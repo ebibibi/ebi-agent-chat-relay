@@ -118,6 +118,35 @@ def _fmt_pct(snap: dict | None) -> str | None:
         return None
 
 
+def _window_label(window_duration_mins: object) -> str | None:
+    """Return a compact label derived from a rate-limit duration."""
+    if isinstance(window_duration_mins, bool) or not isinstance(window_duration_mins, (int, float)):
+        return None
+    if not float(window_duration_mins).is_integer():
+        return None
+
+    minutes = int(window_duration_mins)
+    if minutes <= 0:
+        return None
+    if minutes == 10080:
+        return "週次"
+    if minutes % 1440 == 0:
+        return f"{minutes // 1440}d"
+    if minutes % 60 == 0:
+        return f"{minutes // 60}h"
+    return f"{minutes}m"
+
+
+def _window_segment(snap: dict | None, fallback_label: str) -> str | None:
+    """Format one rate-limit window, retaining a legacy positional fallback."""
+    pct = _fmt_pct(snap)
+    if pct is None:
+        return None
+    duration = snap.get("windowDurationMins") if isinstance(snap, dict) else None
+    label = _window_label(duration) or fallback_label
+    return f"{label} {pct}"
+
+
 def format_codex_status_line(data: dict | None) -> str | None:
     """Format a ``account/rateLimits/read`` result into one Discord line.
 
@@ -131,12 +160,12 @@ def format_codex_status_line(data: dict | None) -> str | None:
         return None
 
     segments: list[str] = []
-    primary = _fmt_pct(snap.get("primary"))
+    primary = _window_segment(snap.get("primary"), "5h")
     if primary is not None:
-        segments.append(f"5h {primary}")
-    secondary = _fmt_pct(snap.get("secondary"))
+        segments.append(primary)
+    secondary = _window_segment(snap.get("secondary"), "週次")
     if secondary is not None:
-        segments.append(f"週次 {secondary}")
+        segments.append(secondary)
 
     credit_info = snap.get("credits")
     if isinstance(credit_info, dict):

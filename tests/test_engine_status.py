@@ -21,6 +21,17 @@ SAMPLE = {
     }
 }
 
+WEEKLY_PRIMARY_SAMPLE = {
+    "rateLimits": {
+        "limitId": "codex",
+        "primary": {"usedPercent": 15, "windowDurationMins": 10080},
+        "secondary": None,
+        "credits": {"hasCredits": False, "unlimited": False, "balance": "0"},
+        "planType": "prolite",
+        "rateLimitReachedType": None,
+    }
+}
+
 
 class TestFormat:
     def test_basic_line(self) -> None:
@@ -31,6 +42,50 @@ class TestFormat:
         assert "週次 8%" in line
         assert "クレジット 0" in line
         assert "(prolite)" in line
+
+    def test_weekly_primary_uses_duration_instead_of_position(self) -> None:
+        line = format_codex_status_line(WEEKLY_PRIMARY_SAMPLE)
+        assert line is not None
+        assert "週次 15%" in line
+        assert "5h 15%" not in line
+
+    @pytest.mark.parametrize(
+        ("duration_mins", "expected_label"),
+        [
+            (300, "5h"),
+            (10080, "週次"),
+            (1440, "1d"),
+            (2880, "2d"),
+            (90, "90m"),
+            (30, "30m"),
+        ],
+    )
+    def test_window_label_uses_reported_duration(
+        self, duration_mins: int, expected_label: str
+    ) -> None:
+        data = {
+            "rateLimits": {
+                "primary": {
+                    "usedPercent": 10,
+                    "windowDurationMins": duration_mins,
+                }
+            }
+        }
+        line = format_codex_status_line(data)
+        assert line is not None
+        assert f"{expected_label} 10%" in line
+
+    def test_missing_durations_keep_positional_fallbacks(self) -> None:
+        data = {
+            "rateLimits": {
+                "primary": {"usedPercent": 5},
+                "secondary": {"usedPercent": 9},
+            }
+        }
+        line = format_codex_status_line(data)
+        assert line is not None
+        assert "5h 5%" in line
+        assert "週次 9%" in line
 
     def test_unlimited_credits(self) -> None:
         data = {"rateLimits": {"primary": {"usedPercent": 5}, "credits": {"unlimited": True}}}
