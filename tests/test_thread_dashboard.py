@@ -141,7 +141,7 @@ class TestOwnerMention:
 
         thread.send.assert_called_once()
         sent_text = thread.send.call_args.args[0]
-        assert "<@42>" in sent_text
+        assert sent_text == "🟡 <@42> The agent has finished — your reply is needed here."
 
     @pytest.mark.asyncio
     async def test_mention_not_sent_if_already_waiting(self) -> None:
