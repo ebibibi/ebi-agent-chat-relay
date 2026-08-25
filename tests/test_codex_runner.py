@@ -93,6 +93,25 @@ class _InterruptibleProcess(_FakeProcess):
         self.interrupted.set()
 
 
+class _CompletesBeforeExitProcess(_FakeProcess):
+    """Process that emits turn.completed before its natural exit is observed."""
+
+    def __init__(self, completed_line: bytes) -> None:
+        super().__init__(stdout_lines=[completed_line + b"\n"], returncode=0)
+        self.returncode = None
+        self.terminated = False
+        self.waited = False
+
+    async def wait(self) -> int:
+        self.waited = True
+        self.returncode = 0
+        return 0
+
+    def terminate(self) -> None:
+        self.terminated = True
+        super().terminate()
+
+
 class TestCodexRunnerIsBackend:
     """CodexRunner must satisfy the SessionBackend protocol."""
 
@@ -319,6 +338,28 @@ class TestCodexRunnerClone:
 
 
 class TestCodexRunnerRun:
+    @pytest.mark.asyncio
+    async def test_turn_completed_waits_for_natural_process_exit(self, monkeypatch) -> None:
+        """A terminal event must not release the session while Codex still owns it."""
+        completed_line = json.dumps({"type": "turn.completed", "usage": {}}).encode()
+        process = _CompletesBeforeExitProcess(completed_line)
+
+        async def fake_create_subprocess_exec(*args, **kwargs):
+            return process
+
+        monkeypatch.setattr(
+            "claude_code_core.codex_runner.asyncio.create_subprocess_exec",
+            fake_create_subprocess_exec,
+        )
+        runner = CodexRunner(command="codex")
+
+        events = [event async for event in runner.run("hello")]
+
+        assert len(events) == 1
+        assert events[0].is_complete is True
+        assert process.waited is True
+        assert process.terminated is False
+
     @pytest.mark.asyncio
     async def test_intentional_interrupt_is_not_reported_as_cli_error(
         self, monkeypatch, caplog

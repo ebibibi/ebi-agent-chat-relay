@@ -607,8 +607,10 @@ class CodexRunner:
             event = parse_codex_line(decoded)
             if event:
                 yield event
-                if event.is_complete:
-                    return
+                # ``turn.completed`` can arrive before the CLI process exits.
+                # Keep draining stdout so ``wait()`` below observes the natural
+                # exit and Codex releases its thread-store writer before a
+                # queued resume starts.
                 # Atomic tools (e.g. file_changes) have no completion event of
                 # their own; pair them with a synthetic result so the live
                 # elapsed timer is cancelled instead of accumulating forever.
