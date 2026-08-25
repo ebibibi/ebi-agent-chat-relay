@@ -33,6 +33,7 @@ TODOIST_SH = os.getenv(
 _COLOR_WARN = 0xFF6B6B
 _COLOR_DANGER = 0xFF4444
 _COLOR_CRITICAL = 0xFF0000
+_FETCH_ATTEMPTS = 2
 
 _TEMPLATES = {
     "warn": {"title": "Hey! You have overdue tasks!", "color": _COLOR_WARN},
@@ -107,22 +108,36 @@ class WatchdogCog(commands.Cog):
         return 8 <= hour < 23
 
     def _fetch_overdue_tasks(self) -> list[dict]:
-        try:
-            result = subprocess.run(
-                [TODOIST_SH, "tasks", "--filter", "(overdue)"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if result.returncode != 0:
-                logger.error("todoist.sh failed: %s", result.stderr)
+        for attempt in range(1, _FETCH_ATTEMPTS + 1):
+            try:
+                result = subprocess.run(
+                    [TODOIST_SH, "tasks", "--filter", "(overdue)"],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+            except FileNotFoundError as e:
+                logger.error("Todoist fetch error: %s", e)
                 return []
+            except subprocess.TimeoutExpired as e:
+                error: Exception = e
+            else:
+                if result.returncode != 0:
+                    logger.error("todoist.sh failed: %s", result.stderr)
+                    return []
+                try:
+                    data = json.loads(result.stdout)
+                except json.JSONDecodeError as e:
+                    error = e
+                else:
+                    return data if isinstance(data, list) else []
 
-            data = json.loads(result.stdout)
-            return data if isinstance(data, list) else []
-        except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError) as e:
-            logger.error("Todoist fetch error: %s", e)
-            return []
+            if attempt < _FETCH_ATTEMPTS:
+                logger.warning("Todoist fetch attempt %d failed; retrying: %s", attempt, error)
+            else:
+                logger.error("Todoist fetch error after %d attempts: %s", attempt, error)
+
+        return []
 
     @tasks.loop(minutes=30)
     async def check_overdue(self) -> None:
