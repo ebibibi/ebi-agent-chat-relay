@@ -671,6 +671,60 @@ class TestFetchSeedContext:
         assert result == "☀️ おはようございます！"
 
     @pytest.mark.asyncio
+    async def test_joins_a_chunked_seed(self) -> None:
+        """A seed longer than Discord's limit is posted as several bot messages.
+
+        Returning only the first one truncates the context Claude wakes up with,
+        which is invisible in the reply and gets worse the longer the seed is.
+        """
+        chunks = []
+        for text in ("part one", "part two", "part three"):
+            msg = MagicMock()
+            msg.author.bot = True
+            msg.content = text
+            chunks.append(msg)
+
+        human = MagicMock()
+        human.author.bot = False
+        human.content = "please write this up"
+
+        thread = MagicMock(spec=discord.Thread)
+        thread.id = 42
+
+        async def _fake_history(**kwargs: object):
+            for msg in [*chunks, human]:
+                yield msg
+
+        thread.history = _fake_history
+
+        result = await ClaudeChatCog._fetch_seed_context(thread)
+        assert result == "part one\npart two\npart three"
+
+    @pytest.mark.asyncio
+    async def test_stops_at_the_first_human_message(self) -> None:
+        """Later bot messages are not seed context — they are the conversation."""
+        seed = MagicMock()
+        seed.author.bot = True
+        seed.content = "seed"
+        human = MagicMock()
+        human.author.bot = False
+        human.content = "reply"
+        later_bot = MagicMock()
+        later_bot.author.bot = True
+        later_bot.content = "answer"
+
+        thread = MagicMock(spec=discord.Thread)
+        thread.id = 42
+
+        async def _fake_history(**kwargs: object):
+            for msg in (seed, human, later_bot):
+                yield msg
+
+        thread.history = _fake_history
+
+        assert await ClaudeChatCog._fetch_seed_context(thread) == "seed"
+
+    @pytest.mark.asyncio
     async def test_returns_none_for_non_bot_message(self) -> None:
         """When the first message is from a human, return None."""
         seed_msg = MagicMock()

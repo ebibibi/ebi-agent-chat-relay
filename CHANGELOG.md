@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`auto_start=false` seeds are no longer truncated to their first message** — a spawn seed longer
+  than Discord's 2,000-character limit is posted as several messages by `spawn_session`, but
+  `_fetch_seed_context` read only message #1. The Claude session that started on the human's reply
+  therefore woke up with a seed cut off mid-sentence, invisibly, and worse the longer the seed was
+  (a daily news digest lost most of its items). It now reads the leading run of bot messages,
+  stopping at the first human message, bounded by `SEED_CONTEXT_MESSAGE_LIMIT`.
+
 - **`POST /api/spawn` honours `user_id`** — the field was already being sent by callers and silently
   dropped, so a spawned thread never appeared in the requester's joined list and the miss looked
   like success. The user is now added as a thread member before the seed message is posted, matching

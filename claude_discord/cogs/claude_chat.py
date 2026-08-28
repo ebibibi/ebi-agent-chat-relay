@@ -53,6 +53,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# How many messages to scan when recovering an ``auto_start=false`` seed.
+# A seed is chunked at Discord's per-message limit, so this bounds the seed at
+# roughly 40 x 2,000 characters — far more than any real prompt, while still
+# refusing to walk an entire thread's history on a malformed one.
+SEED_CONTEXT_MESSAGE_LIMIT = 40
+
 # ---------------------------------------------------------------------------
 # /help command metadata
 #
@@ -1242,23 +1248,29 @@ class ClaudeChatCog(commands.Cog):
 
     @staticmethod
     async def _fetch_seed_context(thread: discord.Thread) -> str | None:
-        """Return the text of the first (seed) message in a thread, if posted by the bot.
+        """Return the seed text of a thread, if it was posted by the bot.
 
         Used to recover context from ``/api/spawn`` threads with ``auto_start=false``,
         where the bot posted a seed message but did not start Claude.  Returns
-        ``None`` if the seed message cannot be retrieved or was not from a bot.
+        ``None`` if the seed cannot be retrieved or was not from a bot.
+
+        Reads the *leading run* of bot messages, not just the first one: a prompt
+        longer than Discord's per-message limit is chunked by ``spawn_session``, so
+        taking only message #1 hands Claude a seed cut off mid-sentence — silently,
+        and worse the longer the seed is. The run stops at the first human message,
+        which is the reply that triggered this lookup.
         """
         try:
-            # oldest_first via after=None with limit=1 is the most efficient
-            # way to get the first message in a thread.
-            first_messages = [msg async for msg in thread.history(limit=1, oldest_first=True)]
-            if not first_messages:
-                return None
-            seed = first_messages[0]
-            # Only include bot-authored seed messages (from /api/spawn).
-            if not seed.author.bot:
-                return None
-            return seed.content or None
+            chunks: list[str] = []
+            async for message in thread.history(
+                limit=SEED_CONTEXT_MESSAGE_LIMIT, oldest_first=True
+            ):
+                # Only include bot-authored seed messages (from /api/spawn).
+                if not message.author.bot:
+                    break
+                if message.content:
+                    chunks.append(message.content)
+            return "\n".join(chunks) or None
         except Exception:
             logger.debug("Failed to fetch seed message for thread %d", thread.id, exc_info=True)
             return None
