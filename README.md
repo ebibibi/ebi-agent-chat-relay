@@ -239,7 +239,7 @@ curl -X POST "$CCDB_API_URL/api/spawn" \
 # Returns immediately with the thread ID; Claude runs in the background
 ```
 
-**Deferred start (`auto_start=false`)** — Create a thread and post a seed message without starting Claude immediately. Claude starts only when a user replies, and receives the seed message as context automatically.
+**Deferred start (`auto_start=false`)** — Create a thread and post a seed message without starting Claude immediately. Claude starts only when a user replies, and receives the seed message as context automatically. A seed longer than Discord's per-message limit is posted as several messages, and all of them are recovered as context — the seed is read up to the first human reply, so it is never truncated mid-sentence.
 
 ```bash
 # Post a notification; Claude starts when the user replies
