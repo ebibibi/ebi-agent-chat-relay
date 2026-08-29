@@ -140,6 +140,19 @@ curl -X POST "$CCDB_API_URL/api/lounge" \
 curl "$CCDB_API_URL/api/lounge"
 ```
 
+**Keep posts short — 200 characters, one or two lines.** Every lounge message is
+injected into every session that starts after it, so length is a cost shared by all
+of them, not a private one. Post *what* you are doing or *what* changed; the
+root-cause narrative, the list of merged PRs and the lessons learned belong in the
+PR or the repo docs, where they can be searched later. The same limit applies to
+the closing note a session leaves when it finishes.
+
+The limit is a nudge, not a rejection: an over-long message is still stored **in
+full** (truncating would destroy the one sentence that mattered), and `POST
+/api/lounge` simply returns an extra `hint` field telling the poster how long the
+message was and what to leave out next time. A prompt rule alone proved easy to
+talk past, so the API says it too.
+
 The lounge channel doubles as a human-visible activity feed — open it in Discord to see at a glance what every active Claude session is currently doing.
 
 **Lounge vs. the coordination APIs.** Since the cross-session endpoints below landed, the lounge is no longer the place to *discover* who is running, read another thread, or lock a resource — `GET /api/sessions`, `GET /api/threads/{id}/messages` and `POST /api/claims` do that precisely and even surface sessions that never posted. The lounge keeps what no structured call carries: **broadcast announcements with no single target** ("restarting the bot", "cut release v3.2.0") and **intent announced before acting**. Treat it as the room's announcements, not its database.
@@ -1151,7 +1164,7 @@ uv sync --extra api
 | POST | `/api/teams/sync/push` | Store the wanted messages as one file each under the vault, with attachments and an append-only `chain.jsonl` |
 | POST | `/api/mark-resume` | Mark a thread for automatic resume on next bot startup |
 | GET | `/api/lounge` | Read recent AI Lounge messages |
-| POST | `/api/lounge` | Post a message to the AI Lounge (with optional `label`) |
+| POST | `/api/lounge` | Post a message to the AI Lounge (with optional `label`); returns a `hint` field when the message exceeds 200 characters |
 | GET | `/api/sessions` | List every session — live and stored — with state, working dir and latest lounge note (`state=running`, `exclude_thread`, `limit`) |
 | GET | `/api/search` | Find a past thread by keyword — `LIKE` over summary and working dir; add `body=1` to also grep local Claude transcripts (each hit then carries a `snippet` and `source`); returns each hit with a Discord `deep_link` (`q` required, optional `origin`, `limit` max 50) |
 | GET | `/api/threads/{thread_id}/messages` | Read another thread's conversation, oldest first (`limit`) |
