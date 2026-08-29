@@ -36,6 +36,7 @@ from claude_code_core.thread_search import run_thread_search
 from claude_code_core.transcript_search import default_transcripts_root
 
 from ..discord_ui.file_sender import send_file_blobs
+from ..lounge import length_hint
 from ..relay import MODE_INTERRUPT, MODE_QUEUE, VALID_MODES, RelayGuard, build_relay_prompt
 from ..session_view import STATE_HISTORY, STATE_RUNNING, build_session_views
 from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
@@ -863,17 +864,18 @@ class ApiServer:
         if self.lounge_channel_id:
             await self._send_lounge_to_discord(stored.label, stored.message, stored.posted_at)
 
-        return web.json_response(
-            {
-                "status": "posted",
-                "id": stored.id,
-                "label": stored.label,
-                "message": stored.message,
-                "thread_id": stored.thread_id,
-                "posted_at": stored.posted_at,
-            },
-            status=201,
-        )
+        payload: dict[str, Any] = {
+            "status": "posted",
+            "id": stored.id,
+            "label": stored.label,
+            "message": stored.message,
+            "thread_id": stored.thread_id,
+            "posted_at": stored.posted_at,
+        }
+        if hint := length_hint(stored.message):
+            payload["hint"] = hint
+
+        return web.json_response(payload, status=201)
 
     # ------------------------------------------------------------------
     # Session spawn endpoint (/api/spawn)

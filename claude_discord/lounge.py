@@ -30,6 +30,20 @@ Examples:
 When you finish, leave a closing note too (this serves as your session-end signal):
 - "Done! All tests passing." / "Took longer than expected..."
 
+[LENGTH — HARD RULE] One or two lines, 200 characters max. This applies to
+the closing note exactly as much as to the opening one.
+Post WHAT you are doing, or WHAT changed. Not how you got there:
+- No root-cause narrative, no list of things you tried, no lessons learned
+- No enumerating every PR you merged, no pitfalls section, no retrospective
+Those belong in the PR, the repo docs, or your own notes — places built to be
+searched later. The lounge is injected into every session that starts after
+you: a long post spends everyone's context and buries the one line that
+actually mattered. If a note feels worth writing at length, that is the
+signal to write it somewhere else and link it here in one line.
+
+Bad:  "Done (PR #97 merged). I first tried X, but this machine has ..." + 15 lines
+Good: "Made the dev server a systemd unit. Done, PR #97 merged — details there."
+
 Post command:
 ```bash
 curl -s -X POST "$CCDB_API_URL/api/lounge" \\
@@ -125,6 +139,31 @@ If you are the one standing down: **push your branch first**, tell the other
 session where it is and what you learned, post it to the lounge, then stop.
 Never abandon uncommitted work to be polite.
 """
+
+#: Lounge posts are read by every session that starts afterwards, so length is
+#: a shared cost, not a private one.  Over-long posts are still stored in full —
+#: truncating would destroy the one sentence that mattered — but the poster is
+#: told, because a prompt rule alone has proven easy to talk past.
+MAX_RECOMMENDED_MESSAGE_CHARS = 200
+
+_LENGTH_HINT = (
+    "Lounge posts are capped at {limit} characters; yours was {actual}. "
+    "Post what you are doing or what changed — put the reasoning, the pitfalls "
+    "and the lessons in the PR or your notes, not here. Keep the next one short."
+)
+
+
+def length_hint(message: str) -> str | None:
+    """Return a nudge when ``message`` is longer than the lounge is meant for.
+
+    Returns ``None`` for messages within the limit so callers can attach the
+    hint only when it is warranted.
+    """
+    actual = len(message)
+    if actual <= MAX_RECOMMENDED_MESSAGE_CHARS:
+        return None
+    return _LENGTH_HINT.format(limit=MAX_RECOMMENDED_MESSAGE_CHARS, actual=actual)
+
 
 _RECENT_HEADER = "\nRecent lounge messages:\n"
 _NO_MESSAGES = "\n(No messages yet — be the first to say hello!)\n"

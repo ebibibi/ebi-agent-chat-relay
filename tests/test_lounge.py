@@ -20,7 +20,12 @@ from claude_discord.database.lounge_repo import LoungeMessage, LoungeRepository
 from claude_discord.database.models import init_db
 from claude_discord.database.notification_repo import NotificationRepository
 from claude_discord.ext.api_server import ApiServer
-from claude_discord.lounge import _NO_MESSAGES, build_lounge_prompt
+from claude_discord.lounge import (
+    _NO_MESSAGES,
+    MAX_RECOMMENDED_MESSAGE_CHARS,
+    build_lounge_prompt,
+    length_hint,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -240,6 +245,17 @@ class TestBuildLoungePrompt:
         assert "/api/claims" in result
         # And it names the lounge's own remaining job (broadcast / intent).
         assert "BROADCAST" in result
+
+    def test_prompt_states_the_length_limit(self) -> None:
+        """The prompt gives a number, not just 'keep it short'.
+
+        Sessions demonstrably talked past the soft wording and posted
+        multi-paragraph retrospectives, so the limit is now explicit and
+        covers the closing note as well as the opening one.
+        """
+        result = build_lounge_prompt([])
+        assert str(MAX_RECOMMENDED_MESSAGE_CHARS) in result
+        assert "closing note" in result
 
     def test_this_thread_marker_for_matching_thread(self) -> None:
         """Messages from current thread are annotated with [this thread]."""
@@ -596,3 +612,23 @@ class TestRunHelperLoungeInjection:
         if runner.clone.called:
             system_prompt = runner.clone.call_args[1].get("append_system_prompt", "")
             assert "AI Lounge" not in system_prompt
+
+
+# ---------------------------------------------------------------------------
+# length_hint tests
+# ---------------------------------------------------------------------------
+
+
+class TestLengthHint:
+    def test_short_message_gets_no_hint(self) -> None:
+        assert length_hint("Fixing a flaky test in ccdb.") is None
+
+    def test_message_at_the_limit_gets_no_hint(self) -> None:
+        assert length_hint("x" * MAX_RECOMMENDED_MESSAGE_CHARS) is None
+
+    def test_long_message_gets_a_hint_naming_both_numbers(self) -> None:
+        message = "x" * (MAX_RECOMMENDED_MESSAGE_CHARS + 50)
+        hint = length_hint(message)
+        assert hint is not None
+        assert str(MAX_RECOMMENDED_MESSAGE_CHARS) in hint
+        assert str(len(message)) in hint
