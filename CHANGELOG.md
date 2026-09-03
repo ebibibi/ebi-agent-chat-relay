@@ -11,6 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The deploy-drift check now also catches a bot that simply never restarted** — it answered one
+  question ("is a forgotten `make dev-on` worktree in production?") and returned `OK: main-tree
+  mode` for everything else, which is a guard that reports on the case it was written for and waves
+  the rest through. Main-tree mode has its own silent staleness: the checkout only pulls in
+  `pre-start.sh`, so a bot that has not restarted keeps serving whatever was merged before it
+  booted, while the tree says `main` and every `git pull` keeps succeeding. The check now compares
+  the *running process* against `origin/main` — commits merged after the service's
+  `ActiveEnterTimestamp` are the ones not running — and reports how long the oldest of them has
+  been waiting. Because restarts are batched deliberately (an in-flight session does not survive
+  one), it reports from day one but only exits 1 past `CCDB_STALE_DAYS` (default 3). A machine
+  without systemd, or an unreadable unit, says so instead of silently passing. `CCDB_SERVICE`
+  overrides the unit name.
+
 - **`scripts/check-deploy-drift.sh` (also `make drift`)** — reports when the bot is loading code
   that is not on `origin/main`. `make dev-on` is the right tool for testing a change against real
   Discord traffic, but nothing expires it: `pre-start.sh` printed one line at boot and never
