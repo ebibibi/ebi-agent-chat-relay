@@ -68,7 +68,7 @@ cd ../wt-my-feature
 make dev-on    # write ~/.ccdb-dev-worktree and restart the bot
 # ... exercise the change on Discord ...
 make dev-off   # remove the marker and restart back onto the main tree
-make drift     # is the bot running code that is not on origin/main?
+make drift     # is the bot running the newest code on origin/main?
 ```
 
 `make dev-on` writes the worktree path to `~/.ccdb-dev-worktree`; the import hook that
@@ -82,8 +82,27 @@ indefinitely, while every merged PR *appears* to deploy and does not. `make drif
 whether that commit is an ancestor of `origin/main`, counts how many merged commits are
 therefore not running, and reports how long dev mode has been on. It compares against the
 remote ref rather than a local `main`, which may itself be stale. `pre-start.sh` prints
-the same report on every boot. Exit codes: `0` clean, `1` drift, `2` the marker points
-nowhere (the hook silently falls back to the main tree).
+the same report on every boot.
+
+**Main-tree mode goes stale too.** Answering only the dev-worktree question and returning
+`OK` for everything else would be a guard that reports on the case it was written for and
+waves the rest through. The checkout is only pulled by `pre-start.sh`, so a bot that has
+not restarted keeps serving whatever was merged before it booted — and that is silent in
+exactly the same way: the tree says `main` and every `git pull` keeps succeeding. So
+`make drift` also compares the *running process* against `origin/main`. The honest measure
+is not "is the checkout behind" (a pull without a restart changes nothing) but "which
+commits landed after the bot started", taken from the service's `ActiveEnterTimestamp`;
+it then reports how long the **oldest** of those has been waiting, which is the length of
+the actual wait rather than the age of the newest commit. Because restarts are batched
+deliberately — an in-flight session does not survive one — it reports from day one but
+only fails past `CCDB_STALE_DAYS` (default `3`). A machine without systemd, or a unit it
+cannot read, says so rather than silently passing. `CCDB_SERVICE` overrides the unit name
+(default `discord-bot`).
+
+Exit codes: `0` running the newest code, or dev mode on already-merged code; `1` drift —
+dev mode on unmerged code, or merged commits undeployed past the threshold; `2` dev mode
+configured but unusable, the marker points nowhere (the hook silently falls back to the
+main tree).
 
 Before switching back, check `.env`: a value only your branch understands falls back to a
 default on the main tree, which changes behaviour without erroring.
