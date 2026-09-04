@@ -551,6 +551,41 @@ async def test_setup_bridge_attaches_worktree_manager_when_pre_initialized_to_no
 
 
 @pytest.mark.asyncio
+async def test_setup_bridge_warns_when_worktree_base_dir_is_unset(
+    tmp_path: object,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unset WORKTREE_BASE_DIR must warn, not pass silently.
+
+    Sessions are instructed to create ``wt-{thread_id}`` regardless of this setting,
+    so a disabled manager means worktrees accumulate forever. Only the *enabled*
+    branch used to log, which made the leaking configuration the quiet one.
+    """
+    import logging
+
+    monkeypatch.delenv("WORKTREE_BASE_DIR", raising=False)
+    bot = _make_bot()
+    bot.worktree_manager = None
+    runner = _make_runner()
+
+    with caplog.at_level(logging.WARNING, logger="claude_discord.setup"):
+        await setup_bridge(
+            bot,
+            runner,
+            session_db_path=str(tmp_path / "sessions.db"),  # type: ignore[operator]
+            enable_scheduler=False,
+        )
+
+    assert any(
+        "WORKTREE_BASE_DIR" in record.message
+        for record in caplog.records
+        if record.levelno >= logging.WARNING
+    )
+    assert bot.worktree_manager is None
+
+
+@pytest.mark.asyncio
 async def test_setup_bridge_defaults_max_concurrent_to_3(tmp_path: object) -> None:
     """Without env var or parameter, max_concurrent defaults to 3."""
     from unittest.mock import patch

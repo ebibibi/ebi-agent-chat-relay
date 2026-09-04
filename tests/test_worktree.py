@@ -30,10 +30,42 @@ class TestWorktreeInfo:
         assert wt.is_session_worktree is True
         assert wt.thread_id == 12345
 
+    def test_labelled_session_branch_parsed(self) -> None:
+        """A session's second worktree labels both names and is still ours.
+
+        Regression: anchoring the branch pattern at the end made every
+        ``session/{id}-{label}`` worktree invisible to cleanup, so they
+        accumulated indefinitely while the unlabelled ones were collected.
+        """
+        wt = WorktreeInfo(
+            path="/home/ebi/wt-12345-obsidian",
+            branch="session/12345-obsidian",
+            commit="abc1234",
+            main_repo="/home/ebi/some-repo",
+        )
+        assert wt.is_session_worktree is True
+        assert wt.thread_id == 12345
+
     def test_non_session_branch(self) -> None:
         wt = WorktreeInfo(
             path="/home/ebi/wt-feat-foo",
             branch="feat/my-feature",
+            commit="abc1234",
+            main_repo="/home/ebi/some-repo",
+        )
+        assert wt.is_session_worktree is False
+        assert wt.thread_id is None
+
+    def test_feature_branch_in_a_session_worktree_is_not_session(self) -> None:
+        """A worktree the session renamed onto a real feature branch is left alone.
+
+        The branch — not the directory name — decides. ``wt-12345-ebi-study``
+        checked out on ``fix/issue-45-...`` holds named work that belongs to a
+        PR, so automatic cleanup must not claim it.
+        """
+        wt = WorktreeInfo(
+            path="/home/ebi/wt-12345-ebi-study",
+            branch="fix/issue-45-ga-production-only",
             commit="abc1234",
             main_repo="/home/ebi/some-repo",
         )
@@ -163,6 +195,34 @@ class TestFindSessionWorktrees:
         assert len(worktrees) == 1
         assert worktrees[0].thread_id == 12345
         assert worktrees[0].is_session_worktree is True
+
+    def test_finds_labelled_session_worktrees(self, tmp_path: Path) -> None:
+        """``wt-{id}-{label}`` directories are scanned, not skipped by the path filter.
+
+        Regression: the directory pattern was anchored at the end, so a session's
+        labelled second worktree was never even opened — the branch check that
+        would have claimed it never ran.
+        """
+        for name in ("wt-12345-obsidian", "wt-obsidian-12345"):
+            wt = tmp_path / name
+            wt.mkdir()
+            (wt / ".git").write_text(f"gitdir: /fake/repo/.git/worktrees/{name}\n")
+
+        with (
+            patch("claude_discord.worktree._get_branch", return_value="session/12345-obsidian"),
+            patch("claude_discord.worktree._get_commit", return_value="abc1234"),
+            patch("claude_discord.worktree._find_main_repo", return_value="/fake/repo"),
+        ):
+            wm = WorktreeManager(base_dir=str(tmp_path))
+            worktrees = wm.find_session_worktrees()
+
+        # The label sits on either side of the thread id in practice, so the
+        # directory name must not be the gate — the branch is.
+        assert sorted(w.path for w in worktrees) == [
+            str(tmp_path / "wt-12345-obsidian"),
+            str(tmp_path / "wt-obsidian-12345"),
+        ]
+        assert {w.thread_id for w in worktrees} == {12345}
 
     def test_empty_when_no_session_worktrees(self, tmp_path: Path) -> None:
         wm = WorktreeManager(base_dir=str(tmp_path))

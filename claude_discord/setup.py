@@ -308,6 +308,14 @@ async def setup_bridge(
         if getattr(bot, "worktree_manager", None) is None:
             bot.worktree_manager = WorktreeManager(base_dir=worktree_base_dir)  # type: ignore[attr-defined]
         logger.info("WorktreeManager enabled (base_dir=%s)", worktree_base_dir)
+    else:
+        # Every session is told to create ``wt-{thread_id}``; without a base dir
+        # nothing ever removes them, and the leak is silent because the enabled
+        # branch is the only one that used to log. Say so on the disabled path.
+        logger.warning(
+            "WorktreeManager disabled: WORKTREE_BASE_DIR is not set. Sessions will "
+            "keep creating wt-{thread_id} worktrees and nothing will clean them up."
+        )
 
     # --- Deployment layout -------------------------------------------------
     # One root per deployment. Ten repositories share session_db_path, so this

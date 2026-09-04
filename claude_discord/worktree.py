@@ -29,8 +29,21 @@ logger = logging.getLogger(__name__)
 
 # Branch pattern created by the concurrency notice template:
 # git worktree add ../wt-{thread_id} -b session/{thread_id}
-_SESSION_BRANCH_RE = re.compile(r"^session/(\d+)$")
-_SESSION_WORKTREE_PATH_RE = re.compile(r"wt-(\d+)$")
+#
+# A session that needs a second worktree appends a label to both names
+# (``wt-{thread_id}-obsidian`` on ``session/{thread_id}-obsidian``), so the
+# thread id is a prefix rather than the whole name.  Anchoring these patterns
+# at the end made every labelled worktree invisible to cleanup — the branch
+# still carries the thread id, which is what identifies it as ours.
+_SESSION_BRANCH_RE = re.compile(r"^session/(\d+)(?:-.*)?$")
+
+#: Directory-name prefilter, so scanning ``base_dir`` only shells out to git for
+#: plausible candidates.  It is deliberately *not* an identity test: sessions
+#: label the directory freely and put the label on either side of the thread id
+#: (``wt-{id}-obsidian`` and ``wt-obsidian-{id}`` both occur).  Matching the
+#: directory name against the thread id made every labelled worktree invisible
+#: to cleanup.  The branch is the only reliable identifier, and it decides.
+_SESSION_WORKTREE_DIR_PREFIX = "wt-"
 
 
 @dataclass(frozen=True)
@@ -171,7 +184,7 @@ class WorktreeManager:
         for entry in entries:
             if not entry.is_dir():
                 continue
-            if not _SESSION_WORKTREE_PATH_RE.search(entry.name):
+            if not entry.name.startswith(_SESSION_WORKTREE_DIR_PREFIX):
                 continue
             if not (entry / ".git").exists():
                 continue
