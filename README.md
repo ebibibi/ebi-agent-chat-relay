@@ -486,7 +486,7 @@ Behind the scenes:
 
 ### Concurrency & Coordination
 - **Worktree instructions auto-injected** — Every session prompted to use `git worktree` before touching any file
-- **Automatic worktree cleanup** — Session worktrees (`wt-{thread_id}`) are removed automatically at session end and on bot startup; dirty worktrees are never auto-removed (safety invariant)
+- **Automatic worktree cleanup** — Requires `WORKTREE_BASE_DIR`; leave it unset and the worktree instruction still fires, so the directory fills up silently. When set, session worktrees are removed at session end and orphans are swept at bot startup. A worktree is identified by its `session/{thread_id}` branch, not by its directory name, so a session's extra labelled worktrees (`wt-{thread_id}-obsidian`, `wt-obsidian-{thread_id}`) are collected too. Dirty worktrees are never auto-removed (safety invariant)
 - **Active session registry** — In-memory registry; each session sees what the others are doing
 - **AI Lounge** — Shared "breakroom" channel; context injected as backend-specific system/developer instructions (ephemeral, never accumulates in history) so long sessions never hit "Prompt is too long"; sessions post intentions, read each other's status, and check before disruptive operations; humans see it as a live activity feed
 - **Cross-session observability** — `GET /api/sessions` lists every session (live and stored) with its state, working dir and latest lounge note; `GET /api/threads/{thread_id}/messages` reads another thread's conversation. Read-only, so a session can look before it edits — including at sessions that never posted to the lounge
@@ -914,7 +914,7 @@ In chat-only mode, permission requests and `AskUserQuestion` prompts are **alway
 | `MENTION_ONLY_CHANNEL_IDS` | Comma-separated channel IDs carved back out of the no-mention set (legacy; not listing a channel now has the same effect) | (optional) |
 | `INLINE_REPLY_CHANNEL_IDS` | Comma-separated channel IDs where the bot replies inline (no thread created) | (optional) |
 | `CHAT_ONLY_CHANNEL_IDS` | Comma-separated channel IDs in chat-only mode — only Claude's text responses are shown; all technical embeds (tools, thinking, session info, todos) are hidden | (optional) |
-| `WORKTREE_BASE_DIR` | Base directory to scan for session worktrees (enables automatic cleanup) | (optional) |
+| `WORKTREE_BASE_DIR` | Parent directory of your repositories, scanned for session worktrees. Strongly recommended: sessions are always told to create `wt-{thread_id}`, and with this unset nothing ever removes them | (optional) |
 | `CLI_SESSIONS_PATH` | Path to `~/.claude/projects` for CLI session discovery (enables `/sync-sessions`) and transcript body search (`/search body:True`, `GET /api/search?body=1`). Defaults to the standard `~/.claude/projects`, so body search stays Zero-Config wherever Claude Code has run | (optional) |
 | `CUSTOM_COGS_DIR` | Directory containing custom Cog files to load at startup (see [Custom Cogs](#custom-cogs-extend-without-forking)) | (optional) |
 | `CLAUDE_ALLOWED_TOOLS` | Comma-separated list of allowed tools for Claude CLI (legacy — prefer `CCDB_ALLOWED_TOOLS`) | (optional) |
