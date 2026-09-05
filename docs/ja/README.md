@@ -881,6 +881,8 @@ CHAT_ONLY_CHANNEL_IDS=444,555
 
 ## 設定
 
+アイドルデッドライン、添付ファイルの再送、認証情報、起動時ロールバックについては [ランタイム復旧とコントロールプレーンの境界](../runtime-reliability.md) を参照してください。
+
 | 変数名 | 説明 | デフォルト |
 |--------|------|-----------|
 | `DISCORD_BOT_TOKEN` | Discord Bot トークン | （必須） |
@@ -905,7 +907,7 @@ CHAT_ONLY_CHANNEL_IDS=444,555
 | `CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS` | 全パーミッションチェックをスキップ（旧名 — `CCDB_DANGEROUSLY_SKIP_PERMISSIONS` を推奨） | `false` |
 | `CLAUDE_WORKING_DIR` | Claude の作業ディレクトリ（旧名 — `CCDB_WORKING_DIR` を推奨） | カレントディレクトリ |
 | `MAX_CONCURRENT_SESSIONS` | 最大並行 Claude CLI セッション数（チャット・スキル・スケジューラ・Webhook の全パスに適用） | `3` |
-| `SESSION_TIMEOUT_SECONDS` | セッション非アクティブタイムアウト | `300` |
+| `SESSION_TIMEOUT_SECONDS` | セッションの**アイドル**タイムアウト（秒）。出力が届くたびにリセットされるため、アクティブなストリームはこの値を超えて継続しうる。`0` でデッドラインを明示的に無効化 | `300` |
 | `CCDB_PR_COMPLETION_OWNER` | 指定したGitHub所有者の非Draft `session/<thread_id>` PRが残っている場合、同じAIを1回だけ自動継続して完了または具体的なブロッカー報告まで進める。認証済み`gh`が必要。 | （オプション） |
 | `DISCORD_OWNER_ID` | Claude が入力待ちのとき @mention する Discord ユーザー ID | （オプション） |
 | `COORDINATION_CHANNEL_ID` | AI Lounge チャンネルのデフォルトフォールバック用チャンネル ID | （オプション） |
@@ -925,6 +927,8 @@ CHAT_ONLY_CHANNEL_IDS=444,555
 | `CCDB_LOG_FILE` | ログファイルのパス。設定するとデフォルトの stdout ハンドラに加えてローテーティングファイルハンドラ（10 MB × 5 バックアップ）が追加される。監視・アラートに便利 | （オプション） |
 | `API_HOST` | REST API バインドアドレス | `127.0.0.1` |
 | `API_PORT` | REST API ポート（設定すると REST API が有効になる） | （オプション） |
+| `CCDB_API_SECRET` | コントロールプレーン用のオプションの Bearer シークレット。セッションランナーにも同じ値が渡される。ループバック以外にバインドする場合は必須 | （オプション） |
+| `CCDB_CONTROL_PLANE_HOST_GUARD` | コントロールプレーンでローカル以外の Host / Origin と転送ヘッダを拒否する。認証済みプロキシを意図的に使う場合は `0` で無効化 | `1` |
 | `CCDB_INGEST_TOKEN` | `POST /api/ingest` 用の Bearer トークン（`api_secret` とは独立）。未設定ならこのエンドポイントは `503` を返す | （オプション） |
 | `CCDB_INGEST_REQUIRE_COMPLETE` | `1` を設定すると、`attachments_manifest` によって添付ファイルの欠落が判明したインジェストを、部分的な証拠でセッションを開始せずに `409` で拒否する | `0` |
 | `CCDB_TEAMS_VAULT_ROOT` | `POST /api/teams/sync` が上流スレッドをミラーリングする先のディレクトリ（メッセージ 1 件につき 1 ファイル）。`CCDB_INGEST_TOKEN` で保護される | `{working_dir}/teams` |
