@@ -80,6 +80,7 @@ def load_config() -> dict[str, str]:
             "CCDB_MONITOR_ALL_CHANNELS", "CLAUDE_MONITOR_ALL_CHANNELS", "false"
         ),
         "api_host": os.getenv("API_HOST", "127.0.0.1"),
+        "api_secret": os.getenv("CCDB_API_SECRET", ""),
         "api_port": os.getenv("API_PORT", ""),
         "custom_cogs_dir": os.getenv("CUSTOM_COGS_DIR", ""),
         "cli_sessions_path": os.getenv("CLI_SESSIONS_PATH", ""),
@@ -130,6 +131,7 @@ async def main() -> None:
         effort=config["effort"] or None,
         agui_url=config["agui_url"] or None,
         agui_token=config["agui_token"] or None,
+        api_secret=config["api_secret"] or None,
     )
 
     runner = factory.build(backend=backend_name, model=config["model"] or None)
@@ -157,6 +159,7 @@ async def main() -> None:
             default_channel_id=channel_id,
             host=config["api_host"],
             port=int(config["api_port"]),
+            api_secret=config["api_secret"] or None,
             ingest_token=os.getenv("CCDB_INGEST_TOKEN") or None,
             ingest_host=os.getenv("CCDB_INGEST_HOST") or None,
             ingest_port=int(os.environ["CCDB_INGEST_PORT"])

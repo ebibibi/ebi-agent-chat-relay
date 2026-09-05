@@ -21,6 +21,7 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 
 from .api_provider import detect_api_provider
+from .child_env import STRIPPED_ENV_KEYS, strip_transport_credentials
 from .parser import parse_line
 from .types import ImageData, MessageType, StreamEvent
 
@@ -326,20 +327,7 @@ class ClaudeRunner:
 
         return args
 
-    _STRIPPED_ENV_KEYS = frozenset(
-        {
-            "CLAUDECODE",
-            "DISCORD_BOT_TOKEN",
-            "DISCORD_TOKEN",
-            "API_SECRET_KEY",
-            "CCDB_AGUI_URL",
-            "CCDB_AGUI_TOKEN",
-            "CCDB_TEAMS_APP_PASSWORD",
-            "CCDB_TEAMS_QUEUE_URL",
-            "CCDB_API_URL",
-            "CCDB_API_SECRET",
-        }
-    )
+    _STRIPPED_ENV_KEYS = STRIPPED_ENV_KEYS
 
     def _build_env(self) -> dict[str, str]:
         """Build environment variables for the subprocess.
@@ -358,6 +346,7 @@ class ClaudeRunner:
                         env[key] = value
             except OSError:
                 logger.debug("CLI env overlay file not found: %s", overlay_path)
+        env = strip_transport_credentials(env)
         if self.api_port is not None:
             env["CCDB_API_URL"] = f"http://127.0.0.1:{self.api_port}"
         if self.api_secret is not None:
@@ -382,7 +371,11 @@ class ClaudeRunner:
 
         line_count = 0
         while True:
-            line = await self._process.stdout.readline()
+            # Each line is progress, not a fresh total runtime budget. Long
+            # active sessions may run indefinitely; silent streams cannot.
+            line = await asyncio.wait_for(
+                self._process.stdout.readline(), timeout=self.timeout_seconds or None
+            )
             if not line:
                 logger.info("Claude CLI stdout EOF after %d lines", line_count)
                 break

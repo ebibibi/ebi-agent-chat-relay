@@ -183,6 +183,8 @@ async def send_files(
     thread: discord.Thread,
     file_paths: list[str],
     working_dir: str | None,
+    *,
+    require_delivery: bool = False,
 ) -> None:
     """Send files as Discord attachments.
 
@@ -203,6 +205,10 @@ async def send_files(
         return
 
     files = collect_discord_files(file_paths, working_dir)
+    if require_delivery and len(files) != len(file_paths):
+        for file in files:
+            file.close()
+        raise OSError("One or more attachments could not be read or exceed the upload limit")
     if not files:
         return
 
@@ -220,3 +226,8 @@ async def send_files(
                 -(-len(files) // _MAX_FILES_PER_MESSAGE),
                 exc_info=True,
             )
+            if require_delivery:
+                raise
+        finally:
+            for file in batch:
+                file.close()

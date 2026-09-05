@@ -18,6 +18,7 @@ import base64
 import binascii
 import contextlib
 import hmac
+import ipaddress
 import json
 import logging
 import os
@@ -29,6 +30,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 from aiohttp import web
 
@@ -238,6 +240,13 @@ class ApiServer:
         ingest_require_complete: bool | None = None,
         teams_vault_root: str | None = None,
     ) -> None:
+        if host.lower() != "localhost":
+            try:
+                local_bind = ipaddress.ip_address(host).is_loopback
+            except ValueError:
+                local_bind = False
+            if not local_bind and not api_secret:
+                raise ValueError("A non-loopback control-plane bind requires an API secret")
         self.repo = repo
         self.bot = bot
         self.default_channel_id = default_channel_id
@@ -295,6 +304,8 @@ class ApiServer:
         self._lounge_mirror_disabled = False
 
         self.app = web.Application(client_max_size=self.max_body_bytes)
+        if os.getenv("CCDB_CONTROL_PLANE_HOST_GUARD", "1").lower() not in ("0", "false", "no"):
+            self.app.middlewares.append(self._host_middleware)
         if self.api_secret:
             self.app.middlewares.append(self._auth_middleware)
         self._setup_routes()
@@ -374,6 +385,53 @@ class ApiServer:
         app.router.add_post("/api/teams/sync/plan", self.teams_sync_plan)
         app.router.add_post("/api/teams/sync/push", self.teams_sync_push)
         return app
+
+    @web.middleware
+    async def _host_middleware(
+        self,
+        request: web.Request,
+        handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
+    ) -> web.StreamResponse:
+        """Refuse accidental proxying/rebinding of the privileged local app.
+
+        This is defense in depth: a proxy that strips every forwarding header
+        and rewrites Host can conceal itself. Never expose this app publicly.
+        Deliberate authenticated proxies must explicitly disable this guard.
+        """
+        try:
+            address = urlsplit("//" + request.headers.get("Host", ""))
+            host = address.hostname or ""
+            valid_port = address.port is None or 0 < address.port < 65536
+            local = host.lower() == "localhost" or ipaddress.ip_address(host).is_loopback
+            valid = (
+                local
+                and valid_port
+                and not (
+                    address.username
+                    or address.password
+                    or address.path
+                    or address.query
+                    or address.fragment
+                )
+            )
+            origin = request.headers.get("Origin")
+            if origin:
+                source = urlsplit(origin)
+                valid = (
+                    valid and source.scheme in ("http", "https") and source.netloc == address.netloc
+                )
+        except ValueError:
+            valid = False
+        if any(
+            name in request.headers
+            for name in ("Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto")
+        ):
+            valid = False
+        if not valid:
+            return web.json_response(
+                {"error": "Control plane accepts direct loopback requests only"}, status=403
+            )
+        return await handler(request)
 
     @web.middleware
     async def _auth_middleware(

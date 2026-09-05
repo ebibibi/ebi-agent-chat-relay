@@ -35,7 +35,6 @@ from claude_code_core.frontend import (
     Mention,
     Notice,
     NoticeLevel,
-    OutboundFile,
     StatusKind,
 )
 from claude_code_core.types import ElicitationRequest
@@ -89,27 +88,13 @@ async def _send_attachment_requests(
         logger.debug("_send_attachment_requests: no working_dir, skipping")
         return
     marker = Path(working_dir) / _attachment_marker_name(thread_id)
-    if not marker.exists():
+    if not marker.exists() and not marker.with_name(marker.name + ".pending").exists():
         logger.debug("_send_attachment_requests: %s not found, skipping", marker)
         return
     logger.info("_send_attachment_requests: found %s", marker)
-    with contextlib.suppress(OSError):
-        paths = [p.strip() for p in marker.read_text(encoding="utf-8").splitlines() if p.strip()]
-        marker.unlink(missing_ok=True)
-        if paths:
-            # Resolve relative paths against working_dir.  Claude is instructed to
-            # write absolute paths, but may write a bare filename.  Resolving here
-            # ensures the file is found even when the bot process has a different cwd.
-            wd = Path(working_dir)
-            abs_paths = [raw if Path(raw).is_absolute() else str(wd / raw) for raw in paths]
-            logger.info(
-                "_send_attachment_requests: sending %d file(s): %s",
-                len(abs_paths),
-                abs_paths,
-            )
-            await surface.deliver_files(
-                [OutboundFile(path=path, display_name=Path(path).name) for path in abs_paths]
-            )
+    from ..attachment_outbox import deliver_pending
+
+    await deliver_pending(surface, marker)
 
 
 # Max characters for tool result display.

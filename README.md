@@ -880,6 +880,9 @@ In chat-only mode, permission requests and `AskUserQuestion` prompts are **alway
 
 ## Configuration
 
+See [runtime recovery and control-plane boundaries](docs/runtime-reliability.md)
+for idle deadlines, attachment retries, credentials and startup rollback.
+
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DISCORD_BOT_TOKEN` | Your Discord bot token | (required) |
@@ -925,6 +928,8 @@ In chat-only mode, permission requests and `AskUserQuestion` prompts are **alway
 | `CCDB_LOG_FILE` | Path to a log file. When set, a rotating file handler (10 MB × 5 backups) is added alongside the default stdout handler. Useful for monitoring and alerting. | (optional) |
 | `API_HOST` | REST API bind address | `127.0.0.1` |
 | `API_PORT` | REST API port (enables REST API when set) | (optional) |
+| `CCDB_API_SECRET` | Optional control-plane Bearer secret, also supplied to session runners. Required for non-loopback binds | (optional) |
+| `CCDB_CONTROL_PLANE_HOST_GUARD` | Reject nonlocal Host/Origin and forwarding headers on the control plane; `0` opts out for deliberately authenticated proxies | `1` |
 | `CCDB_INGEST_TOKEN` | Bearer token for `POST /api/ingest` (independent of `api_secret`); unset ⇒ the endpoint responds `503` | (optional) |
 | `CCDB_INGEST_REQUIRE_COMPLETE` | Set to `1` to reject an ingest with `409` when its `attachments_manifest` proves attachments went missing, instead of starting a session on partial evidence | `0` |
 | `CCDB_TEAMS_VAULT_ROOT` | Directory where `POST /api/teams/sync` mirrors upstream threads (one file per message). Gated by `CCDB_INGEST_TOKEN` | `{working_dir}/teams` |

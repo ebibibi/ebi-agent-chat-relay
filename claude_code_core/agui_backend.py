@@ -342,7 +342,11 @@ class AgUiBackend:
         if self.auth_token:
             headers["Authorization"] = f"Bearer {self.auth_token}"
 
-        timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
+        timeout = aiohttp.ClientTimeout(
+            total=None,
+            connect=self.timeout_seconds or None,
+            sock_read=self.timeout_seconds or None,
+        )
         mapper = AgUiEventMapper()
         terminal_seen = False
         try:

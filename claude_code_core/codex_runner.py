@@ -16,6 +16,7 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .child_env import STRIPPED_ENV_KEYS
 from .types import (
     ImageData,
     MessageType,
@@ -559,20 +560,7 @@ class CodexRunner:
         args.append("-")
         return args
 
-    _STRIPPED_ENV_KEYS = frozenset(
-        {
-            "CLAUDECODE",
-            "DISCORD_BOT_TOKEN",
-            "DISCORD_TOKEN",
-            "API_SECRET_KEY",
-            "CCDB_AGUI_URL",
-            "CCDB_AGUI_TOKEN",
-            "CCDB_TEAMS_APP_PASSWORD",
-            "CCDB_TEAMS_QUEUE_URL",
-            "CCDB_API_URL",
-            "CCDB_API_SECRET",
-        }
-    )
+    _STRIPPED_ENV_KEYS = STRIPPED_ENV_KEYS
 
     def _build_env(self) -> dict[str, str]:
         """Build environment variables for the subprocess."""
@@ -600,7 +588,9 @@ class CodexRunner:
             raise RuntimeError("Process not started")
 
         while True:
-            line = await self._process.stdout.readline()
+            line = await asyncio.wait_for(
+                self._process.stdout.readline(), timeout=self.timeout_seconds or None
+            )
             if not line:
                 break
             decoded = line.decode("utf-8", errors="replace")

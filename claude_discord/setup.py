@@ -571,8 +571,12 @@ async def setup_bridge(
         components.apply_to_api_server(api_server)
         if runner.api_port is None:
             runner.api_port = api_server.port
+        if hasattr(runner, "api_secret") and getattr(runner, "api_secret", None) is None:
+            setattr(runner, "api_secret", api_server.api_secret)  # noqa: B010 - optional backend field
         if backend_factory is not None and backend_factory.api_port is None:
             backend_factory.api_port = api_server.port
+        if backend_factory is not None and backend_factory.api_secret is None:
+            backend_factory.api_secret = api_server.api_secret
         logger.info("Auto-wired repos to ApiServer (port=%d)", api_server.port)
 
     return components

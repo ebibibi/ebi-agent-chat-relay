@@ -14,6 +14,22 @@ import pytest
 from claude_discord.claude.types import MessageType, StreamEvent
 
 
+@pytest.fixture(autouse=True)
+def _isolate_operator_statusline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests must not execute commands from the operator's real settings file.
+
+    Explicit paths and per-test patches still exercise statusline behavior.
+    """
+    from claude_discord.discord_ui import statusline
+
+    original = statusline.read_statusline_command
+    monkeypatch.setattr(
+        statusline,
+        "read_statusline_command",
+        lambda settings_path=None: original(settings_path) if settings_path else None,
+    )
+
+
 @pytest.fixture
 def thread() -> MagicMock:
     """A MagicMock discord.Thread with send and id set."""

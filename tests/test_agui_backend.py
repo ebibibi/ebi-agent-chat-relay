@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from unittest.mock import patch
@@ -28,6 +29,29 @@ def _only(mapper: AgUiEventMapper, event: dict[str, object]):
     mapped = mapper.feed(event)
     assert len(mapped) == 1
     return mapped[0]
+
+
+@pytest.mark.parametrize("active", [True, False])
+async def test_agui_uses_read_idle_deadline_instead_of_total_runtime(active: bool) -> None:
+    async def handler(request: web.Request) -> web.StreamResponse:
+        response = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
+        await response.prepare(request)
+        if active:
+            for _ in range(6):
+                await asyncio.sleep(0.03)
+                await response.write(b": heartbeat\n\n")
+            await response.write(b'data: {"type":"RUN_FINISHED","threadId":"t"}\n\n')
+        else:
+            await asyncio.sleep(0.15)
+        return response
+
+    server, url = await _serve(handler)
+    try:
+        backend = AgUiBackend(endpoint_url=url, timeout_seconds=0.1)
+        events = [event async for event in backend.run("test")]
+        assert bool(events[-1].error) is not active
+    finally:
+        await server.cleanup()
 
 
 class TestAgUiEventMapper:

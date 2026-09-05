@@ -319,7 +319,7 @@ class DiscordSurface:
         paths = [f.path for f in files if f.path]
         blobs = [(f.display_name, f.blob) for f in files if f.blob is not None]
         if paths:
-            await send_files(self._thread, paths, self.working_dir)  # type: ignore[arg-type]
+            await send_files(self._thread, paths, self.working_dir, require_delivery=True)  # type: ignore[arg-type]
         if blobs:
             await send_file_blobs(self._thread, blobs)  # type: ignore[arg-type]
 
