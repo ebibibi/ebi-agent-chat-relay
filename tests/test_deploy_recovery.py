@@ -88,6 +88,32 @@ def test_dirty_import_success_cannot_replace_verified_checkpoint(tmp_path: Path)
     assert (repo / ".git" / "ccdb-last-good").read_text().strip() == good
 
 
+def test_unreadable_index_never_replaces_checkpoint_or_allows_rollback(tmp_path: Path) -> None:
+    repo = setup_repo(tmp_path)
+    good = git(repo, "rev-parse", "HEAD")
+    assert shell(repo, "ccdb_record_good").returncode == 0
+    commit(repo, "new version")
+    (repo / ".git" / "index").write_bytes(b"invalid test index")
+    assert shell(repo, "ccdb_record_good").returncode != 0
+    assert (repo / ".git" / "ccdb-last-good").read_text().strip() == good
+    assert shell(repo, "ccdb_rollback_checkout").returncode != 0
+    assert not (repo / ".git" / "ccdb-runtime-root").exists()
+
+
+def test_unreadable_fallback_index_is_not_selected(tmp_path: Path) -> None:
+    repo = setup_repo(tmp_path)
+    assert shell(repo, "ccdb_record_good").returncode == 0
+    commit(repo, "new version")
+    assert shell(repo, "ccdb_rollback_checkout").returncode == 0
+    marker = repo / ".git" / "ccdb-runtime-root"
+    fallback = Path(marker.read_text().strip())
+    index = Path(git(fallback, "rev-parse", "--git-path", "index"))
+    index.write_bytes(b"invalid fallback index")
+    assert shell(repo, "ccdb_resume_updates").returncode == 0
+    assert shell(repo, "ccdb_rollback_checkout").returncode != 0
+    assert not marker.exists()
+
+
 def test_runtime_hook_loads_fallback_then_returns_to_main(tmp_path: Path) -> None:
     repo = setup_repo(tmp_path)
     package = repo / "claude_discord"

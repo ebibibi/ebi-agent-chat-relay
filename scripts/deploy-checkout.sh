@@ -2,9 +2,10 @@
 # Sourced by pre-start.sh. Never rewrite main to undo a failed deployment.
 
 ccdb_record_good() {
-    local record
-    if [ "$(git branch --show-current)" != main ] || \
-       [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
+    local record branch changes
+    branch=$(git branch --show-current) || return 1
+    changes=$(git status --porcelain --untracked-files=normal) || return 1
+    if [ "$branch" != main ] || [ -n "$changes" ]; then
         echo '[pre-start] Local development checkout does not replace verified main' >&2
         return 0
     fi
@@ -24,18 +25,20 @@ ccdb_resume_updates() {
 }
 
 ccdb_rollback_checkout() {
-    local record marker commit gitdir
+    local record marker commit gitdir branch changes fallback_head fallback_changes
     record=$(git rev-parse --git-path ccdb-last-good) || return 1
     marker=$(git rev-parse --git-path ccdb-runtime-root) || return 1
-    if [ "$(git branch --show-current)" != main ] || [ ! -f "$record" ]; then
+    branch=$(git branch --show-current) || return 1
+    if [ "$branch" != main ] || [ ! -f "$record" ]; then
         echo '[pre-start] No verified main checkout available for automatic rollback' >&2
         return 1
     fi
-    if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+    changes=$(git status --porcelain --untracked-files=no) || return 1
+    if [ -n "$changes" ]; then
         echo '[pre-start] Local edits prevent automatic rollback' >&2
         return 1
     fi
-    read -r commit < "$record"
+    read -r commit < "$record" || return 1
     git cat-file -e "${commit}^{commit}" || return 1
     git merge-base --is-ancestor "$commit" main || return 1
     gitdir=$(git rev-parse --absolute-git-dir) || return 1
@@ -43,8 +46,9 @@ ccdb_rollback_checkout() {
     if [ ! -d "$CCDB_ROLLBACK_ROOT" ]; then
         git worktree add --detach "$CCDB_ROLLBACK_ROOT" "$commit" || return 1
     fi
-    if [ "$(git -C "$CCDB_ROLLBACK_ROOT" rev-parse HEAD)" != "$commit" ] || \
-       [ -n "$(git -C "$CCDB_ROLLBACK_ROOT" status --porcelain --untracked-files=no)" ]; then
+    fallback_head=$(git -C "$CCDB_ROLLBACK_ROOT" rev-parse HEAD) || return 1
+    fallback_changes=$(git -C "$CCDB_ROLLBACK_ROOT" status --porcelain --untracked-files=no) || return 1
+    if [ "$fallback_head" != "$commit" ] || [ -n "$fallback_changes" ]; then
         echo '[pre-start] Saved rollback checkout is modified; refusing to use it' >&2
         return 1
     fi
