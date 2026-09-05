@@ -394,8 +394,8 @@ ccdb 3.0 では、Bot を再起動せずにどの AI が次のセッションを
 
 - `/backend [name] [scope]` — バックエンドの表示または切り替え。`name` は `claude`、`codex`、`local`、または `agui`。`scope` は `thread`（このスレッドのみ）または `global`（サーバー全体のデフォルト）。`scope` を省略すると自動解決: スレッド内ではそのスレッドにスコープ、それ以外ではグローバルデフォルトを設定。
 - `/model [name] [scope]` — **現在の**バックエンドで使用するモデルの表示または切り替え。各バックエンドは独自のモデル設定を記憶するため、バックエンドを切り替えても好みのモデルが保持されます。バックエンドのモデルを未設定にすると、その CLI 自身のデフォルトに委ねられます（たとえば Codex は `~/.codex/config.toml` の `model` を使用するため、ccdb が特定バージョンに固定せずコンソールのデフォルトに追従します）。
-  `name` のオートコンプリートは**実行時に取得**されます。ccdb が Anthropic のモデル一覧エンドポイントへ（Claude Code CLI がすでに持っている認証情報を使って）アカウントから見えるモデルを問い合わせるため、今朝リリースされたばかりのモデルでも ccdb をアップグレードすることなくドロップダウンに現れます。エイリアス（`opus`、`sonnet` など）には、現時点でそのエイリアスが解決される実際のモデルが併記されます。オフライン時・未認証時・Bedrock/Vertex/Foundry 利用時は、小さな静的リストへ黙ってフォールバックします。`CCDB_MODEL_DISCOVERY=0` を設定すると常にその静的リストを使用します。Codex の候補は静的なままです（Codex CLI はモデル一覧を公開していないため）— 任意の id を直接入力すれば従来どおり動作します。
-- `/effort [level] [scope]` — 現在のバックエンドで使用する**推論の強度**の表示または切り替え。有効なレベルはバックエンドごとに異なり、Claude は `low/medium/high/max`、Codex は `low/medium/high/xhigh/max/ultra`（CLI の `model_reasoning_effort` にマッピング）を受け付けます。未設定にすると CLI のデフォルトに委ねられます。
+  `name` のオートコンプリートは**実行時に取得**されます。ccdb が Anthropic のモデル一覧エンドポイントへ（Claude Code CLI がすでに持っている認証情報を使って）アカウントから見えるモデルを問い合わせるため、今朝リリースされたばかりのモデルでも ccdb をアップグレードすることなくドロップダウンに現れます。エイリアス（`opus`、`sonnet` など）には、現時点でそのエイリアスが解決される実際のモデルが併記されます。オフライン時・未認証時・Bedrock/Vertex/Foundry 利用時は、小さな静的リストへ黙ってフォールバックします。`CCDB_MODEL_DISCOVERY=0` を設定すると常にその静的リストを使用します。Codex の候補も同様に実行時に取得されますが、こちらはローカルで完結します。Codex CLI にはモデル一覧のコマンドがないため、ccdb は **CLI 自身がすでに取得してディスクへ書き出したカタログ**（`$CODEX_HOME/models_cache.json`）を読みます。OpenAI を呼び出すのは ccdb ではなく Codex CLI です。そのため `gpt-6-astra` のような新世代も、Codex CLI が一度それを見た時点でドロップダウンに現れます。このホストで Codex CLI を一度も実行していない場合は、小さな静的リストへフォールバックします。いずれの場合も、任意の id を直接入力すれば従来どおり動作します。
+- `/effort [level] [scope]` — 現在のバックエンドで使用する**推論の強度**の表示または切り替え。有効なレベルはバックエンドごとに異なり、Claude は `low/medium/high/max`、Codex は `minimal/low/medium/high/xhigh/max/ultra`（CLI の `model_reasoning_effort` にマッピング）を受け付けます。この Codex 側の一覧は**モデル横断の和集合**であり、どれか 1 つのモデルが全部を受け付けるという意味ではありません — `minimal` は旧世代の GPT-5.x のみ、`max`/`ultra` は GPT-5.6 と GPT-6 のみが対応します。選択中のモデルが対応しないレベルは Codex CLI 側が拒否し、そのエラーはスレッドに届きます。未設定にすると CLI のデフォルトに委ねられます。
 - `/ollama status|list|ps|show|pull|rm|use` — `local` バックエンドの背後にあるランタイムを管理します。`/backend` と `/model` はモデルを「選ぶ」ことしかできず、何がインストールされているか・何なら載るか・いまメモリ上に何が常駐しているかには答えられません。しかしクラウドのバックエンドが使えない状況では、重要なのはまさにその問いです。`/ollama` は Ollama 自身の API をそのまま写した形でそれらに答え、モデル引数はすべてオートコンプリートされます。`tools` 能力を持たないモデルには警告を出し（Codex はツール呼び出しでしか動作しないため、そうしたモデルは編集を実行せず*説明するだけ*になります）、選択中のモデルの削除は拒否します — [docs/local-backend.md](../local-backend.md#managing-the-runtime-ollama) 参照。
 
 **ローカルモデルに環境変数はありません。** `CCDB_LOCAL_MODEL` は削除されました。Discord 上の選択と食い違いうる、2 つ目の見えない正本だったためです。`/ollama use`（または `/model`）で選んだものがそのまま実行され、`/ollama list` はそれを `▶` で示します。
@@ -419,7 +419,7 @@ ccdb がバックエンド情報を記録する前に作成されたレコード
 
 ```text
 /backend codex                        # global → codex (next new sessions use codex)
-/model gpt-5-codex                    # global → codex uses gpt-5-codex
+/model gpt-6-astra                    # global → codex uses GPT-6
 /effort xhigh                          # global → codex reasons at xhigh effort
                                        # …open a thread, send a message…
 /backend claude scope:thread          # this thread only → switch back to claude
@@ -893,7 +893,7 @@ CHAT_ONLY_CHANNEL_IDS=444,555
 | `CCDB_AGUI_TOKEN` | AG-UI endpoint 用の任意の bearer token。Claude/Codex subprocess の環境から除去されます。 | （オプション） |
 | `PATH` | Bot **と Bot が起動する全 CLI セッション**のバイナリ検索パス（セッションは Bot の環境を継承）。systemd はユニットを最小限の PATH で起動し `~/.bashrc` / `~/.profile` を読まないため、systemd 運用時は `.env` に設定する。[ツールチェーンの PATH](#ツールチェーンの-path--env-に設定する) 参照 | （親プロセスから継承） |
 | `CCDB_MODEL` | 使用するモデル（`CLAUDE_MODEL` より優先） | `sonnet` |
-| `CCDB_MODEL_DISCOVERY` | `0` にすると、`/model` のオートコンプリートが Anthropic のモデル一覧エンドポイントへ「この認証情報から見えるモデル」を問い合わせるのをやめ、常に静的な候補リストを使用する。この問い合わせは読み取り専用で、Claude Code CLI 自身の認証情報を再利用し、オフライン時・未認証時・Bedrock/Vertex/Foundry 利用時には自動的にフォールバックする | `1` |
+| `CCDB_MODEL_DISCOVERY` | `0` にすると、`/model` のオートコンプリートが Anthropic のモデル一覧エンドポイントへ「この認証情報から見えるモデル」を問い合わせるのをやめ（あわせて Codex CLI のローカルモデルカタログの読み取りもやめ）、常に静的な候補リストを使用する。この問い合わせは読み取り専用で、Claude Code CLI 自身の認証情報を再利用し、オフライン時・未認証時・Bedrock/Vertex/Foundry 利用時には自動的にフォールバックする | `1` |
 | `CCDB_PERMISSION_MODE` | CLI のパーミッションモード（`CLAUDE_PERMISSION_MODE` より優先） | `acceptEdits` |
 | `CCDB_DANGEROUSLY_SKIP_PERMISSIONS` | 全パーミッションチェックをスキップ（`CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS` より優先） | `false` |
 | `CCDB_WORKING_DIR` | CLI の作業ディレクトリ（`CLAUDE_WORKING_DIR` より優先） | カレントディレクトリ |
