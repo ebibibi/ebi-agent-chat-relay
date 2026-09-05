@@ -128,3 +128,35 @@ def test_script_is_executable_bash() -> None:
     assert SCRIPT.exists()
     first_line = SCRIPT.read_text().splitlines()[0]
     assert first_line == "#!/bin/bash"
+
+
+@pytest.mark.parametrize("kind", ["dirty", "untracked", "ignored", "closed", "unmerged", "clean"])
+def test_live_cleanup_preserves_work_and_unmerged_branches(tmp_path: Path, kind: str) -> None:
+    repo, worktree = _init_repo_with_worktree(tmp_path)
+    fake = _fake_gh_bin(tmp_path, pr_state="CLOSED" if kind == "closed" else "MERGED")
+    if kind == "dirty":
+        (worktree / "README.md").write_text("unfinished edit")
+    elif kind == "untracked":
+        (worktree / "draft.txt").write_text("unfinished draft")
+    elif kind == "ignored":
+        (repo / ".git" / "info" / "exclude").write_text("scratch.txt\n")
+        (worktree / "scratch.txt").write_text("retained output")
+    elif kind == "unmerged":
+        (worktree / "README.md").write_text("unmerged commit")
+        subprocess.run(["git", "add", "README.md"], cwd=worktree, check=True)
+        subprocess.run(["git", "commit", "-qm", "not integrated"], cwd=worktree, check=True)
+
+    result = subprocess.run(
+        [str(repo / "scripts" / SCRIPT.name)],
+        cwd=repo,
+        env={**os.environ, "PATH": f"{fake}:{os.environ['PATH']}"},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert worktree.exists() is (kind != "clean")
+    branch = subprocess.check_output(
+        ["git", "branch", "--list", "feature/thing"], cwd=repo, text=True
+    )
+    assert bool(branch.strip()) is (kind != "clean")

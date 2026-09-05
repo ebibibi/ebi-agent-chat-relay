@@ -80,9 +80,9 @@ async def _send_attachment_requests(
     """Read .ccdb-attachments-{thread_id} and deliver them through the surface.
 
     If the marker file does not exist or is empty, this is a no-op.
-    The marker file is deleted after sending so it does not persist into
-    future sessions.  Any error (missing file, Discord API failure, etc.)
-    is suppressed — file attachment is non-fatal.
+    Requests move to a durable pending outbox and are acknowledged individually
+    after delivery. Failed files remain pending for the next completed turn;
+    attachment errors do not fail the session itself.
     """
     if not working_dir:
         logger.debug("_send_attachment_requests: no working_dir, skipping")

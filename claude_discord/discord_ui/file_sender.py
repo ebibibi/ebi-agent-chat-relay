@@ -200,6 +200,8 @@ async def send_files(
         thread: Discord thread to post attachments to.
         file_paths: Paths of files to send.
         working_dir: Runner working directory for relative display names.
+        require_delivery: Raise on a missing/oversized file or failed send so
+            durable callers can retain the request. False keeps legacy behavior.
     """
     if not file_paths:
         return

@@ -44,6 +44,10 @@ hide from this defense-in-depth check.
 
 ## Startup rollback
 
+Automatic rollback handles **import-validation failures**. Dependency sync
+failure stops startup immediately and is retried on the next start; it does
+not enter the import rollback path.
+
 The pre-start script records import-validated main commits in the repository's
 Git metadata. If a later import fails, it selects a clean detached worktree of
 the recorded version as the runtime import source and synchronizes that
@@ -59,5 +63,10 @@ modified saved worktree or local tracked edits causes rollback to refuse.
 
 Saved fallback worktrees live under Git metadata in `ccdb-rollback-checkouts/`;
 the active selection is `ccdb-runtime-root`. They are retained for recovery.
-Validation covers dependency synchronization and imports, not a successful
-live Discord connection or every possible runtime failure.
+The fallback version's dependencies are synchronized before import validation;
+this does not verify a live Discord connection or every runtime failure.
+
+Automatic worktree cleanup retains dirty, untracked and ignored files and all
+closed-but-unmerged PR branches. Removal requires a merged PR and ancestry or
+patch equivalence with main. Git's normal removal and branch-deletion safety
+checks remain enabled; a refusal never triggers forced deletion.

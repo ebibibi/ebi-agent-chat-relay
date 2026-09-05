@@ -3,6 +3,11 @@
 
 ccdb_record_good() {
     local record
+    if [ "$(git branch --show-current)" != main ] || \
+       [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
+        echo '[pre-start] Local development checkout does not replace verified main' >&2
+        return 0
+    fi
     record=$(git rev-parse --git-path ccdb-last-good) || return 1
     git rev-parse HEAD > "${record}.tmp" || return 1
     mv "${record}.tmp" "$record"

@@ -78,6 +78,16 @@ def test_unrelated_detached_checkout_is_not_changed(tmp_path: Path) -> None:
     assert git(repo, "branch", "--show-current") == ""
 
 
+def test_dirty_import_success_cannot_replace_verified_checkpoint(tmp_path: Path) -> None:
+    repo = setup_repo(tmp_path)
+    good = git(repo, "rev-parse", "HEAD")
+    assert shell(repo, "ccdb_record_good").returncode == 0
+    commit(repo, "broken without local edits")
+    (repo / "version").write_text("local repair, not committed")
+    assert shell(repo, "ccdb_record_good").returncode == 0
+    assert (repo / ".git" / "ccdb-last-good").read_text().strip() == good
+
+
 def test_runtime_hook_loads_fallback_then_returns_to_main(tmp_path: Path) -> None:
     repo = setup_repo(tmp_path)
     package = repo / "claude_discord"
