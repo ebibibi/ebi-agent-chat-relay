@@ -160,3 +160,21 @@ def test_live_cleanup_preserves_work_and_unmerged_branches(tmp_path: Path, kind:
         ["git", "branch", "--list", "feature/thing"], cwd=repo, text=True
     )
     assert bool(branch.strip()) is (kind != "clean")
+
+
+def test_startup_cleanup_only_requests_a_dry_run(tmp_path: Path) -> None:
+    """Execute the startup call site against a stub, not a real service."""
+    stub = tmp_path / "cleanup"
+    stub.write_text('#!/bin/bash\nprintf "%s\\n" "$@"\n')
+    stub.chmod(0o755)
+    source = SCRIPT.with_name("pre-start.sh").read_text()
+    condition = 'if [ -x "$CLEANUP_SCRIPT" ]; then'
+    block = condition + source.split(condition, 1)[1].split("\nfi", 1)[0] + "\nfi"
+    result = subprocess.run(
+        ["bash", "-c", block],
+        env={**os.environ, "CLEANUP_SCRIPT": str(stub)},
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.strip() == "--dry-run"

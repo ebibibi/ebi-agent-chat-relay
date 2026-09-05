@@ -66,7 +66,12 @@ the active selection is `ccdb-runtime-root`. They are retained for recovery.
 The fallback version's dependencies are synchronized before import validation;
 this does not verify a live Discord connection or every runtime failure.
 
-Automatic worktree cleanup retains dirty, untracked and ignored files and all
-closed-but-unmerged PR branches. Removal requires a merged PR and ancestry or
-patch equivalence with main. Git's normal removal and branch-deletion safety
-checks remain enabled; a refusal never triggers forced deletion.
+Startup worktree cleanup is **report-only** (`--dry-run`), including pruning.
+Actual cleanup requires an explicit operator request after confirming that the
+target worktrees have no active writers. This matters because even Git's normal
+removal can discard an ignored file created after a clean-status check.
+
+The cleanup script retains dirty, untracked and ignored files and all closed
+but unmerged PR branches. Removal additionally requires a merged PR and ancestry
+or patch equivalence with main. Normal Git safety checks remain enabled; a
+refusal never triggers forced deletion.

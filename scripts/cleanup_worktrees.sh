@@ -126,8 +126,9 @@ while IFS= read -r line; do
                 echo "  [DRY RUN] Would remove worktree: $current_path"
                 echo "  [DRY RUN] Would delete branch: $current_branch"
             else
-                # Git performs a second safety check against races. Refusal is
-                # preservation, never a reason to force removal.
+                # Git checks tracked/untracked changes again, but may discard
+                # newly created ignored files. Run actual cleanup only after
+                # explicitly confirming these worktrees have no active writers.
                 if git worktree remove "$current_path" 2>/dev/null; then
                     echo "  Removed worktree: $current_path"
                 else

@@ -188,10 +188,10 @@ if [ -n "${CCDB_ROLLBACK_ROOT:-}" ]; then
     COMMIT=$(git -C "$CCDB_ROLLBACK_ROOT" rev-parse --short HEAD)
 fi
 
-# ── Step 4: Cleanup stale worktrees ──
+# ── Step 4: Report stale worktrees (never remove files during startup) ──
 CLEANUP_SCRIPT="$CCDB_HOME/scripts/cleanup_worktrees.sh"
 if [ -x "$CLEANUP_SCRIPT" ]; then
-    "$CLEANUP_SCRIPT" 2>&1 || true
+    "$CLEANUP_SCRIPT" --dry-run 2>&1 || true
 fi
 
 echo "[pre-start] All checks passed. Starting bot (${COMMIT})." >&2
