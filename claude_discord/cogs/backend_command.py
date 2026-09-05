@@ -19,7 +19,7 @@ from ..backend_settings import (
     CODEX_STATUS_MODES,
     BackendSettings,
 )
-from ..model_catalog import claude_model_choices
+from ..model_catalog import claude_model_choices, codex_model_choices
 
 if TYPE_CHECKING:
     from ..backend_factory import BackendFactory
@@ -38,8 +38,8 @@ VALID_EFFORTS: dict[str, frozenset[str]] = {
 
 EFFORT_ORDER: dict[str, list[str]] = {
     "claude": ["low", "medium", "high", "max"],
-    "codex": ["minimal", "low", "medium", "high", "xhigh"],
-    "local": ["minimal", "low", "medium", "high", "xhigh"],
+    "codex": ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
+    "local": ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
 }
 
 # Suggestions only: the model fields remain free text.
@@ -50,11 +50,13 @@ SUGGESTED_MODELS: dict[str, list[tuple[str, str]]] = {
         ("opus", "most capable (alias — newest Opus)"),
         ("fable", "token-efficient frontier (alias — newest Fable)"),
     ],
+    # Fallback only — the live list comes from the Codex CLI's own catalog
+    # (codex_model_choices). Kept short and generation-current so a host that
+    # has never run the CLI still sees something selectable.
     "codex": [
-        ("gpt-5.6-sol", "GPT-5.6 SOL (current Codex console default)"),
-        ("gpt-5.5", "GPT-5.5 (previous default)"),
-        ("gpt-5.5-codex", "GPT-5.5 Codex"),
-        ("o4-mini", "o4-mini (fast)"),
+        ("gpt-6-astra", "GPT-6-Astra — most capable"),
+        ("gpt-5.6-sol", "GPT-5.6-Sol"),
+        ("gpt-5.5", "GPT-5.5"),
     ],
     "local": [
         ("gpt-oss:120b", "gpt-oss 120B (tool use, needs real VRAM)"),
@@ -236,6 +238,8 @@ class BackendCommandCog(commands.Cog):
         backend = await self._backend_for_autocomplete(interaction)
         if backend == "claude":
             suggestions = await claude_model_choices(fallback=SUGGESTED_MODELS["claude"])
+        elif backend == "codex":
+            suggestions = codex_model_choices(fallback=SUGGESTED_MODELS["codex"])
         else:
             suggestions = SUGGESTED_MODELS.get(backend, [])
         current_lower = current.lower()
@@ -441,7 +445,8 @@ class BackendCommandCog(commands.Cog):
     @app_commands.describe(
         level=(
             "Effort level. Claude: low/medium/high/max. "
-            "Codex: minimal/low/medium/high/xhigh. Omit to show current."
+            "Codex: low/medium/high/xhigh/max/ultra (model-dependent). "
+            "Omit to show current."
         ),
         scope=(
             "thread: only this thread; global: server-wide. "

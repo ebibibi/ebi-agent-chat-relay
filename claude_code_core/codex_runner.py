@@ -28,10 +28,15 @@ logger = logging.getLogger(__name__)
 
 _UNSET = object()
 
-# Reasoning-effort levels accepted by the Codex CLI / GPT-5.x models. Used to
-# validate the value before it is injected into a `-c model_reasoning_effort=`
-# config override (defence-in-depth against config injection).
-VALID_CODEX_EFFORTS: frozenset[str] = frozenset({"minimal", "low", "medium", "high", "xhigh"})
+# Reasoning-effort levels accepted by the Codex CLI. Used to validate the value
+# before it is injected into a `-c model_reasoning_effort=` config override
+# (defence-in-depth against config injection), so this is the union across
+# models, not the set one model accepts: `minimal` is only offered by older
+# GPT-5.x models, `max`/`ultra` only by GPT-5.6 and GPT-6. The CLI rejects a
+# level its selected model does not support, and that error reaches the thread.
+VALID_CODEX_EFFORTS: frozenset[str] = frozenset(
+    {"minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
+)
 
 # `codex exec`'s own sandbox policy values (see `codex exec --help`). Codex
 # picks one of these itself by default (config.toml-driven); ccdb never

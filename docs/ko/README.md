@@ -279,7 +279,7 @@ ccdb 3.0은 봇 재시작 없이 다음 세션을 처리할 AI를 변경하는 �
 
 - `/backend [name] [scope]` — 백엔드 표시 또는 전환. `name`은 `claude` 또는 `codex`. `scope`는 `thread`(이 스레드만) 또는 `global`(서버 전역 기본값). `scope`를 생략하면 명령이 자동 해석합니다: 스레드 안에서는 그 스레드로 범위가 지정되고, 그렇지 않으면 전역 기본값을 설정합니다.
 - `/model [name] [scope]` — **현재** 백엔드가 사용하는 모델 표시 또는 전환. 각 백엔드는 자신의 모델 선호를 기억하므로, 백엔드를 앞뒤로 전환해도 선호하는 모델이 그대로 유지됩니다. 백엔드의 모델을 설정하지 않은 채로 두면 해당 CLI 자체의 기본값을 따릅니다(예: Codex는 `~/.codex/config.toml`의 `model`을 사용하므로, ccdb는 버전을 고정하는 대신 콘솔 기본값을 추적합니다).
-- `/effort [level] [scope]` — 현재 백엔드가 사용하는 **추론 노력(reasoning effort)** 표시 또는 전환. 유효한 레벨은 백엔드별로 다릅니다: Claude는 `low/medium/high/max`를 허용하고, Codex는 `minimal/low/medium/high/xhigh`를 허용합니다(CLI의 `model_reasoning_effort`에 매핑됨). 설정하지 않은 채로 두면 CLI 기본값을 따릅니다.
+- `/effort [level] [scope]` — 현재 백엔드가 사용하는 **추론 노력(reasoning effort)** 표시 또는 전환. 유효한 레벨은 백엔드별로 다릅니다: Claude는 `low/medium/high/max`를 허용하고, Codex는 `low/medium/high/xhigh/max/ultra`를 허용합니다(CLI의 `model_reasoning_effort`에 매핑됨). 설정하지 않은 채로 두면 CLI 기본값을 따릅니다.
 
 세 명령 모두 `SettingsRepository`를 통해 SQLite에 저장되므로, 선택은 봇 재시작에도 유지됩니다. 인수 없이 호출하면 현재 전역 기본값과 스레드 오버라이드(있는 경우)를 출력합니다.
 

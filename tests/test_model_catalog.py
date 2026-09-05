@@ -248,3 +248,86 @@ class TestClaudeModelChoices:
         clock[0] += model_catalog.FAILURE_TTL_SECONDS + 1
         await model_catalog.claude_model_choices(fallback=FALLBACK, env={})
         assert len(calls) == 2
+
+
+def _write_codex_cache(home: Path, models: list[dict]) -> None:
+    (home / model_catalog.CODEX_MODELS_CACHE).write_text(
+        json.dumps({"models": models}), encoding="utf-8"
+    )
+
+
+class TestCodexModelChoices:
+    """Codex discovery reads the catalog the Codex CLI already fetched itself."""
+
+    def test_reads_the_cli_catalog_in_priority_order(self, tmp_path: Path) -> None:
+        _write_codex_cache(
+            tmp_path,
+            [
+                {"slug": "old", "display_name": "Old", "priority": 2, "visibility": "list"},
+                {
+                    "slug": "gpt-6-astra",
+                    "display_name": "GPT-6-Astra",
+                    "description": "Most capable",
+                    "priority": 1,
+                    "visibility": "list",
+                },
+            ],
+        )
+
+        choices = model_catalog.codex_model_choices(
+            fallback=FALLBACK, env={"CODEX_HOME": str(tmp_path)}
+        )
+
+        assert choices == [("gpt-6-astra", "Most capable"), ("old", "Old")]
+
+    def test_hidden_models_are_not_offered(self, tmp_path: Path) -> None:
+        """``hide`` marks internal models (auto-review, reserve capacity)."""
+        _write_codex_cache(
+            tmp_path,
+            [
+                {"slug": "gpt-6-astra", "display_name": "GPT-6-Astra", "visibility": "list"},
+                {"slug": "codex-auto-review", "display_name": "Auto Review", "visibility": "hide"},
+            ],
+        )
+
+        choices = model_catalog.codex_model_choices(
+            fallback=FALLBACK, env={"CODEX_HOME": str(tmp_path)}
+        )
+
+        assert [slug for slug, _ in choices] == ["gpt-6-astra"]
+
+    def test_missing_catalog_falls_back(self, tmp_path: Path) -> None:
+        """A host that never ran the Codex CLI still gets suggestions."""
+        assert (
+            model_catalog.codex_model_choices(
+                fallback=FALLBACK, env={"CODEX_HOME": str(tmp_path / "nope")}
+            )
+            == FALLBACK
+        )
+
+    def test_malformed_catalog_falls_back(self, tmp_path: Path) -> None:
+        (tmp_path / model_catalog.CODEX_MODELS_CACHE).write_text("{not json", encoding="utf-8")
+
+        assert (
+            model_catalog.codex_model_choices(fallback=FALLBACK, env={"CODEX_HOME": str(tmp_path)})
+            == FALLBACK
+        )
+
+    def test_empty_catalog_falls_back(self, tmp_path: Path) -> None:
+        _write_codex_cache(tmp_path, [])
+
+        assert (
+            model_catalog.codex_model_choices(fallback=FALLBACK, env={"CODEX_HOME": str(tmp_path)})
+            == FALLBACK
+        )
+
+    def test_discovery_can_be_disabled(self, tmp_path: Path) -> None:
+        _write_codex_cache(tmp_path, [{"slug": "gpt-6-astra", "display_name": "GPT-6-Astra"}])
+
+        assert (
+            model_catalog.codex_model_choices(
+                fallback=FALLBACK,
+                env={"CODEX_HOME": str(tmp_path), "CCDB_MODEL_DISCOVERY": "0"},
+            )
+            == FALLBACK
+        )

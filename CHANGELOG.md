@@ -11,6 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **GPT-6 is selectable, and the Codex model list stops going stale** — `/model`'s Codex suggestions
+  were a hardcoded quartet (`gpt-5.6-sol`, `gpt-5.5`, `gpt-5.5-codex`, `o4-mini`), two of which no
+  longer exist, and the newest generation was not among them: picking GPT-6 meant knowing the slug
+  `gpt-6-astra` by heart and typing it blind. Codex now gets the same treatment Claude got in
+  decision 11, without ccdb calling a vendor: the Codex CLI already fetches its own catalog and
+  writes it to `$CODEX_HOME/models_cache.json`, so `codex_model_choices()` reads that file, drops
+  the entries the CLI marks `hide` (auto-review, reserve capacity), and orders the rest by the
+  catalog's own `priority` — GPT-6 leads the dropdown as soon as the Codex CLI has seen it, with no
+  ccdb release. A host that has never run the Codex CLI, an unreadable catalog, or
+  `CCDB_MODEL_DISCOVERY=0` all degrade to a short static list (now GPT-6-first). Relatedly,
+  `/effort` accepted `minimal/low/medium/high/xhigh` only, so the two levels GPT-5.6 and GPT-6
+  actually added — `max` and `ultra` — were rejected by ccdb before the CLI ever saw them, capping
+  the newest models below their own ceiling; `VALID_CODEX_EFFORTS` is now the union across models
+  (the CLI still rejects a level its selected model does not support, and that error reaches the
+  thread).
+
 - **The deploy-drift check now also catches a bot that simply never restarted** — it answered one
   question ("is a forgotten `make dev-on` worktree in production?") and returned `OK: main-tree
   mode` for everything else, which is a guard that reports on the case it was written for and waves

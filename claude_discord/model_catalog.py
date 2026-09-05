@@ -1,4 +1,4 @@
-"""Discover which Claude models this installation can actually select.
+"""Discover which models this installation can actually select.
 
 ``/model``'s autocomplete used to be a hardcoded list, so it went stale on every
 model launch — it was still offering "Opus 4.8" the week Opus 5 shipped. This
@@ -12,6 +12,10 @@ non-essential: no credentials, no network, a third-party provider or a disabled
 lookup all degrade to the caller's static fallback list. Nothing here ever
 raises into the Discord command path, and the token is only ever read to build a
 request header — never logged.
+
+Codex models are discovered too, but from the catalog the Codex CLI already
+fetched for itself on disk rather than from a second vendor API — see the
+"Codex" section at the bottom of this module.
 
 Opt out with ``CCDB_MODEL_DISCOVERY=0``.
 """
@@ -230,3 +234,80 @@ async def claude_model_choices(
 
         _cache = (choices, now + CACHE_TTL_SECONDS)
         return choices
+
+
+# ── Codex ──────────────────────────────────────────────────────────────
+#
+# The Codex CLI has no "list models" subcommand, but it already solves this
+# problem for itself: it fetches its model catalog from OpenAI and writes the
+# answer to ``$CODEX_HOME/models_cache.json``. Reading that file gives ccdb the
+# same list the Codex console shows — including generation changes like GPT-6 —
+# without ccdb making a vendor call of its own (see CLAUDE.md decision 13) and
+# without a constant that goes stale on every launch.
+
+#: Written by the Codex CLI itself; ccdb only ever reads it.
+CODEX_MODELS_CACHE = "models_cache.json"
+
+#: Models the CLI marks ``hide`` are internal (auto-review, reserve capacity)
+#: and must not be offered as a chat model.
+CODEX_LISTED_VISIBILITY = "list"
+
+
+def _codex_home(env: Mapping[str, str]) -> Path:
+    return Path(env.get("CODEX_HOME") or os.path.join(Path.home(), ".codex"))
+
+
+def parse_codex_models(payload: Mapping[str, Any]) -> list[tuple[str, str]]:
+    """Turn a ``models_cache.json`` payload into ``(slug, description)`` pairs.
+
+    Ordered by the catalog's own ``priority`` so the newest generation leads the
+    dropdown, exactly as it does in the Codex console.
+    """
+    models = payload.get("models")
+    if not isinstance(models, list):
+        return []
+    ranked: list[tuple[int, int, str, str]] = []
+    for index, entry in enumerate(models):
+        if not isinstance(entry, dict):
+            continue
+        slug = entry.get("slug")
+        if not isinstance(slug, str) or not slug:
+            continue
+        if str(entry.get("visibility") or CODEX_LISTED_VISIBILITY) != CODEX_LISTED_VISIBILITY:
+            continue
+        display = str(entry.get("display_name") or slug)
+        description = str(entry.get("description") or "").strip()
+        priority = entry.get("priority")
+        # Missing priority sorts last but keeps file order among its peers.
+        rank = priority if isinstance(priority, int) else len(models)
+        # The slug is already the autocomplete's prefix and ``display_name`` is
+        # only its prettified form ("gpt-6-astra" / "GPT-6-Astra"), so prefer
+        # the one-line description that actually distinguishes the models.
+        label = description or display
+        ranked.append((rank, index, slug, label))
+    ranked.sort(key=lambda item: (item[0], item[1]))
+    return [(slug, label) for _, _, slug, label in ranked]
+
+
+def codex_model_choices(
+    *,
+    fallback: list[tuple[str, str]],
+    env: Mapping[str, str] | None = None,
+) -> list[tuple[str, str]]:
+    """Suggestions for the Codex ``/model`` autocomplete, read from disk.
+
+    Returns ``fallback`` unchanged when the cache is absent, unreadable or
+    empty — a user who has never run the Codex CLI must still get suggestions.
+    No caching: this is a local file read, and the CLI rewrites it whenever the
+    catalog changes.
+    """
+    env = os.environ if env is None else env
+    if env.get("CCDB_MODEL_DISCOVERY", "1").strip().lower() in {"0", "false", "no", "off"}:
+        return fallback
+    try:
+        raw = (_codex_home(env) / CODEX_MODELS_CACHE).read_text(encoding="utf-8")
+        choices = parse_codex_models(json.loads(raw))
+    except (OSError, ValueError, AttributeError, TypeError) as exc:
+        logger.warning("Codex model discovery failed, using static suggestions: %s", exc)
+        return fallback
+    return choices or fallback

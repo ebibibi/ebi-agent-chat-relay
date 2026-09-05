@@ -9,6 +9,7 @@ Codex models/efforts, not Claude ones.
 
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -39,6 +40,9 @@ def _offline_model_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
         return fallback
 
     monkeypatch.setattr("claude_discord.cogs.backend_command.claude_model_choices", _fallback_only)
+    # Codex discovery reads the host's own ~/.codex catalog, so leaving it on
+    # would make these assertions depend on whoever ran the suite.
+    monkeypatch.setenv("CCDB_MODEL_DISCOVERY", "0")
 
 
 async def _new_settings_repo() -> SettingsRepository:
@@ -158,7 +162,37 @@ class TestModelAutocomplete:
 
         choices = await cog._model_name_autocomplete(interaction, "")
 
-        assert choices[0].value == "gpt-5.6-sol"
+        assert choices[0].value == "gpt-6-astra"
+
+    async def test_codex_backend_surfaces_discovered_models(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A Codex generation the CLI already knows must not need a ccdb release."""
+        monkeypatch.delenv("CCDB_MODEL_DISCOVERY", raising=False)
+        monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+        (tmp_path / "models_cache.json").write_text(
+            json.dumps(
+                {
+                    "models": [
+                        {
+                            "slug": "gpt-7",
+                            "display_name": "GPT-7",
+                            "description": "Newer than this release",
+                            "visibility": "list",
+                            "priority": 1,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        settings = await _settings()
+        await settings.set_backend("codex")
+        cog = _make_cog(settings)
+
+        choices = await cog._model_name_autocomplete(_channel_interaction(), "")
+
+        assert [c.value for c in choices] == ["gpt-7"]
 
     async def test_filters_by_current_substring(self) -> None:
         settings = await _settings()

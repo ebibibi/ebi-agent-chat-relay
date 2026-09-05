@@ -279,7 +279,7 @@ ccdb 3.0 引入了三个斜杠命令，用来改变下一个会话由哪个 AI �
 
 - `/backend [name] [scope]` — 显示或切换后端。`name` 为 `claude` 或 `codex`。`scope` 为 `thread`（仅当前线程）或 `global`（服务器级默认值）。省略 `scope` 时，命令会自动判定：在线程中则作用于该线程，否则设置全局默认值。
 - `/model [name] [scope]` — 显示或切换**当前**后端所用的模型。每个后端记住各自的模型偏好，因此来回切换后端不会破坏你偏好的模型。让某后端的模型保持未设置，即可沿用该 CLI 自身的默认值（例如 Codex 使用 `~/.codex/config.toml` 中的 `model`，因此 ccdb 跟踪的是控制台默认值，而不锁定某个版本）。
-- `/effort [level] [scope]` — 显示或切换当前后端所用的**推理强度**。有效级别因后端而异：Claude 接受 `low/medium/high/max`；Codex 接受 `minimal/low/medium/high/xhigh`（映射到 CLI 的 `model_reasoning_effort`）。保持未设置即沿用 CLI 默认值。
+- `/effort [level] [scope]` — 显示或切换当前后端所用的**推理强度**。有效级别因后端而异：Claude 接受 `low/medium/high/max`；Codex 接受 `low/medium/high/xhigh/max/ultra`（映射到 CLI 的 `model_reasoning_effort`）。保持未设置即沿用 CLI 默认值。
 
 这三个命令都会通过 `SettingsRepository` 持久化到 SQLite，因此选择在 Bot 重启后仍然有效。不带参数调用它们时，会打印当前全局默认值以及任何线程级覆盖。
 

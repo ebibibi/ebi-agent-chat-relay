@@ -1,7 +1,7 @@
 """Tests for BackendCommandCog.effort_command (/effort).
 
-Covers per-backend persistence, backend-appropriate validation (Claude "max"
-vs Codex "minimal"/"xhigh"), and thread vs global scope.
+Covers per-backend persistence, backend-appropriate validation (Claude's four
+levels vs Codex's wider set), and thread vs global scope.
 """
 
 from __future__ import annotations
@@ -84,18 +84,29 @@ class TestEffortCommand:
         assert await settings.current_effort("codex") == "xhigh"
         interaction.response.send_message.assert_awaited_once()
 
-    async def test_codex_rejects_claude_only_level(self) -> None:
+    async def test_codex_rejects_unknown_level(self) -> None:
         settings = await _settings()
         await settings.set_backend("codex")
         cog = _make_cog(settings)
         interaction = _channel_interaction()
 
-        # "max" is a Claude level, not valid for Codex.
-        await cog.effort_command.callback(cog, interaction, level="max", scope="global")
+        await cog.effort_command.callback(cog, interaction, level="extreme", scope="global")
 
         assert await settings.current_effort("codex") is None
         msg = interaction.response.send_message.await_args.args[0]
         assert "Unknown effort" in msg
+
+    async def test_codex_accepts_the_top_levels_of_the_current_generation(self) -> None:
+        """GPT-5.6 and GPT-6 added `max`/`ultra`; rejecting them hides the model's ceiling."""
+        settings = await _settings()
+        await settings.set_backend("codex")
+        cog = _make_cog(settings)
+
+        await cog.effort_command.callback(
+            cog, _channel_interaction(), level="ultra", scope="global"
+        )
+
+        assert await settings.current_effort("codex") == "ultra"
 
     async def test_claude_accepts_max(self) -> None:
         settings = await _settings()  # default backend claude

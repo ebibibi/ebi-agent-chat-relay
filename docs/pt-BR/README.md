@@ -279,7 +279,7 @@ O ccdb 3.0 introduz três comandos slash que mudam qual IA lida com a próxima s
 
 - `/backend [name] [scope]` — mostra ou troca o backend. `name` é `claude` ou `codex`. `scope` é `thread` (apenas esta thread) ou `global` (padrão de todo o servidor). Quando você omite `scope`, o comando resolve automaticamente: em uma thread, ele se aplica àquela thread; caso contrário, define o padrão global.
 - `/model [name] [scope]` — mostra ou troca o modelo usado pelo backend **atual**. Cada backend lembra sua própria preferência de modelo, então alternar o backend de um lado para o outro mantém seus modelos favoritos intactos. Deixe o modelo de um backend sem definir para adiar ao padrão da própria CLI (por exemplo, o Codex usa o `model` em `~/.codex/config.toml`, então o ccdb rastreia o padrão do console em vez de fixar uma versão).
-- `/effort [level] [scope]` — mostra ou troca o **esforço de raciocínio (reasoning effort)** usado pelo backend atual. Os níveis válidos são específicos de cada backend: o Claude aceita `low/medium/high/max`; o Codex aceita `minimal/low/medium/high/xhigh` (mapeado para o `model_reasoning_effort` da CLI). Deixe sem definir para adiar ao padrão da CLI.
+- `/effort [level] [scope]` — mostra ou troca o **esforço de raciocínio (reasoning effort)** usado pelo backend atual. Os níveis válidos são específicos de cada backend: o Claude aceita `low/medium/high/max`; o Codex aceita `low/medium/high/xhigh/max/ultra` (mapeado para o `model_reasoning_effort` da CLI). Deixe sem definir para adiar ao padrão da CLI.
 
 Todos os três comandos persistem no SQLite via `SettingsRepository`, então a escolha sobrevive a reinícios do bot. Chamá-los sem argumentos imprime o padrão global atual mais qualquer substituição por thread.
 
