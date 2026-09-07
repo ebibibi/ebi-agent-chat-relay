@@ -898,6 +898,7 @@ for idle deadlines, attachment retries, credentials and startup rollback.
 | `CCDB_MODEL` | Model to use (overrides `CLAUDE_MODEL`) | `sonnet` |
 | `CCDB_MODEL_DISCOVERY` | Set to `0` to stop the `/model` autocomplete from asking the Anthropic models endpoint which models your credentials can see (and from reading the Codex CLI's local model catalog), and always use the static suggestion list instead. Discovery is read-only, reuses the Claude Code CLI's own auth, and already falls back on its own when offline, unauthenticated, or on Bedrock/Vertex/Foundry | `1` |
 | `CCDB_PERMISSION_MODE` | Permission mode for CLI (overrides `CLAUDE_PERMISSION_MODE`) | `acceptEdits` |
+| `CCDB_STATUS_LANG` | Language for the Codex status-line labels (`週次` / `クレジット` / `上限到達`). `en` renders them as `7d` / `credits` / `limit reached`, matching the English used elsewhere in the UI. Unrecognised values fall back to `ja`. Affects only those labels — Japanese prompt text and phrase matching are unaffected. | `ja` |
 | `CCDB_DANGEROUSLY_SKIP_PERMISSIONS` | Skip all permission checks — overrides `CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS` | `false` |
 | `CCDB_WORKING_DIR` | Working directory for CLI (overrides `CLAUDE_WORKING_DIR`) | current dir |
 | `CCDB_ALLOWED_TOOLS` | Comma-separated list of allowed tools (overrides `CLAUDE_ALLOWED_TOOLS`) | (optional) |
