@@ -177,6 +177,12 @@ async def _build_system_context(config: RunConfig) -> str | None:
     marker = _attachment_marker_name(config.surface.thread_key)
     parts.append(
         "## File Delivery\n"
+        "Discord cannot open local filesystem paths. Never describe a local path as a clickable "
+        "link, and never use a local path or file:// URI as a user-facing Markdown link. "
+        "For every file the user asks to view, open, download, or receive, deliver it as a real "
+        "Discord attachment using the marker below and refer to it as an attached file in the "
+        "final response. This Discord-specific rule overrides general instructions to prefer "
+        "clickable local-file links.\n"
         "When you need to send files to Discord, use your Bash tool to append "
         "each file's ABSOLUTE path (one path per line, UTF-8) to:\n"
         f"  {wd}/{marker}\n"
