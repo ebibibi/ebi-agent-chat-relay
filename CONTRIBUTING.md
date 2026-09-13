@@ -99,6 +99,17 @@ only fails past `CCDB_STALE_DAYS` (default `3`). A machine without systemd, or a
 cannot read, says so rather than silently passing. `CCDB_SERVICE` overrides the unit name
 (default `discord-bot`).
 
+**Only commits a restart would actually change are counted.** A restart kills every
+in-flight session, so an alert that asks for one had better be worth it — and when it is
+not, the operator declines and the check stays red for days until nobody reads it. A
+commit that touches only `docs/`, `tests/`, `examples/`, `.github/`, `LICENSE` or a
+top-level `*.md` cannot change one bit of what the bot does, and neither can a Dependabot
+bump that changes only `uv.lock` and labels every updated dependency
+`dependency-type: direct:development`. Both are skipped, and the reported age comes from
+the oldest commit that *does* need a restart. Everything else counts, including a commit
+whose file list cannot be read: unclassifiable has to mean "counts", never "assume it is
+harmless".
+
 Exit codes: `0` running the newest code, or dev mode on already-merged code; `1` drift —
 dev mode on unmerged code, or merged commits undeployed past the threshold; `2` dev mode
 configured but unusable, the marker points nowhere (the hook silently falls back to the

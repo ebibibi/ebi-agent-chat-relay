@@ -27,6 +27,45 @@ SERVICE="${CCDB_SERVICE:-discord-bot}"
 # disruptive, so they are batched. Report from day one, alert after this many.
 STALE_DAYS="${CCDB_STALE_DAYS:-3}"
 
+# ── which commits actually need a restart? ──
+#
+# A restart kills every in-flight session, so the operator rightly refuses to do
+# it for nothing. That makes a false alert expensive twice over: it asks for a
+# disruptive action, and when the answer is "not worth it" the check stays red
+# for days and stops being read at all. A docs-only commit, or a Dependabot bump
+# of a development-only tool, cannot change one bit of what the bot does — those
+# must not hold the alert open.
+#
+# Everything not proven inert counts. A commit whose file list cannot be read
+# (an unresolved merge, an empty diff) counts too: silence here has to mean
+# "nothing to deploy", never "the classifier gave up".
+INERT_PATHS_RE='^(docs/|tests/|examples/|\.github/|LICENSE$|CHANGELOG\.md$|[^/]*\.md$)'
+
+commit_needs_restart() {
+    local sha="$1" files
+    files="$(git -C "$CCDB_HOME" diff-tree --no-commit-id --name-only -r "$sha" 2>/dev/null)"
+    [ -z "$files" ] && return 0
+
+    local runtime_files
+    runtime_files="$(printf '%s\n' "$files" | grep -Ev "$INERT_PATHS_RE" || true)"
+    [ -z "$runtime_files" ] && return 1
+
+    # uv.lock is synced on restart, so a lock change normally counts. The one
+    # exception is a bump Dependabot itself labels development-only: the package
+    # lands in the venv and nothing imports it. Trust that trailer only when it
+    # is the *whole* story -- any production dependency in the same commit, or a
+    # second changed file, and the commit counts again.
+    if [ "$runtime_files" = "uv.lock" ]; then
+        local message
+        message="$(git -C "$CCDB_HOME" show --no-patch --format=%B "$sha" 2>/dev/null)"
+        if printf '%s' "$message" | grep -q 'dependency-type: direct:development' &&
+            ! printf '%s' "$message" | grep -q 'dependency-type: direct:production'; then
+            return 1
+        fi
+    fi
+    return 0
+}
+
 # ── main-tree mode: is the running process the newest code? ──
 #
 # The honest measure is not "is the checkout behind origin/main" (a pull without
@@ -51,19 +90,30 @@ report_undeployed() {
         return 0
     fi
 
-    local count
-    count="$(git -C "$CCDB_HOME" rev-list --count "origin/main" --since="@$started_epoch" 2>/dev/null || echo 0)"
+    # Oldest of the commits the running process is missing -- how long the wait
+    # has actually lasted, not how long ago the newest one landed. Take the
+    # minimum rather than the last line: git log orders by the commit graph, and
+    # a merge can put an older commit anywhere in that list.
+    local count=0 oldest_epoch="" sha commit_epoch
+    while read -r sha; do
+        [ -z "$sha" ] && continue
+        commit_needs_restart "$sha" || continue
+        count=$(( count + 1 ))
+        commit_epoch="$(git -C "$CCDB_HOME" show --no-patch --format=%ct "$sha" 2>/dev/null || echo "")"
+        if [ -n "$commit_epoch" ] &&
+            { [ -z "$oldest_epoch" ] || [ "$commit_epoch" -lt "$oldest_epoch" ]; }; then
+            oldest_epoch="$commit_epoch"
+        fi
+    done <<EOF
+$(git -C "$CCDB_HOME" rev-list "origin/main" --since="@$started_epoch" 2>/dev/null || true)
+EOF
+
     if [ "$count" -eq 0 ]; then
         echo "OK: main-tree mode, running the newest code on origin/main."
         return 0
     fi
 
-    # Oldest of the commits the running process is missing -- how long the wait
-    # has actually lasted, not how long ago the newest one landed. Sort by date
-    # rather than taking the last line: git log orders by the commit graph, and
-    # a merge can put an older commit anywhere in that list.
-    local oldest_epoch age_days
-    oldest_epoch="$(git -C "$CCDB_HOME" log "origin/main" --since="@$started_epoch" --format=%ct 2>/dev/null | sort -n | head -1)"
+    local age_days
     oldest_epoch="${oldest_epoch:-$started_epoch}"
     age_days=$(( ( $(date +%s) - oldest_epoch ) / 86400 ))
 
