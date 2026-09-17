@@ -38,7 +38,7 @@ does not hold, nothing is sent:
 | `--tools ""` | An allow list. Naming tools to forbid cannot keep up |
 | `--strict-mcp-config` | Otherwise the operator's MCP servers come along |
 | Empty temporary directory as cwd | Nothing local to read |
-| Every tool disallowed | No shell to escape the directory with |
+| No tool named anywhere in the argv | An override can only widen the empty list |
 | `--` before the prompt | Without it the variadic tool list eats the prompt |
 
 The first row is the one that surprises people. Measured with `cwd=/home/ebi`
@@ -55,8 +55,19 @@ configured MCP tool, Gmail and Calendar included — plus `Skill` and
 aliases as record IDs to look up. Extending the deny list by hand then left
 `CronCreate`, `RemoteTrigger` and `DesignSync`. A deny list has to be
 rewritten for every tool the CLI adds, so it is the wrong shape: `--tools ""`
-allows nothing by default and was measured to stop `Bash` from running,
-while the deny list stays as a second layer.
+allows nothing by default and was measured to stop `Bash` from running.
+
+The deny list was kept beside it as a second layer, and that turned out to be
+the wrong call for the mirror-image reason: it goes stale in the *other*
+direction too. Measured on CLI 2.1.273, the entry for a tool the CLI has since
+dropped makes it report `Permission deny rule "…" matches no known tool` on
+stderr before answering, so the list has to track renames and removals that the
+empty allow list is immune to. A layer that must be re-checked against every
+CLI release is not defence in depth; it is a second thing to get wrong. There
+is now exactly one tool-selection flag, and `verify_isolation()` refuses any
+argv that adds another — in either direction, since `--allowedTools` would
+widen the empty list and `--disallowedTools` would bring the hand-written names
+back.
 
 This is a *route*, not a procedure. `verify_isolation()` inspects the argv about
 to be used, so a future refactor that drops a flag fails loudly instead of
