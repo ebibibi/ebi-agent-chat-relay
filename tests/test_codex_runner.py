@@ -112,6 +112,69 @@ class _CompletesBeforeExitProcess(_FakeProcess):
         super().terminate()
 
 
+class _HangsAfterCompletionProcess(_FakeProcess):
+    """Process that emits turn.completed and then never closes stdout or exits."""
+
+    def __init__(self, completed_line: bytes) -> None:
+        super().__init__(returncode=0)
+        self.returncode = None
+        self.terminated = False
+        self.exited = asyncio.Event()
+        self.stdout = _HangingAfterLinesStream([completed_line + b"\n"], self.exited)
+
+    async def wait(self) -> int:
+        await self.exited.wait()
+        assert self.returncode is not None
+        return self.returncode
+
+    def terminate(self) -> None:
+        self.terminated = True
+        self.returncode = -15
+        self.exited.set()
+
+
+class _HangingAfterLinesStream:
+    """Yields the given lines, then blocks forever instead of signalling EOF."""
+
+    def __init__(self, lines: list[bytes], released: asyncio.Event) -> None:
+        self._lines = list(lines)
+        self._released = released
+
+    async def readline(self) -> bytes:
+        if self._lines:
+            return self._lines.pop(0)
+        await self._released.wait()
+        return b""
+
+    async def read(self) -> bytes:
+        return b""
+
+
+class _NeverExitsAfterEofProcess(_FakeProcess):
+    """Process that closes stdout after turn.completed but never exits."""
+
+    def __init__(self, completed_line: bytes) -> None:
+        super().__init__(stdout_lines=[completed_line + b"\n"], returncode=0)
+        self.returncode = None
+        self.terminated = False
+        self.exited = asyncio.Event()
+
+    async def wait(self) -> int:
+        await self.exited.wait()
+        assert self.returncode is not None
+        return self.returncode
+
+    def terminate(self) -> None:
+        self.terminated = True
+        self.returncode = -15
+        self.exited.set()
+
+
+async def _collect(stream) -> list:
+    """Drain an async event stream into a list."""
+    return [event async for event in stream]
+
+
 class TestCodexRunnerIsBackend:
     """CodexRunner must satisfy the SessionBackend protocol."""
 
@@ -338,6 +401,66 @@ class TestCodexRunnerClone:
 
 
 class TestCodexRunnerRun:
+    @pytest.mark.asyncio
+    async def test_drain_after_completion_is_bounded_and_falls_back_to_terminate(
+        self, monkeypatch
+    ) -> None:
+        """A Codex CLI that hangs after its terminal event must not stall the turn."""
+        monkeypatch.setattr(
+            "claude_code_core.codex_runner.POST_COMPLETION_DRAIN_SECONDS",
+            0.05,
+            raising=False,
+        )
+        completed_line = json.dumps({"type": "turn.completed", "usage": {}}).encode()
+        process = _HangsAfterCompletionProcess(completed_line)
+
+        async def fake_create_subprocess_exec(*args, **kwargs):
+            return process
+
+        monkeypatch.setattr(
+            "claude_code_core.codex_runner.asyncio.create_subprocess_exec",
+            fake_create_subprocess_exec,
+        )
+        # Long enough that only the post-completion drain bound can end the read.
+        runner = CodexRunner(command="codex", timeout_seconds=30)
+
+        events = await asyncio.wait_for(
+            _collect(runner.run("hello")),
+            timeout=5,
+        )
+
+        assert [event.is_complete for event in events] == [True]
+        assert [event.error for event in events] == [None]
+        assert process.terminated is True
+
+    @pytest.mark.asyncio
+    async def test_process_that_never_exits_after_eof_is_terminated_without_error(
+        self, monkeypatch
+    ) -> None:
+        """A stuck exit after stdout EOF must be terminated, not reported as a turn timeout."""
+        monkeypatch.setattr(
+            "claude_code_core.codex_runner.PROCESS_EXIT_TIMEOUT_SECONDS",
+            0.05,
+            raising=False,
+        )
+        completed_line = json.dumps({"type": "turn.completed", "usage": {}}).encode()
+        process = _NeverExitsAfterEofProcess(completed_line)
+
+        async def fake_create_subprocess_exec(*args, **kwargs):
+            return process
+
+        monkeypatch.setattr(
+            "claude_code_core.codex_runner.asyncio.create_subprocess_exec",
+            fake_create_subprocess_exec,
+        )
+        runner = CodexRunner(command="codex", timeout_seconds=30)
+
+        events = await asyncio.wait_for(_collect(runner.run("hello")), timeout=5)
+
+        assert [event.is_complete for event in events] == [True]
+        assert [event.error for event in events] == [None]
+        assert process.terminated is True
+
     @pytest.mark.asyncio
     async def test_turn_completed_waits_for_natural_process_exit(self, monkeypatch) -> None:
         """A terminal event must not release the session while Codex still owns it."""

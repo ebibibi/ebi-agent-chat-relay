@@ -186,6 +186,15 @@ _RESUME_STREAM_DISCONNECT_PATTERN = re.compile(
     r"websocket closed by server before response\.completed",
     re.IGNORECASE,
 )
+# Once Codex has emitted a terminal event, the turn's output is complete and the
+# remaining stdout is just the CLI winding down. Draining it lets Codex release
+# its thread-store writer before a queued resume starts, but a CLI that never
+# closes stdout must not hold the per-thread run slot for the whole turn
+# timeout, so the post-completion read is bounded separately and falls back to
+# terminating the process.
+POST_COMPLETION_DRAIN_SECONDS = 10.0
+# Bound on the natural exit once stdout has reached EOF, for the same reason.
+PROCESS_EXIT_TIMEOUT_SECONDS = 10.0
 _RECOVERY_MESSAGE_LIMIT = 12
 _RECOVERY_MESSAGE_CHARS = 4_000
 _RECOVERY_TRANSCRIPT_CHARS = 24_000
@@ -592,10 +601,26 @@ class CodexRunner:
         if self._process is None or self._process.stdout is None:
             raise RuntimeError("Process not started")
 
+        saw_terminal_event = False
+
         while True:
-            line = await asyncio.wait_for(
-                self._process.stdout.readline(), timeout=self.timeout_seconds or None
+            read_timeout = (
+                POST_COMPLETION_DRAIN_SECONDS
+                if saw_terminal_event
+                else (self.timeout_seconds or None)
             )
+            try:
+                line = await asyncio.wait_for(self._process.stdout.readline(), timeout=read_timeout)
+            except TimeoutError:
+                if not saw_terminal_event:
+                    raise
+                # The turn already reported its result; _cleanup() terminates
+                # the stuck CLI rather than leaving the thread waiting.
+                logger.warning(
+                    "Codex CLI kept stdout open %.0fs after the terminal event; terminating",
+                    POST_COMPLETION_DRAIN_SECONDS,
+                )
+                return
             if not line:
                 break
             decoded = line.decode("utf-8", errors="replace")
@@ -606,6 +631,8 @@ class CodexRunner:
                 # Keep draining stdout so ``wait()`` below observes the natural
                 # exit and Codex releases its thread-store writer before a
                 # queued resume starts.
+                if event.is_complete:
+                    saw_terminal_event = True
                 # Atomic tools (e.g. file_changes) have no completion event of
                 # their own; pair them with a synthetic result so the live
                 # elapsed timer is cancelled instead of accumulating forever.
@@ -614,7 +641,18 @@ class CodexRunner:
                     yield completion
 
         if self._process.returncode is None:
-            await asyncio.wait_for(self._process.wait(), timeout=10)
+            try:
+                await asyncio.wait_for(self._process.wait(), timeout=PROCESS_EXIT_TIMEOUT_SECONDS)
+            except TimeoutError:
+                logger.warning(
+                    "Codex CLI did not exit %.0fs after stdout closed; terminating",
+                    PROCESS_EXIT_TIMEOUT_SECONDS,
+                )
+                if saw_terminal_event:
+                    # Reporting a turn timeout here would contradict the result
+                    # the thread already received.
+                    return
+                raise
 
         if self._process.returncode is not None and self._process.returncode > 0:
             if self._interrupt_requested:
