@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from .database.claims_repo import ClaimRepository
     from .database.frontend_thread_repo import FrontendThreadRepository
     from .database.ingest_repo import IngestResultRepository
+    from .database.lineage_repo import ThreadLineageRepository
     from .database.lounge_repo import LoungeRepository
     from .database.notification_repo import NotificationRepository
     from .database.repository import SessionRepository, UsageStatsRepository
@@ -56,6 +57,9 @@ class BridgeComponents:
     task_repo: TaskRepository | None = None
     lounge_repo: LoungeRepository | None = None
     claims_repo: ClaimRepository | None = None
+    #: Which thread spawned which — read by /api/sessions so a manager session
+    #: can see its own fan-out instead of inferring it from thread titles.
+    lineage_repo: ThreadLineageRepository | None = None
     resume_repo: PendingResumeRepository | None = None
     ingest_repo: IngestResultRepository | None = None
     summary_repo: ThreadSummaryRepository | None = None
@@ -89,6 +93,8 @@ class BridgeComponents:
             api_server.lounge_repo = self.lounge_repo
         if self.claims_repo is not None:
             api_server.claims_repo = self.claims_repo
+        if self.lineage_repo is not None:
+            api_server.lineage_repo = self.lineage_repo
         if self.resume_repo is not None:
             api_server.resume_repo = self.resume_repo
         if self.ingest_repo is not None:
@@ -356,6 +362,7 @@ async def setup_bridge(
     ask_repo = stores.asks
     lounge_repo = stores.lounge
     claims_repo = stores.claims
+    lineage_repo = stores.lineage
     resume_repo = stores.resumes
     usage_repo = stores.usage
     ingest_repo = stores.ingest
@@ -535,6 +542,7 @@ async def setup_bridge(
         task_repo=task_repo,
         lounge_repo=lounge_repo,
         claims_repo=claims_repo,
+        lineage_repo=lineage_repo,
         resume_repo=resume_repo,
         ingest_repo=ingest_repo,
         summary_repo=summary_repo,

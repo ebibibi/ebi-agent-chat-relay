@@ -43,7 +43,12 @@ from ..discord_ui.thread_context import DEFAULT_DAYS, build_recent_transcript
 from ..discord_ui.thread_dashboard import ThreadState, ThreadStatusDashboard
 from ..discord_ui.thread_renamer import suggest_title
 from ..discord_ui.views import RewindSelectView, StopView
-from ..thread_marker import MAX_THREAD_NAME_LENGTH, mark_spawned_thread_name
+from ..thread_marker import (
+    MAX_THREAD_NAME_LENGTH,
+    family_code,
+    mark_parent_thread_name,
+    mark_spawned_thread_name,
+)
 from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
 from ._run_helper import run_claude_with_config
 from .prompt_builder import build_prompt_and_images, wants_file_attachment
@@ -800,6 +805,42 @@ class ClaudeChatCog(commands.Cog):
             except Exception:
                 logger.warning("Failed to rename thread %d to %r", thread.id, title, exc_info=True)
 
+    async def _link_to_parent_thread(
+        self,
+        thread: discord.Thread,
+        parent_thread_id: int,
+    ) -> None:
+        """Tag the spawning thread and cross-link the two, best-effort.
+
+        Three separate favours, each suppressed on its own: tagging the parent,
+        telling the parent what it started, and telling the child where it came
+        from. None of them is worth failing a spawn that already succeeded, and
+        a parent thread that was archived, deleted or renamed past the limit
+        must not take the fan-out down with it.
+
+        The rename is skipped when the tag is already there, which keeps a
+        ten-child fan-out at one rename rather than ten — Discord allows a
+        thread two renames per ten minutes, so retagging per spawn would start
+        failing partway through and leave the parent untagged exactly when it
+        has the most children to account for.
+        """
+        parent = self.bot.get_channel(parent_thread_id)
+        if parent is None:
+            with contextlib.suppress(Exception):
+                parent = await self.bot.fetch_channel(parent_thread_id)
+        if not isinstance(parent, discord.Thread):
+            return
+
+        tagged = mark_parent_thread_name(parent.name, parent_thread_id)
+        if tagged != parent.name:
+            with contextlib.suppress(Exception):
+                await parent.edit(name=tagged)
+        code = family_code(parent_thread_id)
+        with contextlib.suppress(Exception):
+            await parent.send(f"-# \u2937 spawned {thread.mention}")
+        with contextlib.suppress(Exception):
+            await thread.send(f"-# \u21b3 {code} \u2014 spawned by {parent.mention}")
+
     async def spawn_session(
         self,
         channel: discord.TextChannel,
@@ -812,6 +853,7 @@ class ClaudeChatCog(commands.Cog):
         attachments: list[tuple[str, bytes]] | None = None,
         invite_user_id: int | None = None,
         agent_spawned: bool = False,
+        parent_thread_id: int | None = None,
     ) -> discord.Thread:
         """Create a new thread and optionally start a Claude Code session.
 
@@ -855,13 +897,20 @@ class ClaudeChatCog(commands.Cog):
                         recognisable in the channel list without opening it.
                         ``/fork`` and session resume leave this ``False``: they
                         carry their own prefixes and a human asked for them.
+            parent_thread_id: The thread that asked for this spawn, when the
+                        caller knows it. Both titles then carry that thread's
+                        family code (``🤖K2`` here, ``🌳K2`` there), which is
+                        what turns several concurrent fan-outs from one pile of
+                        markers into readable trees. Best-effort in every
+                        respect: an unreachable or unrenameable parent costs the
+                        cross-link, never the spawn.
 
         Returns:
             The newly created :class:`discord.Thread`.
         """
         raw_name = thread_name or prompt
         name = (
-            mark_spawned_thread_name(raw_name)
+            mark_spawned_thread_name(raw_name, parent_thread_id=parent_thread_id)
             if agent_spawned
             else raw_name[:MAX_THREAD_NAME_LENGTH]
         )
@@ -875,6 +924,8 @@ class ClaudeChatCog(commands.Cog):
         if invite_user_id:
             with contextlib.suppress(Exception):
                 await thread.add_user(discord.Object(id=invite_user_id))
+        if agent_spawned and parent_thread_id:
+            await self._link_to_parent_thread(thread, parent_thread_id)
         # Post the prompt so StatusManager has a Message to add reactions to.
         # Long prompts (e.g. an ingested Teams thread) exceed Discord's
         # per-message limit, so chunk the seed for display. The full prompt is

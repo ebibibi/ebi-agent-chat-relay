@@ -283,6 +283,25 @@ A `user_id` that is not a positive integer is a caller bug and is rejected with 
 
 **Telling agent-started threads apart (`🤖`)** — A spawned thread looks exactly like one a person opened by posting in the channel, and Discord offers no per-thread colour or badge, so the title is the only surface left. ccdb prepends a marker to the name the caller chose — `{"thread_name": "Nightly Triage"}` becomes **🤖 Nightly Triage** — which keeps the agent's own wording intact and still reads at a glance in the channel list. The marker is never applied twice, and it survives the 100-character limit (the tail is trimmed, not the head). Set `CCDB_SPAWN_THREAD_MARKER` to use a different marker, or to an empty string to turn it off. `/fork` and session resume are left alone: they carry their own prefixes (`🔀`, `▶`) and a human asked for them.
 
+**Telling *whose* child it is (`parent_thread_id`)** — one marker is enough for one spawner; with several sessions fanning out at once the channel list becomes a pile of identical `🤖` titles and the tree is gone. Pass the calling thread and both ends get the same two-character **family code**, derived from that thread's ID (never allocated, so anyone holding the ID can recompute it):
+
+```bash
+curl -X POST "$CCDB_API_URL/api/spawn" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Triage the failing nightly build",
+    "thread_name": "Nightly Triage",
+    "parent_thread_id": '$DISCORD_THREAD_ID'
+  }'
+```
+
+- child: **🤖K2 Nightly Triage**
+- parent, renamed once on its first spawn: **🌳K2 <its own title>**
+- a child that spawns in turn keeps both — **🤖K2 🌳P9 …** — child of K2, root of P9
+- both threads get a one-line cross-link, so the jump is one click either way
+
+The link is also recorded, so a session managing a fan-out can read it instead of parsing titles: `GET /api/sessions` reports `parent_thread_id`, `family` and `children` per thread. Renaming, cross-linking and recording are each best-effort — a parent that was archived or renamed past Discord's two-per-ten-minutes limit costs the decoration, never the spawn. `CCDB_SPAWN_PARENT_MARKER` changes `🌳` (empty disables it), mirroring `CCDB_SPAWN_THREAD_MARKER`.
+
 Claude subprocesses receive `DISCORD_THREAD_ID` as an environment variable, so a running session can spawn child sessions to parallelize work.
 
 ### Authenticated External Ingest with Result Retrieval (`/api/ingest`)
