@@ -11,7 +11,8 @@ a hurry always eventually is:
 
 1. ``--setting-sources ""`` — no CLAUDE.md, skills or memory.
 2. An **empty** temporary directory as cwd — nothing local to read.
-3. Every tool disallowed — no shell to escape the directory with.
+3. ``--tools ""`` — the CLI's own "no built-in tools" mode, so a tool added
+   by a later release is off too; no shell to escape the directory with.
 4. ``--`` before the prompt — without it the variadic tool list eats the
    prompt and the CLI dies with "Input must be provided...".
 
@@ -42,7 +43,6 @@ __all__ = [
     "ConsultOutcome",
     "Escalation",
     "IsolationError",
-    "CONSULT_DISALLOWED_TOOLS",
     "verify_isolation",
 ]
 
@@ -51,23 +51,14 @@ class IsolationError(RuntimeError):
     """Raised when a consult would run without its isolation intact."""
 
 
-# Every tool the CLI ships. A consult is text-in, text-out; anything that can
-# touch the filesystem or the network defeats the point of the empty cwd.
-CONSULT_DISALLOWED_TOOLS: tuple[str, ...] = (
-    "Bash",
-    "BashOutput",
-    "Edit",
-    "Glob",
-    "Grep",
-    "KillShell",
-    "NotebookEdit",
-    "Read",
-    "SlashCommand",
-    "Task",
-    "TodoWrite",
-    "WebFetch",
-    "WebSearch",
-    "Write",
+# Tool-selection flags that must never appear beside ``--tools ""``. An allow
+# override widens the empty list; a deny list re-introduces hand-maintained tool
+# names, which is what broke this route once already.
+_FORBIDDEN_TOOL_FLAGS: tuple[str, ...] = (
+    "--allowedTools",
+    "--allowed-tools",
+    "--disallowedTools",
+    "--disallowed-tools",
 )
 
 # Secrets and control-plane handles that have no business in a consult.
@@ -114,16 +105,9 @@ def verify_isolation(args: list[str], cwd: str | Path) -> list[str]:
     if "--" not in args:
         problems.append("-- separator is missing (the tool list would swallow the prompt)")
 
-    if "--disallowedTools" in args:
-        # Without the separator the tool list runs to the end of argv; report
-        # every finding rather than crashing on the first broken assumption.
-        separator = args.index("--") if "--" in args else len(args)
-        listed = set(args[args.index("--disallowedTools") + 1 : separator])
-        missing = [tool for tool in CONSULT_DISALLOWED_TOOLS if tool not in listed]
-        if missing:
-            problems.append(f"tools not disallowed: {', '.join(missing)}")
-    else:
-        problems.append("--disallowedTools is missing")
+    for flag in _FORBIDDEN_TOOL_FLAGS:
+        if flag in args:
+            problems.append(f'{flag} is present (only --tools "" may select tools)')
 
     path = Path(cwd)
     if not path.is_dir():
@@ -166,20 +150,20 @@ class ConsultChannel:
             self.model,
             "--setting-sources",
             "",
-            # Allow list, not deny list. The deny list below is kept as a
-            # second layer, but it cannot be the primary one: measured
-            # 2026-08-17 it still left ToolSearch (the entry point to every
-            # MCP tool), Skill and Workflow, and extending it by hand then
-            # left CronCreate, RemoteTrigger and DesignSync. Every new tool
-            # in the CLI would be allowed by default.
+            # Allow list, and only an allow list. A deny list cannot be the
+            # primary layer: measured 2026-08-17 it still left ToolSearch (the
+            # entry point to every MCP tool), Skill and Workflow, and extending
+            # it by hand then left CronCreate, RemoteTrigger and DesignSync.
+            # It cannot be a second layer either, because it goes stale in the
+            # other direction: measured on CLI 2.1.273 a name the CLI has since
+            # dropped makes it warn that the rule "matches no known tool", so
+            # the list has to track renames the allow list is immune to.
             "--tools",
             "",
             # Without this the consult inherits the operator's configured MCP
             # servers — Gmail, Calendar, cloud APIs — none of which belong in
             # a one-question, text-in-text-out escalation.
             "--strict-mcp-config",
-            "--disallowedTools",
-            *CONSULT_DISALLOWED_TOOLS,
             "--",
             prompt,
         ]
