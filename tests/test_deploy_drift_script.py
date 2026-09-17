@@ -44,6 +44,24 @@ def _commit(repo: Path, name: str, *, days_ago: float = 0) -> None:
     )
 
 
+def _commit_files(repo: Path, files: dict[str, str], message: str, *, days_ago: float = 0) -> None:
+    """A commit touching an exact file set — what the restart filter reads."""
+    for name, body in files.items():
+        target = repo / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body)
+    _git(repo, "add", "-A")
+    when = _ago(days_ago)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", message],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when},
+    )
+
+
 def _init_origin(base: Path) -> Path:
     """A bare 'origin' plus a clone with one commit on main."""
     origin = base / "origin.git"
@@ -226,6 +244,110 @@ def test_drift_report_counts_commits_left_behind(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert "behind   : 2 commit(s)" in result.stdout
+
+
+DEPENDABOT_DEV_BUMP = """build(deps): bump ruff from 0.16.5 to 0.16.6
+
+---
+updated-dependencies:
+- dependency-name: ruff
+  dependency-version: 0.16.6
+  dependency-type: direct:development
+...
+"""
+
+DEPENDABOT_PROD_BUMP = DEPENDABOT_DEV_BUMP.replace("direct:development", "direct:production")
+
+
+def test_documentation_only_commits_do_not_demand_a_restart(tmp_path: Path) -> None:
+    """A restart kills live sessions; prose that the bot never reads is not worth one."""
+    repo = _init_origin(tmp_path)
+    _commit_files(
+        repo,
+        {"README.md": "new\n", "docs/ja/README.md": "new\n", "tests/t.py": "x = 1\n"},
+        "docs: translate the reliability notes",
+        days_ago=9,
+    )
+    _git(repo, "push", "-q", "origin", "main")
+
+    result = _run(tmp_path, repo, started=_ago(20))
+
+    assert result.returncode == 0
+    assert "running the newest code" in result.stdout
+
+
+def test_a_development_only_lock_bump_does_not_demand_a_restart(
+    tmp_path: Path,
+) -> None:
+    """The package lands in the venv and nothing imports it — no behaviour changes."""
+    repo = _init_origin(tmp_path)
+    _commit_files(repo, {"uv.lock": "ruff = 0.16.6\n"}, DEPENDABOT_DEV_BUMP, days_ago=9)
+    _git(repo, "push", "-q", "origin", "main")
+
+    result = _run(tmp_path, repo, started=_ago(20))
+
+    assert result.returncode == 0
+    assert "running the newest code" in result.stdout
+
+
+def test_a_production_lock_bump_still_demands_a_restart(tmp_path: Path) -> None:
+    """uv sync installs it and the bot imports it: this one really is undeployed."""
+    repo = _init_origin(tmp_path)
+    _commit_files(repo, {"uv.lock": "aiohttp = 9\n"}, DEPENDABOT_PROD_BUMP, days_ago=9)
+    _git(repo, "push", "-q", "origin", "main")
+
+    result = _run(tmp_path, repo, started=_ago(20))
+
+    assert result.returncode == 1
+    assert "missing  : 1 commit(s)" in result.stdout
+
+
+def test_a_lock_bump_without_a_dependency_trailer_still_demands_a_restart(
+    tmp_path: Path,
+) -> None:
+    """Unclassifiable must mean "counts", never "assume it is harmless"."""
+    repo = _init_origin(tmp_path)
+    _commit_files(repo, {"uv.lock": "something = 2\n"}, "chore: relock", days_ago=9)
+    _git(repo, "push", "-q", "origin", "main")
+
+    result = _run(tmp_path, repo, started=_ago(20))
+
+    assert result.returncode == 1
+    assert "missing  : 1 commit(s)" in result.stdout
+
+
+def test_a_commit_mixing_code_with_docs_still_demands_a_restart(
+    tmp_path: Path,
+) -> None:
+    repo = _init_origin(tmp_path)
+    _commit_files(
+        repo,
+        {"README.md": "new\n", "claude_discord/runner.py": "x = 2\n"},
+        "fix: change behaviour and say so",
+        days_ago=9,
+    )
+    _git(repo, "push", "-q", "origin", "main")
+
+    result = _run(tmp_path, repo, started=_ago(20))
+
+    assert result.returncode == 1
+    assert "missing  : 1 commit(s)" in result.stdout
+
+
+def test_the_age_comes_from_the_oldest_commit_that_needs_a_restart(
+    tmp_path: Path,
+) -> None:
+    """An inert commit must not age the report, nor hide an older real one."""
+    repo = _init_origin(tmp_path)
+    _commit_files(repo, {"claude_discord/a.py": "x = 1\n"}, "feat: real", days_ago=9)
+    _commit_files(repo, {"README.md": "prose\n"}, "docs: later", days_ago=1)
+    _git(repo, "push", "-q", "origin", "main")
+
+    result = _run(tmp_path, repo, started=_ago(20))
+
+    assert result.returncode == 1
+    assert "waiting 9 days for a restart" in result.stdout
+    assert "missing  : 1 commit(s)" in result.stdout
 
 
 def test_script_is_executable() -> None:
