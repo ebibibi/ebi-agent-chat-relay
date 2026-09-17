@@ -1,0 +1,83 @@
+# このファイルは repo-governance が配布する。手で編集しない。
+# 正本: ebibibi-claude-settings/scripts/repo-governance/templates/require-linked-issue.yml
+name: require-linked-issue
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  require-linked-issue:
+    # セルフホストランナーを飢餓させないため GitHub ホストを明示する。
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check that this PR closes an issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -euo pipefail
+
+          # 依存更新ボットは Issue を立てられないため免除する。
+          case "$PR_AUTHOR" in
+            dependabot[bot]|renovate[bot]|github-actions[bot])
+              echo "::notice::$PR_AUTHOR のPRのためIssue必須チェックを免除します。"
+              exit 0
+              ;;
+          esac
+
+          owner="${REPO%%/*}"
+          name="${REPO##*/}"
+
+          # closingIssuesReferences は本文の "Closes #12" と
+          # GitHub UI の Development 手動リンクの両方を拾う、GitHub が認める正本。
+          linked="$(gh api graphql \
+            -f owner="$owner" -f name="$name" -F number="$PR_NUMBER" \
+            -f query='
+              query($owner:String!, $name:String!, $number:Int!) {
+                repository(owner:$owner, name:$name) {
+                  pullRequest(number:$number) {
+                    closingIssuesReferences(first:20) {
+                      nodes { number title state }
+                    }
+                  }
+                }
+              }' \
+            --jq '.data.repository.pullRequest.closingIssuesReferences.nodes')"
+
+          count="$(printf '%s' "$linked" | jq 'length')"
+
+          if [ "$count" -eq 0 ]; then
+            {
+              echo "## ❌ Issue が紐づいていません"
+              echo
+              echo "このリポジトリは **Issue 駆動** です。Issue のない PR はマージできません。"
+              echo
+              echo "### 直し方（どちらでもよい）"
+              echo
+              echo "1. PR 本文に閉じるキーワードを書く: \`Closes #123\` / \`Fixes #123\` / \`Resolves #123\`"
+              echo "2. PR 画面右側の **Development** から Issue を手動リンクする"
+              echo
+              echo "対応する Issue がまだ無いなら、先に Issue を立ててください:"
+              echo
+              echo "\`\`\`"
+              echo "gh issue create --title '<やること>' --body '<背景と完了条件>'"
+              echo "\`\`\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::この PR はどの Issue も閉じません。PR 本文に 'Closes #<番号>' を書くか、Development から Issue をリンクしてください。"
+            exit 1
+          fi
+
+          {
+            echo "## ✅ 紐づいている Issue"
+            echo
+            printf '%s' "$linked" | jq -r '.[] | "- #\(.number) \(.title) (\(.state))"'
+          } >> "$GITHUB_STEP_SUMMARY"
+          printf '%s' "$linked" | jq -r '.[] | "linked: #\(.number) \(.title)"'
