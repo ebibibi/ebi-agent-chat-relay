@@ -281,6 +281,8 @@ curl -X POST "$CCDB_API_URL/api/spawn" \
 
 A `user_id` that is not a positive integer is a caller bug and is rejected with 400. A Discord-side failure to add the member is only a visibility miss and is suppressed — a spawn that already created the thread and started Claude is never reported as failed.
 
+**Telling agent-started threads apart (`🤖`)** — A spawned thread looks exactly like one a person opened by posting in the channel, and Discord offers no per-thread colour or badge, so the title is the only surface left. ccdb prepends a marker to the name the caller chose — `{"thread_name": "Nightly Triage"}` becomes **🤖 Nightly Triage** — which keeps the agent's own wording intact and still reads at a glance in the channel list. The marker is never applied twice, and it survives the 100-character limit (the tail is trimmed, not the head). Set `CCDB_SPAWN_THREAD_MARKER` to use a different marker, or to an empty string to turn it off. `/fork` and session resume are left alone: they carry their own prefixes (`🔀`, `▶`) and a human asked for them.
+
 Claude subprocesses receive `DISCORD_THREAD_ID` as an environment variable, so a running session can spawn child sessions to parallelize work.
 
 ### Authenticated External Ingest with Result Retrieval (`/api/ingest`)

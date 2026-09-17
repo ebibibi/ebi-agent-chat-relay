@@ -621,6 +621,14 @@ class TestSpawn:
         assert mock_cog.spawn_session.await_args.kwargs["invite_user_id"] == 418192003549888523
 
     @pytest.mark.asyncio
+    async def test_spawn_marks_the_thread_as_agent_spawned(
+        self, spawn_client: TestClient, mock_cog: MagicMock
+    ) -> None:
+        """Every /api/spawn thread is agent-started; the title has to say so."""
+        await spawn_client.post("/api/spawn", json={"prompt": "Check the backlog"})
+        assert mock_cog.spawn_session.await_args.kwargs["agent_spawned"] is True
+
+    @pytest.mark.asyncio
     async def test_spawn_without_user_id_invites_nobody(
         self, spawn_client: TestClient, mock_cog: MagicMock
     ) -> None:

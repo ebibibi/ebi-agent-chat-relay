@@ -43,6 +43,7 @@ from ..discord_ui.thread_context import DEFAULT_DAYS, build_recent_transcript
 from ..discord_ui.thread_dashboard import ThreadState, ThreadStatusDashboard
 from ..discord_ui.thread_renamer import suggest_title
 from ..discord_ui.views import RewindSelectView, StopView
+from ..thread_marker import MAX_THREAD_NAME_LENGTH, mark_spawned_thread_name
 from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
 from ._run_helper import run_claude_with_config
 from .prompt_builder import build_prompt_and_images, wants_file_attachment
@@ -810,6 +811,7 @@ class ClaudeChatCog(commands.Cog):
         result_sink: Callable[[str | None, str | None], Awaitable[None]] | None = None,
         attachments: list[tuple[str, bytes]] | None = None,
         invite_user_id: int | None = None,
+        agent_spawned: bool = False,
     ) -> discord.Thread:
         """Create a new thread and optionally start a Claude Code session.
 
@@ -847,11 +849,22 @@ class ClaudeChatCog(commands.Cog):
                         a thread nobody was watching still lands in their joined
                         list. Best-effort: a failure here is a visibility miss,
                         never a reason to fail a spawn that already succeeded.
+            agent_spawned: Whether this thread was started by an agent rather
+                        than by a person writing in Discord. When ``True`` the
+                        title is prefixed with the spawn marker so the thread is
+                        recognisable in the channel list without opening it.
+                        ``/fork`` and session resume leave this ``False``: they
+                        carry their own prefixes and a human asked for them.
 
         Returns:
             The newly created :class:`discord.Thread`.
         """
-        name = (thread_name or prompt)[:100]
+        raw_name = thread_name or prompt
+        name = (
+            mark_spawned_thread_name(raw_name)
+            if agent_spawned
+            else raw_name[:MAX_THREAD_NAME_LENGTH]
+        )
         thread = await channel.create_thread(
             name=name,
             type=discord.ChannelType.public_thread,

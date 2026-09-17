@@ -41,6 +41,7 @@ from ..discord_ui.file_sender import send_file_blobs
 from ..lounge import length_hint
 from ..relay import MODE_INTERRUPT, MODE_QUEUE, VALID_MODES, RelayGuard, build_relay_prompt
 from ..session_view import STATE_HISTORY, STATE_RUNNING, build_session_views
+from ..thread_marker import MAX_THREAD_NAME_LENGTH
 from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
 from . import ingest_manifest, teams_sync
 from .teams_store import TeamsVaultStore
@@ -75,7 +76,7 @@ _MAX_INGEST_UNZIP_MEMBERS = 5000
 # single request from buffering an unbounded amount of base64 in memory.
 _MAX_SPAWN_ATTACHMENTS = 10
 _MAX_SPAWN_TOTAL_BYTES = 25 * 1024 * 1024
-_MAX_DISCORD_THREAD_NAME_LENGTH = 100
+_MAX_DISCORD_THREAD_NAME_LENGTH = MAX_THREAD_NAME_LENGTH
 
 # /api/sessions and /api/threads/{id}/messages — cross-session observability.
 # Bounded so one session peeking at another can never pull an unbounded amount
@@ -1545,6 +1546,7 @@ class ApiServer:
                 auto_start=auto_start,
                 attachments=decoded_attachments or None,
                 invite_user_id=invite_user_id,
+                agent_spawned=True,
             )
         except Exception as exc:
             logger.error("spawn_session failed: %s", exc, exc_info=True)
