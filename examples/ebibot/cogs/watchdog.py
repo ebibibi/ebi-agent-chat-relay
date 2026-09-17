@@ -26,6 +26,10 @@ TODOIST_SH = os.getenv(
     os.path.expanduser("~/.claude/skills/todoist/scripts/todoist.sh"),
 )
 
+# Bounded retries for transient empty/invalid helper output. Exhausting them is
+# logged as an error so a lost check never looks like "no overdue tasks".
+_FETCH_ATTEMPTS = 2
+
 # ---------------------------------------------------------------------------
 # Embeds
 # ---------------------------------------------------------------------------
@@ -33,7 +37,6 @@ TODOIST_SH = os.getenv(
 _COLOR_WARN = 0xFF6B6B
 _COLOR_DANGER = 0xFF4444
 _COLOR_CRITICAL = 0xFF0000
-_FETCH_ATTEMPTS = 2
 
 _TEMPLATES = {
     "warn": {"title": "Hey! You have overdue tasks!", "color": _COLOR_WARN},
