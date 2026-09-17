@@ -1116,7 +1116,10 @@ async def _post_engine_status_footer(
     Anthropic quota stays visible for side-by-side comparison.
     """
     from ..backend_settings import BackendSettings
-    from ..discord_ui.engine_status import get_codex_status_line
+    from ..discord_ui.engine_status import (
+        codex_status_unavailable_line,
+        get_codex_status_line,
+    )
 
     # Resolve the Codex-status mode (off when no settings resolver is wired,
     # e.g. headless flows).
@@ -1130,7 +1133,7 @@ async def _post_engine_status_footer(
     if show_codex:
         codex_line = await get_codex_status_line(codex_command)
         if codex_line is None and mode == "on":
-            codex_line = "\U0001f916 Codex: 残量取得失敗（codex login 済みか確認）"
+            codex_line = codex_status_unavailable_line()
 
     # Render the Claude statusLine on Claude turns, or whenever the Codex line
     # is being shown (so both engines appear together). On non-Claude turns the
