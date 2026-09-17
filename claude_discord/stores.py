@@ -21,6 +21,7 @@ from .database.ask_repo import PendingAskRepository
 from .database.claims_repo import ClaimRepository
 from .database.frontend_thread_repo import FrontendThreadRepository
 from .database.ingest_repo import IngestResultRepository
+from .database.lineage_repo import ThreadLineageRepository
 from .database.lounge_repo import LoungeRepository
 from .database.models import init_db
 from .database.repository import SessionRepository, UsageStatsRepository
@@ -48,6 +49,7 @@ class SessionStores:
     ingest: IngestResultRepository
     summaries: ThreadSummaryRepository
     frontend_threads: FrontendThreadRepository
+    lineage: ThreadLineageRepository
 
 
 async def build_session_stores(session_db_path: str) -> SessionStores:
@@ -87,4 +89,5 @@ async def build_session_stores(session_db_path: str) -> SessionStores:
         ingest=ingest,
         summaries=summaries,
         frontend_threads=frontend_threads,
+        lineage=ThreadLineageRepository(session_db_path),
     )

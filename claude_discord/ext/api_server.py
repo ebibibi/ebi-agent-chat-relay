@@ -41,7 +41,7 @@ from ..discord_ui.file_sender import send_file_blobs
 from ..lounge import length_hint
 from ..relay import MODE_INTERRUPT, MODE_QUEUE, VALID_MODES, RelayGuard, build_relay_prompt
 from ..session_view import STATE_HISTORY, STATE_RUNNING, build_session_views
-from ..thread_marker import MAX_THREAD_NAME_LENGTH
+from ..thread_marker import MAX_THREAD_NAME_LENGTH, family_code
 from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
 from . import ingest_manifest, teams_sync
 from .teams_store import TeamsVaultStore
@@ -53,6 +53,7 @@ if TYPE_CHECKING:
 
     from ..database.claims_repo import ClaimRepository
     from ..database.ingest_repo import IngestResultRepository
+    from ..database.lineage_repo import ThreadLineageRepository
     from ..database.lounge_repo import LoungeRepository
     from ..database.notification_repo import NotificationRepository
     from ..database.repository import SessionRepository
@@ -237,6 +238,7 @@ class ApiServer:
         ingest_repo: IngestResultRepository | None = None,
         summary_repo: ThreadSummaryRepository | None = None,
         claims_repo: ClaimRepository | None = None,
+        lineage_repo: ThreadLineageRepository | None = None,
         transcripts_path: str | None = None,
         ingest_require_complete: bool | None = None,
         teams_vault_root: str | None = None,
@@ -266,6 +268,7 @@ class ApiServer:
         self.ingest_repo = ingest_repo
         self.summary_repo = summary_repo
         self.claims_repo = claims_repo
+        self.lineage_repo = lineage_repo
         # Where Claude Code transcripts live, for /api/search?body=1. Falls back
         # to the standard ~/.claude/projects location so body search is
         # Zero-Config wherever Claude Code has run.
@@ -1280,12 +1283,20 @@ class ApiServer:
 
         active = self._active_sessions()
         thread_ids = {r.thread_id for r in records} | {s.thread_id for s in active}
+        lineage = []
+        if self.lineage_repo is not None:
+            try:
+                lineage = await self.lineage_repo.list_all()
+            except Exception:
+                # Who is running is the answer; who spawned whom is the garnish.
+                logger.exception("Could not read spawn lineage")
         views = build_session_views(
             records=records,
             active=active,
             running_thread_ids=self._running_thread_ids(),
             lounge_messages=lounge_messages,
             thread_names=self._thread_names(thread_ids),
+            lineage=lineage,
         )
 
         if request.rel_url.query.get("state") == STATE_RUNNING:
@@ -1464,6 +1475,10 @@ class ApiServer:
                 (optional; defaults to ``true``).  When ``false``, only the
                 thread and seed message are created — a Claude session will
                 start when a user replies in the thread.
+            parent_thread_id: The calling thread (optional). Both titles then
+                carry that thread's family code — ``🤖K2`` on the child,
+                ``🌳K2`` on the parent — and the link is recorded so
+                ``GET /api/sessions`` can report it without parsing titles.
             user_id: Discord user to add to the new thread (optional), so the
                 thread appears in their joined list instead of having to be
                 found in the channel. Mirrors what ``/api/ingest`` does for the
@@ -1521,6 +1536,18 @@ class ApiServer:
         # Validated here rather than swallowed downstream: a typo'd user_id is a
         # caller bug and should say so, while a Discord-side failure to add the
         # member is only a visibility miss and must never fail the spawn.
+        raw_parent_id = data.get("parent_thread_id")
+        parent_thread_id: int | None = None
+        if raw_parent_id is not None:
+            try:
+                parent_thread_id = int(raw_parent_id)
+            except (TypeError, ValueError):
+                return web.json_response(
+                    {"error": "parent_thread_id must be an integer"}, status=400
+                )
+            if parent_thread_id <= 0:
+                return web.json_response({"error": "parent_thread_id must be positive"}, status=400)
+
         raw_user_id = data.get("user_id")
         invite_user_id: int | None = None
         if raw_user_id is not None:
@@ -1547,20 +1574,33 @@ class ApiServer:
                 attachments=decoded_attachments or None,
                 invite_user_id=invite_user_id,
                 agent_spawned=True,
+                parent_thread_id=parent_thread_id,
             )
         except Exception as exc:
             logger.error("spawn_session failed: %s", exc, exc_info=True)
             return web.json_response({"error": str(exc)}, status=500)
 
+        # Recorded after the thread exists, and never allowed to undo it: the
+        # titles already carry the family code, so a failed write costs the
+        # queryable half of the lineage, not the visible one.
+        if parent_thread_id is not None and self.lineage_repo is not None:
+            try:
+                await self.lineage_repo.record(
+                    thread.id, parent_thread_id, family_code(parent_thread_id)
+                )
+            except Exception:
+                logger.exception("Could not record spawn lineage for thread %s", thread.id)
+
         logger.info("Spawned new Claude session in thread %s (%s)", thread.id, thread.name)
-        return web.json_response(
-            {
-                "status": "spawned",
-                "thread_id": str(thread.id),
-                "thread_name": thread.name,
-            },
-            status=201,
-        )
+        body: dict[str, str] = {
+            "status": "spawned",
+            "thread_id": str(thread.id),
+            "thread_name": thread.name,
+        }
+        if parent_thread_id is not None:
+            body["parent_thread_id"] = str(parent_thread_id)
+            body["family"] = family_code(parent_thread_id)
+        return web.json_response(body, status=201)
 
     # ------------------------------------------------------------------
     # Authenticated external ingest endpoint (/api/ingest)

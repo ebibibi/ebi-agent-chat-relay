@@ -113,6 +113,18 @@ CREATE TABLE IF NOT EXISTS frontend_threads (
 );
 
 CREATE INDEX IF NOT EXISTS idx_frontend_threads_frontend ON frontend_threads(frontend);
+
+-- Which thread spawned which. Written at spawn time (before any session row
+-- exists, so an auto_start=false thread is not an orphan) and read back to
+-- answer "what did I start?" without parsing thread titles.
+CREATE TABLE IF NOT EXISTS thread_lineage (
+    thread_id INTEGER PRIMARY KEY,
+    parent_thread_id INTEGER NOT NULL,
+    family_code TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_thread_lineage_parent ON thread_lineage(parent_thread_id);
 """
 
 # Migrations for existing databases that lack new columns.
@@ -180,6 +192,15 @@ _MIGRATIONS = [
         "expires_at TEXT NOT NULL)"
     ),
     "CREATE INDEX IF NOT EXISTS idx_resource_claims_thread ON resource_claims(thread_id)",
+    # thread_lineage added in v4.1 — spawn parent/child links
+    (
+        "CREATE TABLE IF NOT EXISTS thread_lineage ("
+        "thread_id INTEGER PRIMARY KEY, "
+        "parent_thread_id INTEGER NOT NULL, "
+        "family_code TEXT NOT NULL, "
+        "created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')))"
+    ),
+    "CREATE INDEX IF NOT EXISTS idx_thread_lineage_parent ON thread_lineage(parent_thread_id)",
 ]
 
 

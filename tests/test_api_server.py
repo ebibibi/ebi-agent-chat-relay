@@ -11,6 +11,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from claude_discord.database.notification_repo import NotificationRepository
 from claude_discord.ext.api_server import ApiServer
+from claude_discord.thread_marker import family_code
 from claude_discord.thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
 
 
@@ -627,6 +628,58 @@ class TestSpawn:
         """Every /api/spawn thread is agent-started; the title has to say so."""
         await spawn_client.post("/api/spawn", json={"prompt": "Check the backlog"})
         assert mock_cog.spawn_session.await_args.kwargs["agent_spawned"] is True
+
+    @pytest.mark.asyncio
+    async def test_spawn_forwards_parent_thread_id(
+        self, spawn_client: TestClient, mock_cog: MagicMock
+    ) -> None:
+        """The caller's thread is what makes the two titles match; dropping it is silent."""
+        resp = await spawn_client.post(
+            "/api/spawn",
+            json={"prompt": "Check the backlog", "parent_thread_id": 1550121254361768021},
+        )
+        assert resp.status == 201
+        assert mock_cog.spawn_session.await_args.kwargs["parent_thread_id"] == 1550121254361768021
+        body = await resp.json()
+        assert body["parent_thread_id"] == "1550121254361768021"
+        assert body["family"] == family_code(1550121254361768021)
+
+    @pytest.mark.asyncio
+    async def test_spawn_records_lineage(
+        self, repo: NotificationRepository, bot_with_text_channel: MagicMock, mock_cog: MagicMock
+    ) -> None:
+        """The titles are the visible half; /api/sessions needs the stored half."""
+        bot_with_text_channel.cogs = {"ClaudeChatCog": mock_cog}
+        lineage_repo = MagicMock()
+        lineage_repo.record = AsyncMock()
+        api = ApiServer(
+            repo=repo,
+            bot=bot_with_text_channel,
+            default_channel_id=12345,
+            lineage_repo=lineage_repo,
+        )
+        client = TestClient(TestServer(api.app))
+        await client.start_server()
+        try:
+            await client.post(
+                "/api/spawn",
+                json={"prompt": "Check the backlog", "parent_thread_id": 1550121254361768021},
+            )
+        finally:
+            await client.close()
+        lineage_repo.record.assert_awaited_once_with(
+            999888777, 1550121254361768021, family_code(1550121254361768021)
+        )
+
+    @pytest.mark.asyncio
+    async def test_spawn_rejects_non_numeric_parent_thread_id(
+        self, spawn_client: TestClient, mock_cog: MagicMock
+    ) -> None:
+        resp = await spawn_client.post(
+            "/api/spawn", json={"prompt": "Hello", "parent_thread_id": "the other one"}
+        )
+        assert resp.status == 400
+        mock_cog.spawn_session.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_spawn_without_user_id_invites_nobody(

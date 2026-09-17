@@ -90,9 +90,7 @@ class TestSpawnSessionMarking:
         assert name == f"{DEFAULT_SPAWN_MARKER} Audit the DNS"
 
     @pytest.mark.asyncio
-    async def test_prompt_derived_name_is_marked_too(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_prompt_derived_name_is_marked_too(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A caller that supplies no title still gets a recognisable thread."""
         monkeypatch.delenv(SPAWN_MARKER_ENV_VAR, raising=False)
         channel, _ = _spawn_fixtures()

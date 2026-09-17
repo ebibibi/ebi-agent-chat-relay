@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Spawn lineage: parent and child titles now match** (#700) — the `🤖` marker said a thread was
+  started by an agent but not by *which* agent, so several concurrent fan-outs read as one flat pile
+  of identical titles. `POST /api/spawn` takes `parent_thread_id`; both ends then carry the same
+  two-character family code (`🤖K2` on the child, `🌳K2` on the parent, `🤖K2 🌳P9` on a child that
+  spawns in turn). The code is *derived* from the parent's thread ID rather than allocated, so any
+  component holding the ID recomputes it — a lost database costs the lineage records, never the
+  lineage display. The link is recorded in a new `thread_lineage` table and surfaced in
+  `GET /api/sessions` as `parent_thread_id` / `family` / `children`, so a session managing a fan-out
+  reads its own tree instead of parsing titles, and both threads get a one-line cross-link. The
+  parent is renamed once, not per child: Discord allows two renames per ten minutes, and retagging
+  per spawn would fail partway through a fan-out. Renaming, cross-linking and recording are each
+  best-effort — none of them can fail a spawn that already succeeded. Omitting `parent_thread_id`
+  keeps the previous behaviour. `CCDB_SPAWN_PARENT_MARKER` mirrors `CCDB_SPAWN_THREAD_MARKER`.
+
 - **Agent-spawned threads are recognisable in the channel list** (#691) — a thread created through
   `POST /api/spawn` (one session starting another) was indistinguishable from a thread a person
   opened by posting in the channel, and Discord exposes no per-thread colour, badge or icon, so the
