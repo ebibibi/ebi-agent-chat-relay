@@ -26,8 +26,11 @@ jobs:
           set -euo pipefail
 
           # 依存更新ボットは Issue を立てられないため免除する。
+          # パターンは必ず引用符で囲む。case のパターンではグロブが効くため、
+          # 裸の dependabot[bot] は「dependabo + b/o/t のいずれか1文字」という
+          # 文字クラスになり、実際のログイン名には決してマッチしない。
           case "$PR_AUTHOR" in
-            dependabot[bot]|renovate[bot]|github-actions[bot])
+            'dependabot[bot]'|'renovate[bot]'|'github-actions[bot]')
               echo "::notice::$PR_AUTHOR のPRのためIssue必須チェックを免除します。"
               exit 0
               ;;
