@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Agent-spawned threads are recognisable in the channel list** (#691) — a thread created through
+  `POST /api/spawn` (one session starting another) was indistinguishable from a thread a person
+  opened by posting in the channel, and Discord exposes no per-thread colour, badge or icon, so the
+  title is the only surface available. The name the spawning agent chose is now prefixed with a
+  marker (`🤖 Nightly Triage`) rather than replaced, applied where the final name is assembled
+  instead of asked of the caller — an agent that has to remember a convention will eventually
+  forget it, and the one thread that then looks human-authored is exactly the one worth noticing.
+  Marking is idempotent and survives the 100-character limit by trimming the tail, never the head.
+  `CCDB_SPAWN_THREAD_MARKER` changes the marker; an *empty* value disables it and is honoured as an
+  explicit opt-out rather than folded back into the default. `/fork` and session resume are
+  unmarked: they carry their own prefixes and a human asked for them.
+
 - **GPT-6 is selectable, and the Codex model list stops going stale** — `/model`'s Codex suggestions
   were a hardcoded quartet (`gpt-5.6-sol`, `gpt-5.5`, `gpt-5.5-codex`, `o4-mini`), two of which no
   longer exist, and the newest generation was not among them: picking GPT-6 meant knowing the slug
