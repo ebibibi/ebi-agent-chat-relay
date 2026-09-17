@@ -40,6 +40,21 @@ async def test_system_context_is_built_without_a_discord_thread() -> None:
     assert str(surface.thread_key) in context
 
 
+async def test_file_delivery_guidance_forbids_local_path_links() -> None:
+    surface = MemorySurface()
+    config = RunConfig(
+        surface=surface,
+        runner=_runner(),
+        prompt="send me the report",
+    )
+
+    context = await _build_system_context(config)
+
+    assert "Discord cannot open local filesystem paths" in context
+    assert "Never describe a local path as a clickable link" in context
+    assert f".ccdb-attachments-{surface.thread_key}" in context
+
+
 async def test_the_session_is_registered_under_the_surface_key() -> None:
     """The registry is how two sessions notice each other — a wrong key is a silent collision."""
     surface = MemorySurface()
