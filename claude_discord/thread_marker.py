@@ -161,3 +161,46 @@ def _spawn_tag_end(name: str) -> int:
     while end < len(name) and name[end] in _CODE_ALPHABET:
         end += 1
     return end
+
+
+def _tag_end(name: str, marker: str) -> int:
+    """Index just past a leading *marker* plus its family code, or 0."""
+    if not marker or not name.startswith(marker):
+        return 0
+    end = len(marker)
+    while end < len(name) and name[end] in _CODE_ALPHABET:
+        end += 1
+    return end
+
+
+def split_marker_tags(name: str) -> tuple[str, str]:
+    """Split *name* into its leading lineage tags and the title behind them.
+
+    ``"🤖K2 🌳P9 Fix the build"`` becomes
+    ``("🤖K2 🌳P9", "Fix the build")``.  A name carrying no tag
+    yields ``("", name)``, so a caller can always rebuild the name by joining
+    the two halves — which is the point: re-titling a thread must not be the
+    moment its lineage quietly disappears from the channel list.
+    """
+    rest = name.strip()
+    tags: list[str] = []
+    for marker in (spawn_marker(), parent_marker()):
+        end = _tag_end(rest, marker)
+        if end:
+            tags.append(rest[:end])
+            rest = rest[end:].lstrip()
+    return " ".join(tags), rest
+
+
+def retag_thread_name(old_name: str, new_title: str) -> str:
+    """Return *new_title* wearing whatever lineage tags *old_name* carried.
+
+    Tags already present in *new_title* are not doubled: the suggested title is
+    written by a model that has seen the old name, so it sometimes copies the
+    marker back in.
+    """
+    prefix, _ = split_marker_tags(old_name)
+    _, title = split_marker_tags(new_title.strip())
+    if not prefix:
+        return _fit(title)
+    return _fit(f"{prefix} {title}".strip())

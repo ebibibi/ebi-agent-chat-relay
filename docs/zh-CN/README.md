@@ -332,7 +332,7 @@ ccdb 3.0 引入了三个斜杠命令，用来改变下一个会话由哪个 AI �
 - **并发会话** — 多个并行会话，限制可配置
 - **停止但不清除** — `/stop` 暂停会话，同时保留它以供恢复
 - **会话中断** — 向活跃线程发送新消息会向运行中的会话发送 SIGINT，并以新指令重新开始；无需手动 `/stop`
-- **自动重命名线程** — 当 `THREAD_AUTO_RENAME=true` 时，每个新线程都会自动重命名为一个由 Claude 从首条消息生成的标题（后台任务，绝不延迟会话启动）
+- **自动重命名线程** — 当 `THREAD_AUTO_RENAME=true` 时，每个新线程都会自动重命名为一个由 Claude 从首条消息生成的标题（后台任务，绝不延迟会话启动）。之后标题也会保持准确：当工作明显转向另一个主题时会重新命名（最多每 15 分钟一次，且仅限 ccdb 创建的线程）
 
 #### 📡 实时反馈
 - **实时状态** — 表情反应：🧠 思考中，🛠️ 读取文件，💻 编辑中，🌐 网络搜索
@@ -763,7 +763,7 @@ CHAT_ONLY_CHANNEL_IDS=444,555
 | `CLAUDE_ALLOWED_TOOLS` | Claude CLI 允许工具的逗号分隔列表（旧名称——推荐 `CCDB_ALLOWED_TOOLS`） | （可选） |
 | `CLAUDE_CHANNEL_IDS` | 多频道设置的额外频道 ID（逗号分隔）（旧名称——推荐 `CCDB_CHANNEL_IDS`） | （可选） |
 | `THREAD_INBOX_ENABLED` | 启用持久线程收件箱（通过 `claude -p` 将会话分类为 `waiting`/`done`/`ambiguous`；显示在线程仪表板中） | `false` |
-| `THREAD_AUTO_RENAME` | 使用 Claude AI 自动重命名新线程标题——通过后台 `claude -p` 调用从首条用户消息生成简短、描述性的标题（绝不延迟会话启动） | `false` |
+| `THREAD_AUTO_RENAME` | 使用 Claude AI 自动重命名新线程标题——通过后台 `claude -p` 调用从首条用户消息生成简短、描述性的标题（绝不延迟会话启动），并在主题明显改变后重新命名线程（每 15 分钟最多一次；保留族谱标记） | `false` |
 | `CCDB_CLI_ENV_FILE` | 一个 `KEY=VALUE` 文件的路径，其变量在每次调用时合并到 CLI 子进程环境中。更改立即生效，无需重启 Bot。对临时 API 路由（如 Azure Foundry）很有用 | （可选） |
 | `CCDB_LOG_FILE` | 日志文件路径。设置后，将在默认 stdout 处理器旁边添加一个轮转文件处理器（10 MB × 5 个备份）。对监控和告警很有用。 | （可选） |
 | `API_HOST` | REST API 绑定地址 | `127.0.0.1` |

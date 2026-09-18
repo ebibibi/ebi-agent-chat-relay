@@ -332,7 +332,7 @@ Nos bastidores:
 - **Sessões concorrentes** — Múltiplas sessões paralelas com limite configurável
 - **Parar sem limpar** — `/stop` interrompe uma sessão preservando-a para retomada
 - **Interrupção de sessão** — Enviar uma nova mensagem para uma thread ativa envia SIGINT à sessão em execução e recomeça com a nova instrução; sem necessidade de `/stop` manual
-- **Auto-renomear threads** — Quando `THREAD_AUTO_RENAME=true`, cada nova thread é automaticamente renomeada com um título gerado pelo Claude derivado da primeira mensagem (tarefa em segundo plano, nunca atrasa o início da sessão)
+- **Auto-renomear threads** — Quando `THREAD_AUTO_RENAME=true`, cada nova thread é automaticamente renomeada com um título gerado pelo Claude derivado da primeira mensagem (tarefa em segundo plano, nunca atrasa o início da sessão). O título continua honesto ao longo da thread: quando o trabalho muda claramente de assunto, ela é retitulada (no máximo uma vez a cada 15 minutos e apenas em threads criadas pelo ccdb)
 
 #### 📡 Feedback em Tempo Real
 - **Status em tempo real** — Reações emoji: 🧠 pensando, 🛠️ lendo arquivos, 💻 editando, 🌐 busca na web
@@ -763,7 +763,7 @@ No modo somente-chat, solicitações de permissão e prompts de `AskUserQuestion
 | `CLAUDE_ALLOWED_TOOLS` | Lista separada por vírgula de ferramentas permitidas para a CLI do Claude (legado — prefira `CCDB_ALLOWED_TOOLS`) | (opcional) |
 | `CLAUDE_CHANNEL_IDS` | IDs de canal adicionais (separados por vírgula) para configuração multi-canal (legado — prefira `CCDB_CHANNEL_IDS`) | (opcional) |
 | `THREAD_INBOX_ENABLED` | Habilita a caixa de entrada de thread persistente (classifica sessões como `waiting`/`done`/`ambiguous` via `claude -p`; mostrada no dashboard de threads) | `false` |
-| `THREAD_AUTO_RENAME` | Auto-renomear títulos de novas threads usando IA do Claude — gera um título curto e descritivo a partir da primeira mensagem do usuário via uma chamada `claude -p` em segundo plano (nunca atrasa o início da sessão) | `false` |
+| `THREAD_AUTO_RENAME` | Auto-renomear títulos de novas threads usando IA do Claude — gera um título curto e descritivo a partir da primeira mensagem do usuário via uma chamada `claude -p` em segundo plano (nunca atrasa o início da sessão) e retitula a thread quando o assunto muda claramente (no máximo um renome a cada 15 minutos; as tags de linhagem são preservadas) | `false` |
 | `CCDB_CLI_ENV_FILE` | Caminho para um arquivo `KEY=VALUE` cujas variáveis são mescladas no ambiente do subprocesso da CLI em cada invocação. As mudanças têm efeito imediato sem reiniciar o bot. Útil para roteamento temporário de API (por exemplo, Azure Foundry) | (opcional) |
 | `CCDB_LOG_FILE` | Caminho para um arquivo de log. Quando definido, um manipulador de arquivo rotativo (10 MB × 5 backups) é adicionado ao lado do manipulador stdout padrão. Útil para monitoramento e alertas. | (opcional) |
 | `API_HOST` | Endereço de bind da REST API | `127.0.0.1` |

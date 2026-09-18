@@ -263,6 +263,7 @@ claude_discord/          # Installable Python package
     thread_dashboard.py  # Live pinned embed showing session states
     file_sender.py       # File delivery via .ccdb-attachments-{thread_id}
     thread_renamer.py    # suggest_title() — background claude -p call for auto thread renaming
+    thread_retitle.py    # RetitleTracker — when a thread has drifted enough to be re-titled
   ext/
     api_server.py        # REST API server (optional, requires aiohttp)
     ingest_manifest.py   # Reconciles attachments_manifest against delivered files
