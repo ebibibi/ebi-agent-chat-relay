@@ -41,13 +41,15 @@ from ..discord_ui.file_sender import send_file_blobs
 from ..discord_ui.status import StatusManager
 from ..discord_ui.thread_context import DEFAULT_DAYS, build_recent_transcript
 from ..discord_ui.thread_dashboard import ThreadState, ThreadStatusDashboard
-from ..discord_ui.thread_renamer import suggest_title
+from ..discord_ui.thread_renamer import suggest_retitle, suggest_title
+from ..discord_ui.thread_retitle import RetitleTracker
 from ..discord_ui.views import RewindSelectView, StopView
 from ..thread_marker import (
     MAX_THREAD_NAME_LENGTH,
     family_code,
     mark_parent_thread_name,
     mark_spawned_thread_name,
+    retag_thread_name,
 )
 from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
 from ._run_helper import run_claude_with_config
@@ -189,6 +191,8 @@ class ClaudeChatCog(commands.Cog):
         self._settings_repo = settings_repo or getattr(bot, "settings_repo", None)
         # When True, rename the thread after creation using a claude -p title suggestion
         self._auto_rename_threads = auto_rename_threads
+        # Drift accounting for keeping that title true as the thread's work moves on
+        self._retitle_tracker = RetitleTracker()
 
     @property
     def active_session_count(self) -> int:
@@ -566,6 +570,11 @@ class ClaudeChatCog(commands.Cog):
             await runner.kill()
             del self._active_runners[interaction.channel.id]
 
+        # The thread starts over, so its drift history is about a conversation
+        # that no longer exists — keeping it would judge the new subject against
+        # the old one's messages.
+        self._retitle_tracker.forget(interaction.channel.id)
+
         deleted = await self.repo.delete(interaction.channel.id)
         if deleted:
             await interaction.response.send_message(
@@ -804,6 +813,56 @@ class ClaudeChatCog(commands.Cog):
                 logger.debug("thread %d renamed to %r", thread.id, title)
             except Exception:
                 logger.warning("Failed to rename thread %d to %r", thread.id, title, exc_info=True)
+
+    def _schedule_retitle(self, thread: discord.Thread, text: str) -> None:
+        """Note a reply, and start a re-title when the thread has drifted enough.
+
+        Synchronous on purpose: the tracker's claim has to happen before any
+        await, or two fast replies both see the same slot as free and each
+        start a rename. Only threads ccdb opened are renamed — a thread a human
+        started is theirs, and quietly retitling it is the sort of "help" nobody
+        asked for.
+        """
+        if not self._auto_rename_threads or not text.strip():
+            return
+        bot_user = self.bot.user
+        if bot_user is None or thread.owner_id != bot_user.id:
+            return
+        self._retitle_tracker.record(thread.id, text)
+        messages = self._retitle_tracker.claim(thread.id)
+        if messages is None:
+            return
+        asyncio.create_task(self._background_retitle_thread(thread, messages))
+
+    async def _background_retitle_thread(
+        self,
+        thread: discord.Thread,
+        recent_messages: tuple[str, ...],
+    ) -> None:
+        """Replace *thread*'s title when its subject has moved on.
+
+        Every outcome that is not a confident new title leaves the thread
+        untouched, so a slow CLI, a rate-limited rename or a model that answered
+        KEEP all look the same from Discord: nothing happened.
+        """
+        current = thread.name or ""
+        title = await suggest_retitle(
+            current,
+            recent_messages,
+            claude_command=self.runner.command,
+            env=self.runner._build_env(),
+        )
+        if not title:
+            return
+        new_name = retag_thread_name(current, title)
+        if new_name == current:
+            return
+        try:
+            await thread.edit(name=new_name)
+            logger.info("thread %d retitled %r -> %r", thread.id, current, new_name)
+        except Exception:
+            # Discord allows two renames per ten minutes; losing one is fine.
+            logger.warning("Failed to retitle thread %d to %r", thread.id, new_name, exc_info=True)
 
     async def _link_to_parent_thread(
         self,
@@ -1194,6 +1253,11 @@ class ClaudeChatCog(commands.Cog):
                 _dashboard = getattr(self.bot, "thread_dashboard", None)
                 if isinstance(_dashboard, ThreadStatusDashboard):
                     await _dashboard.refresh_inbox(_inbox_repo)
+
+        # The title was written from the first message; the work has moved since.
+        # Scheduled here — on the human's turn — so the budget is spent on what
+        # someone actually asked for, not on Claude's own commentary.
+        self._schedule_retitle(thread, message.content or "")
 
         # Determine chat_only from the parent channel of this thread.
         chat_only = (thread.parent_id or 0) in self._chat_only_channel_ids

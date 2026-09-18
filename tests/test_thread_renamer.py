@@ -81,8 +81,12 @@ class TestSuggestTitleNormal:
         proc = _make_proc(b"Some Title\n")
         with patch("asyncio.create_subprocess_exec", return_value=proc) as mock_exec:
             await suggest_title("please help me with authentication")
-        prompt_arg = mock_exec.call_args[0][4]
+        argv = mock_exec.call_args[0]
+        prompt_arg = argv[-1]
         assert "please help me with authentication" in prompt_arg
+        # The prompt is the argument after `--`, so a template that ever starts
+        # with a dash cannot be read as a flag.
+        assert argv[-2] == "--"
 
 
 # ---------------------------------------------------------------------------

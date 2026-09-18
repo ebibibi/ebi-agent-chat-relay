@@ -332,7 +332,7 @@ Tras bambalinas:
 - **Sesiones concurrentes** — Múltiples sesiones en paralelo con límite configurable
 - **Detener sin borrar** — `/stop` detiene una sesión preservándola para reanudarla
 - **Interrupción de sesión** — Enviar un mensaje nuevo a un hilo activo envía SIGINT a la sesión en ejecución y comienza de cero con la nueva instrucción; no se necesita `/stop` manual
-- **Auto-renombrado de hilos** — Con `THREAD_AUTO_RENAME=true`, cada hilo nuevo se renombra automáticamente con un título generado por Claude a partir del primer mensaje (tarea en segundo plano, nunca retrasa el inicio de la sesión)
+- **Auto-renombrado de hilos** — Con `THREAD_AUTO_RENAME=true`, cada hilo nuevo se renombra automáticamente con un título generado por Claude a partir del primer mensaje (tarea en segundo plano, nunca retrasa el inicio de la sesión). El título se mantiene al día: cuando el trabajo cambia claramente de tema, el hilo se vuelve a titular (como máximo una vez cada 15 minutos, y solo en hilos creados por ccdb)
 
 #### 📡 Retroalimentación en Tiempo Real
 - **Estado en tiempo real** — Reacciones emoji: 🧠 pensando, 🛠️ leyendo archivos, 💻 editando, 🌐 búsqueda web
@@ -763,7 +763,7 @@ En el modo solo-chat, las solicitudes de permisos y los prompts de `AskUserQuest
 | `CLAUDE_ALLOWED_TOOLS` | Lista separada por comas de herramientas permitidas para el CLI de Claude (heredado — prefiere `CCDB_ALLOWED_TOOLS`) | (opcional) |
 | `CLAUDE_CHANNEL_IDS` | IDs de canal adicionales (separados por comas) para configuración multi-canal (heredado — prefiere `CCDB_CHANNEL_IDS`) | (opcional) |
 | `THREAD_INBOX_ENABLED` | Habilitar la bandeja de entrada persistente de hilos (clasifica sesiones como `waiting`/`done`/`ambiguous` vía `claude -p`; se muestra en el panel de hilos) | `false` |
-| `THREAD_AUTO_RENAME` | Auto-renombrar los títulos de los hilos nuevos usando Claude AI — genera un título breve y descriptivo a partir del primer mensaje del usuario mediante una llamada en segundo plano a `claude -p` (nunca retrasa el inicio de la sesión) | `false` |
+| `THREAD_AUTO_RENAME` | Auto-renombrar los títulos de los hilos nuevos usando Claude AI — genera un título breve y descriptivo a partir del primer mensaje del usuario mediante una llamada en segundo plano a `claude -p` (nunca retrasa el inicio de la sesión) y vuelve a titular el hilo cuando su tema cambia claramente (un renombrado cada 15 minutos como máximo; se conservan las etiquetas de linaje) | `false` |
 | `CCDB_CLI_ENV_FILE` | Ruta a un archivo `KEY=VALUE` cuyas variables se fusionan en el entorno del subproceso CLI en cada invocación. Los cambios surten efecto inmediatamente sin reiniciar el bot. Útil para enrutamiento temporal de API (p. ej., Azure Foundry) | (opcional) |
 | `CCDB_LOG_FILE` | Ruta a un archivo de log. Cuando se define, se añade un manejador de archivo rotativo (10 MB × 5 copias) junto al manejador de stdout por defecto. Útil para monitoreo y alertas. | (opcional) |
 | `API_HOST` | Dirección de enlace del REST API | `127.0.0.1` |
