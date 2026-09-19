@@ -1039,9 +1039,21 @@ class ClaudeChatCog(commands.Cog):
                 that preempts a turn can cost the receiver uncommitted work.
         """
         chunks = chunk_message(text) or [text]
-        seed_message = await thread.send(chunks[0])
-        for chunk in chunks[1:]:
-            seed_message = await thread.send(chunk)
+        try:
+            seed_message = await thread.send(chunks[0])
+            for chunk in chunks[1:]:
+                seed_message = await thread.send(chunk)
+        except discord.NotFound:
+            # api_server.py fires this via asyncio.create_task with nothing
+            # awaiting the result, so an uncaught NotFound here would surface
+            # only as "Task exception was never retrieved" with no thread
+            # context. The relay source already got a 202; there's no request
+            # left to fail, so log and drop it.
+            logger.warning(
+                "deliver_relayed_message: thread %d no longer exists, dropping relay",
+                thread.id,
+            )
+            return
 
         record = await self.repo.get(thread.id)
         session_id = record.session_id if record else None
