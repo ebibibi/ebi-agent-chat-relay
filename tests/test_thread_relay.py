@@ -316,3 +316,23 @@ async def test_queue_mode_forwards_no_preemption() -> None:
     cog._run_claude.assert_awaited_once()
     _, kwargs = cog._run_claude.call_args
     assert kwargs.get("interrupt_existing") is False
+
+
+async def test_delivery_to_a_deleted_thread_is_swallowed_with_a_warning(caplog) -> None:
+    """A relay target that no longer exists must not leak an unhandled task exception.
+
+    api_server.py fires this coroutine via ``asyncio.create_task`` with nothing
+    awaiting the result, so an uncaught NotFound here surfaces only as
+    "Task exception was never retrieved" with no thread context (production
+    incident: 2026-09-19). It must be caught and logged instead of propagating.
+    """
+    cog = _make_cog()
+    thread = _make_target_thread()
+    thread.send = AsyncMock(side_effect=discord.NotFound(MagicMock(status=404), "Unknown Channel"))
+    cog._run_claude = AsyncMock()
+
+    with caplog.at_level("WARNING"):
+        await cog.deliver_relayed_message(thread, "relayed text", interrupt=False)
+
+    cog._run_claude.assert_not_awaited()
+    assert any(str(thread.id) in record.message for record in caplog.records)
