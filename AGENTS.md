@@ -372,10 +372,12 @@ This project ships AI agent configs for all major tools:
 
 | File | Tool | Purpose |
 |------|------|---------|
-| `CLAUDE.md` | Claude Code | Project context (this file) |
-| `AGENTS.md` | OpenAI Codex | Symlink → CLAUDE.md |
+| `AGENTS.md` | Claude Code, OpenAI Codex | Project context (this file) — the single instruction file |
 | `.github/copilot-instructions.md` | GitHub Copilot | Condensed instructions |
 | `.cursorrules` | Cursor | IDE-specific rules |
+
+There is no `CLAUDE.md`. Claude Code reads `AGENTS.md` (2.1.277+), so one file now
+serves both agents instead of a file plus a symlink pointing at it.
 
 ### Skills (`.claude/skills/`)
 
