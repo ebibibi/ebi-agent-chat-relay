@@ -64,6 +64,7 @@ class BackendSettings:
         env_backend: str,
         env_model_for_claude: str,
         env_model_for_codex: str,
+        env_model_for_pi: str = "",
     ) -> None:
         self.repo = repo
         self._env_backend = env_backend if env_backend in ALL_BACKENDS else "claude"
@@ -76,9 +77,12 @@ class BackendSettings:
             "local": "",
             # AG-UI identifies the model on the remote agent, not in ccdb.
             "agui": "",
-            # pi resolves its own default provider/model from its config; an
-            # env default here would pin a provider the operator never chose.
-            "pi": "",
+            # pi picks its own default when --model is omitted, and that
+            # default is whatever its catalog ranks first — not necessarily a
+            # model this account can call. CCDB_PI_MODEL lets an operator pin
+            # one (fully qualified, "provider/id") without the pi TUI; empty
+            # still means "let pi decide".
+            "pi": env_model_for_pi or "",
         }
 
     # ── Resolution ──────────────────────────────────────────

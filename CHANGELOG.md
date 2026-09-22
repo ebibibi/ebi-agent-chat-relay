@@ -7,6 +7,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`/model` now suggests pi models, and a pi deployment can pin a default** (#729) — the pi
+  backend shipped with no entry in the autocomplete's suggestion table, so `/model set` offered an
+  empty dropdown and the model behind pi was effectively unreachable from Discord. Suggestions are
+  now discovered from pi's own on-disk catalog (`~/.pi/agent/models-store.json`) merged with the
+  operator's hand-declared providers (`~/.pi/agent/models.json`) — the same read-a-local-file stance
+  as Codex, no extra vendor call — and are offered fully qualified (`anthropic/claude-opus-5`),
+  because pi's bare `--model` is a fuzzy pattern whose resolution is not ccdb's choice to make.
+  `CCDB_PI_HOME` points at a non-default pi config directory; `CCDB_MODEL_DISCOVERY=0` still opts
+  out. Leaving the model unset is not neutral either: pi then picks its catalog's own first-ranked
+  model, which on pi 0.85.1 is `anthropic/claude-opus-4-8` — an account without that entitlement got
+  a `400` on every turn with no way to change it. `CCDB_PI_MODEL` pins a deployment default, and
+  `/model set` overrides it per thread or globally.
+
 ## [4.1.0] - 2026-09-22
 
 ### Added

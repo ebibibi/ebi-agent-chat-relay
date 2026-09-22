@@ -331,3 +331,152 @@ class TestCodexModelChoices:
             )
             == FALLBACK
         )
+
+
+def _write_pi_catalogs(
+    home: Path,
+    *,
+    store: dict | None = None,
+    custom: dict | None = None,
+) -> None:
+    """Lay out a fake ``~/.pi`` for ``CCDB_PI_HOME``."""
+    agent = home / "agent"
+    agent.mkdir(parents=True, exist_ok=True)
+    if store is not None:
+        (agent / model_catalog.PI_MODELS_STORE).write_text(json.dumps(store), encoding="utf-8")
+    if custom is not None:
+        (agent / model_catalog.PI_MODELS_CUSTOM).write_text(json.dumps(custom), encoding="utf-8")
+
+
+class TestPiModelChoices:
+    def test_models_are_offered_fully_qualified(self, tmp_path: Path) -> None:
+        """A bare id is a fuzzy pattern to pi, so the provider must be in the value."""
+        _write_pi_catalogs(
+            tmp_path,
+            store={
+                "anthropic": {
+                    "models": [
+                        {"id": "claude-opus-5", "name": "Claude Opus 5"},
+                        {"id": "claude-sonnet-5", "name": "Claude Sonnet 5"},
+                    ]
+                }
+            },
+        )
+
+        choices = model_catalog.pi_model_choices(
+            fallback=FALLBACK, env={"CCDB_PI_HOME": str(tmp_path)}
+        )
+
+        assert choices == [
+            ("anthropic/claude-opus-5", "Claude Opus 5"),
+            ("anthropic/claude-sonnet-5", "Claude Sonnet 5"),
+        ]
+
+    def test_operator_declared_providers_are_merged_in(self, tmp_path: Path) -> None:
+        """models.json is where the only model some installs can run is declared."""
+        _write_pi_catalogs(
+            tmp_path,
+            store={"anthropic": {"models": [{"id": "claude-opus-5", "name": "Claude Opus 5"}]}},
+            custom={"providers": {"ollama": {"models": [{"id": "gpt-oss:120b"}]}}},
+        )
+
+        choices = model_catalog.pi_model_choices(
+            fallback=FALLBACK, env={"CCDB_PI_HOME": str(tmp_path)}
+        )
+
+        # Providers sorted by name, matching ``pi --list-models``.
+        assert choices == [
+            ("anthropic/claude-opus-5", "Claude Opus 5"),
+            ("ollama/gpt-oss:120b", "gpt-oss:120b"),
+        ]
+
+    def test_a_provider_in_both_files_is_not_duplicated(self, tmp_path: Path) -> None:
+        _write_pi_catalogs(
+            tmp_path,
+            store={"ollama": {"models": [{"id": "gpt-oss:120b", "name": "gpt-oss 120B"}]}},
+            custom={
+                "providers": {"ollama": {"models": [{"id": "gpt-oss:120b"}, {"id": "qwen3.6:35b"}]}}
+            },
+        )
+
+        choices = model_catalog.pi_model_choices(
+            fallback=FALLBACK, env={"CCDB_PI_HOME": str(tmp_path)}
+        )
+
+        assert choices == [
+            ("ollama/gpt-oss:120b", "gpt-oss 120B"),
+            ("ollama/qwen3.6:35b", "qwen3.6:35b"),
+        ]
+
+    def test_custom_file_alone_is_enough(self, tmp_path: Path) -> None:
+        """An offline install has no fetched store, only hand-declared providers."""
+        _write_pi_catalogs(
+            tmp_path, custom={"providers": {"ollama": {"models": [{"id": "gpt-oss:120b"}]}}}
+        )
+
+        choices = model_catalog.pi_model_choices(
+            fallback=FALLBACK, env={"CCDB_PI_HOME": str(tmp_path)}
+        )
+
+        assert choices == [("ollama/gpt-oss:120b", "gpt-oss:120b")]
+
+    def test_missing_catalogs_fall_back(self, tmp_path: Path) -> None:
+        """A host that never ran pi still gets suggestions."""
+        assert (
+            model_catalog.pi_model_choices(
+                fallback=FALLBACK, env={"CCDB_PI_HOME": str(tmp_path / "nope")}
+            )
+            == FALLBACK
+        )
+
+    def test_malformed_store_still_reads_the_other_file(self, tmp_path: Path) -> None:
+        """One unreadable file must not hide the models in the other."""
+        agent = tmp_path / "agent"
+        agent.mkdir(parents=True)
+        (agent / model_catalog.PI_MODELS_STORE).write_text("{not json", encoding="utf-8")
+        (agent / model_catalog.PI_MODELS_CUSTOM).write_text(
+            json.dumps({"providers": {"ollama": {"models": [{"id": "gpt-oss:120b"}]}}}),
+            encoding="utf-8",
+        )
+
+        choices = model_catalog.pi_model_choices(
+            fallback=FALLBACK, env={"CCDB_PI_HOME": str(tmp_path)}
+        )
+
+        assert choices == [("ollama/gpt-oss:120b", "gpt-oss:120b")]
+
+    def test_entries_without_an_id_are_skipped(self, tmp_path: Path) -> None:
+        _write_pi_catalogs(
+            tmp_path,
+            store={
+                "anthropic": {
+                    "models": [{"name": "nameless"}, "junk", {"id": "claude-opus-5"}],
+                },
+                "broken": {"models": "not-a-list"},
+            },
+        )
+
+        choices = model_catalog.pi_model_choices(
+            fallback=FALLBACK, env={"CCDB_PI_HOME": str(tmp_path)}
+        )
+
+        assert choices == [("anthropic/claude-opus-5", "claude-opus-5")]
+
+    def test_empty_catalog_falls_back(self, tmp_path: Path) -> None:
+        _write_pi_catalogs(tmp_path, store={})
+
+        assert (
+            model_catalog.pi_model_choices(fallback=FALLBACK, env={"CCDB_PI_HOME": str(tmp_path)})
+            == FALLBACK
+        )
+
+    def test_discovery_can_be_disabled(self, tmp_path: Path) -> None:
+        _write_pi_catalogs(tmp_path, store={"anthropic": {"models": [{"id": "claude-opus-5"}]}})
+
+        assert (
+            model_catalog.pi_model_choices(
+                fallback=FALLBACK,
+                env={"CCDB_PI_HOME": str(tmp_path), "CCDB_MODEL_DISCOVERY": "0"},
+            )
+            == FALLBACK
+        )

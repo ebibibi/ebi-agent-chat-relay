@@ -392,6 +392,12 @@ async def setup_bridge(
             env_backend=_runner_class.replace("Runner", "").lower(),
             env_model_for_claude=(runner.model if _runner_class == "ClaudeRunner" else ""),
             env_model_for_codex=(runner.model if _runner_class == "CodexRunner" else ""),
+            # Dedicated var first, so a Claude-default deployment can still
+            # name a pi model for the threads that switch to it.
+            env_model_for_pi=(
+                os.getenv("CCDB_PI_MODEL", "")
+                or (runner.model if _runner_class == "PiRunner" else "")
+            ),
         )
 
     chat_cog = ClaudeChatCog(
