@@ -3,20 +3,60 @@
 > **注意：** 这是原始英文文档的自动翻译版本。
 > 如有任何差异，以[英文版](../../README.md)为准。
 
-# Claude & Codex Discord Bridge
+# Ebi Agent Chat Relay
 
-*包名：`claude-code-discord-bridge`（短横线命名）*
+*原名 Claude Code Discord Bridge，之后为 Claude & Codex Discord Bridge。所有现有标识符
+均继续有效：包名为 `claude-code-discord-bridge`（短横线命名），命令为 `ccdb`，本文档全文
+沿用 `ccdb` 作为简称。*
 
 [![CI](https://github.com/ebibibi/ebi-agent-chat-relay/actions/workflows/ci.yml/badge.svg)](https://github.com/ebibibi/ebi-agent-chat-relay/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/ebibibi/ebi-agent-chat-relay/actions/workflows/codeql.yml/badge.svg)](https://github.com/ebibibi/ebi-agent-chat-relay/actions/workflows/codeql.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**在手机上使用 Claude Code _或_ OpenAI Codex。多线程并行。全速真实开发。**
+**从 Discord 或 Microsoft Teams 运行编码代理。在同一个会话背后，自由选择 Claude Code、
+OpenAI Codex、本地模型，或任意兼容的 AG-UI 代理。**
 
-通过智能手机的 Discord 应用打开 Claude Code 或 OpenAI Codex，启动多个线程，并行运行开发会话——完全无需触碰键盘。每个 Discord 线程都成为完全隔离的 AI 会话。在一个线程中开发功能，在另一个线程中审查 PR，在第三个线程中运行后台任务——同时进行，甚至可以每个线程混用不同的后端。桥接器处理所有协调，让会话永不互相破坏。
+Ebi Agent Chat Relay 把每个 Discord 线程或 Teams 会话变成一个隔离且持久的代理会话。
+在一个会话中开发功能，在另一个会话中审查 PR，在第三个会话中运行后台任务——同时进行。
+Discord 可以按线程混用不同后端；v4 的 Teams 使用已配置的全局后端。中继负责协调，
+让各个会话不会互相破坏。
 
-**使用现有订阅，无需折腾 API 密钥。** ccdb 基于官方 CLI 运行——Claude Code（包含在 [Claude Pro/Max 订阅](https://claude.ai/pricing)中）和 OpenAI Codex（包含在 [ChatGPT Plus/Pro/Business](https://chatgpt.com)中）。用 `/backend` 切换后端或设置按线程的覆盖——让你的团队以可预测的费用通过 Discord 同时获得两种 AI。
+**为什么改名。** 这个项目最初只是一个 AI 与一个聊天应用之间的桥接器。如今它是一个拥有
+两个生产级前端和五种后端选择的中继。旧名称的四个词中，有三个已经不再成立。决策详情见
+[ADR-0001](../adr/0001-adopt-ebi-agent-chat-relay.md)，保持兼容的迁移方式见
+[改名计划](../RENAME_PLAN.md)。
+
+**使用你现有的订阅、你自己的基础设施，或远程代理。** ccdb 可以运行官方的 Claude Code
+和 Codex CLI、Codex 兼容的本地端点、AG-UI HTTP/SSE 代理，或 pi CLI。Discord 支持在运行时
+通过 `/backend` 切换；v4 的 Teams 通过同一个工厂使用已配置的后端。
+
+## v4 的新变化
+
+版本 4 把两个彼此独立的选择显式分开：**人在哪里对话**，以及**由哪个代理来干活**。
+任何受支持的前端都可以搭配任何受支持的后端。
+
+### 前端 × 后端
+
+| | Claude Code | OpenAI Codex | Local | AG-UI | pi |
+|---|---:|---:|---:|---:|---:|
+| Discord | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Microsoft Teams | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+- **Discord** 仍然是零迁移的默认选项。现有部署的启动方式与此前完全相同。
+- **Microsoft Teams** 已可用于生产环境：由一个小型公开接收端，加上运行在私有会话主机上、
+  仅出站连接的 `ActivityPuller` 构成。设置 `CCDB_FRONTENDS=discord,teams` 即可让
+  Discord 与 Teams 在同一个进程中同时运行。
+- **AG-UI** 让任一聊天界面都能连接到实现了 Agent–User Interaction Protocol 的 HTTP/SSE
+  代理。Claude Code、Codex 以及带防护的本地后端同样保持可用。
+- **pi** 运行 [pi](https://github.com/earendil-works/pi) CLI，可通过单个代理接入
+  Anthropic、OpenAI、Google、GitHub Copilot 以及 OpenAI 兼容的本地服务器。在 ccdb 使用的
+  非交互模式下它没有沙箱，因此在用 `CCDB_PI_ALLOW_UNSANDBOXED=1` 明示"信任宿主自身的隔离"
+  之前，它会拒绝启动。
+
+请先阅读[后端指南](../backends.md)。Teams 请按照完整的
+[Microsoft Teams 设置指南](../teams-setup.md)搭建，然后参考更深入的
+[界面行为](../teams.md)与[中继安全模型](../teams-relay.md)。
 
 **[English](../../README.md)** | **[日本語](../ja/README.md)** | 简体中文 | **[한국어](../ko/README.md)** | **[Español](../es/README.md)** | **[Português](../pt-BR/README.md)** | **[Français](../fr/README.md)**
 
@@ -277,7 +317,7 @@ ccdb 将每条 `embedded` 记录与实际送达的文件进行匹配，顺序为
 
 ccdb 3.0 引入了三个斜杠命令，用来改变下一个会话由哪个 AI 处理，且无需重启 Bot：
 
-- `/backend [name] [scope]` — 显示或切换后端。`name` 为 `claude` 或 `codex`。`scope` 为 `thread`（仅当前线程）或 `global`（服务器级默认值）。省略 `scope` 时，命令会自动判定：在线程中则作用于该线程，否则设置全局默认值。
+- `/backend [name] [scope]` — 显示或切换后端。`name` 为 `claude`、`codex`、`local`、`agui` 或 `pi`。`scope` 为 `thread`（仅当前线程）或 `global`（服务器级默认值）。省略 `scope` 时，命令会自动判定：在线程中则作用于该线程，否则设置全局默认值。
 - `/model [name] [scope]` — 显示或切换**当前**后端所用的模型。每个后端记住各自的模型偏好，因此来回切换后端不会破坏你偏好的模型。让某后端的模型保持未设置，即可沿用该 CLI 自身的默认值（例如 Codex 使用 `~/.codex/config.toml` 中的 `model`，因此 ccdb 跟踪的是控制台默认值，而不锁定某个版本）。
 - `/effort [level] [scope]` — 显示或切换当前后端所用的**推理强度**。有效级别因后端而异：Claude 接受 `low/medium/high/max`；Codex 接受 `low/medium/high/xhigh/max/ultra`（映射到 CLI 的 `model_reasoning_effort`）。保持未设置即沿用 CLI 默认值。
 

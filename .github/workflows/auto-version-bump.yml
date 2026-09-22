@@ -7,14 +7,29 @@ name: Auto Patch Version Bump
 #
 # Two modes, determined by PR title:
 #   [release] in title → tag & release the current version as-is (no bump)
-#   anything else      → bump patch only (1.3.0 → 1.3.1), commit to main; no tag/release
+#   anything else      → open a bump PR against main; no tag/release
 #
-# Uses ADMIN_PAT (classic PAT with repo scope) to push to main.
-# The PAT owner (ebibibi) has admin RepositoryRole, which bypasses
-# the Ruleset's required status checks.
+# Why a PR and not a direct push (issue #725):
+#   The `issue-driven-main` ruleset is created with an empty bypass_actors
+#   list on purpose, so nobody — not a repository admin, and therefore not
+#   ADMIN_PAT either — can push to main or merge a PR with no linked issue.
+#   Direct pushes have been rejected with GH013 since 2026-09-17.
+#
+# Why this PR-based attempt differs from the two that were reverted (#169,
+# #230): both created the PR with GITHUB_TOKEN, and GitHub suppresses
+# pull_request events from that token, so neither CI nor auto-approve ever
+# ran and the required checks stayed "Expected" forever. Here ADMIN_PAT
+# *authors* the branch, issue and PR as a real user, which does fire those
+# events. It is used to satisfy the rules, not to bypass them.
 on:
   repository_dispatch:
     types: [pr-merged]
+
+# Serialise bumps so that two merges landing at once cannot race to create
+# the same auto/bump-* branch.
+concurrency:
+  group: auto-version-bump
+  cancel-in-progress: false
 
 jobs:
   version-bump:
@@ -39,7 +54,7 @@ jobs:
             echo "Mode: release (tag current version as-is)"
           else
             echo "mode=patch-bump" >> "$GITHUB_OUTPUT"
-            echo "Mode: patch-bump (increment patch version)"
+            echo "Mode: patch-bump (open a bump PR)"
           fi
 
       - name: Read current version
@@ -64,13 +79,40 @@ jobs:
           echo "release_version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
           echo "release_tag=v$RELEASE_VERSION"    >> "$GITHUB_OUTPUT"
 
-      - name: Commit version bump to main (patch-bump mode)
-        id: commit
+      - name: Skip when a bump PR is already open
+        id: existing
         if: steps.mode.outputs.mode == 'patch-bump'
         env:
+          GH_TOKEN: ${{ secrets.ADMIN_PAT }}
+        run: |
+          set -euo pipefail
+          # Filtered locally rather than with the `head:` search qualifier,
+          # which matches whole branch names and not this prefix.
+          OPEN=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
+            --json number,headRefName --limit 100 \
+            --jq '[.[] | select(.headRefName | startswith("auto/bump-"))]')
+
+          if [ "$(echo "$OPEN" | jq length)" -gt 0 ]; then
+            # main has not moved while that PR is open, so it already targets
+            # the exact version this run would produce. Merges that land in
+            # the meantime collapse into one patch bump, which is intended.
+            NUMBER=$(echo "$OPEN" | jq -r '.[0].number')
+            echo "::notice::Bump PR #$NUMBER is already open; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open bump PR (patch-bump mode)
+        if: steps.mode.outputs.mode == 'patch-bump' && steps.existing.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.ADMIN_PAT }}
           CURRENT: ${{ steps.read.outputs.current }}
           RELEASE_VERSION: ${{ steps.read.outputs.release_version }}
         run: |
+          set -euo pipefail
+          BRANCH="auto/bump-v$RELEASE_VERSION"
+
           sed -i "s/^version = \"$CURRENT\"/version = \"$RELEASE_VERSION\"/" pyproject.toml
           sed -i \
             "/^name = \"claude-code-discord-bridge\"$/,/^source = { editable = \"\.\" }$/ s/^version = \"$CURRENT\"/version = \"$RELEASE_VERSION\"/" \
@@ -82,14 +124,41 @@ jobs:
             exit 1
           fi
 
+          # The ruleset requires every PR to close an issue, and the exemption
+          # in require-linked-issue.yml only covers bot authors. This PR is
+          # authored by the PAT owner, so it needs an issue of its own.
+          ISSUE_BODY=$(printf '%s\n' \
+            "Automated patch bump from \`$CURRENT\` to \`$RELEASE_VERSION\` after a PR merge." \
+            "" \
+            "Opened by \`auto-version-bump.yml\`; the bump PR that closes it follows immediately.")
+
+          ISSUE_URL=$(gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "chore: bump version to $RELEASE_VERSION" \
+            --body "$ISSUE_BODY")
+          ISSUE_NUMBER="${ISSUE_URL##*/}"
+          echo "Created issue #$ISSUE_NUMBER"
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
           git add pyproject.toml uv.lock
-          git commit -m "chore: bump version to $RELEASE_VERSION [skip ci]"
-          git push origin main
+          git commit -m "chore: bump version to $RELEASE_VERSION"
+          # --force-with-lease so a branch left behind by an abandoned run
+          # cannot block the push, while a branch someone else advanced does.
+          git push --force-with-lease origin "$BRANCH"
 
-          echo "commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "Committed version bump to main"
+          PR_BODY=$(printf '%s\n' \
+            "Automated patch bump from \`$CURRENT\` to \`$RELEASE_VERSION\`." \
+            "" \
+            "Closes #$ISSUE_NUMBER")
+
+          gh pr create --repo "$GITHUB_REPOSITORY" \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore: bump version to $RELEASE_VERSION" \
+            --body "$PR_BODY"
+
+          echo "Opened bump PR for $RELEASE_VERSION"
 
       - name: Create tag and GitHub Release
         # Uses ADMIN_PAT so the release event triggers docs-translate.yml.

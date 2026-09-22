@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Automatic patch bumps work again** (#725) — `auto-version-bump.yml` pushed the bump straight to
+  `main` with an admin PAT, on the assumption that an admin bypasses the branch ruleset. The
+  `issue-driven-main` ruleset is created with an empty bypass list on purpose, so every run since
+  2026-09-17 was rejected with `GH013` and the version stayed at 4.0.27 until it was raised by hand.
+  The workflow now opens an `auto/bump-vX.Y.Z` pull request instead, with an issue of its own so the
+  required `require-linked-issue` check passes, and `auto-approve.yml` merges it once CI is green.
+  The PAT authors the branch, issue and PR as a real user — the two earlier PR-based attempts were
+  reverted because a `GITHUB_TOKEN`-authored PR fires no `pull_request` events and its required
+  checks never run. Merges that land while a bump PR is open collapse into that one bump, and the
+  bump PR's own merge no longer dispatches a bump for itself.
 - **`/model` now suggests pi models, and a pi deployment can pin a default** (#729) — the pi
   backend shipped with no entry in the autocomplete's suggestion table, so `/model set` offered an
   empty dropdown and the model behind pi was effectively unreachable from Discord. Suggestions are
@@ -692,7 +702,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI pipeline: Python 3.10/3.11/3.12, ruff, pytest
 - Branch protection and PR workflow
 
-[Unreleased]: https://github.com/ebibibi/ebi-agent-chat-relay/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/ebibibi/ebi-agent-chat-relay/compare/v4.1.0...HEAD
+[4.1.0]: https://github.com/ebibibi/ebi-agent-chat-relay/compare/v4.0.0...v4.1.0
+[4.0.0]: https://github.com/ebibibi/ebi-agent-chat-relay/compare/v3.4.0...v4.0.0
+[3.4.0]: https://github.com/ebibibi/ebi-agent-chat-relay/compare/v3.3.0...v3.4.0
+[3.3.0]: https://github.com/ebibibi/ebi-agent-chat-relay/compare/v3.2.0...v3.3.0
+[3.2.0]: https://github.com/ebibibi/ebi-agent-chat-relay/compare/v3.1.0...v3.2.0
+[3.1.0]: https://github.com/ebibibi/ebi-agent-chat-relay/compare/v3.0.0...v3.1.0
+[3.0.0]: https://github.com/ebibibi/ebi-agent-chat-relay/compare/v2.2.0...v3.0.0
+[2.2.0]: https://github.com/ebibibi/ebi-agent-chat-relay/compare/v2.1.24...v2.2.0
+[2.1.24]: https://github.com/ebibibi/ebi-agent-chat-relay/compare/v2.1.0...v2.1.24
 [2.1.0]: https://github.com/ebibibi/ebi-agent-chat-relay/compare/v2.0.5...v2.1.0
 [2.0.0]: https://github.com/ebibibi/ebi-agent-chat-relay/compare/v1.9.0...v2.0.5
 [1.9.0]: https://github.com/ebibibi/ebi-agent-chat-relay/compare/v1.8.0...v1.9.0

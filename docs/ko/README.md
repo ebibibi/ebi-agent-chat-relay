@@ -3,20 +3,66 @@
 > **참고:** 이 문서는 원본 영어 문서의 자동 번역본입니다.
 > 내용이 다를 경우 [영어 버전](../../README.md)이 우선합니다.
 
-# Claude & Codex Discord Bridge
+# Ebi Agent Chat Relay
 
-*패키지명: `claude-code-discord-bridge` (케밥 케이스)*
+*이전 이름은 Claude Code Discord Bridge, 그다음은 Claude & Codex Discord Bridge입니다.
+기존 식별자는 모두 그대로 동작합니다. 패키지명은 `claude-code-discord-bridge`(케밥 케이스),
+명령어는 `ccdb`이며, 이 문서에서도 약칭으로 `ccdb`를 사용합니다.*
 
 [![CI](https://github.com/ebibibi/ebi-agent-chat-relay/actions/workflows/ci.yml/badge.svg)](https://github.com/ebibibi/ebi-agent-chat-relay/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/ebibibi/ebi-agent-chat-relay/actions/workflows/codeql.yml/badge.svg)](https://github.com/ebibibi/ebi-agent-chat-relay/actions/workflows/codeql.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**스마트폰에서 Claude Code _또는_ OpenAI Codex를 사용하세요. 멀티 스레드, 동시 진행, 실전 개발까지 모두 가능합니다.**
+**Discord 또는 Microsoft Teams에서 코딩 에이전트를 실행하세요. 같은 대화 뒤에서
+Claude Code, OpenAI Codex, 로컬 모델, 또는 호환되는 AG-UI 에이전트를 선택할 수 있습니다.**
 
-스마트폰 Discord 앱에서 Claude Code 또는 OpenAI Codex를 실행하고, 여러 스레드를 열어 개발 세션을 병렬로 진행하세요 — 키보드를 만지지 않고도 가능합니다. 각 Discord 스레드는 완전히 격리된 AI 세션이 됩니다. 한 스레드에서 기능 개발, 다른 스레드에서 PR 리뷰, 세 번째 스레드에서 백그라운드 작업 — 동시에, 심지어 스레드마다 다른 백엔드를 섞어서 사용할 수도 있습니다. 브리지가 모든 조율을 처리하여 세션들이 서로를 덮어쓰는 일이 없습니다.
+Ebi Agent Chat Relay는 각 Discord 스레드 또는 Teams 대화를 격리된 영속 에이전트 세션으로
+바꿉니다. 한 대화에서 기능을 개발하고, 다른 대화에서 PR을 리뷰하고, 세 번째 대화에서
+백그라운드 작업을 돌리는 일을 동시에 할 수 있습니다. Discord는 스레드마다 백엔드를 섞어 쓸 수
+있고, v4의 Teams는 설정된 전역 백엔드를 사용합니다. 세션끼리 서로의 작업을 망가뜨리지 않도록
+릴레이가 조율을 담당합니다.
 
-**기존 구독을 그대로 활용하세요. API 키 씨름은 불필요합니다.** ccdb는 공식 CLI 위에서 실행됩니다 — Claude Code([Claude Pro/Max 구독](https://claude.ai/pricing)에 포함)와 OpenAI Codex([ChatGPT Plus/Pro/Business](https://chatgpt.com)에 포함). `/backend`로 백엔드를 전환하거나 스레드별 오버라이드를 설정하세요 — 팀 전체가 예측 가능한 비용으로 Discord를 통해 두 AI를 모두 사용할 수 있습니다.
+**이름을 바꾼 이유.** 이 프로젝트는 하나의 AI와 하나의 채팅 앱을 잇는 브리지로 시작했습니다.
+지금은 두 개의 프로덕션 프런트엔드와 다섯 가지 백엔드 선택지를 가진 릴레이입니다. 옛 이름을
+이루던 네 단어 중 세 단어가 더 이상 사실이 아니게 되었습니다. 결정 배경은
+[ADR-0001](../adr/0001-adopt-ebi-agent-chat-relay.md)을, 호환성을 지킨 전환 방법은
+[이름 변경 계획](../RENAME_PLAN.md)을 참고하세요.
+
+**기존 구독, 직접 운영하는 인프라, 또는 원격 에이전트를 쓸 수 있습니다.** ccdb는 공식
+Claude Code 및 Codex CLI, Codex 호환 로컬 엔드포인트, AG-UI HTTP/SSE 에이전트, 또는
+pi CLI를 실행할 수 있습니다. Discord에서는 런타임에 `/backend`로 전환할 수 있고, v4의
+Teams는 동일한 팩토리를 통해 설정된 백엔드를 사용합니다.
+
+## v4의 새로운 점
+
+버전 4는 서로 독립적인 두 가지 선택을 명시적으로 분리합니다. **사람이 어디서 대화하는가**와
+**어떤 에이전트가 일을 하는가**입니다. 지원되는 어떤 프런트엔드도 지원되는 어떤 백엔드와
+조합할 수 있습니다.
+
+### 프런트엔드 × 백엔드
+
+| | Claude Code | OpenAI Codex | Local | AG-UI | pi |
+|---|---:|---:|---:|---:|---:|
+| Discord | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Microsoft Teams | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+- **Discord**는 여전히 마이그레이션이 필요 없는 기본값입니다. 기존 배포는 이전과 완전히
+  동일하게 시작됩니다.
+- **Microsoft Teams**는 작은 공개 리시버와, 비공개 세션 호스트에서 아웃바운드로만 연결하는
+  `ActivityPuller`를 통해 프로덕션에서 사용할 수 있습니다. `CCDB_FRONTENDS=discord,teams`를
+  설정하면 Discord와 Teams를 한 프로세스에서 함께 실행할 수 있습니다.
+- **AG-UI**는 Agent–User Interaction Protocol을 구현한 HTTP/SSE 에이전트에 두 채팅 표면
+  어느 쪽에서든 연결합니다. Claude Code, Codex, 보호 장치가 붙은 로컬 백엔드도 계속 사용할 수
+  있습니다.
+- **pi**는 [pi](https://github.com/earendil-works/pi) CLI를 실행합니다. 하나의 에이전트로
+  Anthropic, OpenAI, Google, GitHub Copilot 및 OpenAI 호환 로컬 서버에 접근합니다. ccdb가
+  사용하는 비대화형 모드에는 샌드박스가 없으므로, 호스트 자체의 격리를 신뢰한다고
+  `CCDB_PI_ALLOW_UNSANDBOXED=1`로 밝히기 전까지는 실행을 거부합니다.
+
+먼저 [백엔드 가이드](../backends.md)를 읽어 보세요. Teams는 완전판
+[Microsoft Teams 설정 가이드](../teams-setup.md)를 따라 구축한 뒤, 더 깊은 내용은
+[표면 동작](../teams.md)과 [릴레이 보안 모델](../teams-relay.md)을 참고하세요.
 
 **[English](../../README.md)** | **[日本語](../ja/README.md)** | **[简体中文](../zh-CN/README.md)** | **[Español](../es/README.md)** | **[Português](../pt-BR/README.md)** | **[Français](../fr/README.md)**
 
@@ -277,7 +323,7 @@ ccdb는 각 `embedded` 항목을 실제 전달된 파일과 **sha256 우선**, �
 
 ccdb 3.0은 봇 재시작 없이 다음 세션을 처리할 AI를 변경하는 세 가지 슬래시 명령을 도입합니다:
 
-- `/backend [name] [scope]` — 백엔드 표시 또는 전환. `name`은 `claude` 또는 `codex`. `scope`는 `thread`(이 스레드만) 또는 `global`(서버 전역 기본값). `scope`를 생략하면 명령이 자동 해석합니다: 스레드 안에서는 그 스레드로 범위가 지정되고, 그렇지 않으면 전역 기본값을 설정합니다.
+- `/backend [name] [scope]` — 백엔드 표시 또는 전환. `name`은 `claude`, `codex`, `local`, `agui`, `pi` 중 하나. `scope`는 `thread`(이 스레드만) 또는 `global`(서버 전역 기본값). `scope`를 생략하면 명령이 자동 해석합니다: 스레드 안에서는 그 스레드로 범위가 지정되고, 그렇지 않으면 전역 기본값을 설정합니다.
 - `/model [name] [scope]` — **현재** 백엔드가 사용하는 모델 표시 또는 전환. 각 백엔드는 자신의 모델 선호를 기억하므로, 백엔드를 앞뒤로 전환해도 선호하는 모델이 그대로 유지됩니다. 백엔드의 모델을 설정하지 않은 채로 두면 해당 CLI 자체의 기본값을 따릅니다(예: Codex는 `~/.codex/config.toml`의 `model`을 사용하므로, ccdb는 버전을 고정하는 대신 콘솔 기본값을 추적합니다).
 - `/effort [level] [scope]` — 현재 백엔드가 사용하는 **추론 노력(reasoning effort)** 표시 또는 전환. 유효한 레벨은 백엔드별로 다릅니다: Claude는 `low/medium/high/max`를 허용하고, Codex는 `low/medium/high/xhigh/max/ultra`를 허용합니다(CLI의 `model_reasoning_effort`에 매핑됨). 설정하지 않은 채로 두면 CLI 기본값을 따릅니다.
 
