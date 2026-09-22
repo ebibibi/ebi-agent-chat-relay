@@ -7,8 +7,8 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
 
 # Cancel any in-progress run for the same PR when a new commit is pushed
-# (synchronize event). This prevents stale polling loops from an earlier
-# commit competing with a fresh run while new CI checks are still pending.
+# (synchronize event). This prevents an earlier run from enabling auto-merge
+# for a commit that has since been replaced.
 concurrency:
   group: auto-approve-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -24,150 +24,25 @@ jobs:
       github.event.pull_request.user.login == 'ebibibi' &&
       github.event.pull_request.draft == false &&
       !contains(github.event.pull_request.labels.*.name, 'external-issue')
-    # This control-plane job polls for required checks. Running it on the same
-    # single-capacity JIT pool as CI can starve the checks it is waiting for.
+    # This is a control-plane job; do not occupy the single-capacity CI pool.
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
-      contents: write
-      # Needed by the explicit `gh issue close` below, not by GitHub's own
-      # closing of linked issues. Granting it here does not reach the merge
-      # GitHub completes later on this job's behalf: measured on #743, which
-      # merged at 04:51:44 and whose linked issues were still open when the
-      # loop looked at 04:51:52 (#739, #747).
-      issues: write
     steps:
       - name: Approve PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --approve
-      - name: Enable auto-merge
+      - name: Enable auto-merge as the repository owner
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The actor that enables auto-merge becomes the eventual merge actor.
+          # ADMIN_PAT therefore makes GitHub emit the main push event; #758
+          # measured the linked issue closing and push workflow end to end.
+          # See docs/merge-events.md.
+          GH_TOKEN: ${{ secrets.ADMIN_PAT }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --auto --squash
-      - name: Wait for merge and notify EbiBot
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          WEBHOOK_URL: ${{ secrets.DOCS_SYNC_WEBHOOK_URL }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-        run: |
-          # GITHUB_TOKEN merges don't trigger other workflows (push/PR events).
-          # The rule and what was measured: docs/merge-events.md.
-          # So we poll for merge completion and send the webhooks directly.
-          # Poll for up to 40 minutes (240 × 10s). The previous 15 minutes was
-          # shorter than CI now takes: the required checks run on the
-          # single-capacity self-hosted pool and have been queueing for 20-40
-          # minutes, so the loop gave up before the merge it was waiting for
-          # more often than not, and everything below was skipped in silence
-          # (#742).
-          POLL_ATTEMPTS=240
-          for i in $(seq 1 "$POLL_ATTEMPTS"); do
-            STATE=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state -q .state)
-            if [ "$STATE" = "CLOSED" ]; then
-              # Closed without merging is a decision, not a failure.
-              echo "::notice::PR #$PR_NUMBER was closed without merging; nothing to do."
-              exit 0
-            fi
-            if [ "$STATE" = "MERGED" ]; then
-              # --- Close the issues this PR declared it closes ---
-              # This loop is load-bearing, not a belt-and-braces duplicate of
-              # GitHub's own closing of linked issues. Measured on #743: it
-              # merged at 04:51:44 and both linked issues were still open when
-              # this ran at 04:51:52, then closed by these calls. A merge that
-              # GitHub completes on this job's behalf does not carry the job's
-              # `issues: write`, so deleting this reintroduces #739 in silence,
-              # and under this repository's merge rules an abandoned issue is
-              # what the next PR then has to work around (#739, #747).
-              LINKED=$(gh api graphql \
-                -f owner="${GITHUB_REPOSITORY%%/*}" \
-                -f name="${GITHUB_REPOSITORY##*/}" \
-                -F number="$PR_NUMBER" \
-                -f query='
-                  query($owner:String!, $name:String!, $number:Int!) {
-                    repository(owner:$owner, name:$name) {
-                      pullRequest(number:$number) {
-                        closingIssuesReferences(first:20) {
-                          nodes { number state }
-                        }
-                      }
-                    }
-                  }' \
-                --jq '.data.repository.pullRequest.closingIssuesReferences.nodes[]
-                      | select(.state == "OPEN") | .number')
-
-              for issue in $LINKED; do
-                echo "Closing linked issue #$issue"
-                gh issue close "$issue" --repo "$GITHUB_REPOSITORY" \
-                  --reason completed \
-                  --comment "Closed by #$PR_NUMBER." \
-                  || echo "::warning::Could not close #$issue"
-              done
-
-              # --- EbiBot upgrade webhook (skip for docs-sync and auto-bump PRs) ---
-              if [[ "$HEAD_REF" != docs-sync/* ]] && [[ "$PR_TITLE" != '[docs-sync]'* ]] && [[ "$HEAD_REF" != auto/bump-* ]]; then
-                echo "PR merged! Sending upgrade webhook..."
-                curl -s -o /dev/null -w "%{http_code}" \
-                  -H "Content-Type: application/json" \
-                  -d '{"content":"🔄 ebibot-upgrade"}' \
-                  "$WEBHOOK_URL"
-              else
-                echo "Skipping upgrade: docs-sync or auto-bump PR ($HEAD_REF)"
-              fi
-
-              # --- Docs-sync webhook (skip for docs-sync and auto-bump PRs) ---
-              if [[ "$HEAD_REF" != docs-sync/* ]] && [[ "$PR_TITLE" != '[docs-sync]'* ]] && [[ "$HEAD_REF" != auto/bump-* ]]; then
-                OPEN_PR=$(gh pr list \
-                  --repo "$GITHUB_REPOSITORY" \
-                  --state open \
-                  --search "head:docs-sync/" \
-                  --json number \
-                  --limit 1)
-                if [ "$(echo "$OPEN_PR" | jq length)" -eq 0 ]; then
-                  echo "Sending docs-sync webhook..."
-                  curl -s -o /dev/null -w "%{http_code}" \
-                    -H "Content-Type: application/json" \
-                    -d '{"content":"🔄 docs-sync"}' \
-                    "$WEBHOOK_URL"
-                else
-                  echo "Skipping docs-sync: docs-sync PR already open"
-                fi
-              else
-                echo "Skipping docs-sync: excluded branch ($HEAD_REF)"
-              fi
-
-              # --- Version bump dispatch (skip for docs-sync and auto-bump PRs) ---
-              # auto/bump-* PRs carry the bump itself. Dispatching on their
-              # merge would open a bump PR for the bump, forever (issue #725).
-              if [[ "$HEAD_REF" != docs-sync/* ]] && [[ "$PR_TITLE" != '[docs-sync]'* ]] && [[ "$HEAD_REF" != auto/bump-* ]]; then
-                echo "Dispatching pr-merged event for version bump..."
-                DISPATCH_PAYLOAD=$(jq -c -n \
-                  --arg event_type "pr-merged" \
-                  --arg pr_number "$PR_NUMBER" \
-                  --arg pr_title "$PR_TITLE" \
-                  '{event_type: $event_type, client_payload: {pr_number: $pr_number, pr_title: $pr_title}}')
-                echo "$DISPATCH_PAYLOAD" | gh api "repos/$GITHUB_REPOSITORY/dispatches" \
-                  --method POST \
-                  --input -
-              else
-                echo "Skipping version bump: docs-sync PR ($HEAD_REF)"
-              fi
-
-              exit 0
-            fi
-            echo "Waiting for merge... ($i/$POLL_ATTEMPTS)"
-            sleep 10
-          done
-
-          # Reported as a failure rather than a green step. The PR is still
-          # open and unmerged, so the upgrade webhook, the docs-sync webhook
-          # and the version bump have all been skipped — a green run here used
-          # to hide that completely (#742).
-          echo "::error::PR #$PR_NUMBER was still open after 40 minutes. The upgrade webhook, docs-sync webhook and version bump dispatch were skipped; re-run this job once it merges."
-          exit 1
 
   auto-merge-dependabot:
     # Auto-merge Dependabot PRs once CI passes — but only patch/minor bumps.
@@ -175,14 +50,13 @@ jobs:
     # human (or Claude) to review instead of merging automatically.
     #
     # This is a SEPARATE job from auto-approve-and-merge on purpose: the owner
-    # job is gated on user.login == 'ebibibi' and carries the EbiBot-restart
-    # webhook + version-bump dispatch. Dependabot PRs must NOT trigger those —
-    # the lock change reaches the running bot on its next natural restart via
-    # pre-start.sh (uv sync), so no disruptive restart is needed here.
+    # job is gated on user.login == 'ebibibi'. Dependabot merges intentionally
+    # remain bot-attributed and do not trigger post-merge deployment or version
+    # bump work. The lock change reaches the running bot on its next natural
+    # restart via pre-start.sh, so no disruptive restart is needed here.
     #
     # Security: only non-major updates are merged, and the repository Ruleset's
-    # required status checks (CI on 3 Python versions) must pass before --auto
-    # completes the merge.
+    # required status checks must pass before --auto completes the merge.
     if: github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: [self-hosted, linux, x64]
     permissions:

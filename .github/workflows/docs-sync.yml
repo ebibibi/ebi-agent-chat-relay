@@ -1,8 +1,8 @@
 name: Documentation Sync
 
+# Automatic runs moved to post-merge.yml. Keep this workflow as the manual
+# recovery entry point for an operator who needs to request a docs sync alone.
 on:
-  push:
-    branches: [main]
   workflow_dispatch: {}
 
 jobs:

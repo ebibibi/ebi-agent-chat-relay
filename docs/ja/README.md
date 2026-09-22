@@ -1112,47 +1112,27 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
-      contents: write
-      # 下で自分で Issue を閉じるために必要。これを付けても GitHub が
-      # 代わりに閉じてくれるようにはならない（この例の下の注を参照）。
-      issues: write
     steps:
-      - env:
+      - name: ワークフロートークンで承認
+        env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --approve
-          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --auto --squash
+        run: gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --approve
+      - name: リポジトリ所有者として auto-merge を有効化
+        env:
+          GH_TOKEN: ${{ secrets.ADMIN_PAT }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --auto --squash
 ```
 
-> **Bot がマージした PR では `Closes #123` は Issue を閉じない。** 実測では、
-> リポジトリ所有者がマージした PR はリンク先 Issue を 1〜2 秒で閉じたが、
-> `github-actions` がマージしたものは1件も閉じず、エラーもどこにも出なかった。
-> このジョブに `issues: write` を足すだけでは**足りない** — auto-merge を完了
-> させるのは後から動く GitHub 側であり、有効化したジョブの権限は引き継がれない。
-> マージを検知したら自分で閉じること:
->
-> ```bash
-> gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
->   --json closingIssuesReferences \
->   --jq '.closingIssuesReferences[].number' \
-> | while read -r issue; do
->     gh issue close "$issue" --repo "$GITHUB_REPOSITORY" --reason completed
->   done
-> ```
->
-> `closingIssuesReferences` は本文の `Closes #123` と PR の Development 欄からの
-> 手動リンクの両方を拾い、閉じ済みの Issue を閉じても no-op なので、毎回のマージで
-> そのまま実行してよい。上の `issues: write` はこのために要る。どのマージが
-> イベントを発火させるかという根本のルールは
-> [ワークフローイベントを発火させるマージ](merge-events.md) にまとめてある。
-
-> **マージ完了をポーリングで待つ場合**、待ち時間は実際の CI 所要時間に合わせ、
-> タイムアウト時はステップを失敗させること。早々に諦めて成功を報告する
-> ポーリングは、その後ろにある全ステップを覆い隠す — このリポジトリ自身の
-> Webhook も、緑のチェックだけを残して無言でスキップされていた。そもそも
-> ポーリングは仕組みとして分が悪い。待ち時間はランナーの混み具合で決まり、
-> ジョブ側からは知りようがないからだ。
+`ADMIN_PAT` には必要最小限の権限を持つ所有者トークンを使い、リポジトリの
+Actions secret として保管し、リリース資格情報と同様にワークフローを保護する。
+auto-merge を有効化した主体が、後で完了するマージの主体になるため、このトークンが
+重要になる。`GITHUB_TOKEN` 名義のマージは `push` イベントを発火せず、
+`Closes #123` の Issue も閉じないが、所有者名義なら両方とも動く。マージ後の処理は
+このジョブ内でポーリングせず、`main` への `push` をトリガーとする別ワークフローに
+置く。実測結果とトレードオフは
+[ワークフローイベントを発火させるマージ](merge-events.md) を参照。
 
 ---
 

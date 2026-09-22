@@ -3,8 +3,6 @@ name: CI
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
   schedule:
     - cron: '0 17 * * *'  # Daily at 02:00 JST (17:00 UTC)
   workflow_dispatch:

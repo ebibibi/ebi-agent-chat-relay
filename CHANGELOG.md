@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Post-merge automation no longer races a polling timeout** (#752) — owner PRs now enable
+  auto-merge with `ADMIN_PAT`, making the eventual merge user-attributed. GitHub therefore emits a
+  `main` push event and closes linked issues natively. A new lightweight `post-merge.yml` workflow
+  reacts to that event to trigger the EbiBot upgrade, docs sync, and patch-version dispatch; the
+  40-minute polling loop and its explicit issue-closing workaround are gone. PR #758 verified the
+  exact auto-merge path end to end. CI and CodeQL continue to run on pull requests and schedules,
+  but not again on the resulting push, avoiding duplicate work on the single-capacity runner.
+
 - **Merging a PR closes the issue it links again** (#739, #747, #753) — `Closes #123` did nothing
   when the merge was completed by `github-actions`, and said nothing either. Measured across the
   last 25 merges: a PR merged by the repository owner closed its issue in 1-2 seconds, and not one
