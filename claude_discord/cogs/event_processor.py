@@ -60,6 +60,8 @@ def _backend_name_from_runner(runner: object) -> str:
         return "codex"
     if cls == "AgUiBackend":
         return "agui"
+    if cls == "PiRunner":
+        return "pi"
     return "claude"
 
 

@@ -61,6 +61,7 @@ def load_config() -> dict[str, str]:
         # the user switches backend at runtime via /backend.
         "claude_command": _env("CCDB_CLAUDE_COMMAND", "CLAUDE_COMMAND", ""),
         "codex_command": os.getenv("CCDB_CODEX_COMMAND", ""),
+        "pi_command": os.getenv("CCDB_PI_COMMAND", ""),
         "agui_url": os.getenv("CCDB_AGUI_URL", ""),
         "agui_token": os.getenv("CCDB_AGUI_TOKEN", ""),
         "model": _env("CCDB_MODEL", "CLAUDE_MODEL", default_model),
@@ -129,6 +130,9 @@ async def main() -> None:
         allowed_tools=allowed_tools,
         append_system_prompt=config["append_system_prompt"] or None,
         effort=config["effort"] or None,
+        pi_command=config["pi_command"]
+        or (config["command"] if backend_name == "pi" else "")
+        or "pi",
         agui_url=config["agui_url"] or None,
         agui_token=config["agui_token"] or None,
         api_secret=config["api_secret"] or None,

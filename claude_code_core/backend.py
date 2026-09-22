@@ -55,7 +55,7 @@ def create_backend(
     """Create a backend runner by name.
 
     Args:
-        backend: "claude", "codex", "local", or "agui".
+        backend: "claude", "codex", "local", "agui", or "pi".
         model: Model identifier (e.g. "sonnet", "o4-mini"). ``None`` lets the
             backend pick its own default — Codex omits ``--model`` and defers
             to its CLI config.
@@ -73,6 +73,10 @@ def create_backend(
         from .local_backend import LocalCodexRunner
 
         runner = LocalCodexRunner(model=model, **kwargs)  # type: ignore[arg-type]
+    elif backend == "pi":
+        from .pi_runner import PiRunner
+
+        runner = PiRunner(model=model, **kwargs)  # type: ignore[arg-type]
     elif backend == "agui":
         from .agui_backend import AgUiBackend
 

@@ -13,8 +13,9 @@ Teams app.
 | OpenAI Codex | local `codex` CLI | the CLI's existing login | Codex coding and review workflows |
 | Local | local `codex` CLI to an OpenAI-compatible `/v1/responses` endpoint | none by default | data that should stay on a controlled network |
 | AG-UI | HTTP request plus JSON server-sent events | optional bearer token | custom and hosted agents that implement AG-UI |
+| pi | local `pi` CLI | the CLI's own login or an API key | one agent over many providers, including subscriptions and local servers |
 
-All four work from both Discord and Microsoft Teams. The frontend controls message rendering,
+All five work from both Discord and Microsoft Teams. The frontend controls message rendering,
 buttons, files, and rate limits; the backend controls model execution and streamed events.
 
 ## Select a backend
@@ -32,6 +33,7 @@ On Discord, switch an individual conversation without restarting:
 /backend codex
 /backend local
 /backend agui
+/backend pi
 ```
 
 These are Discord slash commands, and a conversation override is persisted in SQLite so it survives
@@ -93,6 +95,42 @@ conversation state.
 
 See [AG-UI backend](agui-backend.md) for the event mapping, security boundary, and intentionally
 unsupported protocol features.
+
+## pi
+
+[pi](https://github.com/earendil-works/pi) is a terminal coding agent that normalises Anthropic,
+OpenAI, Google, GitHub Copilot and OpenAI-compatible local servers behind one CLI, and reads
+`AGENTS.md` and skills on its own.
+
+```bash
+npm install -g @earendil-works/pi-coding-agent
+pi          # then /login, once, to authorise a provider
+```
+
+```dotenv
+CCDB_PI_ALLOW_UNSANDBOXED=1
+```
+
+That opt-in is required, and ccdb refuses to spawn `pi` without it. pi documents that it has no
+built-in sandbox and shows no trust prompt in its non-interactive modes, so there is no setting
+that corresponds to the approval loop Claude Code offers: the tool allowlist passed through
+`CCDB_ALLOWED_TOOLS` is the only restriction that applies. Isolation has to come from the host —
+a container, a VM, or the worktree discipline every session prompt already carries.
+
+Project-local `.pi/` settings, skills and extensions are ignored unless
+`CCDB_PI_APPROVE_PROJECT=1` is also set, so a repository ccdb checks out cannot reconfigure the
+agent about to run inside it.
+
+Select a provider and model together, because pi resolves both from one value:
+
+```text
+/model anthropic/claude-sonnet
+/effort high
+```
+
+`/effort` maps to pi's thinking level, which includes an explicit `off`.
+
+See [pi backend](pi-backend.md) for the measured CLI contract and the event mapping.
 
 ## Mixing frontends and backends
 

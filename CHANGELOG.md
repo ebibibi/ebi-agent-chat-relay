@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **pi as a fifth backend** (#719) — [pi](https://github.com/earendil-works/pi) normalises many
+  providers behind one CLI, reads `AGENTS.md` and skills on its own, and runs a subscription the
+  operator already pays for, so it is a CLI-spawn backend like Claude Code and Codex rather than
+  something to reach through AG-UI. `/backend pi`, `/model <provider>/<id>` and `/effort` (pi's
+  thinking level, which includes `off`) work the same way they do elsewhere; `--append-system-prompt`
+  is native, so the lounge and concurrency notice need no config-override workaround. **The backend
+  refuses to spawn until `CCDB_PI_ALLOW_UNSANDBOXED=1` is set**: pi documents that it has no sandbox
+  and no approval loop in the non-interactive modes ccdb uses, so there is no `permission_mode` to
+  map, and a control ccdb cannot provide is surfaced rather than quietly dropped (ADR-0007). The
+  parser is built from recorded runs of pi 0.85.1, because three behaviours differ from the
+  published event list — the terminal event is `agent_settled`, usage is per assistant message, and
+  a failed turn arrives as an ordinary `message_end` with `stopReason: "error"` and exit code 0,
+  which a trusting parser would render as a successful empty answer. See `docs/pi-backend.md`.
+
 - **Spawn lineage: parent and child titles now match** (#700) — the `🤖` marker said a thread was
   started by an agent but not by *which* agent, so several concurrent fan-outs read as one flat pile
   of identical titles. `POST /api/spawn` takes `parent_thread_id`; both ends then carry the same

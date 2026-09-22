@@ -31,8 +31,15 @@ DEFAULT_MODEL: dict[str, str | None] = {
     "codex": None,
     "local": None,
     "agui": None,
+    "pi": None,
 }
-DEFAULT_COMMAND = {"claude": "claude", "codex": "codex", "local": "codex", "agui": "ag-ui"}
+DEFAULT_COMMAND = {
+    "claude": "claude",
+    "codex": "codex",
+    "local": "codex",
+    "agui": "ag-ui",
+    "pi": "pi",
+}
 
 
 class BackendFactory:
@@ -54,6 +61,7 @@ class BackendFactory:
         api_secret: str | None = None,
         agui_url: str | None = None,
         agui_token: str | None = None,
+        pi_command: str | None = None,
     ) -> None:
         self.claude_command = claude_command or DEFAULT_COMMAND["claude"]
         self.codex_command = codex_command or DEFAULT_COMMAND["codex"]
@@ -68,6 +76,7 @@ class BackendFactory:
         self.api_secret = api_secret
         self.agui_url = agui_url
         self.agui_token = agui_token
+        self.pi_command = pi_command or DEFAULT_COMMAND["pi"]
 
     def command_for(self, backend: str) -> str:
         if backend == "claude":
@@ -76,6 +85,8 @@ class BackendFactory:
             # The local backend is the same CLI, pointed at a ccdb-owned
             # CODEX_HOME that pins it to a model on your own hardware.
             return self.codex_command
+        if backend == "pi":
+            return self.pi_command
         if backend == "agui":
             return DEFAULT_COMMAND["agui"]
         raise ValueError(f"Unknown backend: {backend!r}")
@@ -120,7 +131,7 @@ class BackendFactory:
         # the operator's standing instructions silently Claude-only, which
         # matters most on `local`: a small model needs a short, blunt directive
         # far more than a frontier one does.
-        if backend in ("claude", "codex", "local") and self.append_system_prompt is not None:
+        if backend in ("claude", "codex", "local", "pi") and self.append_system_prompt is not None:
             kwargs["append_system_prompt"] = self.append_system_prompt
         # The env-level ``effort`` stays Claude-only. Codex effort is resolved
         # per-backend from BackendSettings at spawn time, and the valid values
