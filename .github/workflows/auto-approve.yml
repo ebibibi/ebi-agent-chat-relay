@@ -30,10 +30,11 @@ jobs:
     permissions:
       pull-requests: write
       contents: write
-      # Without this, a merge completed by GITHUB_TOKEN cannot close the
-      # issues the PR links, and they are left open with no error anywhere.
-      # Measured: PRs merged by `ebibibi` close their linked issue in 1-2s;
-      # every PR merged by `github-actions` left it open (#739).
+      # Needed by the explicit `gh issue close` below, not by GitHub's own
+      # closing of linked issues. Granting it here does not reach the merge
+      # GitHub completes later on this job's behalf: measured on #743, which
+      # merged at 04:51:44 and whose linked issues were still open when the
+      # loop looked at 04:51:52 (#739, #747).
       issues: write
     steps:
       - name: Approve PR
@@ -72,11 +73,14 @@ jobs:
             fi
             if [ "$STATE" = "MERGED" ]; then
               # --- Close the issues this PR declared it closes ---
-              # GitHub's own closure needs `issues: write` on the token that
-              # completes the merge, which this job now has. It is repeated
-              # explicitly because the failure mode is invisible — the issue is
-              # simply left open — and the repository's merge rules make an
-              # abandoned issue the thing the next PR has to work around (#739).
+              # This loop is load-bearing, not a belt-and-braces duplicate of
+              # GitHub's own closing of linked issues. Measured on #743: it
+              # merged at 04:51:44 and both linked issues were still open when
+              # this ran at 04:51:52, then closed by these calls. A merge that
+              # GitHub completes on this job's behalf does not carry the job's
+              # `issues: write`, so deleting this reintroduces #739 in silence,
+              # and under this repository's merge rules an abandoned issue is
+              # what the next PR then has to work around (#739, #747).
               LINKED=$(gh api graphql \
                 -f owner="${GITHUB_REPOSITORY%%/*}" \
                 -f name="${GITHUB_REPOSITORY##*/}" \

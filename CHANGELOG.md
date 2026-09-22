@@ -18,7 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   closed its issue in 1-2 seconds, and not one merged by `github-actions` ever closed it — the ones
   that look closed were closed by hand minutes to hours later. The job now has `issues: write`, and
   closes the PR's `closingIssuesReferences` explicitly as well, because the failure is invisible and
-  the repository cannot merge a PR without a live issue behind it.
+  the repository cannot merge a PR without a live issue behind it. Measured afterwards on the merge
+  that shipped this (#747): the explicit close is what does the work, because a merge GitHub
+  completes on the job's behalf does not carry the job's `issues: write` — so the loop is
+  load-bearing rather than redundant, and the comments say so.
 
 - **Waiting for the merge no longer gives up before CI finishes** (#742) — the post-merge poll ran
   for 15 minutes and then reported success, while the required checks now queue for 20 to 40 minutes
