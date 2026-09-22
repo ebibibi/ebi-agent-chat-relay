@@ -1113,6 +1113,10 @@ jobs:
     permissions:
       pull-requests: write
       contents: write
+      # A `permissions:` block grants exactly what it lists. Without this, the
+      # token that completes the merge cannot close the issues the PR links,
+      # and they are left open with no error anywhere.
+      issues: write
     steps:
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1121,6 +1125,12 @@ jobs:
           gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --approve
           gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --auto --squash
 ```
+
+> **If you poll for the merge afterwards**, size the window to what your CI
+> actually takes and fail the step on timeout. A poll that gives up early and
+> then reports success hides every step behind it — this repository's own
+> webhooks were skipped in silence that way, with nothing but a green check
+> to show for it.
 
 ---
 
