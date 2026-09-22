@@ -1113,9 +1113,8 @@ jobs:
     permissions:
       pull-requests: write
       contents: write
-      # A `permissions:` block grants exactly what it lists. Without this, the
-      # token that completes the merge cannot close the issues the PR links,
-      # and they are left open with no error anywhere.
+      # Needed to close linked issues yourself, below. It does not make GitHub
+      # close them for you — see the note under this example.
       issues: write
     steps:
       - env:
@@ -1126,11 +1125,33 @@ jobs:
           gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --auto --squash
 ```
 
+> **`Closes #123` does not close the issue when a bot merges the PR.** Measured
+> here: PRs merged by the repository owner closed their linked issue in one to
+> two seconds; not one merged by `github-actions` ever did, with no error
+> anywhere to say so. Adding `issues: write` to this job is *not* enough —
+> auto-merge is completed by GitHub later, and does not carry the permissions of
+> the job that enabled it. Close them yourself once you see the merge:
+>
+> ```bash
+> gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+>   --json closingIssuesReferences \
+>   --jq '.closingIssuesReferences[].number' \
+> | while read -r issue; do
+>     gh issue close "$issue" --repo "$GITHUB_REPOSITORY" --reason completed
+>   done
+> ```
+>
+> `closingIssuesReferences` covers both `Closes #123` in the body and a link made
+> from the PR's Development panel, and closing an already-closed issue is a
+> no-op, so this is safe to run on every merge. That is what `issues: write`
+> above is for.
+
 > **If you poll for the merge afterwards**, size the window to what your CI
 > actually takes and fail the step on timeout. A poll that gives up early and
 > then reports success hides every step behind it — this repository's own
 > webhooks were skipped in silence that way, with nothing but a green check
-> to show for it.
+> to show for it. A poll is a poor mechanism regardless: it is bounded by how
+> busy your runners are, which the job cannot know.
 
 ---
 

@@ -1113,9 +1113,8 @@ jobs:
     permissions:
       pull-requests: write
       contents: write
-      # `permissions:` ブロックは列挙したものだけを付与する。これが無いと
-      # マージを完了させたトークンは PR がリンクした Issue を閉じられず、
-      # どこにもエラーが出ないまま Issue が開いたまま残る。
+      # 下で自分で Issue を閉じるために必要。これを付けても GitHub が
+      # 代わりに閉じてくれるようにはならない（この例の下の注を参照）。
       issues: write
     steps:
       - env:
@@ -1126,10 +1125,32 @@ jobs:
           gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --auto --squash
 ```
 
+> **Bot がマージした PR では `Closes #123` は Issue を閉じない。** 実測では、
+> リポジトリ所有者がマージした PR はリンク先 Issue を 1〜2 秒で閉じたが、
+> `github-actions` がマージしたものは1件も閉じず、エラーもどこにも出なかった。
+> このジョブに `issues: write` を足すだけでは**足りない** — auto-merge を完了
+> させるのは後から動く GitHub 側であり、有効化したジョブの権限は引き継がれない。
+> マージを検知したら自分で閉じること:
+>
+> ```bash
+> gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+>   --json closingIssuesReferences \
+>   --jq '.closingIssuesReferences[].number' \
+> | while read -r issue; do
+>     gh issue close "$issue" --repo "$GITHUB_REPOSITORY" --reason completed
+>   done
+> ```
+>
+> `closingIssuesReferences` は本文の `Closes #123` と PR の Development 欄からの
+> 手動リンクの両方を拾い、閉じ済みの Issue を閉じても no-op なので、毎回のマージで
+> そのまま実行してよい。上の `issues: write` はこのために要る。
+
 > **マージ完了をポーリングで待つ場合**、待ち時間は実際の CI 所要時間に合わせ、
 > タイムアウト時はステップを失敗させること。早々に諦めて成功を報告する
 > ポーリングは、その後ろにある全ステップを覆い隠す — このリポジトリ自身の
-> Webhook も、緑のチェックだけを残して無言でスキップされていた。
+> Webhook も、緑のチェックだけを残して無言でスキップされていた。そもそも
+> ポーリングは仕組みとして分が悪い。待ち時間はランナーの混み具合で決まり、
+> ジョブ側からは知りようがないからだ。
 
 ---
 
