@@ -11,17 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Merging a PR closes the issue it links again** (#739) — the job that enables auto-merge declared
-  `pull-requests: write` and `contents: write`, and a `permissions:` block grants exactly what it
-  lists, so the token completing the merge had no way to close the linked issue and left it open
-  with no error anywhere. Measured across the last 25 merges: a PR merged by the repository owner
-  closed its issue in 1-2 seconds, and not one merged by `github-actions` ever closed it — the ones
-  that look closed were closed by hand minutes to hours later. The job now has `issues: write`, and
-  closes the PR's `closingIssuesReferences` explicitly as well, because the failure is invisible and
-  the repository cannot merge a PR without a live issue behind it. Measured afterwards on the merge
-  that shipped this (#747): the explicit close is what does the work, because a merge GitHub
-  completes on the job's behalf does not carry the job's `issues: write` — so the loop is
-  load-bearing rather than redundant, and the comments say so.
+- **Merging a PR closes the issue it links again** (#739, #747, #753) — `Closes #123` did nothing
+  when the merge was completed by `github-actions`, and said nothing either. Measured across the
+  last 25 merges: a PR merged by the repository owner closed its issue in 1-2 seconds, and not one
+  merged by `github-actions` ever did; the ones that looked closed had been closed by hand, minutes
+  to hours later. `auto-approve.yml` now closes the PR's `closingIssuesReferences` itself once it
+  sees the merge. That loop is the fix, not a safety net for the `issues: write` it was first
+  credited to — measured on the merge that shipped it, the permission was present and both linked
+  issues were still open eight seconds later, until the loop closed them. Auto-merge is completed by
+  GitHub afterwards and does not carry the permissions of the job that enabled it; `issues: write`
+  is there so the loop can run. The README example said the reverse in both languages, which would
+  have handed the same silent loss to anyone who copied it, and now carries the measurement and the
+  loop.
 
 - **Waiting for the merge no longer gives up before CI finishes** (#742) — the post-merge poll ran
   for 15 minutes and then reported success, while the required checks now queue for 20 to 40 minutes
