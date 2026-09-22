@@ -11,6 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Merging a PR closes the issue it links again** (#739) — the job that enables auto-merge declared
+  `pull-requests: write` and `contents: write`, and a `permissions:` block grants exactly what it
+  lists, so the token completing the merge had no way to close the linked issue and left it open
+  with no error anywhere. Measured across the last 25 merges: a PR merged by the repository owner
+  closed its issue in 1-2 seconds, and not one merged by `github-actions` ever closed it — the ones
+  that look closed were closed by hand minutes to hours later. The job now has `issues: write`, and
+  closes the PR's `closingIssuesReferences` explicitly as well, because the failure is invisible and
+  the repository cannot merge a PR without a live issue behind it.
+
+- **Waiting for the merge no longer gives up before CI finishes** (#742) — the post-merge poll ran
+  for 15 minutes and then reported success, while the required checks now queue for 20 to 40 minutes
+  on the single-capacity self-hosted pool. Everything downstream of that loop — the upgrade webhook,
+  the docs-sync webhook and the version-bump dispatch — was skipped in silence whenever it timed out,
+  which it did twice on the day #725 was fixed. The window is 40 minutes, a PR closed without merging
+  ends the wait quietly, and a genuine timeout now fails the job instead of hiding.
+
+### Fixed
+
 - **A drifted `uv.lock` no longer wedges the bump** (#731) — the bump rewrote the editable entry
   with a substitution keyed on the version that entry was expected to hold, so once a manual release
   updated `pyproject.toml` alone the substitution matched nothing and the guard stopped every bump
