@@ -63,6 +63,38 @@ Usage is summarised onto the terminal event as the **largest** single `input` se
 of `output`. Summing input would multiply the same context, which pi re-sends on every step of a
 multi-tool turn.
 
+## Choosing a model
+
+pi has no single provider, so `/model set` matters more here than on the other backends. Values are
+**fully qualified** — `anthropic/claude-opus-5`, `openai-codex/gpt-6-astra`, `ollama/gpt-oss:120b`.
+A bare id also works at the CLI, but it is a fuzzy *pattern*: `opus` resolves to whichever opus pi
+ranks first, so ccdb never offers one.
+
+The autocomplete is read from pi's own catalog on disk rather than from any vendor API:
+
+| File | Written by | Contains |
+|---|---|---|
+| `~/.pi/agent/models-store.json` | pi, on `pi update` | the providers pi fetched |
+| `~/.pi/agent/models.json` | the operator | hand-declared providers (a local Ollama endpoint, a gateway) |
+
+Both are read and merged, because the second is where the only model some installs can actually run
+appears — pi does not copy it into the store. Neither file being present degrades to a short static
+list. Point ccdb at a non-default location with `CCDB_PI_HOME`, or turn discovery off entirely with
+`CCDB_MODEL_DISCOVERY=0`.
+
+The store is what pi last fetched, so it can trail `pi --list-models`, which also draws on the
+catalog bundled with the npm package. Run `pi update` to refresh it. ccdb deliberately does not read
+the bundled catalog: it lives inside the package's `node_modules`, and it lists every provider pi
+*could* speak to rather than the ones this install is set up for. The field is free text either way
+— autocomplete narrows the common case, it does not restrict what can be entered.
+
+**Leaving the model unset is not neutral.** With no `--model`, pi resolves its own default from its
+catalog ranking, which is not necessarily a model the account's credentials can call — on pi 0.85.1
+that is `anthropic/claude-opus-4-8`, and an account without that entitlement gets a `400` for every
+turn with no way to change it from Discord except `/model set`. `CCDB_PI_MODEL` pins a deployment
+default so a fresh thread starts on a model that works; `/model set` still overrides it per thread
+or globally.
+
 ## Security
 
 pi states plainly that it has no built-in sandbox, that built-in tools run with the permissions of

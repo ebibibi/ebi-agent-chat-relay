@@ -20,7 +20,7 @@ from ..backend_settings import (
     CODEX_STATUS_MODES,
     BackendSettings,
 )
-from ..model_catalog import claude_model_choices, codex_model_choices
+from ..model_catalog import claude_model_choices, codex_model_choices, pi_model_choices
 
 if TYPE_CHECKING:
     from ..backend_factory import BackendFactory
@@ -65,6 +65,14 @@ SUGGESTED_MODELS: dict[str, list[tuple[str, str]]] = {
     "local": [
         ("gpt-oss:120b", "gpt-oss 120B (tool use, needs real VRAM)"),
         ("qwen3.5:35b", "Qwen3.5 35B"),
+    ],
+    # Fallback only — the live list comes from pi's own on-disk catalog
+    # (pi_model_choices), which is the only place the operator's hand-declared
+    # providers appear. Always fully qualified: pi's bare --model is a fuzzy
+    # pattern, so an unqualified id lets pi pick the provider.
+    "pi": [
+        ("anthropic/claude-opus-5", "Claude Opus 5"),
+        ("openai-codex/gpt-6-astra", "GPT-6-Astra"),
     ],
 }
 
@@ -244,6 +252,8 @@ class BackendCommandCog(commands.Cog):
             suggestions = await claude_model_choices(fallback=SUGGESTED_MODELS["claude"])
         elif backend == "codex":
             suggestions = codex_model_choices(fallback=SUGGESTED_MODELS["codex"])
+        elif backend == "pi":
+            suggestions = pi_model_choices(fallback=SUGGESTED_MODELS["pi"])
         else:
             suggestions = SUGGESTED_MODELS.get(backend, [])
         current_lower = current.lower()

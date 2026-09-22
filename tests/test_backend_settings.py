@@ -227,3 +227,44 @@ class TestEffort:
         s = await self._settings()
         with pytest.raises(ValueError):
             await s.set_effort("gpt4", "high")  # type: ignore[arg-type]
+
+
+class TestPiEnvModel:
+    """Without CCDB_PI_MODEL, pi picks its own default — possibly one the
+    account's credentials cannot call, with no way out from Discord."""
+
+    async def test_pi_env_default_is_resolved(self) -> None:
+        repo, _ = await _new_repo()
+        s = BackendSettings(
+            repo,
+            env_backend="pi",
+            env_model_for_claude="sonnet",
+            env_model_for_codex="",
+            env_model_for_pi="anthropic/claude-opus-5",
+        )
+        assert await s.current_model("pi") == "anthropic/claude-opus-5"
+        # It is a pi default only; the other backends keep their own.
+        assert await s.current_model("claude") == "sonnet"
+
+    async def test_unset_pi_env_still_defers_to_pi(self) -> None:
+        repo, _ = await _new_repo()
+        s = BackendSettings(
+            repo,
+            env_backend="pi",
+            env_model_for_claude="sonnet",
+            env_model_for_codex="",
+        )
+        assert await s.current_model("pi") is None
+
+    async def test_model_set_overrides_the_pi_env_default(self) -> None:
+        repo, _ = await _new_repo()
+        s = BackendSettings(
+            repo,
+            env_backend="pi",
+            env_model_for_claude="sonnet",
+            env_model_for_codex="",
+            env_model_for_pi="anthropic/claude-opus-5",
+        )
+        await s.set_model("pi", "ollama/gpt-oss:120b", thread_id=42)
+        assert await s.current_model("pi", 42) == "ollama/gpt-oss:120b"
+        assert await s.current_model("pi") == "anthropic/claude-opus-5"

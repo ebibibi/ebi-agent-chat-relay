@@ -253,3 +253,61 @@ class TestEffortAutocomplete:
         choices = await cog._effort_level_autocomplete(interaction, "min")
 
         assert [c.value for c in choices] == ["minimal"]
+
+
+class TestPiModelAutocomplete:
+    """The pi backend had no suggestions at all, so its model was unreachable."""
+
+    async def test_pi_backend_suggests_pi_models(self) -> None:
+        settings = await _settings()
+        await settings.set_backend("pi")
+        cog = _make_cog(settings)
+
+        choices = await cog._model_name_autocomplete(_channel_interaction(), "")
+
+        values = {c.value for c in choices}
+        assert values == {m for m, _ in SUGGESTED_MODELS["pi"]}
+        # No Claude aliases leaked in: pi resolves a bare alias by its own
+        # ranking, which is not a choice ccdb makes for the operator.
+        assert "sonnet" not in values
+
+    async def test_pi_suggestions_are_fully_qualified(self) -> None:
+        settings = await _settings()
+        await settings.set_backend("pi")
+        cog = _make_cog(settings)
+
+        choices = await cog._model_name_autocomplete(_channel_interaction(), "")
+
+        assert all("/" in c.value for c in choices)
+
+    async def test_pi_backend_surfaces_discovered_models(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A provider the operator added to ~/.pi must appear without a code change."""
+
+        def _discovered(*, fallback: list[tuple[str, str]]) -> list[tuple[str, str]]:
+            return [("ollama/gpt-oss:120b", "gpt-oss 120B")]
+
+        monkeypatch.setattr("claude_discord.cogs.backend_command.pi_model_choices", _discovered)
+        settings = await _settings()
+        await settings.set_backend("pi")
+        cog = _make_cog(settings)
+
+        choices = await cog._model_name_autocomplete(_channel_interaction(), "")
+
+        assert [c.value for c in choices] == ["ollama/gpt-oss:120b"]
+
+    async def test_pi_backend_ignores_claude_discovery(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def _discovered(*, fallback: list[tuple[str, str]]) -> list[tuple[str, str]]:
+            raise AssertionError("Claude discovery must not run for the pi backend")
+
+        monkeypatch.setattr("claude_discord.cogs.backend_command.claude_model_choices", _discovered)
+        settings = await _settings()
+        await settings.set_backend("pi")
+        cog = _make_cog(settings)
+
+        choices = await cog._model_name_autocomplete(_channel_interaction(), "")
+
+        assert choices

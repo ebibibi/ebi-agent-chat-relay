@@ -13,9 +13,9 @@ lookup all degrade to the caller's static fallback list. Nothing here ever
 raises into the Discord command path, and the token is only ever read to build a
 request header — never logged.
 
-Codex models are discovered too, but from the catalog the Codex CLI already
-fetched for itself on disk rather than from a second vendor API — see the
-"Codex" section at the bottom of this module.
+Codex and pi models are discovered too, but from the catalogs those CLIs
+already fetched for themselves on disk rather than from more vendor APIs — see
+the "Codex" and "pi" sections at the bottom of this module.
 
 Opt out with ``CCDB_MODEL_DISCOVERY=0``.
 """
@@ -310,4 +310,117 @@ def codex_model_choices(
     except (OSError, ValueError, AttributeError, TypeError) as exc:
         logger.warning("Codex model discovery failed, using static suggestions: %s", exc)
         return fallback
+    return choices or fallback
+
+
+# ── pi ─────────────────────────────────────────────────────────────────
+#
+# Same stance as Codex: pi already fetches its own catalog and writes it to
+# disk, so ccdb reads that instead of calling a third vendor API. Two files
+# make up the answer and both matter — ``models-store.json`` is what pi
+# downloaded for the providers it knows, and ``models.json`` is where the
+# operator declares their own (a local Ollama endpoint, a gateway). A thread
+# whose only usable provider is the hand-declared one would otherwise see a
+# dropdown that omits the only model it can run.
+#
+# Values are emitted fully qualified (``provider/id``) because pi's bare
+# ``--model`` is a fuzzy *pattern*: "opus" would resolve to whichever opus pi
+# ranks first, which is not a choice ccdb should make on the operator's behalf.
+
+#: Written by the pi CLI itself; ccdb only ever reads it.
+PI_MODELS_STORE = "models-store.json"
+#: Hand-written by the operator to declare extra providers.
+PI_MODELS_CUSTOM = "models.json"
+#: pi 0.85.1 has no config-dir env var of its own, so this override is ccdb's.
+PI_HOME_ENV = "CCDB_PI_HOME"
+
+
+def _pi_agent_dir(env: Mapping[str, str]) -> Path:
+    return Path(env.get(PI_HOME_ENV) or os.path.join(Path.home(), ".pi")) / "agent"
+
+
+def _pi_models_of(provider: str, entry: Any) -> list[tuple[str, str]]:
+    """``(provider/id, display name)`` pairs for one provider block."""
+    models = entry.get("models") if isinstance(entry, dict) else None
+    if not isinstance(models, list):
+        return []
+    pairs: list[tuple[str, str]] = []
+    for model in models:
+        if not isinstance(model, dict):
+            continue
+        model_id = model.get("id")
+        if not isinstance(model_id, str) or not model_id:
+            continue
+        name = model.get("name")
+        label = name if isinstance(name, str) and name else model_id
+        pairs.append((f"{provider}/{model_id}", label))
+    return pairs
+
+
+def parse_pi_models(
+    store: Mapping[str, Any] | None,
+    custom: Mapping[str, Any] | None,
+) -> list[tuple[str, str]]:
+    """Merge pi's fetched catalog and the operator's providers into choices.
+
+    ``store`` is ``models-store.json`` (``{provider: {"models": [...]}}``);
+    ``custom`` is ``models.json`` (``{"providers": {provider: {"models": ...}}}``).
+    Providers are sorted by name so the dropdown matches ``pi --list-models``,
+    and a provider present in both files contributes its models once.
+    """
+    by_provider: dict[str, list[tuple[str, str]]] = {}
+    sources: list[Mapping[str, Any]] = []
+    if isinstance(store, Mapping):
+        sources.append(store)
+    if isinstance(custom, Mapping) and isinstance(custom.get("providers"), Mapping):
+        sources.append(custom["providers"])
+
+    for source in sources:
+        for provider, entry in source.items():
+            if not isinstance(provider, str) or not provider:
+                continue
+            seen = {value for value, _ in by_provider.get(provider, [])}
+            for pair in _pi_models_of(provider, entry):
+                if pair[0] in seen:
+                    continue
+                seen.add(pair[0])
+                by_provider.setdefault(provider, []).append(pair)
+
+    return [pair for provider in sorted(by_provider) for pair in by_provider[provider]]
+
+
+def _read_json_or_none(path: Path) -> dict[str, Any] | None:
+    """Parse a catalog file, or ``None`` when it is absent or unusable.
+
+    Absent is the normal state for a fresh install, so it must not be louder
+    than a warning and must not stop the other file from being read.
+    """
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        logger.warning("pi model catalog %s is unreadable: %s", path.name, exc)
+        return None
+
+
+def pi_model_choices(
+    *,
+    fallback: list[tuple[str, str]],
+    env: Mapping[str, str] | None = None,
+) -> list[tuple[str, str]]:
+    """Suggestions for the pi ``/model`` autocomplete, read from disk.
+
+    Returns ``fallback`` when discovery is disabled or neither catalog file
+    yields a model, so an install that has never run pi still gets a dropdown.
+    No caching: these are local file reads, and pi rewrites them on ``pi update``.
+    """
+    env = os.environ if env is None else env
+    if env.get("CCDB_MODEL_DISCOVERY", "1").strip().lower() in {"0", "false", "no", "off"}:
+        return fallback
+    agent_dir = _pi_agent_dir(env)
+    choices = parse_pi_models(
+        _read_json_or_none(agent_dir / PI_MODELS_STORE),
+        _read_json_or_none(agent_dir / PI_MODELS_CUSTOM),
+    )
     return choices or fallback
