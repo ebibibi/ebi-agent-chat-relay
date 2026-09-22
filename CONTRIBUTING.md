@@ -195,8 +195,8 @@ unreadable path falls back to a generic prompt rather than dropping the work.
 
 This project uses automatic versioning — **you never need to manually bump the version** for regular contributions.
 
-- **Automatic patch bump**: Every PR merged to `main` triggers an automatic patch version increment (e.g., `1.3.0` → `1.3.1`). No release tag is created — the version is committed directly to `main`.
-- **Manual minor/major release**: To cut a minor or major release (e.g., `1.4.0`), update `pyproject.toml` and `CHANGELOG.md` manually, then include `[release]` in your PR title. This tags and publishes the current version as a GitHub Release without bumping the patch.
+- **Automatic patch bump**: Every PR merged to `main` triggers an automatic patch version increment (e.g., `1.3.0` → `1.3.1`). No release tag is created. The bump does not land on `main` directly — the `issue-driven-main` ruleset has an empty bypass list, so the workflow opens an `auto/bump-v<version>` PR (with an issue of its own, because the ruleset requires every PR to close one) and that PR is merged like any other. If a bump PR is already open, merges that land in the meantime collapse into it rather than opening a second one.
+- **Manual minor/major release**: To cut a minor or major release (e.g., `1.4.0`), update `pyproject.toml` and `CHANGELOG.md` manually, run `uv lock` so the editable entry in `uv.lock` carries the same version, then include `[release]` in your PR title. This tags and publishes the current version as a GitHub Release without bumping the patch.
 
 ## Adding a New Cog
 
