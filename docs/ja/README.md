@@ -1143,7 +1143,9 @@ jobs:
 >
 > `closingIssuesReferences` は本文の `Closes #123` と PR の Development 欄からの
 > 手動リンクの両方を拾い、閉じ済みの Issue を閉じても no-op なので、毎回のマージで
-> そのまま実行してよい。上の `issues: write` はこのために要る。
+> そのまま実行してよい。上の `issues: write` はこのために要る。どのマージが
+> イベントを発火させるかという根本のルールは
+> [docs/merge-events.md](../merge-events.md) にまとめてある。
 
 > **マージ完了をポーリングで待つ場合**、待ち時間は実際の CI 所要時間に合わせ、
 > タイムアウト時はステップを失敗させること。早々に諦めて成功を報告する
