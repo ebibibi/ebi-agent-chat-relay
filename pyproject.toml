@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "claude-code-discord-bridge"
-version = "4.1.3"
+version = "4.1.4"
 description = "Ebi Agent Chat Relay — run Claude Code, Codex, local, and AG-UI agents from Discord or Microsoft Teams"
 readme = "README.md"
 license = {text = "MIT"}
