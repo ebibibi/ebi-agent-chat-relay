@@ -3,20 +3,70 @@
 > **Nota:** Esta é uma versão autotraduzida da documentação original em inglês.
 > Em caso de discrepâncias, a [versão em inglês](../../README.md) prevalece.
 
-# Claude & Codex Discord Bridge
+# Ebi Agent Chat Relay
 
-*Nome do pacote: `claude-code-discord-bridge` (kebab-case)*
+*Antes Claude Code Discord Bridge e depois Claude & Codex Discord Bridge. Todos os
+identificadores existentes continuam funcionando: o pacote é `claude-code-discord-bridge`
+(kebab-case), o comando é `ccdb`, e `ccdb` segue sendo o nome curto usado em todo este
+documento.*
 
 [![CI](https://github.com/ebibibi/ebi-agent-chat-relay/actions/workflows/ci.yml/badge.svg)](https://github.com/ebibibi/ebi-agent-chat-relay/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/ebibibi/ebi-agent-chat-relay/actions/workflows/codeql.yml/badge.svg)](https://github.com/ebibibi/ebi-agent-chat-relay/actions/workflows/codeql.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Use Claude Code _ou_ OpenAI Codex no seu celular. Múltiplas threads. Tudo ao mesmo tempo. Desenvolvimento real incluído.**
+**Execute agentes de programação a partir do Discord ou do Microsoft Teams. Escolha
+Claude Code, OpenAI Codex, um modelo local ou qualquer agente AG-UI compatível por trás da
+mesma conversa.**
 
-Abra o Claude Code ou o OpenAI Codex no app do Discord do seu smartphone, inicie múltiplas threads e execute sessões de desenvolvimento em paralelo — tudo sem tocar em um teclado. Cada thread do Discord se torna uma sessão de IA totalmente isolada. Trabalhe em uma feature em uma thread, revise um PR em outra e execute uma tarefa em segundo plano em uma terceira — simultaneamente, misturando até mesmo backends por thread. A bridge cuida de toda a coordenação para que as sessões nunca atropelem umas às outras.
+O Ebi Agent Chat Relay transforma cada thread do Discord ou conversa do Teams em uma sessão
+de agente isolada e persistente. Desenvolva uma funcionalidade em uma conversa, revise um PR
+em outra e rode uma tarefa em segundo plano numa terceira — ao mesmo tempo. O Discord pode
+misturar backends por thread; no v4, o Teams usa o backend global configurado. O relay cuida
+da coordenação para que as sessões não atropelem umas às outras.
 
-**Use suas assinaturas existentes. Sem malabarismos com API keys.** ccdb roda sobre as CLIs oficiais — Claude Code (inclusa na sua [assinatura Claude Pro/Max](https://claude.ai/pricing)) e OpenAI Codex (incluso no [ChatGPT Plus/Pro/Business](https://chatgpt.com)). Troque de backend com `/backend` ou defina uma substituição por thread — seu time acessa ambas as IAs pelo Discord a um custo previsível.
+**Por que o nome mudou.** Isto começou como uma ponte entre uma IA e um aplicativo de chat.
+Hoje é um relay com dois frontends em produção e cinco opções de backend. Três das quatro
+palavras do nome antigo deixaram de ser verdade. Veja o
+[ADR-0001](../adr/0001-adopt-ebi-agent-chat-relay.md) para a decisão e o
+[plano de renomeação](../RENAME_PLAN.md) para a transição que preserva a compatibilidade.
+
+**Use suas assinaturas atuais, sua própria infraestrutura ou um agente remoto.** O ccdb pode
+executar as CLIs oficiais do Claude Code e do Codex, um endpoint local compatível com Codex,
+um agente AG-UI via HTTP/SSE, ou a CLI do pi. O Discord expõe a troca de `/backend` em tempo
+de execução; no v4, o Teams usa o backend configurado através da mesma factory.
+
+## Novidades do v4
+
+A versão 4 torna explícitas duas escolhas independentes: **onde as pessoas conversam** e
+**qual agente faz o trabalho**. Qualquer frontend suportado pode usar qualquer backend
+suportado.
+
+### Frontend × backend
+
+| | Claude Code | OpenAI Codex | Local | AG-UI | pi |
+|---|---:|---:|---:|---:|---:|
+| Discord | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Microsoft Teams | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+- **Discord** continua sendo o padrão sem migração. Implantações existentes iniciam
+  exatamente como antes.
+- **Microsoft Teams** está pronto para produção por meio de um pequeno receptor público e de
+  um `ActivityPuller` somente-saída no host privado de sessões. Discord e Teams podem rodar
+  juntos em um único processo com `CCDB_FRONTENDS=discord,teams`.
+- **AG-UI** conecta qualquer uma das superfícies de chat a um agente HTTP/SSE que implemente
+  o Agent–User Interaction Protocol. Claude Code, Codex e o backend local protegido continuam
+  disponíveis.
+- **pi** executa a CLI do [pi](https://github.com/earendil-works/pi), que alcança Anthropic,
+  OpenAI, Google, GitHub Copilot e servidores locais compatíveis com OpenAI através de um
+  único agente. Ela não tem sandbox nos modos não interativos usados pelo ccdb, então se
+  recusa a iniciar até que `CCDB_PI_ALLOW_UNSANDBOXED=1` declare que o isolamento do próprio
+  host é confiável.
+
+Comece pelo [guia de backends](../backends.md). Para o Teams, siga o
+[guia completo de configuração do Microsoft Teams](../teams-setup.md) e depois use as
+referências mais detalhadas de [comportamento da superfície](../teams.md) e
+[modelo de segurança do relay](../teams-relay.md).
 
 **[English](../../README.md)** | **[日本語](../ja/README.md)** | **[简体中文](../zh-CN/README.md)** | **[한국어](../ko/README.md)** | **[Español](../es/README.md)** | **[Français](../fr/README.md)**
 
@@ -277,7 +327,7 @@ Se o bot reiniciar no meio de uma sessão, as sessões Claude interrompidas são
 
 O ccdb 3.0 introduz três comandos slash que mudam qual IA lida com a próxima sessão, sem reiniciar o bot:
 
-- `/backend [name] [scope]` — mostra ou troca o backend. `name` é `claude` ou `codex`. `scope` é `thread` (apenas esta thread) ou `global` (padrão de todo o servidor). Quando você omite `scope`, o comando resolve automaticamente: em uma thread, ele se aplica àquela thread; caso contrário, define o padrão global.
+- `/backend [name] [scope]` — mostra ou troca o backend. `name` é `claude`, `codex`, `local`, `agui` ou `pi`. `scope` é `thread` (apenas esta thread) ou `global` (padrão de todo o servidor). Quando você omite `scope`, o comando resolve automaticamente: em uma thread, ele se aplica àquela thread; caso contrário, define o padrão global.
 - `/model [name] [scope]` — mostra ou troca o modelo usado pelo backend **atual**. Cada backend lembra sua própria preferência de modelo, então alternar o backend de um lado para o outro mantém seus modelos favoritos intactos. Deixe o modelo de um backend sem definir para adiar ao padrão da própria CLI (por exemplo, o Codex usa o `model` em `~/.codex/config.toml`, então o ccdb rastreia o padrão do console em vez de fixar uma versão).
 - `/effort [level] [scope]` — mostra ou troca o **esforço de raciocínio (reasoning effort)** usado pelo backend atual. Os níveis válidos são específicos de cada backend: o Claude aceita `low/medium/high/max`; o Codex aceita `low/medium/high/xhigh/max/ultra` (mapeado para o `model_reasoning_effort` da CLI). Deixe sem definir para adiar ao padrão da CLI.
 
