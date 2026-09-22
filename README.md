@@ -19,14 +19,14 @@ configured/global backend in v4. The relay handles coordination so sessions do n
 other.
 
 **Why the name changed.** This started as a bridge between one AI and one chat app. It is now a
-relay with two production frontends and four backend choices. Three of the four words in the old
+relay with two production frontends and five backend choices. Three of the four words in the old
 name had stopped being true. See [ADR-0001](docs/adr/0001-adopt-ebi-agent-chat-relay.md) for the
 decision and [the rename plan](docs/RENAME_PLAN.md) for the compatibility-preserving transition.
 
 **Use your existing subscriptions, your own infrastructure, or a remote agent.** ccdb can run the
-official Claude Code and Codex CLIs, a Codex-compatible local endpoint, or an AG-UI HTTP/SSE
-agent. Discord exposes runtime `/backend` switching; Teams uses the configured backend through the
-same factory in v4.
+official Claude Code and Codex CLIs, a Codex-compatible local endpoint, an AG-UI HTTP/SSE agent,
+or the pi CLI. Discord exposes runtime `/backend` switching; Teams uses the configured backend
+through the same factory in v4.
 
 ## What's new in v4
 
@@ -46,6 +46,10 @@ work**. Any supported frontend can use any supported backend.
   with `CCDB_FRONTENDS=discord,teams`.
 - **AG-UI** connects either chat surface to an HTTP/SSE agent implementing the Agent–User
   Interaction Protocol. Claude Code, Codex, and the guarded local backend remain available.
+- **pi** runs the [pi](https://github.com/earendil-works/pi) CLI, which reaches Anthropic,
+  OpenAI, Google, GitHub Copilot and OpenAI-compatible local servers through one agent. It has
+  no sandbox in the non-interactive modes ccdb uses, so it refuses to spawn until
+  `CCDB_PI_ALLOW_UNSANDBOXED=1` states that the host's own isolation is trusted.
 
 Start with the [backend guide](docs/backends.md). For Teams, follow the complete
 [Microsoft Teams setup guide](docs/teams-setup.md), then use the deeper
@@ -560,6 +564,7 @@ Behind the scenes:
 - **Credential files stay untracked** — `.gitignore` covers `.env.*`, not just `.env`, because operators leave dated backups (`.env.bak-…`) beside the real file and each one holds a live bot token; `.env.example` is re-included explicitly so the template stays tracked
 - **Local-model backend** (optional) — `/backend local` runs a thread against a model on your own hardware. ccdb owns a separate CLI home with the update check and analytics disabled, because a "local" run otherwise still contacts the vendor; it refuses to start if those settings are missing — see [docs/local-backend.md](docs/local-backend.md. `/ollama` manages that runtime from Discord, and the model in use is whatever was selected there — there is no environment variable that can silently disagree with it)
 - **Remote AG-UI backend** (optional) — `/backend agui` connects the existing Discord/Teams session machinery to any HTTP/SSE AG-UI agent while preserving ccdb's session ledger, rendering, cancellation, and operational controls — see [docs/agui-backend.md](docs/agui-backend.md)
+- **pi backend** (optional) — `/backend pi` runs the [pi](https://github.com/earendil-works/pi) CLI, which normalises Anthropic, OpenAI, Google, GitHub Copilot and OpenAI-compatible local servers behind one agent. pi has no sandbox and no approval loop in its non-interactive modes, so ccdb refuses the turn until `CCDB_PI_ALLOW_UNSANDBOXED=1` is set in the deployment environment (never per thread, or any Discord user could grant it to themselves), and declines project-local `.pi/` settings, skills and extensions unless `CCDB_PI_APPROVE_PROJECT=1` — see [docs/pi-backend.md](docs/pi-backend.md)
 - **`/ask` — explicit escalation** (optional) — sends one anonymized, self-contained question to a strong external model with no project context, no files and no tools, then restores your real names in the answer; tools are an empty *allow* list (`--tools ""`) rather than a deny list that has to be rewritten for every tool the CLI adds, and the isolation is verified before every spawn. A local judge first checks that replacement did not hide the very subject of the question — asking for "the pros and cons of `org-002`" is perfectly anonymized and unanswerable — and withholds it if so (`force: true` overrides) — see [docs/escalation.md](docs/escalation.md)
 - **Anonymization gateway** (optional) — Replaces organisation-identifying terms with stable aliases before the prompt reaches Claude or Codex, and restores them in the answer. A local model checks the result for replacement misses and, by default, blocks the send when it finds one; `CCDB_ANONYMIZE_POLICY=adopt` instead mints an alias for the reported term into the mapping table and sends, so a new customer name does not stop the command until someone hand-edits the rules file. Off until you write a rules file — see [docs/anonymization.md](docs/anonymization.md)
 
@@ -908,7 +913,7 @@ for idle deadlines, attachment retries, credentials and startup rollback.
 |----------|-------------|---------|
 | `DISCORD_BOT_TOKEN` | Your Discord bot token | (required) |
 | `DISCORD_CHANNEL_ID` | Channel ID for Claude chat | (required) |
-| `CCDB_BACKEND` | Backend to use: `claude`, `codex`, `local`, or `agui` | `claude` |
+| `CCDB_BACKEND` | Backend to use: `claude`, `codex`, `local`, `agui`, or `pi` | `claude` |
 | `CCDB_COMMAND` | Path or name of the CLI binary (overrides `CLAUDE_COMMAND`). Used by the initial runner picked from `CCDB_BACKEND`; superseded by the two per-backend variables below when `/backend` switches at runtime. | _(auto: `claude` or `codex`)_ |
 | `CCDB_CLAUDE_COMMAND` | Explicit path to the Claude CLI binary. Used by `BackendFactory` whenever `/backend claude` is active, regardless of the initial `CCDB_BACKEND`. Falls back to `CLAUDE_COMMAND`, then `claude` (PATH). | (optional) |
 | `CCDB_CODEX_COMMAND` | Explicit path to the OpenAI Codex CLI binary. Required when running the bot under systemd (default service PATH does not include `~/.npm-global/bin`). Falls back to `codex` (PATH). | (optional) |
