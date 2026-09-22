@@ -114,8 +114,13 @@ jobs:
           BRANCH="auto/bump-v$RELEASE_VERSION"
 
           sed -i "s/^version = \"$CURRENT\"/version = \"$RELEASE_VERSION\"/" pyproject.toml
+          # Matched by position in the editable entry, not by the version it
+          # currently holds: a manual release that touches pyproject.toml and
+          # forgets uv.lock leaves the two out of step, and a sed keyed on
+          # $CURRENT then silently matches nothing and wedges every bump
+          # afterwards. This rewrite also repairs that drift.
           sed -i \
-            "/^name = \"claude-code-discord-bridge\"$/,/^source = { editable = \"\.\" }$/ s/^version = \"$CURRENT\"/version = \"$RELEASE_VERSION\"/" \
+            "/^name = \"claude-code-discord-bridge\"$/,/^source = { editable = \"\.\" }$/ s/^version = \".*\"$/version = \"$RELEASE_VERSION\"/" \
             uv.lock
 
           if ! grep -A2 '^name = "claude-code-discord-bridge"$' uv.lock \
@@ -124,9 +129,19 @@ jobs:
             exit 1
           fi
 
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git add pyproject.toml uv.lock
+          git commit -m "chore: bump version to $RELEASE_VERSION"
+          # --force-with-lease so a branch left behind by an abandoned run
+          # cannot block the push, while a branch someone else advanced does.
+          git push --force-with-lease origin "$BRANCH"
+
           # The ruleset requires every PR to close an issue, and the exemption
           # in require-linked-issue.yml only covers bot authors. This PR is
-          # authored by the PAT owner, so it needs an issue of its own.
+          # authored by the PAT owner, so it needs an issue of its own. Created
+          # only once the branch is up, so a failed push leaves no orphan.
           ISSUE_BODY=$(printf '%s\n' \
             "Automated patch bump from \`$CURRENT\` to \`$RELEASE_VERSION\` after a PR merge." \
             "" \
@@ -137,15 +152,6 @@ jobs:
             --body "$ISSUE_BODY")
           ISSUE_NUMBER="${ISSUE_URL##*/}"
           echo "Created issue #$ISSUE_NUMBER"
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch -c "$BRANCH"
-          git add pyproject.toml uv.lock
-          git commit -m "chore: bump version to $RELEASE_VERSION"
-          # --force-with-lease so a branch left behind by an abandoned run
-          # cannot block the push, while a branch someone else advanced does.
-          git push --force-with-lease origin "$BRANCH"
 
           PR_BODY=$(printf '%s\n' \
             "Automated patch bump from \`$CURRENT\` to \`$RELEASE_VERSION\`." \

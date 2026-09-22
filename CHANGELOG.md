@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A drifted `uv.lock` no longer wedges the bump** (#731) — the bump rewrote the editable entry
+  with a substitution keyed on the version that entry was expected to hold, so once a manual release
+  updated `pyproject.toml` alone the substitution matched nothing and the guard stopped every bump
+  that followed. The version is now matched by its position inside the entry, which repairs the
+  drift instead of stalling on it, and `uv.lock` is brought back in step with `pyproject.toml`. The
+  bump issue is also created only after the branch is pushed, so a failed push leaves no orphan.
+
 - **Automatic patch bumps work again** (#725) — `auto-version-bump.yml` pushed the bump straight to
   `main` with an admin PAT, on the assumption that an admin bypasses the branch ruleset. The
   `issue-driven-main` ruleset is created with an empty bypass list on purpose, so every run since
