@@ -42,10 +42,10 @@ Version 4 では、**人がどこで会話するか**と**どのエージェン�
 
 ### フロントエンド × バックエンド
 
-| | Claude Code | OpenAI Codex | Local | AG-UI |
-|---|---:|---:|---:|---:|
-| Discord | ✅ | ✅ | ✅ | ✅ |
-| Microsoft Teams | ✅ | ✅ | ✅ | ✅ |
+| | Claude Code | OpenAI Codex | Local | AG-UI | pi |
+|---|---:|---:|---:|---:|---:|
+| Discord | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Microsoft Teams | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 - **Discord** は移行不要のデフォルトです。既存環境はこれまでとまったく同じように起動します。
 - **Microsoft Teams** は、小さな公開レシーバーと、プライベートなセッションホストから outbound 接続する
@@ -413,7 +413,7 @@ Bot の再起動中にセッションが中断された場合、Bot が再起動
 
 ccdb 3.0 では、Bot を再起動せずにどの AI が次のセッションを処理するかを切り替える 3 つのスラッシュコマンドが追加されました:
 
-- `/backend [name] [scope]` — バックエンドの表示または切り替え。`name` は `claude`、`codex`、`local`、または `agui`。`scope` は `thread`（このスレッドのみ）または `global`（サーバー全体のデフォルト）。`scope` を省略すると自動解決: スレッド内ではそのスレッドにスコープ、それ以外ではグローバルデフォルトを設定。
+- `/backend [name] [scope]` — バックエンドの表示または切り替え。`name` は `claude`、`codex`、`local`、`agui`、または `pi`。`scope` は `thread`（このスレッドのみ）または `global`（サーバー全体のデフォルト）。`scope` を省略すると自動解決: スレッド内ではそのスレッドにスコープ、それ以外ではグローバルデフォルトを設定。
 - `/model [name] [scope]` — **現在の**バックエンドで使用するモデルの表示または切り替え。各バックエンドは独自のモデル設定を記憶するため、バックエンドを切り替えても好みのモデルが保持されます。バックエンドのモデルを未設定にすると、その CLI 自身のデフォルトに委ねられます（たとえば Codex は `~/.codex/config.toml` の `model` を使用するため、ccdb が特定バージョンに固定せずコンソールのデフォルトに追従します）。
   `name` のオートコンプリートは**実行時に取得**されます。ccdb が Anthropic のモデル一覧エンドポイントへ（Claude Code CLI がすでに持っている認証情報を使って）アカウントから見えるモデルを問い合わせるため、今朝リリースされたばかりのモデルでも ccdb をアップグレードすることなくドロップダウンに現れます。エイリアス（`opus`、`sonnet` など）には、現時点でそのエイリアスが解決される実際のモデルが併記されます。オフライン時・未認証時・Bedrock/Vertex/Foundry 利用時は、小さな静的リストへ黙ってフォールバックします。`CCDB_MODEL_DISCOVERY=0` を設定すると常にその静的リストを使用します。Codex の候補も同様に実行時に取得されますが、こちらはローカルで完結します。Codex CLI にはモデル一覧のコマンドがないため、ccdb は **CLI 自身がすでに取得してディスクへ書き出したカタログ**（`$CODEX_HOME/models_cache.json`）を読みます。OpenAI を呼び出すのは ccdb ではなく Codex CLI です。そのため `gpt-6-astra` のような新世代も、Codex CLI が一度それを見た時点でドロップダウンに現れます。このホストで Codex CLI を一度も実行していない場合は、小さな静的リストへフォールバックします。いずれの場合も、任意の id を直接入力すれば従来どおり動作します。
 - `/effort [level] [scope]` — 現在のバックエンドで使用する**推論の強度**の表示または切り替え。有効なレベルはバックエンドごとに異なり、Claude は `low/medium/high/max`、Codex は `minimal/low/medium/high/xhigh/max/ultra`（CLI の `model_reasoning_effort` にマッピング）を受け付けます。この Codex 側の一覧は**モデル横断の和集合**であり、どれか 1 つのモデルが全部を受け付けるという意味ではありません — `minimal` は旧世代の GPT-5.x のみ、`max`/`ultra` は GPT-5.6 と GPT-6 のみが対応します。選択中のモデルが対応しないレベルは Codex CLI 側が拒否し、そのエラーはスレッドに届きます。未設定にすると CLI のデフォルトに委ねられます。
@@ -915,6 +915,9 @@ CHAT_ONLY_CHANNEL_IDS=444,555
 | `CCDB_CODEX_SANDBOX_OVERRIDE` | Codex の `--sandbox` をデプロイ全体で上書きする任意設定: `read-only`、`workspace-write`、`danger-full-access`。未設定なら Codex CLI のデフォルトを使用します。`danger-full-access` は、ホスト側の外側の隔離が信頼でき、かつ OS の namespace 制限によって Codex 自身の sandbox が起動できない場合にのみ使ってください。この設定はスレッド単位では意図的に公開していません。 | （オプション） |
 | `CCDB_AGUI_URL` | `/backend agui` で使用する正確な HTTP(S) run endpoint。redirect は拒否されます。 | （`agui` では必須） |
 | `CCDB_AGUI_TOKEN` | AG-UI endpoint 用の任意の bearer token。Claude/Codex subprocess の環境から除去されます。 | （オプション） |
+| `CCDB_PI_COMMAND` | [pi](https://github.com/earendil-works/pi) CLI バイナリの明示的なパス。`pi`（PATH）へのフォールバックあり。 | （オプション） |
+| `CCDB_PI_ALLOW_UNSANDBOXED` | `/backend pi` の起動を許可する場合に `1`。pi は非対話モードで sandbox も承認ループも持たないため、既定では ccdb がターンを拒否します。[pi バックエンド](../pi-backend.md) 参照。 | `0`（バックエンドは拒否） |
+| `CCDB_PI_APPROVE_PROJECT` | プロジェクト固有の `.pi/` 設定・skill・extension を pi に読み込ませる場合に `1`。チェックアウトしたリポジトリが、その中で動くエージェントを再設定できないよう既定はオフです。 | `0` |
 | `PATH` | Bot **と Bot が起動する全 CLI セッション**のバイナリ検索パス（セッションは Bot の環境を継承）。systemd はユニットを最小限の PATH で起動し `~/.bashrc` / `~/.profile` を読まないため、systemd 運用時は `.env` に設定する。[ツールチェーンの PATH](#ツールチェーンの-path--env-に設定する) 参照 | （親プロセスから継承） |
 | `CCDB_MODEL` | 使用するモデル（`CLAUDE_MODEL` より優先） | `sonnet` |
 | `CCDB_MODEL_DISCOVERY` | `0` にすると、`/model` のオートコンプリートが Anthropic のモデル一覧エンドポイントへ「この認証情報から見えるモデル」を問い合わせるのをやめ（あわせて Codex CLI のローカルモデルカタログの読み取りもやめ）、常に静的な候補リストを使用する。この問い合わせは読み取り専用で、Claude Code CLI 自身の認証情報を再利用し、オフライン時・未認証時・Bedrock/Vertex/Foundry 利用時には自動的にフォールバックする | `1` |

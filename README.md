@@ -35,10 +35,10 @@ work**. Any supported frontend can use any supported backend.
 
 ### Frontend × backend
 
-| | Claude Code | OpenAI Codex | Local | AG-UI |
-|---|---:|---:|---:|---:|
-| Discord | ✅ | ✅ | ✅ | ✅ |
-| Microsoft Teams | ✅ | ✅ | ✅ | ✅ |
+| | Claude Code | OpenAI Codex | Local | AG-UI | pi |
+|---|---:|---:|---:|---:|---:|
+| Discord | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Microsoft Teams | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 - **Discord** remains the zero-migration default. Existing deployments start exactly as before.
 - **Microsoft Teams** is production-ready through a small public receiver and an outbound-only
@@ -410,7 +410,7 @@ If the bot restarts mid-session, interrupted Claude sessions are automatically r
 
 ccdb 3.0 introduces three slash commands that change which AI handles the next session, with no bot restart:
 
-- `/backend [name] [scope]` — show or switch backend. `name` is `claude`, `codex`, `local`, or `agui`. `scope` is `thread` (this thread only) or `global` (server-wide default). When you omit `scope`, the command auto-resolves: in a thread it scopes to that thread, otherwise it sets the global default.
+- `/backend [name] [scope]` — show or switch backend. `name` is `claude`, `codex`, `local`, `agui`, or `pi`. `scope` is `thread` (this thread only) or `global` (server-wide default). When you omit `scope`, the command auto-resolves: in a thread it scopes to that thread, otherwise it sets the global default.
 - `/model [name] [scope]` — show or switch the model used by the **current** backend. Each backend remembers its own model preference, so flipping backend back and forth keeps your favoured models intact. Leave a backend's model unset to defer to that CLI's own default (e.g. Codex uses the `model` in `~/.codex/config.toml`, so ccdb tracks the console default instead of pinning a version).
   The `name` autocomplete is **discovered live**: ccdb asks the Anthropic models endpoint (using the credentials the Claude Code CLI already has) which models your account can see, so a model released this morning shows up in the dropdown without a ccdb upgrade. Aliases (`opus`, `sonnet`, …) are labelled with the model they currently resolve to. Offline, unauthenticated, or on Bedrock/Vertex/Foundry it silently falls back to a small static list; set `CCDB_MODEL_DISCOVERY=0` to always use that list. Codex suggestions are discovered too, but locally: the Codex CLI exposes no model listing, so ccdb reads the catalog the CLI already fetched for itself (`$CODEX_HOME/models_cache.json`) rather than calling OpenAI — a new generation such as `gpt-6-astra` appears as soon as the Codex CLI has seen it. Never run the Codex CLI on this host and it falls back to a small static list. Any id you type still works.
 - `/effort [level] [scope]` — show or switch the **reasoning effort** used by the current backend. Valid levels are backend-specific: Claude accepts `low/medium/high/max`; Codex accepts `minimal/low/medium/high/xhigh/max/ultra` (mapped to the CLI's `model_reasoning_effort`). That Codex set is the *union* across models, not what any one model takes — `minimal` is offered by the older GPT-5.x models only, and `max`/`ultra` by GPT-5.6 and GPT-6 only. The Codex CLI rejects a level its selected model does not support, and that error reaches the thread. Leave it unset to defer to the CLI default.
@@ -915,6 +915,9 @@ for idle deadlines, attachment retries, credentials and startup rollback.
 | `CCDB_CODEX_SANDBOX_OVERRIDE` | Optional deployment-wide Codex `--sandbox` override: `read-only`, `workspace-write`, or `danger-full-access`. Leave unset to use the Codex CLI default. Use `danger-full-access` only when the host's outer isolation is trusted and OS namespace restrictions prevent Codex's own sandbox from starting. This setting is intentionally not exposed per thread. | (optional) |
 | `CCDB_AGUI_URL` | Exact HTTP(S) run endpoint for `/backend agui`. Redirects are rejected. | (required for `agui`) |
 | `CCDB_AGUI_TOKEN` | Optional bearer token for the AG-UI endpoint. Stripped from Claude/Codex subprocess environments. | (optional) |
+| `CCDB_PI_COMMAND` | Explicit path to the [pi](https://github.com/earendil-works/pi) CLI binary. Falls back to `pi` (PATH). | (optional) |
+| `CCDB_PI_ALLOW_UNSANDBOXED` | Set to `1` to allow `/backend pi` to spawn at all. pi has no sandbox and no approval loop in its non-interactive modes, so ccdb refuses the turn instead of running unsandboxed by default. See [pi backend](docs/pi-backend.md). | `0` (backend refuses) |
+| `CCDB_PI_APPROVE_PROJECT` | Set to `1` to let pi load project-local `.pi/` settings, skills and extensions. Off by default so a checked-out repository cannot reconfigure the agent running inside it. | `0` |
 | `PATH` | Binary search path for the bot **and every CLI session it spawns** — sessions inherit the bot's environment. Set it in `.env` when running under systemd, which starts units with a minimal PATH and never reads `~/.bashrc` / `~/.profile`. See [Toolchain PATH](#toolchain-path--set-it-in-env). | (inherited from the parent process) |
 | `CCDB_MODEL` | Model to use (overrides `CLAUDE_MODEL`) | `sonnet` |
 | `CCDB_MODEL_DISCOVERY` | Set to `0` to stop the `/model` autocomplete from asking the Anthropic models endpoint which models your credentials can see (and from reading the Codex CLI's local model catalog), and always use the static suggestion list instead. Discovery is read-only, reuses the Claude Code CLI's own auth, and already falls back on its own when offline, unauthenticated, or on Bedrock/Vertex/Foundry | `1` |

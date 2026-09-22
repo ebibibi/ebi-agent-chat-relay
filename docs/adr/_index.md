@@ -12,3 +12,4 @@ earlier ADR instead of rewriting its history.
 - [ADR-0004: Add AG-UI as an optional backend transport](0004-add-ag-ui-as-an-optional-backend.md)
 - [ADR-0005: Classify new optional backends as minor releases](0005-classify-feature-backends-as-minor-releases.md)
 - [ADR-0006: Publish the multi-frontend platform as version 4](0006-publish-the-multi-frontend-platform-as-v4.md)
+- [ADR-0007: Require an operator opt-in for the unsandboxed pi backend](0007-require-an-opt-in-for-the-unsandboxed-pi-backend.md)
