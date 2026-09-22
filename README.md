@@ -554,6 +554,27 @@ Behind the scenes:
 - **Conversation rewind** — `/rewind` shows a select menu of past user turns and truncates the session JSONL at the chosen point, removing that message and everything after it so the session resumes from the exact state before that turn; keeps all working files Claude created; useful when a session has gone off-track
 - **Conversation fork** — `/fork` branches the current thread into a new thread that continues from the same session state via `--fork-session`, creating a truly independent session copy; lets you explore a different direction without affecting the original
 
+### Context Links
+- **Project links on thread creation** — When a new thread's name matches a configured project, `ContextLinksCog` posts a compact set of links for that project (notes, repositories, dashboards). Matching is case-insensitive substring search over the thread name, and the **first** matching project wins, so order your config from most specific to least
+- **Zero-config** — The Cog is always registered but stays silent until a config file exists. It reads `context_links.json` from the working directory, or the path in `CONTEXT_LINKS_CONFIG`. A missing or malformed file disables the feature rather than raising
+- **Two link kinds** — `{"label": ..., "url": ...}` for a plain URL, and `{"label": ..., "obsidian": "path/to/note.md"}` which is expanded against the config's `obsidian_vault`
+- **Why some links are buttons and some are text** — Discord link buttons accept only `http(s)` URLs, so an `obsidian://` URI cannot be one. Those render as text in the embed instead. Set `CCDB_PUBLIC_API_URL` to a base URL that 302s `/open/obsidian?vault=…&file=…` to the `obsidian://` URI and they become real buttons. **ccdb does not serve that redirect** — point the variable at your own endpoint
+
+```json
+{
+  "obsidian_vault": "MyVault",
+  "projects": [
+    {
+      "match": ["ccdb", "discord-bridge"],
+      "links": [
+        { "label": "Repo", "url": "https://github.com/ebibibi/ebi-agent-chat-relay" },
+        { "label": "Notes", "obsidian": "Projects/ccdb.md" }
+      ]
+    }
+  ]
+}
+```
+
 ### Security
 - **No shell injection** — `asyncio.create_subprocess_exec` only, never `shell=True`
 - **Session ID validation** — Strict regex before passing to `--resume`
@@ -924,6 +945,8 @@ for idle deadlines, attachment retries, credentials and startup rollback.
 | `CCDB_PI_ALLOW_UNSANDBOXED` | Set to `1` to allow `/backend pi` to spawn at all. pi has no sandbox and no approval loop in its non-interactive modes, so ccdb refuses the turn instead of running unsandboxed by default. See [pi backend](docs/pi-backend.md). | `0` (backend refuses) |
 | `CCDB_PI_MODEL` | Default pi model, fully qualified (`anthropic/claude-opus-5`, `ollama/gpt-oss:120b`). Unset means pi picks its own default, which is not necessarily one the account's credentials can call. `/model set` overrides it per thread or globally. See [pi backend](docs/pi-backend.md). | (optional) |
 | `CCDB_PI_HOME` | pi config directory, when it is not `~/.pi`. Only used to find the model catalog the `/model` autocomplete reads. | `~/.pi` |
+| `CONTEXT_LINKS_CONFIG` | Path to the context-links JSON file read by `ContextLinksCog`. A missing or malformed file silently disables the feature. | `context_links.json` |
+| `CCDB_PUBLIC_API_URL` | Base URL of an HTTPS endpoint that redirects `/open/obsidian?vault=…&file=…` to the matching `obsidian://` URI. Set it to render Obsidian context links as clickable Discord buttons instead of embed text. ccdb does not serve this redirect itself. | (optional) |
 | `CCDB_PI_APPROVE_PROJECT` | Set to `1` to let pi load project-local `.pi/` settings, skills and extensions. Off by default so a checked-out repository cannot reconfigure the agent running inside it. | `0` |
 | `PATH` | Binary search path for the bot **and every CLI session it spawns** — sessions inherit the bot's environment. Set it in `.env` when running under systemd, which starts units with a minimal PATH and never reads `~/.bashrc` / `~/.profile`. See [Toolchain PATH](#toolchain-path--set-it-in-env). | (inherited from the parent process) |
 | `CCDB_MODEL` | Model to use (overrides `CLAUDE_MODEL`) | `sonnet` |
