@@ -1,6 +1,7 @@
 name: Auto Patch Version Bump
 
 # Triggered by auto-approve.yml after a non-docs-sync PR is merged.
+# The rule this whole file is shaped by: docs/merge-events.md.
 # repository_dispatch works even when auto-approve.yml uses GITHUB_TOKEN
 # to squash-merge (push/pull_request events from GITHUB_TOKEN are suppressed
 # by GitHub, but repository_dispatch is explicitly sent so it always fires).

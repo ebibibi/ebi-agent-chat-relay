@@ -56,6 +56,7 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           # GITHUB_TOKEN merges don't trigger other workflows (push/PR events).
+          # The rule and what was measured: docs/merge-events.md.
           # So we poll for merge completion and send the webhooks directly.
           # Poll for up to 40 minutes (240 × 10s). The previous 15 minutes was
           # shorter than CI now takes: the required checks run on the

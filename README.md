@@ -1144,7 +1144,8 @@ jobs:
 > `closingIssuesReferences` covers both `Closes #123` in the body and a link made
 > from the PR's Development panel, and closing an already-closed issue is a
 > no-op, so this is safe to run on every merge. That is what `issues: write`
-> above is for.
+> above is for. The underlying rule — which merges fire events and which do not —
+> is in [docs/merge-events.md](docs/merge-events.md).
 
 > **If you poll for the merge afterwards**, size the window to what your CI
 > actually takes and fail the step on timeout. A poll that gives up early and
