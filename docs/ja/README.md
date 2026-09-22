@@ -922,10 +922,12 @@ CHAT_ONLY_CHANNEL_IDS=444,555
 | `CCDB_AGUI_TOKEN` | AG-UI endpoint 用の任意の bearer token。Claude/Codex subprocess の環境から除去されます。 | （オプション） |
 | `CCDB_PI_COMMAND` | [pi](https://github.com/earendil-works/pi) CLI バイナリの明示的なパス。`pi`（PATH）へのフォールバックあり。 | （オプション） |
 | `CCDB_PI_ALLOW_UNSANDBOXED` | `/backend pi` の起動を許可する場合に `1`。pi は非対話モードで sandbox も承認ループも持たないため、既定では ccdb がターンを拒否します。[pi バックエンド](../pi-backend.md) 参照。 | `0`（バックエンドは拒否） |
+| `CCDB_PI_MODEL` | pi の既定モデル。プロバイダ込みの完全修飾名で指定します（`anthropic/claude-opus-5`、`ollama/gpt-oss:120b`）。未設定の場合は pi 自身の既定モデルが選ばれますが、それはアカウントの認証情報で呼び出せるモデルとは限りません。`/model set` はスレッド単位・全体のいずれでもこの値を上書きします。[pi バックエンド](../pi-backend.md) 参照。 | （オプション） |
+| `CCDB_PI_HOME` | pi の設定ディレクトリが `~/.pi` でない場合に指定します。`/model` のオートコンプリートが読むモデルカタログの探索にのみ使われます。 | `~/.pi` |
 | `CCDB_PI_APPROVE_PROJECT` | プロジェクト固有の `.pi/` 設定・skill・extension を pi に読み込ませる場合に `1`。チェックアウトしたリポジトリが、その中で動くエージェントを再設定できないよう既定はオフです。 | `0` |
 | `PATH` | Bot **と Bot が起動する全 CLI セッション**のバイナリ検索パス（セッションは Bot の環境を継承）。systemd はユニットを最小限の PATH で起動し `~/.bashrc` / `~/.profile` を読まないため、systemd 運用時は `.env` に設定する。[ツールチェーンの PATH](#ツールチェーンの-path--env-に設定する) 参照 | （親プロセスから継承） |
 | `CCDB_MODEL` | 使用するモデル（`CLAUDE_MODEL` より優先） | `sonnet` |
-| `CCDB_MODEL_DISCOVERY` | `0` にすると、`/model` のオートコンプリートが Anthropic のモデル一覧エンドポイントへ「この認証情報から見えるモデル」を問い合わせるのをやめ（あわせて Codex CLI のローカルモデルカタログの読み取りもやめ）、常に静的な候補リストを使用する。この問い合わせは読み取り専用で、Claude Code CLI 自身の認証情報を再利用し、オフライン時・未認証時・Bedrock/Vertex/Foundry 利用時には自動的にフォールバックする | `1` |
+| `CCDB_MODEL_DISCOVERY` | `0` にすると、`/model` のオートコンプリートが Anthropic のモデル一覧エンドポイントへ「この認証情報から見えるモデル」を問い合わせるのをやめ（あわせて Codex CLI と pi CLI のローカルモデルカタログの読み取りもやめ）、常に静的な候補リストを使用する。この問い合わせは読み取り専用で、Claude Code CLI 自身の認証情報を再利用し、オフライン時・未認証時・Bedrock/Vertex/Foundry 利用時には自動的にフォールバックする | `1` |
 | `CCDB_PERMISSION_MODE` | CLI のパーミッションモード（`CLAUDE_PERMISSION_MODE` より優先） | `acceptEdits` |
 | `CCDB_STATUS_LANG` | Codex ステータス行のラベル（`週次` / `クレジット` / `上限到達`）の言語。`en` にすると UI の他の箇所で使われている英語に合わせて `7d` / `credits` / `limit reached` と表示されます。認識できない値は `ja` にフォールバックします。影響するのはこれらのラベルだけで、日本語のプロンプト文やフレーズ照合には影響しません。 | `ja` |
 | `CCDB_DANGEROUSLY_SKIP_PERMISSIONS` | 全パーミッションチェックをスキップ（`CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS` より優先） | `false` |
