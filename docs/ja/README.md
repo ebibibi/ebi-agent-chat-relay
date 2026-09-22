@@ -15,8 +15,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **Discord または Microsoft Teams からコーディングエージェントを実行。Claude Code、
-OpenAI Codex、ローカルモデル、または互換性のある AG-UI エージェントを、同じ会話の背後で
-選択できます。**
+OpenAI Codex、ローカルモデル、互換性のある AG-UI エージェント、または pi を、同じ会話の
+背後で選択できます。**
 
 Ebi Agent Chat Relay は、Discord の各スレッドまたは Teams の各会話を、分離された永続的な
 エージェントセッションに変換します。ある会話で機能を開発し、別の会話で PR をレビューし、さらに
@@ -25,14 +25,14 @@ Ebi Agent Chat Relay は、Discord の各スレッドまたは Teams の各会�
 互いの作業を壊さないよう、リレーが協調処理を担います。
 
 **名称変更の理由。** 当初は 1 つの AI と 1 つのチャットアプリを結ぶブリッジでしたが、現在は
-2 つの本番対応フロントエンドと 4 つのバックエンドを選べるリレーになりました。旧名称を
+2 つの本番対応フロントエンドと 5 つのバックエンドを選べるリレーになりました。旧名称を
 構成していた 4 語のうち 3 語が実態に合わなくなったためです。判断の詳細は
 [ADR-0001](../adr/0001-adopt-ebi-agent-chat-relay.md)、互換性を維持した移行方法は
 [名称変更計画](../RENAME_PLAN.md)を参照してください。
 
 **既存のサブスクリプション、自前のインフラ、リモートエージェントを利用できます。** ccdb は公式の
-Claude Code CLI と Codex CLI、Codex 互換のローカルエンドポイント、または AG-UI HTTP/SSE
-エージェントを実行できます。Discord では実行時に `/backend` で切り替えられ、v4 の Teams では同じファクトリーを
+Claude Code CLI と Codex CLI、Codex 互換のローカルエンドポイント、AG-UI HTTP/SSE
+エージェント、または pi CLI を実行できます。Discord では実行時に `/backend` で切り替えられ、v4 の Teams では同じファクトリーを
 通じて設定済みバックエンドを使用します。
 
 ## v4 の新機能
@@ -54,6 +54,10 @@ Version 4 では、**人がどこで会話するか**と**どのエージェン�
 - **AG-UI** は、Agent–User Interaction Protocol を実装する HTTP/SSE エージェントへ、どちらの
   チャットサーフェスからも接続できます。Claude Code、Codex、安全策付きローカルバックエンドも引き続き
   利用できます。
+- **pi** は [pi](https://github.com/earendil-works/pi) CLI を実行します。Anthropic・OpenAI・
+  Google・GitHub Copilot・OpenAI 互換のローカルサーバーへ 1 つのエージェントから到達できます。
+  ccdb が使う非対話モードでは sandbox を持たないため、ホスト側の隔離が信頼できることを
+  `CCDB_PI_ALLOW_UNSANDBOXED=1` で明示するまで、起動を拒否します。
 
 まず[バックエンドガイド](../backends.md)を参照してください。Teams は、完全版の
 [Microsoft Teams セットアップガイド](../teams-setup.md)に沿って構築し、詳細は
@@ -561,6 +565,7 @@ ccdb がバックエンド情報を記録する前に作成されたレコード
 - **認証情報ファイルを追跡しない** — `.gitignore` は `.env` だけでなく `.env.*` も対象にする。運用者は実ファイルの隣に日付付きバックアップ（`.env.bak-…`）を残しがちで、その 1 つ 1 つが有効な Bot トークンを保持しているため。テンプレートを追跡し続けられるよう `.env.example` だけは明示的に再包含している
 - **ローカルモデルバックエンド**（オプション）— `/backend local` で自身のハードウェア上のモデルに対してスレッドを実行。通常は「local」実行でもベンダーへ接続するため、ccdb は update check と analytics を無効にした専用 CLI home を管理し、その設定がなければ起動を拒否します — [docs/local-backend.md](../local-backend.md)参照。`/ollama` で Discord からそのランタイムを管理でき、実行されるモデルはそこで選択したものだけです — 黙って食い違う環境変数は存在しません
 - **リモート AG-UI バックエンド**（オプション）— `/backend agui` で既存の Discord/Teams セッション機構を任意の HTTP/SSE AG-UI エージェントへ接続し、ccdb の session ledger、rendering、cancellation、運用制御を維持します — [docs/agui-backend.md](../agui-backend.md)参照
+- **pi バックエンド**（オプション）— `/backend pi` で [pi](https://github.com/earendil-works/pi) CLI を実行します。pi は Anthropic・OpenAI・Google・GitHub Copilot・OpenAI 互換のローカルサーバーを 1 つのエージェントの背後に正規化します。pi は非対話モードで sandbox も承認ループも持たないため、ccdb はデプロイ環境に `CCDB_PI_ALLOW_UNSANDBOXED=1` が設定されるまでターンを拒否します（スレッド単位では設定できません。できてしまうと、任意の Discord ユーザーが自分に許可を出せてしまうためです）。また `CCDB_PI_APPROVE_PROJECT=1` がない限り、プロジェクト固有の `.pi/` 設定・skill・extension は読み込みません — [docs/pi-backend.md](../pi-backend.md)参照
 - **`/ask` — 明示的なエスカレーション**（オプション）— 匿名化済みかつ単体で完結する質問を 1 件だけ、プロジェクトの文脈もファイルもツールも与えずに強力な外部モデルへ送り、回答内で実名を復元します。ツールは deny list ではなく空の *allow* list（`--tools ""`）で制御します — deny list は CLI がツールを追加するたびに書き換えが必要になるためです。分離は spawn のたびに検証されます。送信前にはローカルのジャッジが、置換によって質問の主題そのものが隠されていないかを確認します —「`org-002` の良い点と悪い点」は完璧に匿名化されている一方で回答不能です — 該当する場合は送信を保留します（`force: true` で上書き可能）— [docs/escalation.md](../escalation.md)参照
 - **匿名化ゲートウェイ**（オプション）— プロンプトが Claude または Codex へ届く前に組織を識別する語を安定した alias へ置換し、回答内で復元。ローカルモデルが置換漏れを確認し、デフォルトでは漏れを検出すると送信をブロックします。`CCDB_ANONYMIZE_POLICY=adopt` を指定すると、報告された語に対して alias を対応表へ発行したうえで送信するため、新しい顧客名が出てくるたびに誰かが手で rules file を編集するまでコマンドが止まる、という事態を避けられます。rules file を作成するまでは無効です — [docs/anonymization.md](../anonymization.md)参照
 
@@ -908,7 +913,7 @@ CHAT_ONLY_CHANNEL_IDS=444,555
 |--------|------|-----------|
 | `DISCORD_BOT_TOKEN` | Discord Bot トークン | （必須） |
 | `DISCORD_CHANNEL_ID` | Claude チャット用チャンネル ID | （必須） |
-| `CCDB_BACKEND` | 使用するバックエンド: `claude`、`codex`、`local`、または `agui` | `claude` |
+| `CCDB_BACKEND` | 使用するバックエンド: `claude`、`codex`、`local`、`agui`、または `pi` | `claude` |
 | `CCDB_COMMAND` | CLI バイナリのパスまたは名前（`CLAUDE_COMMAND` より優先）。`CCDB_BACKEND` で選択された初期ランナーに使用され、実行時に `/backend` で切り替えた際は以下の 2 つのバックエンド別変数が優先されます。 | _（自動: `claude` or `codex`）_ |
 | `CCDB_CLAUDE_COMMAND` | Claude CLI バイナリの明示的なパス。`/backend claude` がアクティブなとき `BackendFactory` が使用（`CCDB_BACKEND` の初期値に依存しない）。`CLAUDE_COMMAND`、次に `claude`（PATH）へのフォールバックあり。 | （オプション） |
 | `CCDB_CODEX_COMMAND` | OpenAI Codex CLI バイナリの明示的なパス。systemd 下で Bot を実行する場合に必須（デフォルトのサービス PATH に `~/.npm-global/bin` が含まれない）。`codex`（PATH）へのフォールバックあり。 | （オプション） |
