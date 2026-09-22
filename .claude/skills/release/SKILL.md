@@ -44,6 +44,14 @@ git checkout -b release/v1.4.0   # バージョンは指定されたものに変
 version = "1.4.0"
 ```
 
+`uv.lock` の editable エントリも同じ値に揃える（`name = "claude-code-discord-bridge"` の
+直下の `version`）。ここを忘れると2つのファイルがずれ、次回以降の自動パッチバンプが
+`uv.lock` の同期に失敗して止まる（Issue #731 の実例）:
+
+```bash
+uv lock
+```
+
 ### Step 4: CHANGELOG.md を更新
 
 1. `## [Unreleased]` セクションを `## [1.4.0] - YYYY-MM-DD` に変更（今日の日付）
