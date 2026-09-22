@@ -30,6 +30,11 @@ jobs:
     permissions:
       pull-requests: write
       contents: write
+      # Without this, a merge completed by GITHUB_TOKEN cannot close the
+      # issues the PR links, and they are left open with no error anywhere.
+      # Measured: PRs merged by `ebibibi` close their linked issue in 1-2s;
+      # every PR merged by `github-actions` left it open (#739).
+      issues: write
     steps:
       - name: Approve PR
         env:
@@ -51,11 +56,52 @@ jobs:
         run: |
           # GITHUB_TOKEN merges don't trigger other workflows (push/PR events).
           # So we poll for merge completion and send the webhooks directly.
-          # Poll for up to 15 minutes (90 × 10s) to accommodate CI runs that
-          # start after fix commits are pushed (synchronize event).
-          for i in $(seq 1 90); do
+          # Poll for up to 40 minutes (240 × 10s). The previous 15 minutes was
+          # shorter than CI now takes: the required checks run on the
+          # single-capacity self-hosted pool and have been queueing for 20-40
+          # minutes, so the loop gave up before the merge it was waiting for
+          # more often than not, and everything below was skipped in silence
+          # (#742).
+          POLL_ATTEMPTS=240
+          for i in $(seq 1 "$POLL_ATTEMPTS"); do
             STATE=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state -q .state)
+            if [ "$STATE" = "CLOSED" ]; then
+              # Closed without merging is a decision, not a failure.
+              echo "::notice::PR #$PR_NUMBER was closed without merging; nothing to do."
+              exit 0
+            fi
             if [ "$STATE" = "MERGED" ]; then
+              # --- Close the issues this PR declared it closes ---
+              # GitHub's own closure needs `issues: write` on the token that
+              # completes the merge, which this job now has. It is repeated
+              # explicitly because the failure mode is invisible — the issue is
+              # simply left open — and the repository's merge rules make an
+              # abandoned issue the thing the next PR has to work around (#739).
+              LINKED=$(gh api graphql \
+                -f owner="${GITHUB_REPOSITORY%%/*}" \
+                -f name="${GITHUB_REPOSITORY##*/}" \
+                -F number="$PR_NUMBER" \
+                -f query='
+                  query($owner:String!, $name:String!, $number:Int!) {
+                    repository(owner:$owner, name:$name) {
+                      pullRequest(number:$number) {
+                        closingIssuesReferences(first:20) {
+                          nodes { number state }
+                        }
+                      }
+                    }
+                  }' \
+                --jq '.data.repository.pullRequest.closingIssuesReferences.nodes[]
+                      | select(.state == "OPEN") | .number')
+
+              for issue in $LINKED; do
+                echo "Closing linked issue #$issue"
+                gh issue close "$issue" --repo "$GITHUB_REPOSITORY" \
+                  --reason completed \
+                  --comment "Closed by #$PR_NUMBER." \
+                  || echo "::warning::Could not close #$issue"
+              done
+
               # --- EbiBot upgrade webhook (skip for docs-sync and auto-bump PRs) ---
               if [[ "$HEAD_REF" != docs-sync/* ]] && [[ "$PR_TITLE" != '[docs-sync]'* ]] && [[ "$HEAD_REF" != auto/bump-* ]]; then
                 echo "PR merged! Sending upgrade webhook..."
@@ -107,10 +153,16 @@ jobs:
 
               exit 0
             fi
-            echo "Waiting for merge... ($i/90)"
+            echo "Waiting for merge... ($i/$POLL_ATTEMPTS)"
             sleep 10
           done
-          echo "PR not merged within 15 minutes, skipping webhook"
+
+          # Reported as a failure rather than a green step. The PR is still
+          # open and unmerged, so the upgrade webhook, the docs-sync webhook
+          # and the version bump have all been skipped — a green run here used
+          # to hide that completely (#742).
+          echo "::error::PR #$PR_NUMBER was still open after 40 minutes. The upgrade webhook, docs-sync webhook and version bump dispatch were skipped; re-run this job once it merges."
+          exit 1
 
   auto-merge-dependabot:
     # Auto-merge Dependabot PRs once CI passes — but only patch/minor bumps.
