@@ -1,6 +1,6 @@
 # Changelog
 
-Last updated: 2026-08-11
+Last updated: 2026-09-22
 
 All notable changes to this project will be documented in this file.
 
@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [4.2.0] - 2026-09-22
 
 ### Fixed
 
@@ -737,7 +739,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI pipeline: Python 3.10/3.11/3.12, ruff, pytest
 - Branch protection and PR workflow
 
-[Unreleased]: https://github.com/ebibibi/ebi-agent-chat-relay/compare/v4.1.0...HEAD
+[Unreleased]: https://github.com/ebibibi/ebi-agent-chat-relay/compare/v4.2.0...HEAD
+[4.2.0]: https://github.com/ebibibi/ebi-agent-chat-relay/compare/v4.1.0...v4.2.0
 [4.1.0]: https://github.com/ebibibi/ebi-agent-chat-relay/compare/v4.0.0...v4.1.0
 [4.0.0]: https://github.com/ebibibi/ebi-agent-chat-relay/compare/v3.4.0...v4.0.0
 [3.4.0]: https://github.com/ebibibi/ebi-agent-chat-relay/compare/v3.3.0...v3.4.0
