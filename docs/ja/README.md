@@ -555,6 +555,27 @@ ccdb がバックエンド情報を記録する前に作成されたレコード
 - **会話の巻き戻し** — `/rewind` で過去のユーザーターン一覧をセレクトメニューで表示し、選択したターンでセッションの JSONL を切り捨て。そのメッセージ以降をすべて削除し、直前の状態から再開できる。Claude が作成した作業ファイルは保持される。セッションが迷走したときに便利
 - **会話のフォーク** — `/fork` で `--fork-session` フラグを使い、現在のセッション状態から独立した新しいセッションコピーとして新スレッドを作成。元のスレッドに影響を与えず、別の方向を探索できる
 
+### コンテキストリンク
+- **スレッド作成時にプロジェクト関連リンクを提示** — 新しいスレッド名が設定済みプロジェクトに一致すると、`ContextLinksCog` がそのプロジェクトのリンク（ノート、リポジトリ、ダッシュボードなど）をまとめて投稿します。判定はスレッド名に対する大文字小文字を区別しない部分一致で、**最初に一致したプロジェクト**が採用されるため、設定は具体的なものから順に並べてください
+- **ゼロコンフィグ** — この Cog は常に登録されますが、設定ファイルが存在するまで何もしません。作業ディレクトリの `context_links.json`、または `CONTEXT_LINKS_CONFIG` で指定したパスを読みます。ファイルが無い場合も壊れている場合も、例外を投げずに機能が無効化されるだけです
+- **2 種類のリンク** — 通常の URL は `{"label": ..., "url": ...}`、Obsidian ノートは `{"label": ..., "obsidian": "path/to/note.md"}` で、設定の `obsidian_vault` と組み合わせて展開されます
+- **ボタンになるリンクとテキストのままのリンクがある理由** — Discord のリンクボタンは `http(s)` の URL しか受け付けないため、`obsidian://` の URI はボタンにできず、embed 内のテキストとして表示されます。`/open/obsidian?vault=…&file=…` を `obsidian://` の URI へ 302 リダイレクトするベース URL を `CCDB_PUBLIC_API_URL` に設定すると、これらも本物のボタンになります。**このリダイレクトを提供するのは ccdb ではありません** — 自前のエンドポイントを指定してください
+
+```json
+{
+  "obsidian_vault": "MyVault",
+  "projects": [
+    {
+      "match": ["ccdb", "discord-bridge"],
+      "links": [
+        { "label": "Repo", "url": "https://github.com/ebibibi/ebi-agent-chat-relay" },
+        { "label": "Notes", "obsidian": "Projects/ccdb.md" }
+      ]
+    }
+  ]
+}
+```
+
 ### セキュリティ
 - **シェルインジェクション防止** — `asyncio.create_subprocess_exec` のみ使用、`shell=True` は一切なし
 - **セッション ID 検証** — `--resume` に渡す前に厳格な正規表現で検証
@@ -924,6 +945,8 @@ CHAT_ONLY_CHANNEL_IDS=444,555
 | `CCDB_PI_ALLOW_UNSANDBOXED` | `/backend pi` の起動を許可する場合に `1`。pi は非対話モードで sandbox も承認ループも持たないため、既定では ccdb がターンを拒否します。[pi バックエンド](../pi-backend.md) 参照。 | `0`（バックエンドは拒否） |
 | `CCDB_PI_MODEL` | pi の既定モデル。プロバイダ込みの完全修飾名で指定します（`anthropic/claude-opus-5`、`ollama/gpt-oss:120b`）。未設定の場合は pi 自身の既定モデルが選ばれますが、それはアカウントの認証情報で呼び出せるモデルとは限りません。`/model set` はスレッド単位・全体のいずれでもこの値を上書きします。[pi バックエンド](../pi-backend.md) 参照。 | （オプション） |
 | `CCDB_PI_HOME` | pi の設定ディレクトリが `~/.pi` でない場合に指定します。`/model` のオートコンプリートが読むモデルカタログの探索にのみ使われます。 | `~/.pi` |
+| `CONTEXT_LINKS_CONFIG` | `ContextLinksCog` が読むコンテキストリンク JSON ファイルのパス。ファイルが無い場合・壊れている場合は、この機能が黙って無効になります。 | `context_links.json` |
+| `CCDB_PUBLIC_API_URL` | `/open/obsidian?vault=…&file=…` を対応する `obsidian://` URI へリダイレクトする HTTPS エンドポイントのベース URL。設定すると Obsidian のコンテキストリンクが embed 内のテキストではなくクリック可能な Discord ボタンとして表示されます。このリダイレクト自体は ccdb が提供するものではありません。 | （オプション） |
 | `CCDB_PI_APPROVE_PROJECT` | プロジェクト固有の `.pi/` 設定・skill・extension を pi に読み込ませる場合に `1`。チェックアウトしたリポジトリが、その中で動くエージェントを再設定できないよう既定はオフです。 | `0` |
 | `PATH` | Bot **と Bot が起動する全 CLI セッション**のバイナリ検索パス（セッションは Bot の環境を継承）。systemd はユニットを最小限の PATH で起動し `~/.bashrc` / `~/.profile` を読まないため、systemd 運用時は `.env` に設定する。[ツールチェーンの PATH](#ツールチェーンの-path--env-に設定する) 参照 | （親プロセスから継承） |
 | `CCDB_MODEL` | 使用するモデル（`CLAUDE_MODEL` より優先） | `sonnet` |
