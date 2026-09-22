@@ -88,8 +88,10 @@ jobs:
                 echo "Skipping docs-sync: excluded branch ($HEAD_REF)"
               fi
 
-              # --- Version bump dispatch (skip for docs-sync PRs) ---
-              if [[ "$HEAD_REF" != docs-sync/* ]] && [[ "$PR_TITLE" != '[docs-sync]'* ]]; then
+              # --- Version bump dispatch (skip for docs-sync and auto-bump PRs) ---
+              # auto/bump-* PRs carry the bump itself. Dispatching on their
+              # merge would open a bump PR for the bump, forever (issue #725).
+              if [[ "$HEAD_REF" != docs-sync/* ]] && [[ "$PR_TITLE" != '[docs-sync]'* ]] && [[ "$HEAD_REF" != auto/bump-* ]]; then
                 echo "Dispatching pr-merged event for version bump..."
                 DISPATCH_PAYLOAD=$(jq -c -n \
                   --arg event_type "pr-merged" \
