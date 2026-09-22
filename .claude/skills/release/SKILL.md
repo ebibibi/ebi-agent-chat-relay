@@ -94,11 +94,20 @@ PR マージ（auto-approve.yml）
   └── repository_dispatch: pr-merged
         └── auto-version-bump.yml
               ├── [release] あり → 現在バージョンでタグ & Release（バンプなし）
-              └── [release] なし → patch++ を main に直接コミット → タグ & Release
+              └── [release] なし → patch++ の bump PR を自動で開く（タグ・Release なし）
+                    └── auto-approve.yml が承認 → CI 通過後に自動マージ
 ```
 
 - docs-sync PR（翻訳・ドキュメント更新）はバンプも Release も発生しない
-- patch-bump は main への直接コミット（`enforce_admins=false` で許可）
+- patch-bump は `auto/bump-vX.Y.Z` ブランチからの PR。`issue-driven-main`
+  ルールセットは bypass_actors が空で、管理者の PAT でも main へ直接 push
+  できないため（Issue #725）
+- bump PR は `require-linked-issue` を通すために専用 Issue を自動作成して
+  `Closes #N` で紐付ける。PR も Issue も ADMIN_PAT（= ebibibi）が作る。
+  GITHUB_TOKEN で作ると pull_request イベントが発火せず、必須チェックが
+  「Expected」のまま永久に埋まらない（過去2回この理由で revert されている）
+- bump PR が既に開いているあいだの追加マージは、その1件に集約される
+- bump PR のマージでは dispatch を送らない（無限ループ防止）
 - リリース時にはえびログ（Discord）に自動通知
 
 ---
