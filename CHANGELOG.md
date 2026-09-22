@@ -27,8 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which it did twice on the day #725 was fixed. The window is 40 minutes, a PR closed without merging
   ends the wait quietly, and a genuine timeout now fails the job instead of hiding.
 
-### Fixed
-
 - **A drifted `uv.lock` no longer wedges the bump** (#731) — the bump rewrote the editable entry
   with a substitution keyed on the version that entry was expected to hold, so once a manual release
   updated `pyproject.toml` alone the substitution matched nothing and the guard stopped every bump

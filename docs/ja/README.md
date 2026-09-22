@@ -1113,6 +1113,10 @@ jobs:
     permissions:
       pull-requests: write
       contents: write
+      # `permissions:` ブロックは列挙したものだけを付与する。これが無いと
+      # マージを完了させたトークンは PR がリンクした Issue を閉じられず、
+      # どこにもエラーが出ないまま Issue が開いたまま残る。
+      issues: write
     steps:
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1121,6 +1125,11 @@ jobs:
           gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --approve
           gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --auto --squash
 ```
+
+> **マージ完了をポーリングで待つ場合**、待ち時間は実際の CI 所要時間に合わせ、
+> タイムアウト時はステップを失敗させること。早々に諦めて成功を報告する
+> ポーリングは、その後ろにある全ステップを覆い隠す — このリポジトリ自身の
+> Webhook も、緑のチェックだけを残して無言でスキップされていた。
 
 ---
 
