@@ -1,0 +1,110 @@
+name: Post-merge automation
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  post-merge:
+    # This job reacts to the push emitted by an owner-attributed merge. Keep it
+    # off the single-capacity test pool: it only calls GitHub and Discord APIs.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve the pull request that produced this commit
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          PR=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+            --jq '[.[] | select(.base.ref == "main" and .merged_at != null)]
+                  | sort_by(.merged_at) | last // empty')
+
+          if [ -z "$PR" ]; then
+            echo "::notice::No merged pull request is associated with $GITHUB_SHA; nothing to do."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "found=true" >> "$GITHUB_OUTPUT"
+          echo "number=$(echo "$PR" | jq -r '.number')" >> "$GITHUB_OUTPUT"
+          echo "title=$(echo "$PR" | jq -r '.title')" >> "$GITHUB_OUTPUT"
+          echo "head_ref=$(echo "$PR" | jq -r '.head.ref')" >> "$GITHUB_OUTPUT"
+
+      - name: Classify the merged pull request
+        id: classify
+        if: steps.pr.outputs.found == 'true'
+        env:
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          PR_TITLE: ${{ steps.pr.outputs.title }}
+        run: |
+          if [[ "$HEAD_REF" == docs-sync/* ]] \
+            || [[ "$PR_TITLE" == '[docs-sync]'* ]] \
+            || [[ "$HEAD_REF" == auto/bump-* ]]; then
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping post-merge work for excluded PR: $HEAD_REF"
+          else
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Trigger EbiBot upgrade
+        if: steps.classify.outputs.eligible == 'true'
+        env:
+          WEBHOOK_URL: ${{ secrets.DOCS_SYNC_WEBHOOK_URL }}
+        run: |
+          curl --fail-with-body -sS -o /dev/null \
+            -H "Content-Type: application/json" \
+            -d '{"content":"🔄 ebibot-upgrade"}' \
+            "$WEBHOOK_URL"
+
+      - name: Check whether docs-sync is already active
+        id: docs
+        if: steps.classify.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          OPEN_PR=$(gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state open \
+            --search "head:docs-sync/" \
+            --json number \
+            --limit 1)
+
+          if [ "$(echo "$OPEN_PR" | jq length)" -gt 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Skipping docs-sync: docs-sync PR already open"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Trigger docs-sync
+        if: steps.classify.outputs.eligible == 'true' && steps.docs.outputs.skip != 'true'
+        env:
+          WEBHOOK_URL: ${{ secrets.DOCS_SYNC_WEBHOOK_URL }}
+        run: |
+          curl --fail-with-body -sS -o /dev/null \
+            -H "Content-Type: application/json" \
+            -d '{"content":"🔄 docs-sync"}' \
+            "$WEBHOOK_URL"
+
+      - name: Dispatch the patch version bump
+        if: steps.classify.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          PR_TITLE: ${{ steps.pr.outputs.title }}
+        run: |
+          jq -c -n \
+            --arg event_type "pr-merged" \
+            --arg pr_number "$PR_NUMBER" \
+            --arg pr_title "$PR_TITLE" \
+            '{event_type: $event_type,
+              client_payload: {pr_number: $pr_number, pr_title: $pr_title}}' \
+          | gh api "repos/$GITHUB_REPOSITORY/dispatches" --method POST --input -

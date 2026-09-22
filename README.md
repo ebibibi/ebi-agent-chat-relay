@@ -1112,47 +1112,27 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
-      contents: write
-      # Needed to close linked issues yourself, below. It does not make GitHub
-      # close them for you — see the note under this example.
-      issues: write
     steps:
-      - env:
+      - name: Approve with the workflow token
+        env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --approve
-          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --auto --squash
+        run: gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --approve
+      - name: Enable auto-merge as the repository owner
+        env:
+          GH_TOKEN: ${{ secrets.ADMIN_PAT }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --auto --squash
 ```
 
-> **`Closes #123` does not close the issue when a bot merges the PR.** Measured
-> here: PRs merged by the repository owner closed their linked issue in one to
-> two seconds; not one merged by `github-actions` ever did, with no error
-> anywhere to say so. Adding `issues: write` to this job is *not* enough —
-> auto-merge is completed by GitHub later, and does not carry the permissions of
-> the job that enabled it. Close them yourself once you see the merge:
->
-> ```bash
-> gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
->   --json closingIssuesReferences \
->   --jq '.closingIssuesReferences[].number' \
-> | while read -r issue; do
->     gh issue close "$issue" --repo "$GITHUB_REPOSITORY" --reason completed
->   done
-> ```
->
-> `closingIssuesReferences` covers both `Closes #123` in the body and a link made
-> from the PR's Development panel, and closing an already-closed issue is a
-> no-op, so this is safe to run on every merge. That is what `issues: write`
-> above is for. The underlying rule — which merges fire events and which do not —
-> is in [docs/merge-events.md](docs/merge-events.md).
-
-> **If you poll for the merge afterwards**, size the window to what your CI
-> actually takes and fail the step on timeout. A poll that gives up early and
-> then reports success hides every step behind it — this repository's own
-> webhooks were skipped in silence that way, with nothing but a green check
-> to show for it. A poll is a poor mechanism regardless: it is bounded by how
-> busy your runners are, which the job cannot know.
+Use a narrowly scoped owner token for `ADMIN_PAT`, store it as a repository
+actions secret, and protect the workflow like any other release credential. The
+token matters because the actor that enables auto-merge becomes the eventual
+merge actor. A `GITHUB_TOKEN`-attributed merge emits no `push` event and does not
+close issues named by `Closes #123`; an owner-attributed merge does both. Put
+post-merge work in a separate workflow triggered by `push` to `main` instead of
+holding this job open in a polling loop. See the measurement and trade-offs in
+[docs/merge-events.md](docs/merge-events.md).
 
 ---
 
