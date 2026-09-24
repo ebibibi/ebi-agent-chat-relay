@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Threads can be marked ready to close** (#769) — when a thread's work is fully finished, the
+  agent tells the user the thread can be closed and calls `POST /api/threads/{thread_id}/done`,
+  which prefixes the title with `✅`. A new human reply removes the marker; a retitle never carries
+  it forward. `CCDB_DONE_THREAD_MARKER` changes the marker (empty disables it and the instruction).
+
 ## [4.2.0] - 2026-09-22
 
 ### Fixed

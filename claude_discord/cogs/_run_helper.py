@@ -126,6 +126,33 @@ def _truncate_result(content: str) -> str:
     return content[:TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
 
 
+def _build_done_marker_section(config: RunConfig) -> str | None:
+    """Tell the agent how to signal that this thread can be closed.
+
+    Only offered where it can work: a surface that renames threads, a backend
+    that exposes the control-plane API, and a done marker the operator has
+    not disabled.
+    """
+    from ..thread_marker import done_marker
+
+    marker = done_marker()
+    if not marker or not config.surface.capabilities.supports_thread_rename:
+        return None
+    if getattr(config.runner, "api_port", None) is None:
+        return None
+    return (
+        "## Finishing a Thread\n"
+        "When the user's request in this thread is fully finished — changes committed "
+        "and pushed/merged, pipelines green, deliverables sent, nothing waiting on you "
+        "or on the user — end your final reply by telling the user, in their language, "
+        "that this thread can be closed, and mark it:\n"
+        '  `curl -s -X POST "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/done"`\n'
+        f"This prefixes the thread title with {marker}. Do NOT mark it when you are asking "
+        "a question, waiting for a pipeline or a decision, or leaving work pending. "
+        "If the user replies later, the marker is removed automatically."
+    )
+
+
 async def _build_system_context(config: RunConfig) -> str | None:
     """Build ephemeral system context from AI Lounge and concurrency notice.
 
@@ -193,6 +220,10 @@ async def _build_system_context(config: RunConfig) -> str | None:
         "that file path here. Otherwise, only include files the user explicitly "
         "asked to receive."
     )
+
+    done_section = _build_done_marker_section(config)
+    if done_section:
+        parts.append(done_section)
 
     # Post-compact guardrail: prevent auto-execution of "pending tasks" from summary.
     if config.post_compact_rerun:

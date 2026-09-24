@@ -30,8 +30,12 @@ DEFAULT_SPAWN_MARKER = "\U0001f916"  # 🤖
 # Prepended to the thread that did the spawning, in front of its own name.
 DEFAULT_PARENT_MARKER = "\U0001f333"  # 🌳
 
+# Prepended when the agent reports the thread's work finished (safe to close).
+DEFAULT_DONE_MARKER = "\u2705"  # ✅
+
 SPAWN_MARKER_ENV_VAR = "CCDB_SPAWN_THREAD_MARKER"
 PARENT_MARKER_ENV_VAR = "CCDB_SPAWN_PARENT_MARKER"
+DONE_MARKER_ENV_VAR = "CCDB_DONE_THREAD_MARKER"
 
 # Unambiguous alphabet: no 0/O, no 1/I/L. A code is read off a screen and typed
 # back into an API call by a human as often as by an agent.
@@ -62,6 +66,35 @@ def spawn_marker() -> str:
 def parent_marker() -> str:
     """Marker for a thread that *did* the spawning."""
     return _marker(PARENT_MARKER_ENV_VAR, DEFAULT_PARENT_MARKER)
+
+
+def done_marker() -> str:
+    """Marker for a thread whose work is finished and can be closed."""
+    return _marker(DONE_MARKER_ENV_VAR, DEFAULT_DONE_MARKER)
+
+
+def mark_done_thread_name(name: str) -> str:
+    """Return *name* tagged as ready to close, Discord-safe and idempotent.
+
+    The marker goes in front of everything, lineage tags included: "can I
+    close this?" is the question a human scans the channel list for, so it
+    is the first thing the eye should hit.  Truncation happens after tagging
+    for the same reason as :func:`mark_spawned_thread_name`.
+    """
+    marker = done_marker()
+    trimmed = name.strip()
+    if not marker or trimmed.startswith(marker):
+        return _fit(trimmed)
+    return _fit(f"{marker} {trimmed}")
+
+
+def unmark_done_thread_name(name: str) -> str:
+    """Return *name* without a leading done marker (unchanged when absent)."""
+    marker = done_marker()
+    trimmed = name.strip()
+    if marker and trimmed.startswith(marker):
+        return trimmed[len(marker) :].lstrip()
+    return trimmed
 
 
 def family_code(thread_id: int) -> str:
@@ -181,8 +214,12 @@ def split_marker_tags(name: str) -> tuple[str, str]:
     yields ``("", name)``, so a caller can always rebuild the name by joining
     the two halves — which is the point: re-titling a thread must not be the
     moment its lineage quietly disappears from the channel list.
+
+    A leading done marker is dropped, not returned: a retitle only happens on
+    a human's turn, and a thread someone is talking in again is no longer
+    ready to close.
     """
-    rest = name.strip()
+    rest = unmark_done_thread_name(name)
     tags: list[str] = []
     for marker in (spawn_marker(), parent_marker()):
         end = _tag_end(rest, marker)
