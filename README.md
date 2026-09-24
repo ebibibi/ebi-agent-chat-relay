@@ -308,6 +308,8 @@ The link is also recorded, so a session managing a fan-out can read it instead o
 
 Claude subprocesses receive `DISCORD_THREAD_ID` as an environment variable, so a running session can spawn child sessions to parallelize work.
 
+When a thread's work is fully finished, the agent tells the user the thread can be closed and calls `POST /api/threads/{thread_id}/done`, which prefixes the title with **✅** — the channel list then shows at a glance which threads are safe to close. A new human reply removes the marker automatically. `CCDB_DONE_THREAD_MARKER` changes `✅` (empty disables the marker and the instruction).
+
 ### Authenticated External Ingest with Result Retrieval (`/api/ingest`)
 
 `POST /api/ingest` is the **authenticated, attachment-aware spawn** for untrusted external clients (browser extensions, mobile shortcuts, webhooks). Unlike `/api/spawn` (trusted, localhost), it requires a dedicated `ingest_token` (set `CCDB_INGEST_TOKEN`; independent of `api_secret`) and can carry base64 file attachments that are written to `{working_dir}/ingest/{thread_id}/` so the spawned session can read them. It creates a real Discord thread, so the full interaction stays observable.
@@ -979,6 +981,7 @@ for idle deadlines, attachment retries, credentials and startup rollback.
 | `CLAUDE_CHANNEL_IDS` | Additional channel IDs (comma-separated) for multi-channel setup (legacy — prefer `CCDB_CHANNEL_IDS`) | (optional) |
 | `CCDB_SPAWN_THREAD_MARKER` | Marker prepended to the title of a thread opened by `POST /api/spawn`, so agent-started threads are distinguishable in the channel list. Set to an empty string to disable | `🤖` |
 | `CCDB_SPAWN_PARENT_MARKER` | Marker prepended to the title of a thread that spawned children, in front of its own name. Set to an empty string to disable | `🌳` |
+| `CCDB_DONE_THREAD_MARKER` | Marker prepended to a thread the agent reported finished (removed on the next human reply). Set to an empty string to disable | `✅` |
 | `THREAD_INBOX_ENABLED` | Enable the persistent thread inbox (classifies sessions as `waiting`/`done`/`ambiguous` via `claude -p`; shown in thread dashboard) | `false` |
 | `THREAD_AUTO_RENAME` | Auto-rename new thread titles using Claude AI — generates a short, descriptive title from the first user message via a background `claude -p` call (never delays session start), and re-titles the thread later when its subject has clearly moved on (rate-limited to one rename per 15 minutes; lineage tags are preserved) | `false` |
 | `CCDB_CLI_ENV_FILE` | Path to a `KEY=VALUE` file whose variables are merged into the CLI subprocess environment on every invocation. Changes take effect immediately without restarting the bot. Useful for temporary API routing (e.g., Azure Foundry) | (optional) |
@@ -1246,6 +1249,7 @@ uv sync --extra api
 | GET | `/api/claims` | List live claims (optional `resource` filter) |
 | DELETE | `/api/claims` | Release a claim (`resource`, `thread_id`, optional `force=true`) |
 | POST | `/api/threads/{thread_id}/message` | Relay a message from one session to another (`text`, `from_thread`, `mode`, `hop`) |
+| POST | `/api/threads/{thread_id}/done` | Mark a thread as ready to close (prefixes the title with `✅`; idempotent) |
 
 ```bash
 # Send notification (embed format, default)

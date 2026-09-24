@@ -50,6 +50,7 @@ from ..thread_marker import (
     mark_parent_thread_name,
     mark_spawned_thread_name,
     retag_thread_name,
+    unmark_done_thread_name,
 )
 from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
 from ._run_helper import run_claude_with_config
@@ -814,6 +815,25 @@ class ClaudeChatCog(commands.Cog):
             except Exception:
                 logger.warning("Failed to rename thread %d to %r", thread.id, title, exc_info=True)
 
+    def _schedule_clear_done_marker(self, thread: discord.Thread) -> None:
+        """Drop the "ready to close" marker once a human talks in the thread again.
+
+        Backgrounded: discord.py sleeps through a rename rate limit (two per ten
+        minutes per thread), and the human's reply must not wait on that.
+        """
+        current = thread.name or ""
+        cleared = unmark_done_thread_name(current)
+        if cleared == current.strip():
+            return
+        asyncio.create_task(self._clear_done_marker(thread, current, cleared))
+
+    async def _clear_done_marker(self, thread: discord.Thread, current: str, cleared: str) -> None:
+        try:
+            await thread.edit(name=cleared)
+            logger.info("thread %d reopened %r -> %r", thread.id, current, cleared)
+        except Exception:
+            logger.warning("Failed to clear done marker on thread %d", thread.id, exc_info=True)
+
     def _schedule_retitle(self, thread: discord.Thread, text: str) -> None:
         """Note a reply, and start a re-title when the thread has drifted enough.
 
@@ -1265,6 +1285,9 @@ class ClaudeChatCog(commands.Cog):
                 _dashboard = getattr(self.bot, "thread_dashboard", None)
                 if isinstance(_dashboard, ThreadStatusDashboard):
                     await _dashboard.refresh_inbox(_inbox_repo)
+
+        # A thread someone is talking in again is no longer ready to close.
+        self._schedule_clear_done_marker(thread)
 
         # The title was written from the first message; the work has moved since.
         # Scheduled here — on the human's turn — so the budget is spent on what

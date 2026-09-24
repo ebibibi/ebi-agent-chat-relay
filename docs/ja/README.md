@@ -311,6 +311,8 @@ curl -X POST "$CCDB_API_URL/api/spawn" \
 
 この関係は記録もされるため、ファンアウトを管理するセッションはタイトルを解析せずに済みます: `GET /api/sessions` がスレッドごとに `parent_thread_id`・`family`・`children` を返します。リネーム・相互リンク・記録はいずれもベストエフォートです — 親がアーカイブ済みだったり、Discord の「10 分に 2 回」のリネーム制限に当たったりした場合に失われるのは装飾だけで、スポーン自体が失敗することはありません。`CCDB_SPAWN_PARENT_MARKER` で `🌳` を変更できます（空文字で無効化）。`CCDB_SPAWN_THREAD_MARKER` と同じ扱いです。
 
+スレッドの作業が完全に終わると、エージェントは「このスレッドは終了できます」とユーザーに伝え、`POST /api/threads/{thread_id}/done` を呼びます。タイトル先頭に **✅** が付き、チャンネル一覧でどのスレッドを閉じてよいか一目で分かります。人間が再び返信するとマーカーは自動で外れます。`CCDB_DONE_THREAD_MARKER` で `✅` を変更できます（空文字でマーカーと指示の両方を無効化）。
+
 Claude のサブプロセスには `DISCORD_THREAD_ID` 環境変数が渡されるため、実行中のセッションから子セッションを起動して作業を並列化できます。
 
 ### 認証済み外部インジェストと結果取得 (`/api/ingest`)
@@ -979,6 +981,7 @@ CHAT_ONLY_CHANNEL_IDS=444,555
 | `CLAUDE_CHANNEL_IDS` | マルチチャンネル設定用の追加チャンネル ID（旧名 — `CCDB_CHANNEL_IDS` を推奨） | （オプション） |
 | `CCDB_SPAWN_THREAD_MARKER` | `POST /api/spawn` で作成したスレッドのタイトル先頭に付けるマーカー。エージェントが起動したスレッドをチャンネル一覧で見分けるためのもの。空文字で無効化 | `🤖` |
 | `CCDB_SPAWN_PARENT_MARKER` | 子スレッドをスポーンしたスレッド自身のタイトル先頭に付けるマーカー。空文字で無効化 | `🌳` |
+| `CCDB_DONE_THREAD_MARKER` | エージェントが作業完了を報告したスレッドのタイトル先頭に付けるマーカー（次に人間が返信すると外れる）。空文字で無効化 | `✅` |
 | `THREAD_INBOX_ENABLED` | 永続スレッドインボックスを有効化（`claude -p` でセッションを `waiting`/`done`/`ambiguous` に分類し、スレッドダッシュボードに表示） | `false` |
 | `THREAD_AUTO_RENAME` | 新しいスレッドのタイトルを Claude AI で自動リネーム — 最初のユーザーメッセージをもとにバックグラウンドの `claude -p` 呼び出しで短く分かりやすいタイトルを生成（セッション開始を遅延させない）。以降も話題が明確に変わったらタイトルを更新する（15分に1回まで・系譜タグは保持） | `false` |
 | `CCDB_CLI_ENV_FILE` | CLI サブプロセス起動時に毎回環境変数へマージする `KEY=VALUE` ファイルのパス。Bot を再起動せずに即座に反映される。一時的な API ルーティング（Azure Foundry への切り替えなど）に便利 | （オプション） |
@@ -1246,6 +1249,7 @@ uv sync --extra api
 | GET | `/api/claims` | 有効なクレームの一覧（`resource` フィルター任意） |
 | DELETE | `/api/claims` | クレームの解放（`resource`、`thread_id`、任意で `force=true`） |
 | POST | `/api/threads/{thread_id}/message` | あるセッションから別のセッションへメッセージをリレー（`text`、`from_thread`、`mode`、`hop`） |
+| POST | `/api/threads/{thread_id}/done` | スレッドを「終了してよい」状態にする（タイトル先頭に `✅`。冪等） |
 
 ```bash
 # 通知の送信（埋め込み形式、デフォルト）
