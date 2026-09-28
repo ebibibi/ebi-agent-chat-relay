@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which prefixes the title with `✅`. A new human reply removes the marker; a retitle never carries
   it forward. `CCDB_DONE_THREAD_MARKER` changes the marker (empty disables it and the instruction).
 
+### Fixed
+
+- **`/rewind` no longer wipes non-Claude sessions** — rewind only understands Claude session JSONL,
+  so on a Codex/local/pi/AG-UI thread the history lookup missed and fell through to a full reset.
+  It now replies that rewind is unsupported for that backend and leaves the session untouched.
+
 ## [4.2.0] - 2026-09-22
 
 ### Fixed

@@ -553,7 +553,7 @@ Behind the scenes:
 - **Runtime tool permissions** — `/tools-show` displays the current allowed tools; `/tools-set` opens a select menu to toggle tools on/off; `/tools-reset` reverts to `.env` default — all without restart
 - **Context usage** — `/context` shows context window percentage with a visual progress bar; ⚠️ warning when nearing the 83.5% autocompact threshold; ephemeral (only visible to the caller)
 - **Rate limit usage** — `/usage` shows Claude API rate limit utilization with percentage bar and time-until-reset countdown for 5-hour and 7-day windows; ⚠️ flag when utilization ≥ 80%
-- **Conversation rewind** — `/rewind` shows a select menu of past user turns and truncates the session JSONL at the chosen point, removing that message and everything after it so the session resumes from the exact state before that turn; keeps all working files Claude created; useful when a session has gone off-track
+- **Conversation rewind** — `/rewind` shows a select menu of past user turns and truncates the session JSONL at the chosen point, removing that message and everything after it so the session resumes from the exact state before that turn; keeps all working files Claude created; useful when a session has gone off-track. Claude sessions only — on Codex/local/pi/AG-UI sessions it declines and leaves the conversation untouched
 - **Conversation fork** — `/fork` branches the current thread into a new thread that continues from the same session state via `--fork-session`, creating a truly independent session copy; lets you explore a different direction without affecting the original
 
 ### Context Links
