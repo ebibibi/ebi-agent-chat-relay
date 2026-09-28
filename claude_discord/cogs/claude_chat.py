@@ -617,6 +617,17 @@ class ClaudeChatCog(commands.Cog):
             )
             return
 
+        # Rewind truncates a Claude session JSONL. Other backends keep their
+        # history elsewhere, so the lookup below would miss and fall through to
+        # the full reset — refuse instead of silently wiping the session.
+        if record.backend and record.backend != "claude":
+            await interaction.response.send_message(
+                f"⏪ `/rewind` is not supported for `{record.backend}` sessions yet. "
+                "The conversation was left unchanged — use `/clear` to start over.",
+                ephemeral=True,
+            )
+            return
+
         # Locate the JSONL and parse user turns.
         jsonl_path = find_session_jsonl(record.session_id, record.working_dir)
         turns = parse_user_turns(jsonl_path) if jsonl_path is not None else []
