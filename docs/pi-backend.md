@@ -115,6 +115,32 @@ means a repository ccdb checks out cannot reconfigure the agent that is about to
 worth keeping even for repositories the operator owns, since an agent's own worktree is exactly
 where such a file would appear.
 
+## Claude Code plugin skills
+
+pi discovers skills in `~/.agents/skills/` and its own locations, but it does not look inside Claude
+Code plugins. Without help, a thread switched to pi silently loses every skill a plugin provides —
+while a user's own skills, often reached through a `~/.agents/skills` symlink, keep working, which
+makes the gap easy to miss.
+
+Each turn, the runner reads `~/.claude/plugins/installed_plugins.json` (or the one under
+`CLAUDE_CONFIG_DIR`) and passes the `skills/` directory of every plugin to pi as `--skill`, subject
+to two filters:
+
+- **Enabled only.** A plugin set to `false` in `enabledPlugins` of Claude Code's `settings.json` is
+  left out, as it is for Claude.
+- **User scope only.** Project and local installs are left out for the same reason project trust
+  is declined: a checked-out repository must not be able to add instructions to the agent.
+
+The path is resolved on every turn because it contains the plugin version, which changes on each
+plugin update. Name collisions resolve the way a user would expect: pi keeps the first skill it
+discovers under a name, and `~/.agents/skills/` is discovered before `--skill` paths, so a user's
+own `goodmorning` still wins over a plugin's `goodmorning`. Claude Code namespaces plugin skills
+(`plugin:skill`); pi has no namespaces, so a shadowed plugin skill is simply unavailable on pi.
+
+Only skills cross over. Plugin hooks, MCP servers and slash commands (`commands/`) have no pi
+equivalent that ccdb can pass on the command line. Set `CCDB_PI_CLAUDE_PLUGIN_SKILLS=0` to turn the
+bridge off.
+
 ## Not implemented
 
 pi's `--mode rpc` keeps one process alive and accepts `prompt`, `steer`, `follow_up`, `abort`,

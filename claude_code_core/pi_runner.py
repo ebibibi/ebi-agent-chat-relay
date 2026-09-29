@@ -33,6 +33,7 @@ from dataclasses import replace
 from typing import Any
 
 from .child_env import STRIPPED_ENV_KEYS
+from .claude_plugins import plugin_skill_dirs
 from .types import (
     TOOL_CATEGORIES,
     ImageData,
@@ -72,6 +73,16 @@ UNSANDBOXED_REFUSAL = (
 # able to reconfigure the agent that is about to run inside it, even when the
 # repository is the operator's own.
 PI_APPROVE_PROJECT_ENV = "CCDB_PI_APPROVE_PROJECT"
+
+# pi discovers ``~/.agents/skills`` but not Claude Code plugins, so a thread
+# moved to pi would silently lose every plugin skill it had under claude. The
+# runner hands each enabled, user-scope plugin's ``skills/`` directory to pi as
+# ``--skill``. Project/local plugin installs are left out for the same reason
+# project trust is declined: a checked-out repository must not be able to add
+# instructions to the agent. pi keeps the first skill it discovers under a
+# given name, so a user's own skill still wins over a plugin skill of the same
+# name. Set this to ``0`` to turn the bridge off.
+PI_CLAUDE_PLUGIN_SKILLS_ENV = "CCDB_PI_CLAUDE_PLUGIN_SKILLS"
 
 # pi's built-in tool names mapped onto the names ccdb renders and categorises.
 # Anything unmapped passes through under its own name.
@@ -429,6 +440,10 @@ class PiRunner:
         if self.append_system_prompt:
             args.extend(["--append-system-prompt", self.append_system_prompt])
 
+        if _claude_plugin_skills_enabled():
+            for skills_dir in plugin_skill_dirs(user_scope_only=True, enabled_only=True):
+                args.extend(["--skill", str(skills_dir)])
+
         if self.allowed_tools:
             # The only permission lever pi offers. ``permission_mode`` has no
             # CLI equivalent: pi has no approval loop to put into a mode.
@@ -574,3 +589,9 @@ def _unsandboxed_execution_allowed() -> bool:
 
 def _project_trust_allowed() -> bool:
     return _env_flag(PI_APPROVE_PROJECT_ENV)
+
+
+def _claude_plugin_skills_enabled() -> bool:
+    """On unless the operator sets the variable to a false-like value."""
+    value = os.environ.get(PI_CLAUDE_PLUGIN_SKILLS_ENV, "").strip().lower()
+    return value not in {"0", "false", "no", "off"}

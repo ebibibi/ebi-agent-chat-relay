@@ -15,7 +15,6 @@ Skills are lazily reloaded every 60 seconds so new skills appear without restart
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 import time
@@ -26,6 +25,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from claude_code_core.backend import SessionBackend
+from claude_code_core.claude_plugins import plugin_skill_dirs
 
 from ..concurrency import SessionRegistry
 from ..database.repository import SessionRepository
@@ -83,30 +83,10 @@ def _load_skills(skills_dir: Path) -> list[dict[str, str]]:
 def _get_plugin_skill_dirs(claude_dir: Path | None = None) -> list[Path]:
     """Discover skills/ directories from all installed Claude Code plugins.
 
-    Reads ``~/.claude/plugins/installed_plugins.json`` and returns the
-    ``skills/`` subdirectory for each plugin whose installPath contains one.
-    Returns an empty list if the file does not exist or cannot be parsed.
+    Thin wrapper over :func:`claude_code_core.claude_plugins.plugin_skill_dirs`,
+    which the pi backend shares.
     """
-    if claude_dir is None:
-        claude_dir = Path.home() / ".claude"
-    plugins_json = claude_dir / "plugins" / "installed_plugins.json"
-    if not plugins_json.exists():
-        return []
-    try:
-        data = json.loads(plugins_json.read_text(encoding="utf-8"))
-        dirs: list[Path] = []
-        for entries in data.get("plugins", {}).values():
-            for entry in entries:
-                install_path = entry.get("installPath")
-                if not install_path:
-                    continue
-                skills_dir = Path(install_path) / "skills"
-                if skills_dir.is_dir():
-                    dirs.append(skills_dir)
-        return dirs
-    except (OSError, json.JSONDecodeError, TypeError, KeyError):
-        logger.warning("Failed to discover plugin skill dirs from %s", plugins_json)
-        return []
+    return plugin_skill_dirs(claude_dir)
 
 
 def _collect_skills(primary_dir: Path, extra_dirs: list[Path]) -> list[dict[str, str]]:

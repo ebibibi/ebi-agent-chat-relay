@@ -20,6 +20,7 @@ import pytest
 from claude_code_core.backend import SessionBackend, create_backend
 from claude_code_core.pi_runner import (
     PI_APPROVE_PROJECT_ENV,
+    PI_CLAUDE_PLUGIN_SKILLS_ENV,
     PI_UNSANDBOXED_ENV,
     PiRunner,
     parse_pi_line,
@@ -38,13 +39,17 @@ def _parse_fixture(name: str) -> list:
 
 
 @pytest.fixture(autouse=True)
-def _allow_unsandboxed(monkeypatch: pytest.MonkeyPatch) -> None:
+def _allow_unsandboxed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Most tests exercise behaviour past the opt-in gate.
 
     The gate itself is covered by TestUnsandboxedGate, which clears this again.
+    ``CLAUDE_CONFIG_DIR`` points at an empty directory so the plugins installed
+    on the machine running the suite never leak into argv.
     """
     monkeypatch.setenv(PI_UNSANDBOXED_ENV, "1")
     monkeypatch.delenv(PI_APPROVE_PROJECT_ENV, raising=False)
+    monkeypatch.delenv(PI_CLAUDE_PLUGIN_SKILLS_ENV, raising=False)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
 
 
 class _FakeStream:
@@ -260,6 +265,63 @@ class TestBuildArgs:
         args = PiRunner(command="pi")._build_args(None)
         assert "--approve" in args
         assert "--no-approve" not in args
+
+
+def _install_plugin(
+    claude_dir: Path, key: str, *, scope: str = "user", enabled: bool | None = None
+) -> Path:
+    """Lay out one plugin the way Claude Code records it and return its skills dir."""
+    skills_dir = claude_dir / "plugins" / "cache" / key / "1.0.0" / "skills"
+    skills_dir.mkdir(parents=True)
+    index_path = claude_dir / "plugins" / "installed_plugins.json"
+    index = json.loads(index_path.read_text()) if index_path.exists() else {"plugins": {}}
+    index["plugins"][key] = [{"scope": scope, "installPath": str(skills_dir.parent)}]
+    index_path.write_text(json.dumps(index))
+    if enabled is not None:
+        settings_path = claude_dir / "settings.json"
+        settings = json.loads(settings_path.read_text()) if settings_path.exists() else {}
+        settings.setdefault("enabledPlugins", {})[key] = enabled
+        settings_path.write_text(json.dumps(settings))
+    return skills_dir
+
+
+def _skill_args(args: list[str]) -> list[str]:
+    return [args[i + 1] for i, arg in enumerate(args) if arg == "--skill"]
+
+
+class TestClaudePluginSkills:
+    """pi does not look inside Claude Code plugins; the runner points it there."""
+
+    @pytest.fixture
+    def claude_dir(self, tmp_path: Path) -> Path:
+        return tmp_path / "claude"
+
+    def test_user_scope_plugin_skills_are_passed(self, claude_dir: Path) -> None:
+        workspace = _install_plugin(claude_dir, "ebi-workspace@ebi-tools", enabled=True)
+        wiki = _install_plugin(claude_dir, "ebi-ai-wiki@ebi-tools")
+        args = PiRunner(command="pi")._build_args(None)
+        assert set(_skill_args(args)) == {str(workspace), str(wiki)}
+        assert args.index("--skill") < args.index("--")
+
+    def test_disabled_plugins_are_left_out(self, claude_dir: Path) -> None:
+        _install_plugin(claude_dir, "off@market", enabled=False)
+        on = _install_plugin(claude_dir, "on@market", enabled=True)
+        assert _skill_args(PiRunner(command="pi")._build_args(None)) == [str(on)]
+
+    def test_project_scope_plugins_are_left_out(self, claude_dir: Path) -> None:
+        _install_plugin(claude_dir, "repo@market", scope="project")
+        assert _skill_args(PiRunner(command="pi")._build_args(None)) == []
+
+    def test_no_claude_config_means_no_skill_flags(self) -> None:
+        assert "--skill" not in PiRunner(command="pi")._build_args(None)
+
+    @pytest.mark.parametrize("value", ["0", "false", "off"])
+    def test_the_bridge_can_be_turned_off(
+        self, claude_dir: Path, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        _install_plugin(claude_dir, "ebi-workspace@ebi-tools")
+        monkeypatch.setenv(PI_CLAUDE_PLUGIN_SKILLS_ENV, value)
+        assert "--skill" not in PiRunner(command="pi")._build_args(None)
 
 
 class TestUnsandboxedGate:
