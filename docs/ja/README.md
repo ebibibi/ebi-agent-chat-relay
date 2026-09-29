@@ -950,6 +950,7 @@ CHAT_ONLY_CHANNEL_IDS=444,555
 | `CONTEXT_LINKS_CONFIG` | `ContextLinksCog` が読むコンテキストリンク JSON ファイルのパス。ファイルが無い場合・壊れている場合は、この機能が黙って無効になります。 | `context_links.json` |
 | `CCDB_PUBLIC_API_URL` | `/open/obsidian?vault=…&file=…` を対応する `obsidian://` URI へリダイレクトする HTTPS エンドポイントのベース URL。設定すると Obsidian のコンテキストリンクが embed 内のテキストではなくクリック可能な Discord ボタンとして表示されます。このリダイレクト自体は ccdb が提供するものではありません。 | （オプション） |
 | `CCDB_PI_APPROVE_PROJECT` | プロジェクト固有の `.pi/` 設定・skill・extension を pi に読み込ませる場合に `1`。チェックアウトしたリポジトリが、その中で動くエージェントを再設定できないよう既定はオフです。 | `0` |
+| `CCDB_PI_CLAUDE_PLUGIN_SKILLS` | 有効化済みでユーザースコープの Claude Code プラグインの skill を `--skill` で pi に渡し、Claude スレッドと同じプラグイン skill を pi スレッドでも使えるようにします。`0` で無効化。 | `1` |
 | `PATH` | Bot **と Bot が起動する全 CLI セッション**のバイナリ検索パス（セッションは Bot の環境を継承）。systemd はユニットを最小限の PATH で起動し `~/.bashrc` / `~/.profile` を読まないため、systemd 運用時は `.env` に設定する。[ツールチェーンの PATH](#ツールチェーンの-path--env-に設定する) 参照 | （親プロセスから継承） |
 | `CCDB_MODEL` | 使用するモデル（`CLAUDE_MODEL` より優先） | `sonnet` |
 | `CCDB_MODEL_DISCOVERY` | `0` にすると、`/model` のオートコンプリートが Anthropic のモデル一覧エンドポイントへ「この認証情報から見えるモデル」を問い合わせるのをやめ（あわせて Codex CLI と pi CLI のローカルモデルカタログの読み取りもやめ）、常に静的な候補リストを使用する。この問い合わせは読み取り専用で、Claude Code CLI 自身の認証情報を再利用し、オフライン時・未認証時・Bedrock/Vertex/Foundry 利用時には自動的にフォールバックする | `1` |

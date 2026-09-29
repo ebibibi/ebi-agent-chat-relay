@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agent tells the user the thread can be closed and calls `POST /api/threads/{thread_id}/done`,
   which prefixes the title with `✅`. A new human reply removes the marker; a retitle never carries
   it forward. `CCDB_DONE_THREAD_MARKER` changes the marker (empty disables it and the instruction).
+- **pi threads can use Claude Code plugin skills** — pi does not read Claude Code plugins, so a
+  thread switched to pi lost every plugin skill. The pi runner now passes the `skills/` directory
+  of each enabled, user-scope plugin as `--skill`, resolved per turn so plugin updates are picked
+  up. A user's own skill still wins a name collision. `CCDB_PI_CLAUDE_PLUGIN_SKILLS=0` turns it off.
 
 ### Fixed
 

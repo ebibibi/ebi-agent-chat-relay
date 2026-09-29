@@ -121,6 +121,10 @@ Project-local `.pi/` settings, skills and extensions are ignored unless
 `CCDB_PI_APPROVE_PROJECT=1` is also set, so a repository ccdb checks out cannot reconfigure the
 agent about to run inside it.
 
+pi does not read Claude Code plugins, so ccdb passes the `skills/` directory of each enabled,
+user-scope plugin as `--skill` (`CCDB_PI_CLAUDE_PLUGIN_SKILLS=0` turns that off). See
+[pi-backend.md](pi-backend.md#claude-code-plugin-skills).
+
 Select a provider and model together, because pi resolves both from one value:
 
 ```text
