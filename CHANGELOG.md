@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Threads waiting on a scheduled task are marked** (#783) — while an enabled task will post into
+  a thread (`POST /api/tasks` with `thread_id`, or a `ScheduleWakeup` bridged to one), the
+  scheduler prefixes its title with `⏰`, and removes it when a one-shot fires or the task is
+  disabled or deleted. The title is reconciled from the task table, so every way of registering a
+  task is covered. `CCDB_SCHEDULED_THREAD_MARKER` changes the marker (empty disables it).
 - **Threads can be marked ready to close** (#769) — when a thread's work is fully finished, the
   agent tells the user the thread can be closed and calls `POST /api/threads/{thread_id}/done`,
   which prefixes the title with `✅`. A new human reply removes the marker; a retitle never carries
