@@ -23,6 +23,7 @@ from discord.ext import commands, tasks
 from claude_code_core.frontend import ConversationSurface, Notice, NoticeLevel
 
 from ..frontend import DiscordFrontend
+from ..scheduled_marker import ScheduledThreadMarker
 from ._run_helper import run_claude_with_config
 from .headless_backend import build_headless_runner
 from .run_config import RunConfig
@@ -74,6 +75,9 @@ class SchedulerCog(commands.Cog):
         self.frontend: SessionFrontend = frontend or DiscordFrontend(bot)
         # Track in-flight tasks to avoid double-running the same task_id.
         self._running: set[int] = set()
+        # Shows which threads are waiting on a follow-up task (the ⏰ title).
+        self.thread_marker = ScheduledThreadMarker(bot)
+        self._marker_task: asyncio.Task[None] | None = None
 
     async def cog_load(self) -> None:
         """Start the master loop when the Cog is loaded."""
@@ -89,10 +93,8 @@ class SchedulerCog(commands.Cog):
     async def _master_loop(self) -> None:
         """Wake up every 30 s, find due tasks, and spawn them concurrently."""
         due = await self.repo.get_due()
-        if not due:
-            return
-
-        logger.info("SchedulerCog: %d task(s) due", len(due))
+        if due:
+            logger.info("SchedulerCog: %d task(s) due", len(due))
         for task in due:
             task_id: int = task["id"]
             if task_id in self._running:
@@ -103,10 +105,50 @@ class SchedulerCog(commands.Cog):
             # if the loop fires again before the task finishes.
             await self.repo.update_next_run(task_id, interval_seconds=task["interval_seconds"])
 
+            # Claimed here, not only inside _run_task, so the reconcile below
+            # already sees a fired one-shot as no longer waiting.
+            self._running.add(task_id)
             asyncio.create_task(
                 self._run_task(task),
                 name=f"ccdb-scheduler-{task_id}",
             )
+
+        self._start_marker_reconcile()
+
+    def _start_marker_reconcile(self) -> None:
+        """Sync thread titles with the pending tasks, in the background.
+
+        Backgrounded because discord.py sleeps through a rename rate limit (two
+        per ten minutes per thread) and the master loop must not wait on that —
+        a due task would be late by the length of the sleep.  A reconcile still
+        in flight makes this tick skip; the next tick picks up whatever changed.
+        """
+        if self._marker_task is not None and not self._marker_task.done():
+            return
+        self._marker_task = asyncio.create_task(
+            self._reconcile_markers(), name="ccdb-scheduler-thread-marker"
+        )
+
+    async def _reconcile_markers(self) -> None:
+        try:
+            await self.thread_marker.reconcile(await self._pending_thread_ids())
+        except Exception:
+            logger.exception("SchedulerCog: failed to update scheduled thread markers")
+
+    async def _pending_thread_ids(self) -> set[int]:
+        """Threads an enabled task will post into later.
+
+        A one-shot that is already running is no longer *waiting* — it will be
+        disabled when it finishes — so its thread drops out as soon as it fires.
+        A recurring task keeps its thread pending while it runs.
+        """
+        return {
+            task["thread_id"]
+            for task in await self.repo.get_all()
+            if task["enabled"]
+            and task.get("thread_id")
+            and not (task["one_shot"] and task["id"] in self._running)
+        }
 
     @_master_loop.before_loop
     async def _before_master_loop(self) -> None:

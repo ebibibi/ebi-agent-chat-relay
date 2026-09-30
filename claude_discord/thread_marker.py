@@ -36,6 +36,10 @@ DEFAULT_DONE_MARKER = "\u2705"  # ✅
 SPAWN_MARKER_ENV_VAR = "CCDB_SPAWN_THREAD_MARKER"
 PARENT_MARKER_ENV_VAR = "CCDB_SPAWN_PARENT_MARKER"
 DONE_MARKER_ENV_VAR = "CCDB_DONE_THREAD_MARKER"
+SCHEDULED_MARKER_ENV_VAR = "CCDB_SCHEDULED_THREAD_MARKER"
+
+# Prepended while a scheduled task is waiting to post into the thread.
+DEFAULT_SCHEDULED_MARKER = "\U000023f0"  # ⏰
 
 # Unambiguous alphabet: no 0/O, no 1/I/L. A code is read off a screen and typed
 # back into an API call by a human as often as by an agent.
@@ -73,28 +77,74 @@ def done_marker() -> str:
     return _marker(DONE_MARKER_ENV_VAR, DEFAULT_DONE_MARKER)
 
 
+def scheduled_marker() -> str:
+    """Marker for a thread a scheduled task will post into later."""
+    return _marker(SCHEDULED_MARKER_ENV_VAR, DEFAULT_SCHEDULED_MARKER)
+
+
+def _split_status(name: str) -> tuple[bool, bool, str]:
+    """Strip the leading status markers: ``(done, scheduled, rest)``.
+
+    Status markers describe the thread *now* and are toggled independently, so
+    they are accepted in either order and always written back in the one order
+    :func:`_join_status` uses — otherwise unmarking one would depend on which
+    of the two happened to be applied first.
+    """
+    done_tag, scheduled_tag = done_marker(), scheduled_marker()
+    done = scheduled = False
+    rest = name.strip()
+    while True:
+        if done_tag and not done and rest.startswith(done_tag):
+            done, rest = True, rest[len(done_tag) :].lstrip()
+        elif scheduled_tag and not scheduled and rest.startswith(scheduled_tag):
+            scheduled, rest = True, rest[len(scheduled_tag) :].lstrip()
+        else:
+            return done, scheduled, rest
+
+
+def _join_status(done: bool, scheduled: bool, rest: str) -> str:
+    """Rebuild a name from its status flags: done first, then scheduled.
+
+    Done leads because "can I close this?" is the question a human scans the
+    channel list for.  Truncation happens after tagging for the same reason as
+    :func:`mark_spawned_thread_name` — the head of the string must survive.
+    """
+    flags = ((done_marker(), done), (scheduled_marker(), scheduled))
+    prefix = " ".join(tag for tag, on in flags if on and tag)
+    return _fit(f"{prefix} {rest}".strip() if prefix else rest)
+
+
 def mark_done_thread_name(name: str) -> str:
     """Return *name* tagged as ready to close, Discord-safe and idempotent.
 
     The marker goes in front of everything, lineage tags included: "can I
     close this?" is the question a human scans the channel list for, so it
-    is the first thing the eye should hit.  Truncation happens after tagging
-    for the same reason as :func:`mark_spawned_thread_name`.
+    is the first thing the eye should hit.
     """
-    marker = done_marker()
-    trimmed = name.strip()
-    if not marker or trimmed.startswith(marker):
-        return _fit(trimmed)
-    return _fit(f"{marker} {trimmed}")
+    _, scheduled, rest = _split_status(name)
+    return _join_status(True, scheduled, rest)
 
 
 def unmark_done_thread_name(name: str) -> str:
     """Return *name* without a leading done marker (unchanged when absent)."""
-    marker = done_marker()
-    trimmed = name.strip()
-    if marker and trimmed.startswith(marker):
-        return trimmed[len(marker) :].lstrip()
-    return trimmed
+    _, scheduled, rest = _split_status(name)
+    return _join_status(False, scheduled, rest)
+
+
+def mark_scheduled_thread_name(name: str) -> str:
+    """Return *name* tagged as waiting on a scheduled task, idempotent.
+
+    Sits behind a done marker and in front of lineage tags: it is a status
+    like done, not part of the thread's ancestry.
+    """
+    done, _, rest = _split_status(name)
+    return _join_status(done, True, rest)
+
+
+def unmark_scheduled_thread_name(name: str) -> str:
+    """Return *name* without the scheduled marker (unchanged when absent)."""
+    done, _, rest = _split_status(name)
+    return _join_status(done, False, rest)
 
 
 def family_code(thread_id: int) -> str:
@@ -217,10 +267,11 @@ def split_marker_tags(name: str) -> tuple[str, str]:
 
     A leading done marker is dropped, not returned: a retitle only happens on
     a human's turn, and a thread someone is talking in again is no longer
-    ready to close.
+    ready to close.  A scheduled marker is kept, leading the tags: the task is
+    still waiting whatever the thread is called now.
     """
-    rest = unmark_done_thread_name(name)
-    tags: list[str] = []
+    _, scheduled, rest = _split_status(name)
+    tags: list[str] = [scheduled_marker()] if scheduled else []
     for marker in (spawn_marker(), parent_marker()):
         end = _tag_end(rest, marker)
         if end:
