@@ -29,6 +29,8 @@ from ..discord_ui.ask_handler import collect_ask_answers
 from ..discord_ui.embeds import error_embed, timeout_embed
 from ..lounge import build_lounge_prompt
 from ..pr_completion_gate import GitHubPrCompletionGate, build_completion_prompt
+from ..thread_marker import OUTCOME_ERROR, OUTCOME_WAITING
+from ..thread_status import schedule_thread_outcome
 from .event_processor import EventProcessor
 from .run_config import RunConfig
 
@@ -149,7 +151,24 @@ def _build_done_marker_section(config: RunConfig) -> str | None:
         '  `curl -s -X POST "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/done"`\n'
         f"This prefixes the thread title with {marker}. Do NOT mark it when you are asking "
         "a question, waiting for a pipeline or a decision, or leaving work pending. "
-        "If the user replies later, the marker is removed automatically."
+        "If the user replies later, the marker is removed automatically." + _waiting_marker_hint()
+    )
+
+
+def _waiting_marker_hint() -> str:
+    """The counterpart of done: the turn ends because the human has to act."""
+    from ..thread_marker import waiting_marker
+
+    marker = waiting_marker()
+    if not marker:
+        return ""
+    return (
+        "\nWhen instead your turn ends because only the user can move the work forward "
+        "— you need their decision, answer, approval or a manual step — say so plainly "
+        "and mark the thread as waiting on them:\n"
+        '  `curl -s -X POST "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/waiting"`\n'
+        f"This prefixes the title with {marker}; it too is removed when the user replies. "
+        "Do not use it while you are the one who still has work to do."
     )
 
 
@@ -473,6 +492,7 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
         if config.status:
             with contextlib.suppress(Exception):
                 await config.status.set_error()
+        schedule_thread_outcome(config.thread, OUTCOME_ERROR)
         await _emit_result_sink(config, None, f"{type(exc).__name__}: {exc}")
         return processor.session_id
     finally:
@@ -504,6 +524,7 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
     # After the stream ends, handle pending AskUserQuestion by showing Discord
     # UI and resuming the session with the user's answer.
     if processor.pending_ask and processor.session_id:
+        schedule_thread_outcome(config.thread, OUTCOME_WAITING)
         answer_prompt = await collect_ask_answers(
             config.thread,
             processor.pending_ask,
@@ -512,6 +533,7 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
             notify_user_id=config.notify_user_id,
         )
         if answer_prompt:
+            schedule_thread_outcome(config.thread, None)
             logger.info(
                 "Resuming session %s after AskUserQuestion answer",
                 processor.session_id,
@@ -541,6 +563,8 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
     # sink fires exactly once, from the outermost completed run. An in-stream
     # RESULT error (e.g. API 400/429) is reported as an error, not an empty
     # "done", so the caller can tell a failure from an empty answer.
+    if processor.final_error:
+        schedule_thread_outcome(config.thread, OUTCOME_ERROR)
     await _emit_result_sink(config, processor.final_assistant_text, processor.final_error)
     return processor.session_id
 

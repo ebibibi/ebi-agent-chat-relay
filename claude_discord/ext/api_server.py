@@ -41,7 +41,13 @@ from ..discord_ui.file_sender import send_file_blobs
 from ..lounge import length_hint
 from ..relay import MODE_INTERRUPT, MODE_QUEUE, VALID_MODES, RelayGuard, build_relay_prompt
 from ..session_view import STATE_HISTORY, STATE_RUNNING, build_session_views
-from ..thread_marker import MAX_THREAD_NAME_LENGTH, family_code, mark_done_thread_name
+from ..thread_marker import (
+    MAX_THREAD_NAME_LENGTH,
+    OUTCOME_DONE,
+    OUTCOME_WAITING,
+    family_code,
+    set_outcome_thread_name,
+)
 from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
 from . import ingest_manifest, teams_sync
 from .teams_store import TeamsVaultStore
@@ -345,6 +351,7 @@ class ApiServer:
         self.app.router.add_get("/api/threads/{thread_id}/messages", self.get_thread_messages)
         self.app.router.add_post("/api/threads/{thread_id}/message", self.relay_thread_message)
         self.app.router.add_post("/api/threads/{thread_id}/done", self.mark_thread_done)
+        self.app.router.add_post("/api/threads/{thread_id}/waiting", self.mark_thread_waiting)
         # Session spawn route
         self.app.router.add_post("/api/spawn", self.spawn)
         # Authenticated external ingest route (browser extension / webhooks)
@@ -1473,6 +1480,18 @@ class ApiServer:
         404 for an unknown channel, 400 when it is not a thread, 502 when the
         rename itself fails (e.g. rate limited).
         """
+        return await self._mark_thread_outcome(request, OUTCOME_DONE)
+
+    async def mark_thread_waiting(self, request: web.Request) -> web.Response:
+        """POST /api/threads/{thread_id}/waiting — the next move is the human's.
+
+        Prefixes the title with the waiting marker (``❓`` by default), replacing
+        a done or error marker. Same contract as :meth:`mark_thread_done`,
+        including removal on the human's next reply.
+        """
+        return await self._mark_thread_outcome(request, OUTCOME_WAITING)
+
+    async def _mark_thread_outcome(self, request: web.Request, outcome: str) -> web.Response:
         try:
             thread_id = int(request.match_info["thread_id"])
         except (ValueError, KeyError):
@@ -1490,15 +1509,15 @@ class ApiServer:
             return web.json_response({"error": "Channel is not a thread"}, status=400)
 
         current = channel.name or ""
-        marked = mark_done_thread_name(current)
+        marked = set_outcome_thread_name(current, outcome)
         if marked == current:
             return web.json_response({"status": "unchanged", "thread_name": current})
         try:
             await channel.edit(name=marked)
         except Exception as exc:  # rate limited, archived, missing permission
-            logger.warning("Failed to mark thread %d done", thread_id, exc_info=True)
+            logger.warning("Failed to mark thread %d %s", thread_id, outcome, exc_info=True)
             return web.json_response({"error": str(exc)}, status=502)
-        logger.info("thread %d marked done: %r -> %r", thread_id, current, marked)
+        logger.info("thread %d marked %s: %r -> %r", thread_id, outcome, current, marked)
         return web.json_response({"status": "marked", "thread_name": marked})
 
     async def spawn(self, request: web.Request) -> web.Response:
