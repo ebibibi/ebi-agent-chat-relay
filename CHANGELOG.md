@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Thread titles show whose move it is** (#787) — besides `✅` (done), a thread whose turn ended
+  on a question only the human can answer gets `❓` (an open AskUserQuestion, or the agent calling
+  the new `POST /api/threads/{thread_id}/waiting`), and one whose turn failed gets `⚠️`. These
+  three are exclusive, sit in front of `⏰`, and a human reply clears them. Per-message states such
+  as "running" stay on the reactions: Discord allows two renames per ten minutes per thread.
+  `CCDB_WAITING_THREAD_MARKER` / `CCDB_ERROR_THREAD_MARKER` change or disable them.
 - **Threads waiting on a scheduled task are marked** (#783) — while an enabled task will post into
   a thread (`POST /api/tasks` with `thread_id`, or a `ScheduleWakeup` bridged to one), the
   scheduler prefixes its title with `⏰`, and removes it when a one-shot fires or the task is
