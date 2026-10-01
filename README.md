@@ -1260,6 +1260,7 @@ uv sync --extra api
 | DELETE | `/api/claims` | Release a claim (`resource`, `thread_id`, optional `force=true`) |
 | POST | `/api/threads/{thread_id}/message` | Relay a message from one session to another (`text`, `from_thread`, `mode`, `hop`) |
 | POST | `/api/threads/{thread_id}/done` | Mark a thread as ready to close (prefixes the title with `✅`; idempotent) |
+| POST | `/api/threads/{thread_id}/waiting` | Mark a thread as waiting on the human (prefixes the title with `❓`, replacing `✅`/`⚠️`; removed on the next human reply; idempotent) |
 
 ```bash
 # Send notification (embed format, default)
