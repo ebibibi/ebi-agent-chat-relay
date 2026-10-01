@@ -33,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Teams sync no longer files an unchanged message as an edit** (#790) — a hash with a different
+  scheme prefix (`fnv1a:` → `fnv1a2:`) re-keys the stored message without writing `_history`, an
+  attachment already on disk keeps its `📎` link when a later push does not declare it (Teams
+  lazy-loads images), and a duplicated attachment name renders once.
 - **`/rewind` no longer wipes non-Claude sessions** — rewind only understands Claude session JSONL,
   so on a Codex/local/pi/AG-UI thread the history lookup missed and fell through to a full reset.
   It now replies that rewind is unsupported for that backend and leaves the session untouched.

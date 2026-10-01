@@ -314,7 +314,9 @@ class TeamsVaultStore:
         note.parent.mkdir(parents=True, exist_ok=True)
 
         previous = self.latest_chain(thread_dir).get(msg.mid)
-        edited = previous is not None and previous.get("hash") != msg.hash
+        edited = previous is not None and teams_sync.is_edit(
+            str(previous.get("hash") or ""), msg.hash
+        )
         rev = int(previous.get("rev", 1)) + 1 if previous else 1
         first_synced = now
         if note.exists():
@@ -323,6 +325,8 @@ class TeamsVaultStore:
             first_synced = self._existing_first_synced(note) or now
 
         saved, pending, unavailable = self._save_attachments(thread_dir, msg)
+        declared = {teams_sync.safe_attachment_name(a.name) for a in msg.attachments}
+        kept = tuple(sorted(self._attachments_present(thread_dir, msg.mid) - declared))
         note.write_text(
             teams_sync.render_message(
                 msg,
@@ -333,6 +337,7 @@ class TeamsVaultStore:
                 last_synced_at=now,
                 pending=pending,
                 unavailable=unavailable,
+                kept_attachments=kept,
             ),
             encoding="utf-8",
         )

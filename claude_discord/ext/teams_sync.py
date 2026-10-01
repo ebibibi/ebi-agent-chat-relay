@@ -362,6 +362,21 @@ def build_plan(
     return plan
 
 
+def hash_scheme(digest: str) -> str:
+    """The ``<scheme>`` of a ``<scheme>:<digest>`` client hash ("" when absent)."""
+    return digest.split(":", 1)[0] if ":" in digest else ""
+
+
+def is_edit(previous_hash: str, new_hash: str) -> bool:
+    """Whether a hash change means the message itself changed upstream.
+
+    Hashes are only comparable within one scheme. When a client changes its
+    formula (``fnv1a:`` → ``fnv1a2:``) every stored hash differs at once; that
+    is a re-keying, not thousands of edits, so it must not fill ``_history``.
+    """
+    return previous_hash != new_hash and hash_scheme(previous_hash) == hash_scheme(new_hash)
+
+
 def _mid_sort_key(mid: str) -> tuple[int, str]:
     """Sort mids numerically, tolerating an unexpected non-numeric one."""
     return (len(mid), mid)
@@ -382,6 +397,7 @@ def render_message(
     last_synced_at: str,
     pending: list[dict],
     unavailable: list[dict] | None = None,
+    kept_attachments: tuple[str, ...] = (),
 ) -> str:
     """Render one message as an Obsidian note with YAML frontmatter.
 
@@ -390,7 +406,16 @@ def render_message(
     chain that breaks in the middle if the write is interrupted. Order lives in
     the append-only ``chain.jsonl`` instead, and ``prev`` is enough to walk
     backwards from any single file.
+
+    ``kept_attachments`` are files already stored for this message that the
+    current push did not declare. Teams lazy-loads images, so one pass sees a
+    screenshot and the next does not; the file stays on disk either way, and so
+    does its link. Attachment names are de-duplicated — the same name declared
+    twice is one file.
     """
+    entries = _unique_attachments(msg.attachments)
+    names = [name for name, _ in entries]
+    names += [name for name in kept_attachments if name not in names]
     front = {
         "mid": msg.mid,
         "thread_root": thread.root_mid,
@@ -402,7 +427,7 @@ def render_message(
         "hash": msg.hash,
         "edited": edited,
         "deleted": msg.deleted,
-        "attachments": [safe_attachment_name(a.name) for a in msg.attachments],
+        "attachments": names,
         "attachments_pending": [p["name"] for p in pending],
         "attachments_unavailable": [p["name"] for p in unavailable or []],
         "first_synced_at": first_synced_at,
@@ -420,16 +445,29 @@ def render_message(
     if body:
         lines.append(body)
         lines.append("")
-    for att in msg.attachments:
-        name = safe_attachment_name(att.name)
+    for name, att in entries:
         if att.status == "embedded":
             lines.append(f"- 📎 [[{msg.mid}/{name}]]")
         else:
             note = att.reason or att.status
             lines.append(f"- ⚠️ 添付未取得: {name}（{note}）")
-    if msg.attachments:
+    for name in names[len(entries) :]:
+        lines.append(f"- 📎 [[{msg.mid}/{name}]]")
+    if names:
         lines.append("")
     return "\n".join(lines)
+
+
+def _unique_attachments(
+    attachments: tuple[AttachmentRef, ...],
+) -> list[tuple[str, AttachmentRef]]:
+    """Safe name per attachment, first occurrence wins; an embedded copy beats a gap."""
+    out: dict[str, AttachmentRef] = {}
+    for att in attachments:
+        name = safe_attachment_name(att.name)
+        if name not in out or (att.status == "embedded" and out[name].status != "embedded"):
+            out[name] = att
+    return list(out.items())
 
 
 def _yaml_scalar(value: object) -> str:

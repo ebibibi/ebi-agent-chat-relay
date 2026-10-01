@@ -390,6 +390,8 @@ The running summary above keeps a *distillation* of an upstream thread. When you
 
 A *changed* hash and a *never-seen* id are the same question, so following an upstream **edit** is not a separate feature — it falls out of the same comparison, and the superseded version is preserved under `_history/` rather than overwritten.
 
+Hashes are only compared within one scheme: when a client changes its hash formula (`fnv1a:` → `fnv1a2:`), the stored message is re-keyed in place without writing `_history/`, so a client upgrade does not look like thousands of edits. Teams lazy-loads images, so an attachment already on disk keeps its `📎` link even when a later push does not declare it, and an attachment name declared twice renders once.
+
 ```
 {title}--{root_mid}/
   thread.json      identity, coverage, unresolved attachment gaps
