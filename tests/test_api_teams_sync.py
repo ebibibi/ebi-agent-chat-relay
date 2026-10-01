@@ -997,3 +997,106 @@ async def test_plan_advertises_conversation_scope_support(client: TestClient) ->
     plan = await client.post("/api/teams/sync/plan", json=thread_body(), headers=AUTH)
     body = await plan.json()
     assert body.get("capabilities", {}).get("conversation_scope") is True
+
+
+# ---------------------------------------------------------------------------
+# re-sync of an unchanged message — #790
+# ---------------------------------------------------------------------------
+
+
+async def test_a_new_hash_scheme_is_not_an_edit(client: TestClient) -> None:
+    """A client that changes its hash formula must not archive the whole thread."""
+    await client.post(
+        "/api/teams/sync/push",
+        headers=AUTH,
+        json=thread_body(messages=[msg(ROOT, "同じ本文", "fnv1a:aaaa1111")]),
+    )
+    resp = await client.post(
+        "/api/teams/sync/push",
+        headers=AUTH,
+        json=thread_body(messages=[msg(ROOT, "同じ本文", "fnv1a2:bbbb2222")]),
+    )
+    body = await resp.json()
+    folder = Path(body["folder"])
+    note = (folder / "messages" / f"{ROOT}.md").read_text()
+    assert 'hash: "fnv1a2:bbbb2222"' in note
+    assert "edited: false" in note
+    assert not list((folder / "_history").glob("*.md"))
+
+    plan = await client.post(
+        "/api/teams/sync/plan",
+        headers=AUTH,
+        json=thread_body(messages=[{"mid": ROOT, "hash": "fnv1a2:bbbb2222"}]),
+    )
+    assert (await plan.json())["want_messages"] == []
+
+
+async def test_an_edit_within_the_same_scheme_is_still_archived(client: TestClient) -> None:
+    await client.post(
+        "/api/teams/sync/push",
+        headers=AUTH,
+        json=thread_body(messages=[msg(ROOT, "旧本文", "fnv1a2:aaaa1111")]),
+    )
+    resp = await client.post(
+        "/api/teams/sync/push",
+        headers=AUTH,
+        json=thread_body(messages=[msg(ROOT, "新本文", "fnv1a2:bbbb2222")]),
+    )
+    folder = Path((await resp.json())["folder"])
+    assert "edited: true" in (folder / "messages" / f"{ROOT}.md").read_text()
+    assert len(list((folder / "_history").glob(f"{ROOT}.*.md"))) == 1
+
+
+async def test_a_stored_attachment_stays_linked_when_a_later_push_misses_it(
+    client: TestClient,
+) -> None:
+    """Teams lazy-loads images; a pass that did not see one must not unlink it."""
+    payload = base64.b64encode(b"png-bytes").decode()
+    await client.post(
+        "/api/teams/sync/push",
+        headers=AUTH,
+        json=thread_body(
+            messages=[
+                msg(
+                    ROOT,
+                    "スクショです",
+                    "h1",
+                    attachments=[{"name": "画像.png", "status": "embedded", "data": payload}],
+                )
+            ]
+        ),
+    )
+    resp = await client.post(
+        "/api/teams/sync/push",
+        headers=AUTH,
+        json=thread_body(messages=[msg(ROOT, "スクショです", "h1")]),
+    )
+    folder = Path((await resp.json())["folder"])
+    note = (folder / "messages" / f"{ROOT}.md").read_text()
+    assert f"- 📎 [[{ROOT}/画像.png]]" in note
+    assert 'attachments: ["画像.png"]' in note
+    assert (folder / "messages" / ROOT / "画像.png").read_bytes() == b"png-bytes"
+
+
+async def test_a_duplicate_attachment_name_renders_once(client: TestClient) -> None:
+    resp = await client.post(
+        "/api/teams/sync/push",
+        headers=AUTH,
+        json=thread_body(
+            messages=[
+                msg(
+                    ROOT,
+                    "仕様調査を添付します",
+                    "h1",
+                    attachments=[
+                        {"name": "仕様調査.pdf", "status": "unavailable", "reason": "HTTP 404"},
+                        {"name": "仕様調査.pdf", "status": "unavailable", "reason": "言及のみ"},
+                    ],
+                )
+            ]
+        ),
+    )
+    folder = Path((await resp.json())["folder"])
+    note = (folder / "messages" / f"{ROOT}.md").read_text()
+    assert note.count("添付未取得: 仕様調査.pdf") == 1
+    assert 'attachments: ["仕様調査.pdf"]' in note
