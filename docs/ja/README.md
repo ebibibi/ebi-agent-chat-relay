@@ -1260,6 +1260,7 @@ uv sync --extra api
 | DELETE | `/api/claims` | クレームの解放（`resource`、`thread_id`、任意で `force=true`） |
 | POST | `/api/threads/{thread_id}/message` | あるセッションから別のセッションへメッセージをリレー（`text`、`from_thread`、`mode`、`hop`） |
 | POST | `/api/threads/{thread_id}/done` | スレッドを「終了してよい」状態にする（タイトル先頭に `✅`。冪等） |
+| POST | `/api/threads/{thread_id}/waiting` | スレッドを「人間の返答待ち」状態にする（タイトル先頭に `❓`。`✅`/`⚠️` を置き換え、次に人間が返信すると外れる。冪等） |
 
 ```bash
 # 通知の送信（埋め込み形式、デフォルト）
