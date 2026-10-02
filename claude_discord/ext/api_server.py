@@ -43,7 +43,9 @@ from ..relay import MODE_INTERRUPT, MODE_QUEUE, VALID_MODES, RelayGuard, build_r
 from ..session_view import STATE_HISTORY, STATE_RUNNING, build_session_views
 from ..thread_marker import (
     MAX_THREAD_NAME_LENGTH,
+    OUTCOME_ACTION,
     OUTCOME_DONE,
+    OUTCOME_REVIEW,
     OUTCOME_WAITING,
     family_code,
     set_outcome_thread_name,
@@ -352,6 +354,8 @@ class ApiServer:
         self.app.router.add_post("/api/threads/{thread_id}/message", self.relay_thread_message)
         self.app.router.add_post("/api/threads/{thread_id}/done", self.mark_thread_done)
         self.app.router.add_post("/api/threads/{thread_id}/waiting", self.mark_thread_waiting)
+        self.app.router.add_post("/api/threads/{thread_id}/review", self.mark_thread_review)
+        self.app.router.add_post("/api/threads/{thread_id}/action", self.mark_thread_action)
         # Session spawn route
         self.app.router.add_post("/api/spawn", self.spawn)
         # Authenticated external ingest route (browser extension / webhooks)
@@ -1490,6 +1494,21 @@ class ApiServer:
         including removal on the human's next reply.
         """
         return await self._mark_thread_outcome(request, OUTCOME_WAITING)
+
+    async def mark_thread_review(self, request: web.Request) -> web.Response:
+        """POST /api/threads/{thread_id}/review — a deliverable awaits the human's look.
+
+        ``👀`` by default. Same contract as :meth:`mark_thread_done`.
+        """
+        return await self._mark_thread_outcome(request, OUTCOME_REVIEW)
+
+    async def mark_thread_action(self, request: web.Request) -> web.Response:
+        """POST /api/threads/{thread_id}/action — the human has a task to do (a todo).
+
+        ``📋`` by default: something only they can do outside the chat. Same
+        contract as :meth:`mark_thread_done`.
+        """
+        return await self._mark_thread_outcome(request, OUTCOME_ACTION)
 
     async def _mark_thread_outcome(self, request: web.Request, outcome: str) -> web.Response:
         try:

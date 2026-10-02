@@ -156,19 +156,37 @@ def _build_done_marker_section(config: RunConfig) -> str | None:
 
 
 def _waiting_marker_hint() -> str:
-    """The counterpart of done: the turn ends because the human has to act."""
-    from ..thread_marker import waiting_marker
+    """The counterpart of done: the turn ends because the human has to move next.
 
-    marker = waiting_marker()
-    if not marker:
+    Split three ways so the channel list says *what* is expected, not just that
+    something is: a reply, a look at a deliverable, or a task outside the chat.
+    """
+    from ..thread_marker import action_marker, review_marker, waiting_marker
+
+    kinds = [
+        ("waiting", waiting_marker(), "a reply is enough — a question, a choice, a go/no-go"),
+        ("review", review_marker(), "a deliverable (draft, slides, attachment) to look over"),
+        (
+            "action",
+            action_marker(),
+            "a task they must do themselves outside this chat — a manual step in a UI, "
+            "sign-in/MFA, an approval in a portal, a payment, anything physical",
+        ),
+    ]
+    lines = [
+        f"  {marker} {desc}:\n"
+        f'    `curl -s -X POST "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/{path}"`'
+        for path, marker, desc in kinds
+        if marker
+    ]
+    if not lines:
         return ""
     return (
-        "\nWhen instead your turn ends because only the user can move the work forward "
-        "— you need their decision, answer, approval or a manual step — say so plainly "
-        "and mark the thread as waiting on them:\n"
-        '  `curl -s -X POST "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/waiting"`\n'
-        f"This prefixes the title with {marker}; it too is removed when the user replies. "
-        "Do not use it while you are the one who still has work to do."
+        "\nWhen instead your turn ends because only the user can move the work forward, "
+        "say plainly what you need from them and mark the thread with the ONE that fits:\n"
+        + "\n".join(lines)
+        + "\nThe marker is removed when the user replies. Do not use any of these while "
+        "you are the one who still has work to do."
     )
 
 
