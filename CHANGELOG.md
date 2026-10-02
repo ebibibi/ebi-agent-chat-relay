@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **"Your move" is split by what is expected** (#801) — `❓` now means a reply is enough; `👀`
+  (new, `POST /api/threads/{thread_id}/review`) means a deliverable is waiting for the human to
+  look over, and `📋` (new, `POST /api/threads/{thread_id}/action`) means a task the human has to
+  do outside the chat — a todo. Exclusive with `✅` / `⚠️` like the others, cleared on the next
+  human reply. `CCDB_REVIEW_THREAD_MARKER` / `CCDB_ACTION_THREAD_MARKER` change or disable them.
+
 - **Thread titles show whose move it is** (#787) — besides `✅` (done), a thread whose turn ended
   on a question only the human can answer gets `❓` (an open AskUserQuestion, or the agent calling
   the new `POST /api/threads/{thread_id}/waiting`), and one whose turn failed gets `⚠️`. These
