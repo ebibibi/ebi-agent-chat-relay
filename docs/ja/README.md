@@ -317,6 +317,8 @@ curl -X POST "$CCDB_API_URL/api/spawn" \
 
 `✅` と同じ位置で、ターンが止まったときに「次は誰の番か」も示します。**❓** はあなたの返答待ち（AskUserQuestion が開いている、またはエージェントが判断を求めて `POST /api/threads/{thread_id}/waiting` を呼んだ）、**⚠️** はターンがエラーで終わったことを表します。`✅` / `❓` / `⚠️` は同時に 1 つだけで、常に `⏰` の前に付き、あなたが返信すると外れます。「実行中」のようにメッセージごとに変わる状態はリアクション絵文字のままです。Discord のリネーム制限（スレッドごとに 10 分で 2 回）があるため、タイトルにはターンをまたいで続く状態だけを載せます。`CCDB_WAITING_THREAD_MARKER` と `CCDB_ERROR_THREAD_MARKER` で `❓` と `⚠️` を変更できます（空文字で無効化）。
 
+「あなたの番」は求められていることの種類で分かれるので、チャンネル一覧がそのまま Todo リストになります。**❓** は返信で済む（質問・選択・GO/NO-GO）、**👀** は成果物の確認待ち（`POST /api/threads/{thread_id}/review`）、**📋** はチャットの外であなたにしかできない作業（画面での手作業、サインイン・MFA、承認、支払いなど。`POST /api/threads/{thread_id}/action`）です。ターンの終わりにエージェントが 1 つ選び、`✅` / `⚠️` と同じ枠を共有します。`CCDB_REVIEW_THREAD_MARKER` と `CCDB_ACTION_THREAD_MARKER` で `👀` と `📋` を変更できます（空文字で無効化）。
+
 Claude のサブプロセスには `DISCORD_THREAD_ID` 環境変数が渡されるため、実行中のセッションから子セッションを起動して作業を並列化できます。
 
 ### 認証済み外部インジェストと結果取得 (`/api/ingest`)
@@ -990,6 +992,8 @@ CHAT_ONLY_CHANNEL_IDS=444,555
 | `CCDB_SPAWN_PARENT_MARKER` | 子スレッドをスポーンしたスレッド自身のタイトル先頭に付けるマーカー。空文字で無効化 | `🌳` |
 | `CCDB_DONE_THREAD_MARKER` | エージェントが作業完了を報告したスレッドのタイトル先頭に付けるマーカー（次に人間が返信すると外れる）。空文字で無効化 | `✅` |
 | `CCDB_WAITING_THREAD_MARKER` | ターンが人間の返答待ちで終わったとき（AskUserQuestion が開いている、または `POST /api/threads/{id}/waiting`）にタイトル先頭に付けるマーカー。次に人間が返信すると外れる。空文字で無効化 | `❓` |
+| `CCDB_REVIEW_THREAD_MARKER` | ターンが成果物の確認待ちで終わったとき（`POST /api/threads/{id}/review`）にタイトル先頭に付けるマーカー。次に人間が返信すると外れる。空文字で無効化 | `👀` |
+| `CCDB_ACTION_THREAD_MARKER` | ターンが人間の作業待ち（Todo）で終わったとき（`POST /api/threads/{id}/action`）にタイトル先頭に付けるマーカー。次に人間が返信すると外れる。空文字で無効化 | `📋` |
 | `CCDB_ERROR_THREAD_MARKER` | ターンがエラーで終わったときにタイトル先頭に付けるマーカー。次に人間が返信すると外れる。空文字で無効化 | `⚠️` |
 | `CCDB_SCHEDULED_THREAD_MARKER` | スケジュールされたタスクの投稿を待っているスレッドのタイトル先頭に付けるマーカー（発火・無効化・削除で外れる）。空文字で無効化 | `⏰` |
 | `THREAD_INBOX_ENABLED` | 永続スレッドインボックスを有効化（`claude -p` でセッションを `waiting`/`done`/`ambiguous` に分類し、スレッドダッシュボードに表示） | `false` |

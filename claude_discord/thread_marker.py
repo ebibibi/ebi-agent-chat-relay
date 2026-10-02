@@ -38,10 +38,16 @@ PARENT_MARKER_ENV_VAR = "CCDB_SPAWN_PARENT_MARKER"
 DONE_MARKER_ENV_VAR = "CCDB_DONE_THREAD_MARKER"
 WAITING_MARKER_ENV_VAR = "CCDB_WAITING_THREAD_MARKER"
 ERROR_MARKER_ENV_VAR = "CCDB_ERROR_THREAD_MARKER"
+REVIEW_MARKER_ENV_VAR = "CCDB_REVIEW_THREAD_MARKER"
+ACTION_MARKER_ENV_VAR = "CCDB_ACTION_THREAD_MARKER"
 SCHEDULED_MARKER_ENV_VAR = "CCDB_SCHEDULED_THREAD_MARKER"
 
 # Prepended when the turn ended on a question only the human can answer.
 DEFAULT_WAITING_MARKER = "\U00002753"  # ❓
+# Prepended when the turn ended on a deliverable the human should look over.
+DEFAULT_REVIEW_MARKER = "\U0001f440"  # 👀
+# Prepended when the turn ended on a task the human has to do outside the chat.
+DEFAULT_ACTION_MARKER = "\U0001f4cb"  # 📋
 # Prepended when the turn ended in an error rather than an answer.
 DEFAULT_ERROR_MARKER = "\U000026a0\U0000fe0f"  # ⚠️
 # Prepended while a scheduled task is waiting to post into the thread.
@@ -50,6 +56,8 @@ DEFAULT_SCHEDULED_MARKER = "\U000023f0"  # ⏰
 # How the last turn ended. At most one applies: each describes whose move it is.
 OUTCOME_DONE = "done"
 OUTCOME_WAITING = "waiting"
+OUTCOME_REVIEW = "review"
+OUTCOME_ACTION = "action"
 OUTCOME_ERROR = "error"
 
 # Unambiguous alphabet: no 0/O, no 1/I/L. A code is read off a screen and typed
@@ -98,6 +106,16 @@ def waiting_marker() -> str:
     return _marker(WAITING_MARKER_ENV_VAR, DEFAULT_WAITING_MARKER)
 
 
+def review_marker() -> str:
+    """Marker for a thread whose turn ended on a deliverable to review."""
+    return _marker(REVIEW_MARKER_ENV_VAR, DEFAULT_REVIEW_MARKER)
+
+
+def action_marker() -> str:
+    """Marker for a thread whose turn ended on a task for the human (a todo)."""
+    return _marker(ACTION_MARKER_ENV_VAR, DEFAULT_ACTION_MARKER)
+
+
 def error_marker() -> str:
     """Marker for a thread whose last turn failed."""
     return _marker(ERROR_MARKER_ENV_VAR, DEFAULT_ERROR_MARKER)
@@ -107,6 +125,8 @@ def _outcome_markers() -> dict[str, str]:
     return {
         OUTCOME_DONE: done_marker(),
         OUTCOME_WAITING: waiting_marker(),
+        OUTCOME_REVIEW: review_marker(),
+        OUTCOME_ACTION: action_marker(),
         OUTCOME_ERROR: error_marker(),
     }
 
@@ -312,7 +332,7 @@ def split_marker_tags(name: str) -> tuple[str, str]:
     the two halves — which is the point: re-titling a thread must not be the
     moment its lineage quietly disappears from the channel list.
 
-    A leading outcome marker (done, waiting, error) is dropped, not returned:
+    A leading outcome marker (done, waiting, review, action, error) is dropped, not returned:
     a retitle only happens on a human's turn, and a thread someone is talking
     in again has moved past how its last turn ended.  A scheduled marker is
     kept, leading the tags: the task is still waiting whatever the thread is
