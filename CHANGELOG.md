@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Bundled manager skill** (#807) — `skills/relay-thread-manager/SKILL.md` teaches an agent to
+  run worker threads on top of `/api/spawn`, `/api/sessions` lineage and the relay: self-contained
+  briefs, tracking children, relaying within the limits, verifying reports, escalating, and
+  closing with `✅`. Plain `curl`, so Claude Code and Codex can both use it.
+
 - **"Your move" is split by what is expected** (#801) — `❓` now means a reply is enough; `👀`
   (new, `POST /api/threads/{thread_id}/review`) means a deliverable is waiting for the human to
   look over, and `📋` (new, `POST /api/threads/{thread_id}/action`) means a task the human has to
