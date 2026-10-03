@@ -308,6 +308,15 @@ The link is also recorded, so a session managing a fan-out can read it instead o
 
 Claude subprocesses receive `DISCORD_THREAD_ID` as an environment variable, so a running session can spawn child sessions to parallelize work.
 
+**Manager sessions (bundled skill)** — The endpoints above are the mechanics; [`skills/relay-thread-manager`](skills/relay-thread-manager/SKILL.md) teaches an agent the workflow on top of them: when to fan out, how to write a self-contained brief, tracking workers through the lineage in `/api/sessions`, relaying follow-ups within the hop and rate limits, verifying reports against the actual PR or commit, escalating to the human, and closing the tree with `✅`. It is plain `curl`, so it works the same for Claude Code and Codex. Install it by copying or symlinking the directory into the agent's skill folder:
+
+```bash
+ln -s "$PWD/skills/relay-thread-manager" ~/.claude/skills/relay-thread-manager   # Claude Code
+ln -s "$PWD/skills/relay-thread-manager" ~/.codex/skills/relay-thread-manager    # Codex
+```
+
+Then ask a thread to "split this across three worker threads and report back".
+
 When a thread's work is fully finished, the agent tells the user the thread can be closed and calls `POST /api/threads/{thread_id}/done`, which prefixes the title with **✅** — the channel list then shows at a glance which threads are safe to close. A new human reply removes the marker automatically. `CCDB_DONE_THREAD_MARKER` changes `✅` (empty disables the marker and the instruction).
 
 A thread that a scheduled task will post into later — a follow-up registered with `thread_id`, or a `ScheduleWakeup` — carries **⏰** at the front of its title for as long as the task is waiting, so a thread that will resume on its own no longer looks abandoned. The scheduler reconciles the marker from the task table every tick: it disappears when a one-shot fires or the task is disabled or deleted, sits behind `✅` when both apply, and survives an automatic retitle. `CCDB_SCHEDULED_THREAD_MARKER` changes `⏰` (empty disables it).
