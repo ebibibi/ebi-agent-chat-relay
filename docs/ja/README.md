@@ -321,6 +321,15 @@ curl -X POST "$CCDB_API_URL/api/spawn" \
 
 Claude のサブプロセスには `DISCORD_THREAD_ID` 環境変数が渡されるため、実行中のセッションから子セッションを起動して作業を並列化できます。
 
+**マネージャーセッション（同梱スキル）** — 上記のエンドポイントは仕組みにすぎません。[`skills/relay-thread-manager`](../../skills/relay-thread-manager/SKILL.md) は、その上に乗るワークフローをエージェントに教えます: いつファンアウトするか、自己完結したブリーフの書き方、`/api/sessions` の親子関係を使ったワーカーの追跡、ホップ数とレート制限の範囲内でのフォローアップのリレー、報告を実際の PR やコミットと突き合わせる検証、人間へのエスカレーション、そして `✅` によるツリー全体のクローズまで。中身は素の `curl` なので、Claude Code でも Codex でも同じように動きます。ディレクトリをエージェントのスキルフォルダへコピーするかシンボリックリンクを張ってインストールします:
+
+```bash
+ln -s "$PWD/skills/relay-thread-manager" ~/.claude/skills/relay-thread-manager   # Claude Code
+ln -s "$PWD/skills/relay-thread-manager" ~/.codex/skills/relay-thread-manager    # Codex
+```
+
+あとはスレッドで「これを 3 つのワーカースレッドに分けて、結果を報告して」と頼むだけです。
+
 ### 認証済み外部インジェストと結果取得 (`/api/ingest`)
 
 `POST /api/ingest` は、信頼できない外部クライアント（ブラウザ拡張機能、モバイルショートカット、webhook）向けの**認証済み、添付ファイル対応スポーン**です。`/api/spawn`（信頼済み、localhost）とは異なり、専用の `ingest_token`（`CCDB_INGEST_TOKEN` で設定。`api_secret` とは独立）が必要で、base64 ファイル添付を `{working_dir}/ingest/{thread_id}/` に書き込み、スポーンされたセッションが読み取れるようにします。実際の Discord スレッドを作成するため、すべてのやり取りが観察可能です。
