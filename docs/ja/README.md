@@ -773,7 +773,6 @@ async def setup(bot, runner, components):
 | Cog | 用途 |
 |-----|------|
 | `ReminderCog` | Discord ベースのリマインダースケジューリング |
-| `WatchdogCog` | Todoist / 外部サービスウォッチドッグ |
 | `AutoUpgradeCog` | Webhook トリガーによるパッケージ自動アップグレード |
 | `DocsSyncCog` | プッシュ時の自動ドキュメント同期 |
 | `AlertResponderCog` | 汎用アラート監視 — 監視システムからのアラートを Discord に転送し、Claude Code による調査セッションをトリガー |
@@ -1445,7 +1444,6 @@ examples/
   ebibot/                  # 実例: カスタム Cog を使った個人 Bot
     cogs/
       reminder.py          # /remind スラッシュコマンド + スケジュール通知
-      watchdog.py          # Todoist 期限切れタスクモニター
       auto_upgrade.py      # GitHub webhook 経由の自己更新
       docs_sync.py         # push 時のドキュメント自動翻訳
 ```
@@ -1491,7 +1489,6 @@ uv run pytest tests/ -v --cov=claude_discord
 **[`examples/ebibot/`](../../examples/ebibot/)** — このフレームワーク上に構築された個人 Discord Bot がこのリポジトリに同梱されています。カスタム Cog ローダーを以下のもので実演しています:
 
 - **ReminderCog** — `/remind HH:MM "メッセージ"` スラッシュコマンド + 30 秒送信ループ
-- **WatchdogCog** — Todoist 期限切れタスクモニター（30 分チェック、デイリー重複排除、重要度別アラート）
 - **AutoUpgradeCog** — GitHub webhook + systemctl restart による自己更新
 - **DocsSyncCog** — push 時の Webhook 経由でドキュメントを自動翻訳
 - **AlertResponderCog** — 汎用アラート監視 Cog。設定可能なソースを監視し、重要度付き通知を Discord に投稿

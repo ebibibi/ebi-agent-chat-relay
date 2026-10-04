@@ -235,7 +235,7 @@ class TestExampleCogImports:
 
     @pytest.mark.parametrize(
         "cog_name",
-        ["auto_upgrade", "docs_sync", "reminder", "watchdog"],
+        ["auto_upgrade", "docs_sync", "reminder"],
     )
     def test_example_cog_has_setup(self, cog_name: str) -> None:
         """Each example cog file exposes an async setup() function."""

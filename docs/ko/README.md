@@ -626,7 +626,6 @@ async def setup(bot, runner, components):
 | Cog | 목적 |
 |-----|---------|
 | `ReminderCog` | Discord 기반 리마인더 예약 |
-| `WatchdogCog` | Todoist / 외부 서비스 워치독 |
 | `AutoUpgradeCog` | Webhook 트리거 패키지 업그레이드 |
 | `DocsSyncCog` | 푸시 시 자동 문서 동기화 |
 | `AlertResponderCog` | 범용 알림 모니터링 — 모니터링 시스템의 알림을 Discord로 전달하고 Claude Code 조사 세션을 트리거 |
@@ -1174,7 +1173,6 @@ examples/
   ebibot/                  # Real-world example: personal bot with custom Cogs
     cogs/
       reminder.py          # /remind slash command + scheduled notifications
-      watchdog.py          # Todoist overdue task monitor
       auto_upgrade.py      # Self-update via GitHub webhook
       docs_sync.py         # Auto-translate docs on push
 ```
@@ -1220,7 +1218,6 @@ uv run pytest tests/ -v --cov=claude_discord
 **[`examples/ebibot/`](examples/ebibot/)** — 이 프레임워크 위에 구축되어 바로 이 저장소에 포함된 개인 Discord 봇. 커스텀 Cog 로더를 다음과 함께 시연합니다:
 
 - **ReminderCog** — `/remind HH:MM "message"` 슬래시 명령 + 30초 전송 루프
-- **WatchdogCog** — Todoist 기한 초과 작업 모니터(30분 확인, 일일 중복 제거, 심각도 기반 경보)
 - **AutoUpgradeCog** — GitHub webhook + systemctl restart를 통한 자가 업데이트
 - **DocsSyncCog** — 푸시 시 webhook을 통한 자동 문서 번역
 - **AlertResponderCog** — 범용 알림 모니터링 Cog; 구성 가능한 소스를 감시하고 심각도가 주석된 알림을 Discord에 게시

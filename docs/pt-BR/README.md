@@ -623,14 +623,13 @@ async def setup(bot, runner, components):
 
 Arquivos prefixados com `_` são ignorados. Se um Cog falhar ao carregar, os outros ainda carregam normalmente.
 
-Veja [`examples/ebibot/`](examples/ebibot/) para um exemplo completo do mundo real com lembretes, watchdog do Todoist, auto-upgrade e sincronização de docs.
+Veja [`examples/ebibot/`](examples/ebibot/) para um exemplo completo do mundo real com lembretes, auto-upgrade e sincronização de docs.
 
 **Exemplos integrados em `examples/ebibot/cogs/`:**
 
 | Cog | Finalidade |
 |-----|------------|
 | `ReminderCog` | Agendamento de lembretes baseado no Discord |
-| `WatchdogCog` | Watchdog do Todoist / serviço externo |
 | `AutoUpgradeCog` | Atualização de pacote disparada por webhook |
 | `DocsSyncCog` | Sincronização automática de documentação no push |
 | `AlertResponderCog` | Monitoramento genérico de alertas — encaminha alertas de sistemas de monitoramento para o Discord e dispara uma sessão de investigação do Claude Code |
@@ -1178,7 +1177,6 @@ examples/
   ebibot/                  # Real-world example: personal bot with custom Cogs
     cogs/
       reminder.py          # /remind slash command + scheduled notifications
-      watchdog.py          # Todoist overdue task monitor
       auto_upgrade.py      # Self-update via GitHub webhook
       docs_sync.py         # Auto-translate docs on push
 ```
@@ -1224,7 +1222,6 @@ O projeto começou em 2026-02-18 e continua a evoluir através de conversas iter
 **[`examples/ebibot/`](examples/ebibot/)** — Um bot pessoal do Discord construído sobre este framework, incluído diretamente neste repositório. Demonstra o carregador de Cogs personalizados com:
 
 - **ReminderCog** — Comando slash `/remind HH:MM "message"` + loop de envio de 30 segundos
-- **WatchdogCog** — Monitor de tarefas vencidas do Todoist (verificação a cada 30 minutos, dedup diária, alertas baseados em severidade)
 - **AutoUpgradeCog** — Auto-atualização via webhook do GitHub + systemctl restart
 - **DocsSyncCog** — Traduz automaticamente a documentação no push via webhook
 - **AlertResponderCog** — Cog genérico de monitoramento de alertas; observa uma fonte configurável e publica notificações anotadas por severidade no Discord
