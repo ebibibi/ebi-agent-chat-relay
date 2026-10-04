@@ -765,14 +765,13 @@ async def setup(bot, runner, components):
 
 Files prefixed with `_` are skipped. If one Cog fails to load, others still load normally.
 
-See [`examples/ebibot/`](examples/ebibot/) for a full real-world example with reminders, Todoist watchdog, auto-upgrade, and docs sync.
+See [`examples/ebibot/`](examples/ebibot/) for a full real-world example with reminders, auto-upgrade, and docs sync.
 
 **Built-in examples in `examples/ebibot/cogs/`:**
 
 | Cog | Purpose |
 |-----|---------|
 | `ReminderCog` | Discord-based reminder scheduling |
-| `WatchdogCog` | Todoist / external service watchdog |
 | `AutoUpgradeCog` | Webhook-triggered package upgrade |
 | `DocsSyncCog` | Automated documentation sync on push |
 | `AlertResponderCog` | Generic alert monitoring — forwards alerts from monitoring systems to Discord and triggers a Claude Code investigation session |
@@ -1448,7 +1447,6 @@ examples/
   ebibot/                  # Real-world example: personal bot with custom Cogs
     cogs/
       reminder.py          # /remind slash command + scheduled notifications
-      watchdog.py          # Todoist overdue task monitor
       auto_upgrade.py      # Self-update via GitHub webhook
       docs_sync.py         # Auto-translate docs on push
 ```
@@ -1494,7 +1492,6 @@ The project started on 2026-02-18 and continues to evolve through iterative conv
 **[`examples/ebibot/`](examples/ebibot/)** — A personal Discord bot built on this framework, included right in this repo. Demonstrates the custom Cog loader with:
 
 - **ReminderCog** — `/remind HH:MM "message"` slash command + 30-second send loop
-- **WatchdogCog** — Todoist overdue task monitor (30-minute check, daily dedup, severity-based alerts)
 - **AutoUpgradeCog** — Self-updating via GitHub webhook + systemctl restart
 - **DocsSyncCog** — Auto-translate documentation on push via webhook
 - **AlertResponderCog** — Generic alert-monitoring Cog; watches a configurable source and posts severity-annotated notifications to Discord

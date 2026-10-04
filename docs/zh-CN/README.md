@@ -620,7 +620,6 @@ async def setup(bot, runner, components):
 | Cog | 用途 |
 |-----|------|
 | `ReminderCog` | 基于 Discord 的提醒调度 |
-| `WatchdogCog` | Todoist / 外部服务看门狗 |
 | `AutoUpgradeCog` | Webhook 触发的包升级 |
 | `DocsSyncCog` | 推送时自动同步文档 |
 | `AlertResponderCog` | 通用告警监控——将来自监控系统的告警转发到 Discord 并触发一个 Claude Code 调查会话 |
@@ -1168,7 +1167,6 @@ examples/
   ebibot/                  # 真实世界示例：带自定义 Cog 的个人 Bot
     cogs/
       reminder.py          # /remind 斜杠命令 + 定时通知
-      watchdog.py          # Todoist 过期任务监控
       auto_upgrade.py      # 通过 GitHub webhook 自我更新
       docs_sync.py         # 推送时自动翻译文档
 ```
@@ -1214,7 +1212,6 @@ uv run pytest tests/ -v --cov=claude_discord
 **[`examples/ebibot/`](examples/ebibot/)** — 一个基于此框架构建的个人 Discord Bot，就包含在本仓库中。它展示了自定义 Cog 加载器，包含：
 
 - **ReminderCog** — `/remind HH:MM "message"` 斜杠命令 + 30 秒发送循环
-- **WatchdogCog** — Todoist 过期任务监控（30 分钟检查，每日去重，按严重程度告警）
 - **AutoUpgradeCog** — 通过 GitHub webhook + systemctl restart 自我更新
 - **DocsSyncCog** — 通过 webhook 在推送时自动翻译文档
 - **AlertResponderCog** — 通用告警监控 Cog；监视一个可配置来源并向 Discord 发布带严重程度注释的通知
