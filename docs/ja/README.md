@@ -766,7 +766,7 @@ async def setup(bot, runner, components):
 
 `_` で始まるファイルはスキップされます。1 つの Cog の読み込みが失敗しても、他は正常に読み込まれます。
 
-リマインダー、Todoist ウォッチドッグ、自動アップグレード、ドキュメント同期を含む実例は [`examples/ebibot/`](../../examples/ebibot/) を参照してください。
+リマインダー、自動アップグレード、ドキュメント同期を含む実例は [`examples/ebibot/`](../../examples/ebibot/) を参照してください。
 
 **`examples/ebibot/cogs/` に含まれる組み込みサンプル:**
 

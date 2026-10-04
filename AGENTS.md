@@ -301,7 +301,7 @@ claude_teams/            # Microsoft Teams frontend (optional extra: [teams])
 tests/                   # pytest test suite
 examples/
   ebibot/                # Real-world example: personal bot with custom Cogs
-    cogs/                # ReminderCog, WatchdogCog, AutoUpgradeCog, DocsSyncCog,
+    cogs/                # ReminderCog, AutoUpgradeCog, DocsSyncCog,
                          # AlertResponderCog, JobFailureTriageCog, ThreadCompletionCog
 pyproject.toml           # Package metadata + dependencies
 uv.lock                  # Dependency lock file
