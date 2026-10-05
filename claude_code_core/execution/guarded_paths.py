@@ -301,7 +301,7 @@ def prepare_git(layout: GitLayout) -> None:
         parent = os.path.dirname(path)
         if os.path.islink(parent) or not os.path.isdir(parent) or os.path.lexists(path):
             continue
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         os.close(fd)
 
 
