@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Execution environments** (#823) — the operator chooses where agent CLIs run:
+  `host` (default, unchanged), `native` (Claude Code's sandbox via `--settings`, Codex
+  `--sandbox workspace-write`; pi refuses), `bwrap` (read-only host, writable working directory and
+  agent state, private `/tmp`, no `sudo`, the relay's `.env` / `~/.ssh` / Docker socket hidden),
+  `container` (`docker run --rm -i` with your image; sample `deploy/agent-container/Dockerfile`) or
+  `ssh` (a remote host). `CCDB_EXECUTION_MODE` sets the default and `CCDB_EXECUTION_ALLOWED_MODES`
+  the allowlist; `/sandbox` picks a mode per thread from that list only. Preflight failures and
+  misconfiguration fail the turn with one sentence and start no process; the completion notice
+  shows the environment that served the turn. See `docs/execution-environments.md` and ADR-0008.
+
 - **Bundled manager skill** (#807) — `skills/relay-thread-manager/SKILL.md` teaches an agent to
   run worker threads on top of `/api/spawn`, `/api/sessions` lineage and the relay: self-contained
   briefs, tracking children, relaying within the limits, verifying reports, escalating, and

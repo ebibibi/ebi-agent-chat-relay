@@ -29,6 +29,8 @@ from claude_code_core.claude_plugins import plugin_skill_dirs
 
 from ..concurrency import SessionRegistry
 from ..database.repository import SessionRepository
+from ..database.settings_repo import SettingsRepository
+from ..execution_settings import apply_thread_execution_mode
 from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
 from ._run_helper import run_claude_with_config
 from .run_config import RunConfig
@@ -126,8 +128,12 @@ class SkillCommandCog(commands.Cog):
         registry: SessionRegistry | None = None,
         claude_channel_ids: set[int] | None = None,
         claude_dir: Path | str | None = None,
+        settings_repo: SettingsRepository | None = None,
     ) -> None:
         self.bot = bot
+        # Source of the thread's /sandbox choice; without it skills run in the
+        # deployment's default execution environment.
+        self._settings_repo = settings_repo
         self.repo = repo
         self.runner = runner
         self.claude_channel_id = claude_channel_id
@@ -245,6 +251,7 @@ class SkillCommandCog(commands.Cog):
             await interaction.followup.send(f"Running {display} in this thread…")
 
             runner = self.runner.clone(thread_id=channel.id)
+            await apply_thread_execution_mode(runner, self._settings_repo, channel.id)
             await run_claude_with_config(
                 RunConfig(
                     thread=channel,
@@ -282,6 +289,7 @@ class SkillCommandCog(commands.Cog):
         await interaction.followup.send(f"Running {display} → {thread.mention}")
 
         runner = self.runner.clone(thread_id=thread.id)
+        await apply_thread_execution_mode(runner, self._settings_repo, thread.id)
         await run_claude_with_config(
             RunConfig(
                 thread=thread,

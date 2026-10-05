@@ -22,6 +22,7 @@ from pathlib import Path
 
 from .api_provider import detect_api_provider
 from .child_env import STRIPPED_ENV_KEYS, strip_transport_credentials
+from .execution import ExecutionRefusedError, carry_execution_mode, prepare_launch, refusal_event
 from .parser import parse_line
 from .types import ImageData, MessageType, StreamEvent
 
@@ -72,6 +73,11 @@ def _resolve_windows_cmd(cmd_path: Path) -> list[str] | None:
 
 class ClaudeRunner:
     """Manages Claude Code CLI subprocess execution."""
+
+    # Execution environment (claude_code_core.execution). ``None`` = deployment
+    # default; ``execution_served`` records which one ran the last spawn.
+    execution_mode: str | None = None
+    execution_served: str | None = None
 
     def __init__(
         self,
@@ -137,13 +143,22 @@ class ClaudeRunner:
 
         stdin_mode = asyncio.subprocess.PIPE
 
+        try:
+            launch = await prepare_launch(
+                backend="claude", requested_mode=self.execution_mode, argv=args, env=env, cwd=cwd
+            )
+        except ExecutionRefusedError as exc:
+            yield refusal_event(exc)
+            return
+        self.execution_served = launch.mode
+
         self._process = await asyncio.create_subprocess_exec(
-            *args,
+            *launch.argv,
             stdin=stdin_mode,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=cwd,
-            env=env,
+            cwd=launch.cwd,
+            env=launch.env,
             limit=10 * 1024 * 1024,
         )
 
@@ -177,7 +192,7 @@ class ClaudeRunner:
         effort: str | None | object = _UNSET,
     ) -> ClaudeRunner:
         """Create a fresh runner with the same configuration but no active process."""
-        return ClaudeRunner(
+        cloned = ClaudeRunner(
             command=self.command,
             model=model if model is not None else self.model,
             permission_mode=self.permission_mode,
@@ -203,6 +218,7 @@ class ClaudeRunner:
                 self.effort if effort is _UNSET else effort  # type: ignore[arg-type]
             ),
         )
+        return carry_execution_mode(self, cloned)
 
     async def inject_tool_result(self, request_id: str, data: dict) -> None:
         """Send a tool result or permission/elicitation response via stdin."""

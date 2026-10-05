@@ -479,6 +479,20 @@ Behind the scenes:
 
 **Where does each backend authenticate?** Claude Code uses your existing Claude Pro/Max subscription via the `claude` CLI's `claude login`. Codex uses your existing ChatGPT Plus/Pro/Business subscription via the `codex` CLI's `codex login`. ccdb never sees raw API keys — it just shells out to whichever CLI is selected.
 
+### Execution Environments — Where the Agent Runs
+
+By default every CLI backend runs on the host as the relay's own user (`host`, unchanged from earlier versions). An operator can put an OS boundary around it instead:
+
+| Mode | What it does |
+|---|---|
+| `host` | Today's behaviour. Default |
+| `native` | The agent's own sandbox: Claude Code's `sandbox` settings via `--settings`, Codex `--sandbox workspace-write`. pi refuses (it has none) |
+| `bwrap` | bubblewrap: read-only host, writable working directory and agent state, private `/tmp`, no `sudo`, the relay's `.env`, `~/.ssh` and the Docker socket hidden |
+| `container` | `docker run --rm -i` with your image ([sample Dockerfile](deploy/agent-container/Dockerfile)) |
+| `ssh` | Runs the CLI on another machine, streaming stdin/stdout |
+
+The operator sets the default and an allowlist in the environment (`CCDB_EXECUTION_MODE`, `CCDB_EXECUTION_ALLOWED_MODES`); `/sandbox` lets a user pick a mode for one thread **from that allowlist only**. Preflight failures (no `bwrap`, missing image, unreachable host) fail the turn with one sentence and start no process, and the completion notice shows which environment served the turn. See [docs/execution-environments.md](docs/execution-environments.md) and ADR-0008.
+
 ---
 
 ## Features
@@ -599,6 +613,7 @@ Behind the scenes:
 - **Session ID validation** — Strict regex before passing to `--resume`
 - **Flag injection prevention** — `--` separator before all prompts
 - **Secret isolation** — Bot token stripped from subprocess environment
+- **Execution environments** — run agents behind an OS boundary (`bwrap`, the agent's own sandbox, a container, or another host) chosen by the operator; users can only pick from the operator's allowlist with `/sandbox` — see [docs/execution-environments.md](docs/execution-environments.md)
 - **User authorization** — `allowed_user_ids` restricts who can invoke Claude
 - **Log injection prevention** — User-provided API values are sanitized (newlines stripped) before writing to logs
 - **Credential files stay untracked** — `.gitignore` covers `.env.*`, not just `.env`, because operators leave dated backups (`.env.bak-…`) beside the real file and each one holds a live bot token; `.env.example` is re-included explicitly so the template stays tracked

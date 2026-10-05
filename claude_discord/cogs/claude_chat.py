@@ -44,6 +44,7 @@ from ..discord_ui.thread_dashboard import ThreadState, ThreadStatusDashboard
 from ..discord_ui.thread_renamer import suggest_retitle, suggest_title
 from ..discord_ui.thread_retitle import RetitleTracker
 from ..discord_ui.views import RewindSelectView, StopView
+from ..execution_settings import apply_thread_execution_mode
 from ..thread_marker import (
     MAX_THREAD_NAME_LENGTH,
     family_code,
@@ -96,6 +97,7 @@ _HELP_CATEGORY: dict[str, str | None] = {
     "backend": "🤖 Model",
     "engine-status": "🤖 Model",
     "ollama": "🤖 Model",  # manage the runtime behind the `local` backend
+    "sandbox": "🤖 Model",  # where the agent runs (execution environment)
     "ask": "🤖 Model",  # one anonymized question to an external model
     "effort": "⚡ Effort",
     "tools-show": "🔧 Advanced",
@@ -394,6 +396,9 @@ class ClaudeChatCog(commands.Cog):
 
         if fork_session and hasattr(runner, "fork_session"):
             runner.fork_session = True  # type: ignore[attr-defined]
+
+        # Per-thread execution environment (/sandbox), bounded by the allowlist.
+        await apply_thread_execution_mode(runner, self._backend_settings.repo, thread_id)
 
         return runner
 

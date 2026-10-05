@@ -221,6 +221,8 @@ def verify_quiet_settings(codex_home: Path) -> list[str]:
 class LocalCodexRunner(CodexRunner):
     """Codex CLI pinned to a local model through a ccdb-owned CODEX_HOME."""
 
+    _execution_backend = "local"
+
     def __init__(
         self,
         *args: object,
@@ -274,7 +276,7 @@ class LocalCodexRunner(CodexRunner):
 
     def clone(self, **kwargs: object) -> LocalCodexRunner:
         cloned = super().clone(**kwargs)  # type: ignore[arg-type]
-        return LocalCodexRunner(
+        local = LocalCodexRunner(
             command=cloned.command,
             model=cloned.model,
             permission_mode=cloned.permission_mode,
@@ -289,6 +291,8 @@ class LocalCodexRunner(CodexRunner):
             effort=cloned.effort,
             local_config=self.local_config,
         )
+        local.execution_mode = cloned.execution_mode
+        return local
 
     def describe_api(self) -> str:
         return f"Local model ({self.local_config.endpoint_host})"

@@ -113,26 +113,46 @@ Extraction never destroys the upload it came from. The original is deleted only 
 
 ## Environment Isolation
 
-### Stripped Environment Variables (runner.py)
+### Stripped environment variables (`claude_code_core/child_env.py`)
 
-```python
-_STRIPPED_ENV_KEYS = frozenset({
-    "CLAUDECODE",           # Nesting detection
-    "DISCORD_BOT_TOKEN",    # Bot authentication
-    "DISCORD_TOKEN",        # Alternative token var
-    "API_SECRET_KEY",       # API authentication
-})
-```
+Every CLI runner (Claude Code, Codex, `local`, pi) builds its child environment from the relay's
+environment minus `STRIPPED_ENV_KEYS`:
 
-These variables are removed from the subprocess environment before spawning Claude Code:
+| Variable | Why it is removed |
+|---|---|
+| `CLAUDECODE` | Claude Code's nesting detection; the child must start as a fresh top-level instance |
+| `DISCORD_BOT_TOKEN`, `DISCORD_TOKEN`, `DISCORD_WEBHOOK_URL` | Discord credentials |
+| `API_SECRET_KEY` | REST API authentication of a host bot |
+| `CCDB_AGUI_URL`, `CCDB_AGUI_TOKEN` | Remote AG-UI agent credential |
+| `CCDB_INGEST_TOKEN` | `/api/ingest` credential |
+| `CCDB_TEAMS_APP_PASSWORD`, `CCDB_TEAMS_QUEUE_URL` | Teams credentials |
+| `CCDB_API_URL`, `CCDB_API_SECRET` | Inherited control-plane values (see below) |
 
-1. **DISCORD_BOT_TOKEN / DISCORD_TOKEN**: Prevents Claude Code from reading the Discord token via its Bash tool
-2. **CLAUDECODE**: Claude Code uses this to detect nesting. Stripping it ensures the subprocess runs as a fresh top-level instance
-3. **API_SECRET_KEY**: If the host bot exposes a REST API, this key shouldn't leak to Claude
+Claude Code also applies the same filter to the `CCDB_CLI_ENV_FILE` overlay, so a stripped
+variable cannot come back through the overlay. After filtering, the runner sets the control-plane
+values explicitly for this session: `CCDB_API_URL` (loopback), `CCDB_API_SECRET`, and
+`DISCORD_THREAD_ID`. This is how an agent reaches the relay's REST API on purpose.
 
-### What's NOT Stripped
+### What is not stripped
 
-General environment variables (PATH, HOME, ANTHROPIC_API_KEY, etc.) are passed through because Claude Code needs them to function. The `ANTHROPIC_API_KEY` is intentionally available — Claude Code uses it for API calls. If you need to restrict which API key Claude Code uses, configure it via Claude Code's own settings, not this bridge.
+Provider credentials (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, ...) and general variables (`PATH`,
+`HOME`, ...) are passed through, because the selected CLI needs them to work.
+
+### This is an environment boundary, not an OS boundary
+
+Stripping variables does not stop an agent from reading the files those values came from. Under
+the default `host` execution environment, the CLI runs as the relay's user and can read anything
+that user can: the relay's `.env`, `~/.ssh`, the Docker socket. To put an OS boundary around the
+agent, choose an execution environment:
+
+- `bwrap`: read-only host, writable working directory and agent state, private `/tmp`,
+  `no_new_privs` (so `sudo` fails), and the relay's `.env`, `~/.ssh` and the Docker socket hidden.
+- `native`: the agent's own sandbox.
+- `container`: an image you provide.
+- `ssh`: another machine.
+
+The operator chooses the default and an allowlist in the environment; users can only choose
+within it. See [execution-environments.md](execution-environments.md) and ADR-0008.
 
 ## Authorization Model
 
@@ -200,6 +220,7 @@ Key principles:
 5. **Don't use `dangerously_skip_permissions`**: This flag exists for power users who understand the implications. It disables Claude Code's built-in safety prompts
 6. **Monitor the bot**: Check logs regularly. Claude Code sessions are logged with timing and cost data
 7. **Keep dependencies updated**: `uv lock --upgrade-package claude-code-discord-bridge && uv sync`
+8. **Choose an execution environment**: if anyone but you can start a session, set `CCDB_EXECUTION_MODE=bwrap` (or `container` / `ssh`) so agents run behind an OS boundary rather than as the relay's user — see [execution-environments.md](execution-environments.md)
 
 ## Security Audit Checklist
 

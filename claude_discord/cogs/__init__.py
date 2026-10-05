@@ -9,6 +9,7 @@ from .event_processor import EventProcessor
 from .notification_dispatch import NotificationDispatchCog
 from .ollama_command import OllamaCommandCog
 from .run_config import RunConfig
+from .sandbox_command import SandboxCommandCog
 from .scheduler import SchedulerCog
 from .session_manage import SessionManageCog
 from .skill_command import SkillCommandCog
@@ -21,6 +22,7 @@ __all__ = [
     "ContextLinksCog",
     "EventProcessor",
     "RunConfig",
+    "SandboxCommandCog",
     "NotificationDispatchCog",
     "OllamaCommandCog",
     "SchedulerCog",

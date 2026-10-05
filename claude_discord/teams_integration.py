@@ -17,6 +17,7 @@ from claude_code_core.frontend import ConversationSurface, SessionFrontend, Thre
 from .backend_settings import session_is_resumable
 from .cogs._run_helper import run_claude_with_config
 from .cogs.run_config import RunConfig
+from .execution_settings import apply_thread_execution_mode
 
 if TYPE_CHECKING:
     from aiohttp import ClientSession
@@ -149,6 +150,7 @@ class TeamsSessionHost:
         backend = await self._settings.current_backend(thread_key)
         model = await self._settings.current_model(backend, thread_key)
         runner = self._factory.build(backend=backend, model=model, thread_id=thread_key)
+        await apply_thread_execution_mode(runner, getattr(self._settings, "repo", None), thread_key)
 
         session_id = None
         if record is not None and session_is_resumable(record.backend, backend):

@@ -99,6 +99,12 @@ constructs the selected implementation at the start of each turn:
 resumed when the stored backend matches the selected backend; native Claude, Codex, and remote
 AG-UI identifiers are not interchangeable.
 
+Every CLI runner hands its launch (argv, environment, working directory) to
+`claude_code_core.execution.prepare_launch` immediately before spawning. The operator-selected
+execution environment (`host`, `native`, `bwrap`, `container`, `ssh`) runs its preflight and
+rewrites the launch; `host`, the default, returns it unchanged. See
+[Execution environments](execution-environments.md).
+
 See [Choose an agent backend](backends.md).
 
 ## Shared execution flow
@@ -137,6 +143,7 @@ bot identity, queue, and `CCDB_DATA_ROOT` for each isolation boundary.
 |---|---|
 | `claude_code_core/frontend.py` | frontend/surface protocols, capabilities, stable thread keys |
 | `claude_code_core/backend.py` | backend protocol and common construction vocabulary |
+| `claude_code_core/execution/` | execution environments: preflight and launch rewrite per mode |
 | `claude_discord/frontend.py` | Discord conversation adapter |
 | `claude_teams/frontend.py` | Teams conversation adapter |
 | `claude_discord/teams_integration.py` | normal-process Teams runtime and `ActivityPuller` dispatch |
