@@ -424,6 +424,18 @@ ccdb は各 `embedded` エントリを、届いたファイルに対して **sha
 
 スレッドはデフォルトで `{working_dir}/teams` 配下（`ingest/` の隣）に置かれます — エディタで普段読んでいるノート vault など別の場所に置きたい場合は `CCDB_TEAMS_VAULT_ROOT`（または `teams_vault_root=`）を設定してください。両ルートとも `/api/ingest` と同じ ingest bearer トークンで保護され、外部リスナーからも利用でき、セッションのスポーンは一切行いません。
 
+### 自分自身のアテンションを計測する (`/attention`)
+
+エージェントの時間は安価です。尽きるのはオペレーター自身の時間 — 返信を読み、判断し、指示する時間 — のほうです。リレーは Discord と Teams でセッションに届いた人間のメッセージすべてについてメタデータ（本文は**決して**記録しません）を記録し、1 日ごと・スレッドごとの人間のアテンション時間（分）を推定します: 互いに 10 分以内のメッセージは 1 つのバーストとしてまとめられ、バーストのコストはその期間に 2 分のリードインを加えたもので、その分数は書いた文字数に応じてスレッド間で按分されます（添付ファイル 1 つは 50 文字として数えます）。
+
+```bash
+/attention                                   # ephemeral: today, last 7 days, top threads
+curl "$CCDB_API_URL/api/attention?group_by=thread&from=2026-09-28&to=2026-10-04"
+ccdb attention-backfill --guild <id> --since 2026-09-01   # seed history (owner only)
+```
+
+デフォルトで有効です（`CCDB_ATTENTION_ENABLED=false` で記録を停止）。すべての数値には推定値であることが明記され、使用したパラメータも併せて報告されます。詳しくは [docs/attention.md](../attention.md) を参照してください。
+
 ### スタートアップリジューム
 
 Bot の再起動中にセッションが中断された場合、Bot が再起動したときに自動的に再開されます。リジューム登録の方法は 3 つあります:
