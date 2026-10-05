@@ -10,13 +10,17 @@ from __future__ import annotations
 import contextlib
 import logging
 from collections.abc import Awaitable, Callable, Mapping
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from claude_code_core.attention import HumanActivity
+from claude_code_core.attention_repo import AttentionRecorder
 from claude_code_core.frontend import ConversationSurface, SessionFrontend, ThreadKey
 
 from .backend_settings import session_is_resumable
 from .cogs._run_helper import run_claude_with_config
 from .cogs.run_config import RunConfig
+from .execution_settings import apply_thread_execution_mode
 
 if TYPE_CHECKING:
     from aiohttp import ClientSession
@@ -33,6 +37,7 @@ __all__ = [
     "TeamsSessionHost",
     "build_teams_runtime",
     "parse_frontends",
+    "teams_activity",
 ]
 
 _KNOWN_FRONTENDS = frozenset({"discord", "teams"})
@@ -105,8 +110,10 @@ class TeamsSessionHost:
         usage_repo: Any = None,
         registry: Any = None,
         worktree_manager: Any = None,
+        attention_recorder: AttentionRecorder | None = None,
     ) -> None:
         self._app_id = app_id
+        self._attention_recorder = attention_recorder
         self._frontend = frontend
         self._ledger = ledger
         self._session_repo = session_repo
@@ -144,11 +151,13 @@ class TeamsSessionHost:
         surface = await self._frontend.resolve_surface(thread_key)
         if surface is None:
             raise LookupError(f"Teams conversation {activity.conversation_id!r} cannot be resolved")
+        await self._record_attention(activity, parent_id=parent_id, text=prompt)
 
         record = await self._session_repo.get(thread_key)
         backend = await self._settings.current_backend(thread_key)
         model = await self._settings.current_model(backend, thread_key)
         runner = self._factory.build(backend=backend, model=model, thread_id=thread_key)
+        await apply_thread_execution_mode(runner, getattr(self._settings, "repo", None), thread_key)
 
         session_id = None
         if record is not None and session_is_resumable(record.backend, backend):
@@ -179,6 +188,14 @@ class TeamsSessionHost:
             )
         )
 
+    async def _record_attention(
+        self, activity: InboundActivity, *, parent_id: str | None, text: str
+    ) -> None:
+        recorder = self._attention_recorder
+        if recorder is None or not recorder.enabled or not activity.id:
+            return
+        await recorder.record(teams_activity(activity, parent_id=parent_id, text=text))
+
     def _handle_invoke(self, activity: InboundActivity) -> None:
         if activity.raw.get("name") != "adaptiveCard/action":
             return
@@ -187,6 +204,37 @@ class TeamsSessionHost:
         data = action.get("data") if isinstance(action, dict) else None
         if not self._frontend.interactions.resolve(activity.conversation_id, data):
             logger.info("A relayed Teams card action did not match a live prompt")
+
+
+def teams_activity(activity: InboundActivity, *, parent_id: str | None, text: str) -> HumanActivity:
+    """Describe a Teams message as human activity — metadata only, never the text."""
+    conversation = activity.raw.get("conversation")
+    title = conversation.get("name") if isinstance(conversation, dict) else None
+    attachments = activity.raw.get("attachments")
+    # Teams repeats the message body as a text/html attachment; that is not a file.
+    files = (
+        [a for a in attachments if isinstance(a, dict) and a.get("contentType") != "text/html"]
+        if isinstance(attachments, list)
+        else []
+    )
+    raw_time = activity.raw.get("timestamp")
+    try:
+        occurred_at = datetime.fromisoformat(str(raw_time).replace("Z", "+00:00"))
+        if occurred_at.tzinfo is None:
+            raise ValueError("naive timestamp")
+    except ValueError:
+        occurred_at = datetime.now(UTC)
+    return HumanActivity(
+        frontend="teams",
+        conversation_id=activity.conversation_id,
+        parent_id=parent_id,
+        thread_title=title if isinstance(title, str) and title else None,
+        author_id=activity.from_id,
+        occurred_at=occurred_at,
+        char_count=len(text),
+        attachment_count=len(files),
+        message_id=activity.id,
+    )
 
 
 class TeamsRuntime:
@@ -267,6 +315,7 @@ async def build_teams_runtime(
             usage_repo=components.usage_repo,
             registry=registry,
             worktree_manager=worktree_manager,
+            attention_recorder=getattr(components, "attention_recorder", None),
         )
         queue = StorageQueue(queue_url, aiohttp_request(session))
         puller = ActivityPuller(queue, host.handle, on_service_url=frontend.remember)

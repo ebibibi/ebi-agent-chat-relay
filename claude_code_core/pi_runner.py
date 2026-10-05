@@ -34,6 +34,7 @@ from typing import Any
 
 from .child_env import STRIPPED_ENV_KEYS
 from .claude_plugins import plugin_skill_dirs
+from .execution import ExecutionRefusedError, carry_execution_mode, prepare_launch, refusal_event
 from .types import (
     TOOL_CATEGORIES,
     ImageData,
@@ -233,6 +234,11 @@ def parse_pi_line(line: str) -> StreamEvent | None:
 class PiRunner:
     """Manages a ``pi --mode json`` subprocess."""
 
+    # Execution environment (claude_code_core.execution). ``None`` = deployment
+    # default; ``execution_served`` records which one ran the last spawn.
+    execution_mode: str | None = None
+    execution_served: str | None = None
+
     def __init__(
         self,
         command: str = "pi",
@@ -291,13 +297,22 @@ class PiRunner:
 
         logger.info("Starting pi CLI: %s (cwd=%s)", " ".join(args[:6]) + " ...", cwd)
 
+        try:
+            launch = await prepare_launch(
+                backend="pi", requested_mode=self.execution_mode, argv=args, env=env, cwd=cwd
+            )
+        except ExecutionRefusedError as exc:
+            yield refusal_event(exc)
+            return
+        self.execution_served = launch.mode
+
         self._process = await asyncio.create_subprocess_exec(
-            *args,
+            *launch.argv,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=cwd,
-            env=env,
+            cwd=launch.cwd,
+            env=launch.env,
             limit=10 * 1024 * 1024,
         )
 
@@ -330,7 +345,7 @@ class PiRunner:
         **_kwargs: object,
     ) -> PiRunner:
         """Create a fresh runner with the same configuration but no process."""
-        return PiRunner(
+        cloned = PiRunner(
             command=self.command,
             model=model if model is not None else self.model,
             permission_mode=self.permission_mode,
@@ -351,6 +366,7 @@ class PiRunner:
             images=self.images,
             effort=self.effort if effort is _UNSET else effort,  # type: ignore[arg-type]
         )
+        return carry_execution_mode(self, cloned)
 
     async def interrupt(self) -> None:
         """Interrupt the subprocess with SIGINT.

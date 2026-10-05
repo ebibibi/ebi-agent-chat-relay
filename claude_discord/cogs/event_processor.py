@@ -113,6 +113,12 @@ def _truncate_result(content: str) -> str:
     return content[:_TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
 
 
+def _execution_label_wanted(served: str) -> bool:
+    from claude_code_core.execution import HOST, ExecutionConfig
+
+    return served != HOST or len(ExecutionConfig.from_env().allowed_modes) > 1
+
+
 def _completion_fields(event: StreamEvent, runner: object) -> tuple[tuple[str, str], ...]:
     """Build frontend-neutral completion metadata from a terminal event."""
     fields: list[tuple[str, str]] = []
@@ -124,6 +130,12 @@ def _completion_fields(event: StreamEvent, runner: object) -> tuple[tuple[str, s
         # Only set when an account pool is configured, so the footer is
         # unchanged for a single-login deployment.
         fields.append(("Account", account.profile))
+    # Which execution environment ran the turn. A deployment that only allows
+    # ``host`` (the default) has nothing to choose between, so it stays
+    # unlabelled there and existing deployments see no change.
+    served = getattr(runner, "execution_served", None)
+    if isinstance(served, str) and served and _execution_label_wanted(served):
+        fields.append(("Environment", served))
     if event.duration_ms is not None:
         fields.append(("Duration", f"{event.duration_ms / 1000:.1f}s"))
     if event.cost_usd is not None:

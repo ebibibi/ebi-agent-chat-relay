@@ -12,3 +12,13 @@ vanishes from the sidebar an hour after the last reply reads as lost work.
 
 # Discord's maximum auto-archive window (7 days, in minutes).
 THREAD_AUTO_ARCHIVE_MINUTES = 10080
+
+# What a thread opened by a message is called before any rename: the message's
+# opening text, which is what Discord shows in the sidebar.
+DEFAULT_THREAD_NAME = "Claude Chat"
+THREAD_NAME_LIMIT = 100
+
+
+def initial_thread_name(content: str | None) -> str:
+    """The name ccdb gives a thread it opens from a message with *content*."""
+    return (content or "")[:THREAD_NAME_LIMIT] or DEFAULT_THREAD_NAME

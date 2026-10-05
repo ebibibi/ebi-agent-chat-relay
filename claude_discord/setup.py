@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from discord.ext.commands import Bot
 
+    from claude_code_core.attention import AttentionParams
+    from claude_code_core.attention_repo import AttentionRecorder, HumanActivityRepository
     from claude_code_core.backend import SessionBackend
     from claude_code_core.frontend import SessionFrontend
 
@@ -77,6 +79,11 @@ class BridgeComponents:
     #: so a custom Cog scheduling a reminder lands in the same database the
     #: dispatcher reads.  A Cog that opens its own file writes into a void.
     notification_repo: NotificationRepository | None = None
+    #: Human-activity metering (docs/attention.md): the stored rows, the hook
+    #: frontends record through, and the parameters reports are estimated with.
+    attention_repo: HumanActivityRepository | None = None
+    attention_recorder: AttentionRecorder | None = None
+    attention_params: AttentionParams | None = None
 
     def apply_to_api_server(self, api_server: ApiServer) -> None:
         """Wire all optional repos to an ApiServer instance.
@@ -101,6 +108,10 @@ class BridgeComponents:
             api_server.ingest_repo = self.ingest_repo
         if self.summary_repo is not None:
             api_server.summary_repo = self.summary_repo
+        if self.attention_repo is not None:
+            api_server.attention_repo = self.attention_repo
+        if self.attention_params is not None:
+            api_server.attention_params = self.attention_params
         api_server.session_repo = self.session_repo
 
 
@@ -374,6 +385,15 @@ async def setup_bridge(
     account_router = build_account_router(session_db_path)
     summary_repo = stores.summaries
 
+    # --- Attention metering (on by default; CCDB_ATTENTION_ENABLED=false stops recording) ---
+    from claude_code_core.attention import AttentionConfig
+    from claude_code_core.attention_repo import AttentionRecorder
+
+    attention_config = AttentionConfig.from_env(os.environ)
+    attention_recorder = AttentionRecorder(stores.attention, attention_config)
+    if not attention_config.enabled:
+        logger.info("Attention metering disabled (CCDB_ATTENTION_ENABLED)")
+
     # Attach repos to bot so generic cogs (e.g. AutoUpgradeCog) can discover them
     # without a hard import dependency on ccdb internals.
     bot.session_repo = session_repo  # type: ignore[attr-defined]
@@ -431,6 +451,7 @@ async def setup_bridge(
         thread_context_days=thread_context_days,
         usage_repo=usage_repo,
         account_router=account_router,
+        attention_recorder=attention_recorder,
     )
     await bot.add_cog(chat_cog)
     logger.info("Registered ClaudeChatCog")
@@ -468,6 +489,7 @@ async def setup_bridge(
             claude_channel_id=_primary_channel_id,
             claude_channel_ids=_all_channel_ids,
             allowed_user_ids=allowed_user_ids,
+            settings_repo=settings_repo,
         )
         await bot.add_cog(skill_cog)
         logger.info("Registered SkillCommandCog")
@@ -517,9 +539,22 @@ async def setup_bridge(
             settings=backend_settings,
             factory=backend_factory,
             chat_cog=chat_cog,
+            allowed_user_ids=allowed_user_ids,
         )
         await bot.add_cog(backend_cmd_cog)
         logger.info("Registered BackendCommandCog")
+
+        # --- SandboxCommandCog: per-thread execution environment (/sandbox) ---
+        from .cogs.sandbox_command import SandboxCommandCog
+
+        await bot.add_cog(
+            SandboxCommandCog(
+                bot,  # type: ignore[arg-type]
+                settings_repo=settings_repo,
+                allowed_user_ids=allowed_user_ids,
+            )
+        )
+        logger.info("Registered SandboxCommandCog")
 
         # --- OllamaCommandCog: management for the `local` backend's runtime ---
         # Registered alongside /backend rather than gated on reachability: the
@@ -532,9 +567,18 @@ async def setup_bridge(
                 bot,  # type: ignore[arg-type]
                 settings=backend_settings,
                 chat_cog=chat_cog,
+                allowed_user_ids=allowed_user_ids,
             )
         )
         logger.info("Registered OllamaCommandCog")
+
+    # --- AttentionCog: /attention reads the estimate back to the operator ---
+    from .cogs.attention_command import AttentionCog
+
+    await bot.add_cog(
+        AttentionCog(bot, repo=stores.attention, params=attention_config.params)  # type: ignore[arg-type]
+    )
+    logger.info("Registered AttentionCog")
 
     # --- AskCommandCog (auto-discovered: only when anonymization rules exist) ---
     # Zero-config by the same rule as the gateway itself — no rules file, no
@@ -568,6 +612,9 @@ async def setup_bridge(
         settings_repo=settings_repo,
         ask_repo=ask_repo,
         usage_repo=usage_repo,
+        attention_repo=stores.attention,
+        attention_recorder=attention_recorder,
+        attention_params=attention_config.params,
     )
 
     # Auto-wire repos to ApiServer and set runner.api_port if provided

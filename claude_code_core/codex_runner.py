@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 
 from .account_pool import AccountBinding
 from .child_env import STRIPPED_ENV_KEYS
+from .execution import ExecutionRefusedError, carry_execution_mode, prepare_launch, refusal_event
 from .types import (
     ImageData,
     MessageType,
@@ -304,6 +305,13 @@ def _build_resume_recovery_prompt(prompt: str, session_id: str, env: dict[str, s
 class CodexRunner:
     """Manages OpenAI Codex CLI subprocess."""
 
+    # Execution environment (claude_code_core.execution). ``None`` = deployment
+    # default; ``execution_served`` records which one ran the last spawn.
+    execution_mode: str | None = None
+    execution_served: str | None = None
+    # ``local`` reuses this runner; the environment needs to know which it is.
+    _execution_backend = "codex"
+
     def __init__(
         self,
         command: str = "codex",
@@ -366,13 +374,26 @@ class CodexRunner:
 
             logger.info("Starting Codex CLI: %s (cwd=%s)", " ".join(args[:6]) + " ...", cwd)
 
+            try:
+                launch = await prepare_launch(
+                    backend=self._execution_backend,
+                    requested_mode=self.execution_mode,
+                    argv=args,
+                    env=env,
+                    cwd=cwd,
+                )
+            except ExecutionRefusedError as exc:
+                yield refusal_event(exc)
+                return
+            self.execution_served = launch.mode
+
             self._process = await asyncio.create_subprocess_exec(
-                *args,
+                *launch.argv,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-                env=env,
+                cwd=launch.cwd,
+                env=launch.env,
                 limit=10 * 1024 * 1024,
             )
 
@@ -464,7 +485,7 @@ class CodexRunner:
             effort=self.effort if effort is _UNSET else effort,  # type: ignore[arg-type]
         )
         cloned.account = self.account
-        return cloned
+        return carry_execution_mode(self, cloned)
 
     async def interrupt(self) -> None:
         """Interrupt the subprocess with SIGINT."""

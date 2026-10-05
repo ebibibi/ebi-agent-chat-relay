@@ -421,6 +421,18 @@ Threads are filed one folder per company: `{root}/{company}/{title}--{root_mid}/
 
 Threads live under `{working_dir}/teams` by default, beside the `ingest/` tree — set `CCDB_TEAMS_VAULT_ROOT` (or `teams_vault_root=`) to keep them somewhere else, such as a notes vault you already read in an editor. Both routes use the same ingest bearer token as `/api/ingest`, are available on the external listener, and spawn nothing.
 
+### Your Own Attention, Metered (`/attention`)
+
+Agent time is cheap; the operator's own time — reading replies, deciding, instructing — is what runs out. The relay records metadata (never text) for every human message that reaches a session, on Discord and Teams, and estimates minutes of human attention per day and per thread: messages within 10 minutes of each other form a burst, a burst costs its span plus a 2-minute lead-in, and its minutes are split across threads by characters written (each attachment counts as 50 characters).
+
+```bash
+/attention                                   # ephemeral: today, last 7 days, top threads
+curl "$CCDB_API_URL/api/attention?group_by=thread&from=2026-09-28&to=2026-10-04"
+ccdb attention-backfill --guild <id> --since 2026-09-01   # seed history (owner only)
+```
+
+On by default (`CCDB_ATTENTION_ENABLED=false` stops recording); every number is labelled an estimate and reports its parameters. See [docs/attention.md](docs/attention.md).
+
 ### Startup Resume
 
 If the bot restarts mid-session, interrupted Claude sessions are automatically resumed when the bot comes back online. Sessions are marked for resume in three ways:
@@ -503,6 +515,20 @@ config_dir = "/home/me/.claude-work"
 Provider credentials in the relay's environment (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `OPENAI_API_KEY`, …) take precedence over each profile's login and defeat pooling — unset them; the relay warns at startup.
 
 Without the file, nothing changes. Full reference: [docs/account-pools.md](docs/account-pools.md) · sample: [examples/account-pools.example.toml](examples/account-pools.example.toml).
+
+### Execution Environments — Where the Agent Runs
+
+By default every CLI backend runs on the host as the relay's own user (`host`, unchanged from earlier versions). An operator can put an OS boundary around it instead. `bwrap`, `container` and `ssh` are **preview**; `host` stays the default, and the recommended setup for a sandboxed deployment is a dedicated `CLAUDE_CONFIG_DIR` / `CODEX_HOME` (never your own `~/.claude`):
+
+| Mode | What it does |
+|---|---|
+| `host` | Today's behaviour. Default |
+| `native` | The agent's own sandbox: Claude Code's `sandbox` settings via `--settings`, Codex `--sandbox workspace-write`. pi refuses (it has none) |
+| `bwrap` (preview) | bubblewrap: read-only system, **empty `$HOME`** with only the working directory, the agent's state (its hook/config files read-only) and the CLI's install bound back; no `sudo`; the relay's `.env`, the user runtime dir / D-Bus and the Docker socket hidden. Network stays shared |
+| `container` (preview) | `docker run --rm -i` with your image, same config/git protection as `bwrap` ([sample Dockerfile](deploy/agent-container/Dockerfile)) |
+| `ssh` (preview) | Runs the CLI on another machine, streaming stdin/stdout |
+
+The operator sets the default and an allowlist in the environment (`CCDB_EXECUTION_MODE`, `CCDB_EXECUTION_ALLOWED_MODES`); `/sandbox` lets a user pick a mode for one thread **from that allowlist only**. Preflight failures (no `bwrap`, missing image, unreachable host) fail the turn with one sentence and start no process, and the completion notice shows which environment served the turn. See [docs/execution-environments.md](docs/execution-environments.md) and ADR-0008.
 
 ---
 
@@ -624,6 +650,7 @@ Without the file, nothing changes. Full reference: [docs/account-pools.md](docs/
 - **Session ID validation** — Strict regex before passing to `--resume`
 - **Flag injection prevention** — `--` separator before all prompts
 - **Secret isolation** — Bot token stripped from subprocess environment
+- **Execution environments** — run agents behind an OS boundary (`bwrap`, the agent's own sandbox, a container, or another host) chosen by the operator; users can only pick from the operator's allowlist with `/sandbox` — see [docs/execution-environments.md](docs/execution-environments.md)
 - **User authorization** — `allowed_user_ids` restricts who can invoke Claude
 - **Log injection prevention** — User-provided API values are sanitized (newlines stripped) before writing to logs
 - **Credential files stay untracked** — `.gitignore` covers `.env.*`, not just `.env`, because operators leave dated backups (`.env.bak-…`) beside the real file and each one holds a live bot token; `.env.example` is re-included explicitly so the template stays tracked

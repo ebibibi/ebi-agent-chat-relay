@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ..claude.runner import _UNSET
+from ..execution_settings import apply_thread_execution_mode
 
 if TYPE_CHECKING:
     from claude_code_core.backend import SessionBackend
@@ -40,6 +41,7 @@ async def build_headless_runner(
         effort = await settings.current_effort(backend, thread_id)
         if effort is not None and hasattr(runner, "effort"):
             runner.effort = effort  # type: ignore[attr-defined]
+        await apply_thread_execution_mode(runner, settings.repo, thread_id)
     else:
         runner = base_runner.clone(thread_id=thread_id)
 

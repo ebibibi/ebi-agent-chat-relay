@@ -17,6 +17,8 @@ import logging
 import os
 from dataclasses import dataclass
 
+from claude_code_core.attention_repo import HumanActivityRepository
+
 from .database.ask_repo import PendingAskRepository
 from .database.claims_repo import ClaimRepository
 from .database.frontend_thread_repo import FrontendThreadRepository
@@ -50,6 +52,8 @@ class SessionStores:
     summaries: ThreadSummaryRepository
     frontend_threads: FrontendThreadRepository
     lineage: ThreadLineageRepository
+    #: Human messages that reached a session — the input of the attention estimate.
+    attention: HumanActivityRepository
 
 
 async def build_session_stores(session_db_path: str) -> SessionStores:
@@ -69,6 +73,8 @@ async def build_session_stores(session_db_path: str) -> SessionStores:
     await ingest.init_db()
     summaries = ThreadSummaryRepository(session_db_path)
     await summaries.init_db()
+    attention = HumanActivityRepository(session_db_path)
+    await attention.init_db()
 
     # Adopt every thread this deployment already has, so the ledger answers for
     # all of its conversations rather than only the ones opened from now on.
@@ -90,4 +96,5 @@ async def build_session_stores(session_db_path: str) -> SessionStores:
         summaries=summaries,
         frontend_threads=frontend_threads,
         lineage=ThreadLineageRepository(session_db_path),
+        attention=attention,
     )
