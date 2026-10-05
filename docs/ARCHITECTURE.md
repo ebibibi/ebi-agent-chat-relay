@@ -152,6 +152,8 @@ bot identity, queue, and `CCDB_DATA_ROOT` for each isolation boundary.
 | `claude_discord/cogs/event_processor.py` | neutral stream-event rendering and prompt dispatch |
 | `claude_discord/stores.py` | construction of the shared SQLite repositories |
 | `claude_discord/deployment.py` | one configurable data-root layout |
+| `claude_code_core/attention.py` | pure estimate of the operator's own attention ([attention](attention.md)) |
+| `claude_code_core/attention_repo.py` | `human_activity` storage and the frontend-neutral recording hook |
 
 ## Extension points
 

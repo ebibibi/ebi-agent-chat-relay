@@ -52,12 +52,16 @@ from ..thread_marker import (
 )
 from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
 from . import ingest_manifest, teams_sync
+from .attention_api import handle_attention
 from .teams_store import TeamsVaultStore
 from .teams_sync import ThreadRef
 
 if TYPE_CHECKING:
     import discord
     from discord.ext.commands import Bot
+
+    from claude_code_core.attention import AttentionParams
+    from claude_code_core.attention_repo import HumanActivityRepository
 
     from ..database.claims_repo import ClaimRepository
     from ..database.ingest_repo import IngestResultRepository
@@ -277,6 +281,10 @@ class ApiServer:
         self.summary_repo = summary_repo
         self.claims_repo = claims_repo
         self.lineage_repo = lineage_repo
+        # Human-activity metering (GET /api/attention). Wired by
+        # BridgeComponents.apply_to_api_server; 503 until then.
+        self.attention_repo: HumanActivityRepository | None = None
+        self.attention_params: AttentionParams | None = None
         # Where Claude Code transcripts live, for /api/search?body=1. Falls back
         # to the standard ~/.claude/projects location so body search is
         # Zero-Config wherever Claude Code has run.
@@ -349,6 +357,7 @@ class ApiServer:
         self.app.router.add_delete("/api/claims", self.delete_claim)
         # Cross-session observability routes (requires session_repo)
         self.app.router.add_get("/api/sessions", self.list_sessions)
+        self.app.router.add_get("/api/attention", self.get_attention)
         self.app.router.add_get("/api/search", self.search_sessions)
         self.app.router.add_get("/api/threads/{thread_id}/messages", self.get_thread_messages)
         self.app.router.add_post("/api/threads/{thread_id}/message", self.relay_thread_message)
@@ -869,6 +878,10 @@ class ApiServer:
                 status=503,
             )
         return None
+
+    async def get_attention(self, request: web.Request) -> web.Response:
+        """GET /api/attention — estimated operator attention (see attention_api)."""
+        return await handle_attention(request, self.attention_repo, self.attention_params)
 
     async def get_lounge(self, request: web.Request) -> web.Response:
         """GET /api/lounge — list recent AI Lounge messages.
