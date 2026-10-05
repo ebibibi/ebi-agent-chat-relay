@@ -3,6 +3,8 @@
 Usage:
     ccdb setup   — interactive wizard: creates .env from prompts
     ccdb start   — start the bot (reads .env)
+    ccdb attention-backfill --guild ID --since YYYY-MM-DD
+                 — record past human messages for the attention estimate
     ccdb         — show help
 
 Install via:
@@ -362,6 +364,78 @@ def cmd_start(env_path: Path = Path(".env")) -> None:
 
 
 # ---------------------------------------------------------------------------
+# cmd_attention_backfill — seed human_activity from Discord history
+# ---------------------------------------------------------------------------
+
+
+async def _run_attention_backfill(args: argparse.Namespace) -> int:
+    from datetime import UTC, date, datetime
+
+    from claude_code_core.attention import AttentionConfig, local_day_bounds_utc
+    from claude_code_core.attention_repo import HumanActivityRepository
+
+    from .attention_backfill import DiscordRest, aiohttp_raw_get, backfill_guild
+    from .deployment import DataLayout
+
+    token = os.getenv("DISCORD_BOT_TOKEN", "").strip()
+    if not token:
+        _die("DISCORD_BOT_TOKEN is not set (looked in the environment and --env).")
+    try:
+        since_day = date.fromisoformat(args.since)
+        until_day = date.fromisoformat(args.until) if args.until else None
+    except ValueError:
+        _die("--since/--until must be dates in YYYY-MM-DD form.")
+    params = AttentionConfig.from_env(os.environ).params
+    since, _ = local_day_bounds_utc(since_day, since_day, params)
+    until = local_day_bounds_utc(until_day, until_day, params)[1] if until_day else None
+    if until is not None and until <= since:
+        _die("--until must not be before --since.")
+
+    authors: set[str] = set(args.author or [])
+    if args.owner_only:
+        owner = os.getenv("DISCORD_OWNER_ID", "").strip()
+        if not owner:
+            _die("--owner-only needs DISCORD_OWNER_ID to be set.")
+        authors.add(owner)
+
+    db_path = args.db or DataLayout.from_env().sessions_db
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    repo = HumanActivityRepository(db_path)
+    await repo.init_db()
+
+    import aiohttp
+
+    async with aiohttp.ClientSession() as session:
+        rest = DiscordRest(aiohttp_raw_get(session, token))
+        stats = await backfill_guild(
+            rest,
+            repo,
+            guild_id=args.guild,
+            since=since,
+            until=until or datetime.now(UTC),
+            author_ids=authors or None,
+            progress=lambda line: print(line, file=sys.stderr),
+        )
+    print(
+        f"Scanned {stats.channels} channels and {stats.threads} threads: "
+        f"{stats.human_messages} human messages, {stats.inserted} newly recorded in {db_path}."
+    )
+    for skipped in stats.skipped_containers:
+        print(f"  skipped: {skipped}", file=sys.stderr)
+    return 0
+
+
+def cmd_attention_backfill(args: argparse.Namespace) -> None:
+    """Entry point for `ccdb attention-backfill`."""
+    env_path = Path(args.env)
+    if env_path.exists():
+        from dotenv import load_dotenv
+
+        load_dotenv(env_path)
+    sys.exit(asyncio.run(_run_attention_backfill(args)))
+
+
+# ---------------------------------------------------------------------------
 # main() — argument parsing
 # ---------------------------------------------------------------------------
 
@@ -398,9 +472,38 @@ def main() -> None:
         help="Directory containing custom Cog files to load",
     )
 
+    backfill_parser = sub.add_parser(
+        "attention-backfill",
+        help="Record past human messages from a guild for the attention estimate",
+    )
+    backfill_parser.add_argument("--guild", required=True, metavar="ID", help="Guild id")
+    backfill_parser.add_argument(
+        "--since", required=True, metavar="YYYY-MM-DD", help="First local day to include"
+    )
+    backfill_parser.add_argument(
+        "--until", default=None, metavar="YYYY-MM-DD", help="Last local day (default: now)"
+    )
+    backfill_parser.add_argument(
+        "--author",
+        action="append",
+        metavar="ID",
+        help="Only record this author id (repeatable). Default: every human.",
+    )
+    backfill_parser.add_argument(
+        "--owner-only", action="store_true", help="Only record DISCORD_OWNER_ID"
+    )
+    backfill_parser.add_argument(
+        "--db", default=None, metavar="PATH", help="Session DB (default: the data root's)"
+    )
+    backfill_parser.add_argument(
+        "--env", default=".env", metavar="PATH", help="Read the bot token from this .env"
+    )
+
     args = parser.parse_args()
 
-    if args.command == "setup":
+    if args.command == "attention-backfill":
+        cmd_attention_backfill(args)
+    elif args.command == "setup":
         cmd_setup(Path(args.env))
     elif args.command == "start":
         cogs_dir = getattr(args, "cogs_dir", None)

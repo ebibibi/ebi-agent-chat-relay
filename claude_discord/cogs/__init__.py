@@ -1,6 +1,7 @@
 """Cogs for claude-code-discord-bridge."""
 
 from .ask_command import AskCommandCog
+from .attention_command import AttentionCog
 from .auto_upgrade import AutoUpgradeCog
 from .claude_chat import ClaudeChatCog
 from .collision_watch import CollisionWatchCog
@@ -15,6 +16,7 @@ from .skill_command import SkillCommandCog
 from .webhook_trigger import WebhookTriggerCog
 
 __all__ = [
+    "AttentionCog",
     "AutoUpgradeCog",
     "ClaudeChatCog",
     "CollisionWatchCog",

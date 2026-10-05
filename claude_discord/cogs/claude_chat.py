@@ -22,8 +22,10 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from claude_code_core.attention_repo import AttentionRecorder
 from claude_code_core.backend import SessionBackend
 
+from ..attention_capture import activity_from_message, is_human_message
 from ..backend_factory import BackendFactory
 from ..backend_settings import BackendSettings, session_is_resumable
 from ..claude.rewind import find_session_jsonl, parse_user_turns
@@ -86,6 +88,7 @@ _HELP_CATEGORY: dict[str, str | None] = {
     "fork": "📌 Session",
     "context": "📌 Session",
     "usage": "📌 Session",
+    "attention": "📌 Session",
     "sessions": "📌 Session",
     "search": "📌 Session",
     "resume": "📌 Session",
@@ -138,8 +141,12 @@ class ClaudeChatCog(commands.Cog):
         factory: BackendFactory | None = None,
         backend_settings: BackendSettings | None = None,
         conversation_history: ConversationHistoryReader | None = None,
+        attention_recorder: AttentionRecorder | None = None,
     ) -> None:
         self.bot = bot
+        # Human-activity metering (docs/attention.md). Optional: when absent,
+        # nothing is recorded and the chat path is unchanged.
+        self._attention_recorder = attention_recorder
         self.repo = repo
         self.runner = runner
         # Optional backend factory + settings: when both are present,
@@ -271,14 +278,32 @@ class ClaudeChatCog(commands.Cog):
         # thread, a thread message continues that thread's session.
         if self._is_no_mention_scope(message.channel):
             if isinstance(message.channel, discord.Thread):
+                await self._record_attention(message, opens_thread=False)
                 await self._handle_thread_reply(message)
             else:
+                await self._record_attention(
+                    message,
+                    opens_thread=message.channel.id not in self._inline_reply_channel_ids,
+                )
                 await self._handle_new_conversation(message)
             return
 
         # Everywhere else: answer only when summoned, and answer *there*.
         if self._is_summoned(message):
+            await self._record_attention(message, opens_thread=False)
             await self._handle_mention(message)
+
+    async def _record_attention(self, message: discord.Message, *, opens_thread: bool) -> None:
+        """Meter a human turn that is about to reach a session (metadata only)."""
+        recorder = self._attention_recorder
+        if recorder is None or not recorder.enabled or not is_human_message(message):
+            return
+        try:
+            activity = activity_from_message(message, opens_thread=opens_thread)
+        except Exception:
+            logger.exception("Could not describe message %s for attention metering", message.id)
+            return
+        await recorder.record(activity)
 
     def _is_no_mention_scope(self, channel: discord.abc.MessageableChannel) -> bool:
         """Return whether *channel* is one ccdb was invited to speak in freely.
