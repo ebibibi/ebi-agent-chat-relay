@@ -493,6 +493,31 @@ ccdb がバックエンド情報を記録する前に作成されたレコード
 
 **各バックエンドの認証方法:** Claude Code は `claude login` で認証した Claude Pro/Max サブスクリプションを使用。Codex は `codex login` で認証した ChatGPT Plus/Pro/Business サブスクリプションを使用。ccdb が生の API キーを見ることは一切なく、選択された CLI を呼び出すだけです。
 
+### アカウントプール — バックエンドごとに複数のログインを使う
+
+1つのログインが使用量上限に達すると、通常はそのバックエンド上のすべてのスレッドが制限ウィンドウのリセットまで止まります。複数のログインを持っている場合は TOML ファイルに列挙して `CCDB_ACCOUNT_POOLS_FILE` で指定すると、リレーがセッションまたはターンごとにプロファイル（ログイン済みの `CLAUDE_CONFIG_DIR` または `CODEX_HOME`）を選びます:
+
+```toml
+[pools.claude]
+strategy = "priority"        # priority | sticky | round_robin | most_headroom
+[[pools.claude.profiles]]
+name = "personal"            # the relay's own login
+[[pools.claude.profiles]]
+name = "work"
+config_dir = "/home/me/.claude-work"
+```
+
+- **戦略**: `priority` は順番にプロファイルを使い切り、前のプロファイルがリセットされたらそちらへ戻る。`sticky` は上限到達時に切り替えてそのまま使い続ける。`round_robin` は新しいセッションごとに順番に回す。`most_headroom` は使用率が最も低いものを選ぶ。
+- **継続性**: スレッドが別のプロファイルへ移るとき、セッションのトランスクリプトをそのプロファイルへコピーし、同じセッションをそこで再開する（Claude Code 2.1.289 と codex-cli 0.160.0 で実測）。それが不可能な場合は、会話のテキストを新しいセッションに渡して引き継ぐ。
+- **フェイルオーバー**: クォータ超過で拒否されると、そのプロファイルをリセット時刻まで「使い切り」とマークし、次に使うプロファイルをスレッドに通知する。`retry_on_exhaustion = true` にすると、そのターンを次のプロファイルで再実行する。
+- **可視化**: `/usage` で全プロファイルを一覧表示。完了通知にはそのターンを処理したプロファイル名が表示される。
+
+**利用規約について。** プールに入れる各ログインについて、各ベンダーの利用規約を守る責任は利用者にあります。この機能はすでに持っているログインの中から選ぶだけで、子プロセスに環境変数を1つ設定するのみです。トークンを読み取り・コピー・保存することは一切ありません。
+
+リレーの環境にあるプロバイダー認証情報（`ANTHROPIC_API_KEY`、`CLAUDE_CODE_OAUTH_TOKEN`、`OPENAI_API_KEY` など）は各プロファイルのログインより優先され、プールが機能しなくなります。これらは設定解除してください（起動時に警告が出ます）。
+
+ファイルを置かなければ何も変わりません。詳細リファレンス: [docs/account-pools.md](../account-pools.md) · サンプル: [examples/account-pools.example.toml](../../examples/account-pools.example.toml)
+
 ---
 
 ## 機能
@@ -1018,6 +1043,7 @@ CHAT_ONLY_CHANNEL_IDS=444,555
 | `CCDB_SCHEDULED_THREAD_MARKER` | スケジュールされたタスクの投稿を待っているスレッドのタイトル先頭に付けるマーカー（発火・無効化・削除で外れる）。空文字で無効化 | `⏰` |
 | `THREAD_INBOX_ENABLED` | 永続スレッドインボックスを有効化（`claude -p` でセッションを `waiting`/`done`/`ambiguous` に分類し、スレッドダッシュボードに表示） | `false` |
 | `THREAD_AUTO_RENAME` | 新しいスレッドのタイトルを Claude AI で自動リネーム — 最初のユーザーメッセージをもとにバックグラウンドの `claude -p` 呼び出しで短く分かりやすいタイトルを生成（セッション開始を遅延させない）。以降も話題が明確に変わったらタイトルを更新する（15分に1回まで・系譜タグは保持） | `false` |
+| `CCDB_ACCOUNT_POOLS_FILE` | バックエンドごとにログイン済みの Claude Code / Codex プロファイルディレクトリと、セッションまたはターンごとにどれを使うかの戦略を記述した TOML ファイルのパス。起動時に検証される。未設定ならバックエンドごとに暗黙のログイン1つのまま。[アカウントプール](../account-pools.md) を参照 | （オプション） |
 | `CCDB_CLI_ENV_FILE` | CLI サブプロセス起動時に毎回環境変数へマージする `KEY=VALUE` ファイルのパス。Bot を再起動せずに即座に反映される。一時的な API ルーティング（Azure Foundry への切り替えなど）に便利 | （オプション） |
 | `CCDB_LOG_FILE` | ログファイルのパス。設定するとデフォルトの stdout ハンドラに加えてローテーティングファイルハンドラ（10 MB × 5 バックアップ）が追加される。監視・アラートに便利 | （オプション） |
 | `API_HOST` | REST API バインドアドレス | `127.0.0.1` |
