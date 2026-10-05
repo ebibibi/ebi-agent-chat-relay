@@ -480,6 +480,7 @@ async def setup_bridge(
             claude_channel_id=_primary_channel_id,
             claude_channel_ids=_all_channel_ids,
             allowed_user_ids=allowed_user_ids,
+            settings_repo=settings_repo,
         )
         await bot.add_cog(skill_cog)
         logger.info("Registered SkillCommandCog")
@@ -529,9 +530,22 @@ async def setup_bridge(
             settings=backend_settings,
             factory=backend_factory,
             chat_cog=chat_cog,
+            allowed_user_ids=allowed_user_ids,
         )
         await bot.add_cog(backend_cmd_cog)
         logger.info("Registered BackendCommandCog")
+
+        # --- SandboxCommandCog: per-thread execution environment (/sandbox) ---
+        from .cogs.sandbox_command import SandboxCommandCog
+
+        await bot.add_cog(
+            SandboxCommandCog(
+                bot,  # type: ignore[arg-type]
+                settings_repo=settings_repo,
+                allowed_user_ids=allowed_user_ids,
+            )
+        )
+        logger.info("Registered SandboxCommandCog")
 
         # --- OllamaCommandCog: management for the `local` backend's runtime ---
         # Registered alongside /backend rather than gated on reachability: the
@@ -544,6 +558,7 @@ async def setup_bridge(
                 bot,  # type: ignore[arg-type]
                 settings=backend_settings,
                 chat_cog=chat_cog,
+                allowed_user_ids=allowed_user_ids,
             )
         )
         logger.info("Registered OllamaCommandCog")

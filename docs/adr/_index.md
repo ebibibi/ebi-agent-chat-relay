@@ -13,3 +13,4 @@ earlier ADR instead of rewriting its history.
 - [ADR-0005: Classify new optional backends as minor releases](0005-classify-feature-backends-as-minor-releases.md)
 - [ADR-0006: Publish the multi-frontend platform as version 4](0006-publish-the-multi-frontend-platform-as-v4.md)
 - [ADR-0007: Require an operator opt-in for the unsandboxed pi backend](0007-require-an-opt-in-for-the-unsandboxed-pi-backend.md)
+- [ADR-0008: Let the operator choose the execution environment](0008-let-the-operator-choose-the-execution-environment.md)

@@ -97,11 +97,28 @@ class BackendCommandCog(commands.Cog):
         settings: BackendSettings,
         factory: BackendFactory,
         chat_cog: ClaudeChatCog,
+        allowed_user_ids: set[int] | None = None,
     ) -> None:
         self.bot = bot
+        # Who may change backends, models and effort: the same set as /skill.
+        self._allowed_user_ids = allowed_user_ids
         self._settings = settings
         self._factory = factory
         self._chat_cog = chat_cog
+
+    def _is_authorized(self, user_id: int) -> bool:
+        """Same rule as /skill: ``None`` means every user who can reach the bot."""
+        if self._allowed_user_ids is None:
+            return True
+        return user_id in self._allowed_user_ids
+
+    async def _refuse_unauthorized(self, interaction: discord.Interaction) -> bool:
+        if self._is_authorized(interaction.user.id):
+            return False
+        await interaction.response.send_message(
+            "You don't have permission to use this command.", ephemeral=True
+        )
+        return True
 
     def _thread_id_or_none(self, interaction: discord.Interaction) -> int | None:
         channel = interaction.channel
@@ -177,6 +194,8 @@ class BackendCommandCog(commands.Cog):
         name: str | None = None,
         scope: str | None = None,
     ) -> None:
+        if await self._refuse_unauthorized(interaction):
+            return
         thread_id_now = self._thread_id_or_none(interaction)
 
         if name is None:
@@ -270,6 +289,8 @@ class BackendCommandCog(commands.Cog):
         description="Show the current model selection",
     )
     async def model_show_command(self, interaction: discord.Interaction) -> None:
+        if await self._refuse_unauthorized(interaction):
+            return
         thread_id_now = self._thread_id_or_none(interaction)
         backend_for_thread = (
             await self._settings.current_backend(thread_id_now)
@@ -319,6 +340,8 @@ class BackendCommandCog(commands.Cog):
         name: str,
         scope: str | None = None,
     ) -> None:
+        if await self._refuse_unauthorized(interaction):
+            return
         resolved_scope, target_thread_id = self._resolve_scope(interaction, scope)
         if resolved_scope == SCOPE_THREAD and target_thread_id is None:
             await interaction.response.send_message(
@@ -370,6 +393,8 @@ class BackendCommandCog(commands.Cog):
         name: str,
         scope: str | None = None,
     ) -> None:
+        if await self._refuse_unauthorized(interaction):
+            return
         resolved_scope, target_thread_id = self._resolve_scope(interaction, scope)
         if resolved_scope == SCOPE_THREAD and target_thread_id is None:
             await interaction.response.send_message(
@@ -473,6 +498,8 @@ class BackendCommandCog(commands.Cog):
         level: str | None = None,
         scope: str | None = None,
     ) -> None:
+        if await self._refuse_unauthorized(interaction):
+            return
         thread_id_now = self._thread_id_or_none(interaction)
 
         if level is None:
@@ -560,6 +587,8 @@ class BackendCommandCog(commands.Cog):
         mode: str | None = None,
         scope: str | None = None,
     ) -> None:
+        if await self._refuse_unauthorized(interaction):
+            return
         thread_id_now = self._thread_id_or_none(interaction)
 
         if mode is None:

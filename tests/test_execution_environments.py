@@ -1,0 +1,595 @@
+"""Execution environments: config, every mode's transform, preflight, allowlist."""
+
+from __future__ import annotations
+
+import json
+import shlex
+from dataclasses import replace
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from claude_code_core.execution import (
+    ExecutionConfig,
+    ExecutionRefusedError,
+    Launch,
+    agent_state_paths,
+    prepare_launch,
+    resolve_mode,
+)
+from claude_code_core.execution.config import (
+    ContainerSettings,
+    NativeSettings,
+    SshSettings,
+)
+from claude_code_core.execution.container import (
+    ContainerEnvironment,
+    build_container_argv,
+    forwarded_env_names,
+)
+from claude_code_core.execution.guarded_paths import GitLayout, guarded_mounts
+from claude_code_core.execution.native import (
+    PI_REFUSAL,
+    NativeEnvironment,
+    claude_sandbox_settings,
+    rewrite_codex_argv,
+)
+from claude_code_core.execution.ssh import (
+    SshEnvironment,
+    build_ssh_argv,
+    map_workdir,
+    remote_command,
+)
+
+HOME = "/home/agent"
+ENV = {"HOME": HOME, "PATH": "/usr/bin:/bin", "ANTHROPIC_API_KEY": "sk-secret"}
+CLAUDE_ARGV = ("claude", "-p", "--output-format", "stream-json", "--input-format", "stream-json")
+CODEX_ARGV = ("codex", "exec", "--json", "--skip-git-repo-check", "--cd", "/work/repo", "-")
+
+
+def launch(argv: tuple[str, ...] = CLAUDE_ARGV, cwd: str = "/work/repo", **env: str) -> Launch:
+    return Launch(argv=argv, env={**ENV, **env}, cwd=cwd)
+
+
+# ---------------------------------------------------------------- config
+
+
+class TestConfig:
+    def test_default_is_host_only(self) -> None:
+        config = ExecutionConfig.from_env({})
+        assert config.default_mode == "host"
+        assert config.allowed_modes == ("host",)
+        assert config.error is None
+
+    def test_default_always_allowed_and_first(self) -> None:
+        config = ExecutionConfig.from_env(
+            {"CCDB_EXECUTION_MODE": "bwrap", "CCDB_EXECUTION_ALLOWED_MODES": "host, native,bwrap"}
+        )
+        assert config.allowed_modes == ("bwrap", "host", "native")
+
+    def test_unknown_default_mode_is_an_error_not_host(self) -> None:
+        config = ExecutionConfig.from_env({"CCDB_EXECUTION_MODE": "bwarp"})
+        assert config.error is not None and "bwarp" in config.error
+
+    def test_unknown_allowed_mode_is_an_error(self) -> None:
+        config = ExecutionConfig.from_env({"CCDB_EXECUTION_ALLOWED_MODES": "host,root"})
+        assert config.error is not None and "root" in config.error
+
+    def test_paths_must_be_absolute(self) -> None:
+        config = ExecutionConfig.from_env({"CCDB_BWRAP_RW_PATHS": "relative/dir:/abs/dir"})
+        assert config.error is None
+        assert "relative/dir" in (config.problem_for("bwrap") or "")
+        assert config.bwrap.rw_paths == ("/abs/dir",)
+
+    def test_bad_boolean_is_an_error(self) -> None:
+        config = ExecutionConfig.from_env({"CCDB_BWRAP_UNSHARE_NET": "maybe"})
+        assert config.problem_for("bwrap") is not None
+
+    def test_native_json_must_be_an_object(self) -> None:
+        for raw in ("[1]", "{"):
+            config = ExecutionConfig.from_env({"CCDB_NATIVE_CLAUDE_SANDBOX_JSON": raw})
+            assert config.problem_for("native")
+
+    def test_ssh_settings(self) -> None:
+        config = ExecutionConfig.from_env(
+            {
+                "CCDB_SSH_HOST": "agent@vm",
+                "CCDB_SSH_OPTIONS": "-p 2222 -i '/keys/my key'",
+                "CCDB_SSH_WORKDIR_MAP": "/work=/srv/work,/work/repo=/srv/repo",
+                "CCDB_SSH_ENV": "FOO, BAR_2",
+            }
+        )
+        assert config.error is None
+        assert config.ssh.options == ("-p", "2222", "-i", "/keys/my key")
+        # Longest prefix first.
+        assert config.ssh.workdir_map[0] == ("/work/repo", "/srv/repo")
+        assert config.ssh.forward_env == ("FOO", "BAR_2")
+
+    def test_ssh_env_names_validated(self) -> None:
+        assert ExecutionConfig.from_env({"CCDB_SSH_ENV": "A;rm -rf /"}).problem_for("ssh")
+
+    def test_bad_workdir_map(self) -> None:
+        assert ExecutionConfig.from_env({"CCDB_SSH_WORKDIR_MAP": "nope"}).problem_for("ssh")
+
+    def test_a_bad_variable_for_another_mode_does_not_stop_host(self) -> None:
+        config = ExecutionConfig.from_env(
+            {"CCDB_SSH_ENV": "A;B", "CCDB_EXECUTION_ALLOWED_MODES": "host,ssh"}
+        )
+        assert resolve_mode(None, config) == "host"
+        with pytest.raises(ExecutionRefusedError, match="CCDB_SSH_ENV"):
+            resolve_mode("ssh", config)
+
+
+# ---------------------------------------------------------------- allowlist
+
+
+class TestResolveMode:
+    def test_none_means_default(self) -> None:
+        assert resolve_mode(None, ExecutionConfig.from_env({})) == "host"
+
+    def test_requested_mode_outside_allowlist_is_refused(self) -> None:
+        with pytest.raises(ExecutionRefusedError, match="not allowed"):
+            resolve_mode("bwrap", ExecutionConfig.from_env({}))
+
+    def test_config_error_refuses_every_mode(self) -> None:
+        with pytest.raises(ExecutionRefusedError, match="misconfigured"):
+            resolve_mode(None, ExecutionConfig.from_env({"CCDB_EXECUTION_MODE": "nope"}))
+
+
+class TestPrepareLaunch:
+    async def test_host_returns_inputs_unchanged_without_checks(self) -> None:
+        result = await prepare_launch(
+            backend="claude",
+            requested_mode=None,
+            argv=list(CLAUDE_ARGV),
+            env=ENV,
+            cwd="/work/repo",
+            config=ExecutionConfig.from_env({}),
+        )
+        assert result.argv == CLAUDE_ARGV
+        assert result.env == ENV
+        assert result.cwd == "/work/repo"
+        assert result.mode == "host"
+
+    async def test_preflight_problem_raises_and_does_not_transform(self) -> None:
+        config = ExecutionConfig.from_env({"CCDB_EXECUTION_MODE": "native"})
+        with pytest.raises(ExecutionRefusedError, match="no native sandbox"):
+            await prepare_launch(
+                backend="pi",
+                requested_mode=None,
+                argv=["pi", "--mode", "json"],
+                env=ENV,
+                cwd="/work",
+                config=config,
+            )
+
+    async def test_transformed_launch_reports_mode(self) -> None:
+        config = ExecutionConfig.from_env({"CCDB_EXECUTION_MODE": "native"})
+        result = await prepare_launch(
+            backend="codex",
+            requested_mode=None,
+            argv=list(CODEX_ARGV),
+            env=ENV,
+            cwd="/work/repo",
+            config=config,
+        )
+        assert result.mode == "native"
+        assert result.argv[:4] == ("codex", "exec", "--sandbox", "workspace-write")
+
+
+# ---------------------------------------------------------------- state dirs
+
+
+class TestAgentStatePaths:
+    def test_claude_default(self) -> None:
+        assert agent_state_paths("claude", ENV) == (f"{HOME}/.claude", f"{HOME}/.claude.json")
+
+    def test_claude_config_dir_wins(self) -> None:
+        env = {**ENV, "CLAUDE_CONFIG_DIR": "/pool/profile-a"}
+        assert agent_state_paths("claude", env) == ("/pool/profile-a",)
+
+    def test_codex_and_local(self) -> None:
+        assert agent_state_paths("codex", ENV) == (f"{HOME}/.codex",)
+        assert agent_state_paths("local", {**ENV, "CODEX_HOME": "/x/home"}) == ("/x/home",)
+
+    def test_pi(self) -> None:
+        assert agent_state_paths("pi", ENV) == (f"{HOME}/.pi",)
+
+
+# ---------------------------------------------------------------- native
+
+
+class TestNative:
+    def test_claude_gets_sandbox_settings(self) -> None:
+        env = NativeEnvironment(NativeSettings())
+        out = env.transform("claude", launch())
+        assert out.argv[: len(CLAUDE_ARGV)] == CLAUDE_ARGV
+        assert out.argv[-2] == "--settings"
+        sandbox = json.loads(out.argv[-1])["sandbox"]
+        assert sandbox["enabled"] is True
+        assert sandbox["allowUnsandboxedCommands"] is False
+        assert sandbox["failIfUnavailable"] is True
+
+    def test_claude_operator_overrides_merge(self) -> None:
+        merged = claude_sandbox_settings(
+            NativeSettings(claude_sandbox_overrides={"network": {"allowedDomains": ["x.com"]}})
+        )
+        assert merged["sandbox"]["network"] == {"allowedDomains": ["x.com"]}
+        assert merged["sandbox"]["enabled"] is True
+
+    async def test_claude_preflight_needs_bwrap_and_socat_on_linux(self) -> None:
+        env = NativeEnvironment(NativeSettings())
+        with (
+            patch("claude_code_core.execution.native.sys.platform", "linux"),
+            patch("claude_code_core.execution.native.resolve_binary", return_value=None),
+        ):
+            problem = await env.preflight("claude", launch())
+        assert problem is not None and "bwrap and socat" in problem
+
+    async def test_claude_preflight_refuses_windows(self) -> None:
+        env = NativeEnvironment(NativeSettings())
+        with patch("claude_code_core.execution.native.sys.platform", "win32"):
+            assert "Linux and macOS" in (await env.preflight("claude", launch()) or "")
+
+    def test_codex_sandbox_inserted_after_exec(self) -> None:
+        out = NativeEnvironment(NativeSettings()).transform("codex", launch(CODEX_ARGV))
+        assert out.argv == ("codex", "exec", "--sandbox", "workspace-write", *CODEX_ARGV[2:])
+
+    def test_codex_resume_keeps_sandbox_before_resume(self) -> None:
+        argv = ("codex", "exec", "resume", "--json", "abc-123", "-")
+        out = rewrite_codex_argv(argv, "workspace-write")
+        assert out == (
+            "codex",
+            "exec",
+            "--sandbox",
+            "workspace-write",
+            "resume",
+            "--json",
+            "abc-123",
+            "-",
+        )
+
+    def test_codex_bypass_and_existing_sandbox_are_replaced(self) -> None:
+        argv = (
+            "codex",
+            "exec",
+            "--sandbox",
+            "danger-full-access",
+            "--json",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "-",
+        )
+        assert rewrite_codex_argv(argv, "workspace-write") == (
+            "codex",
+            "exec",
+            "--sandbox",
+            "workspace-write",
+            "--json",
+            "-",
+        )
+
+    def test_codex_read_only_override_is_kept(self) -> None:
+        out = NativeEnvironment(NativeSettings()).transform(
+            "codex", launch(CODEX_ARGV, CCDB_CODEX_SANDBOX_OVERRIDE="read-only")
+        )
+        assert out.argv[2:4] == ("--sandbox", "read-only")
+
+    async def test_codex_danger_override_contradicts_native(self) -> None:
+        problem = await NativeEnvironment(NativeSettings()).preflight(
+            "codex", launch(CODEX_ARGV, CCDB_CODEX_SANDBOX_OVERRIDE="danger-full-access")
+        )
+        assert problem is not None and "contradicts" in problem
+
+    async def test_local_backend_behaves_like_codex(self) -> None:
+        env = NativeEnvironment(NativeSettings())
+        assert await env.preflight("local", launch(CODEX_ARGV)) is None
+        assert env.transform("local", launch(CODEX_ARGV)).argv[2:4] == (
+            "--sandbox",
+            "workspace-write",
+        )
+
+    async def test_pi_refuses_with_one_sentence(self) -> None:
+        problem = await NativeEnvironment(NativeSettings()).preflight("pi", launch(("pi",)))
+        assert problem == PI_REFUSAL
+        assert problem.count(". ") == 0
+
+
+# ---------------------------------------------------------------- bwrap
+
+
+def container_argv(
+    settings: ContainerSettings,
+    lch: Launch,
+    *,
+    backend: str = "claude",
+    layout: GitLayout | None = None,
+    uid: int = 1,
+    gid: int = 1,
+    exists=lambda p: True,
+) -> tuple[str, ...]:
+    mounts = guarded_mounts(backend, lch, layout or GitLayout(), realpath=lambda p: p)
+    return build_container_argv(settings, lch, mounts, uid=uid, gid=gid, exists=exists)
+
+
+class TestContainer:
+    SETTINGS = ContainerSettings(image="ccdb-agent:latest", extra_args=("--network", "host"))
+
+    def test_argv(self) -> None:
+        argv = container_argv(
+            self.SETTINGS, launch(argv=("/usr/local/bin/claude", "-p")), uid=1000, gid=1000
+        )
+        assert argv[:7] == ("docker", "run", "--rm", "-i", "--init", "--workdir", "/work/repo")
+        joined = " ".join(argv)
+        assert "--user 1000:1000" in joined
+        assert "--volume /work/repo:/work/repo" in joined
+        assert f"--volume {HOME}/.claude:{HOME}/.claude" in joined
+        assert "--network host ccdb-agent:latest claude -p" in joined
+
+    def test_env_is_passed_by_name_never_value(self) -> None:
+        argv = container_argv(self.SETTINGS, launch())
+        assert "sk-secret" not in " ".join(argv)
+        assert "ANTHROPIC_API_KEY" in argv
+        assert "PATH" not in argv
+
+    def test_forwarded_env_names_filters_host_only(self) -> None:
+        names = forwarded_env_names(
+            {
+                "PATH": "x",
+                "LD_PRELOAD": "y",
+                "SSH_AUTH_SOCK": "z",
+                "HOME": "h",
+                "OPENAI_API_KEY": "k",
+            }
+        )
+        assert names == ("HOME", "OPENAI_API_KEY")
+
+    async def test_preflight_needs_image(self) -> None:
+        problem = await ContainerEnvironment(ContainerSettings()).preflight("claude", launch())
+        assert problem is not None and "CCDB_CONTAINER_IMAGE" in problem
+
+    async def test_preflight_missing_runtime(self) -> None:
+        env = ContainerEnvironment(ContainerSettings(image="x", runtime="no-such-runtime"))
+        problem = await env.preflight("claude", launch())
+        assert problem is not None and "no-such-runtime" in problem
+
+    async def test_preflight_missing_image(self, tmp_path) -> None:
+        env = ContainerEnvironment(ContainerSettings(image="x", runtime="/bin/false"))
+        (tmp_path / "w").mkdir()
+        lch = launch(cwd=str(tmp_path / "w"), HOME=str(tmp_path))
+        problem = await env.preflight("claude", lch)
+        assert problem is not None and "not available" in problem
+
+    async def test_preflight_rejects_colon_paths(self, tmp_path) -> None:
+        bad = tmp_path / "a:b"
+        bad.mkdir()
+        env = ContainerEnvironment(ContainerSettings(image="x", runtime="/bin/true"))
+        problem = await env.preflight("claude", launch(cwd=str(bad), HOME=str(tmp_path)))
+        assert problem is not None and "cannot be mounted" in problem
+
+
+# ---------------------------------------------------------------- ssh
+
+
+class TestSsh:
+    SETTINGS = SshSettings(host="agent@vm", options=("-p", "2222"))
+
+    def test_argv_shape(self) -> None:
+        argv = build_ssh_argv(self.SETTINGS, launch(), "/usr/bin/ssh")
+        assert argv[:5] == ("/usr/bin/ssh", "-T", "-o", "BatchMode=yes", "-p")
+        assert argv[argv.index("--") + 1] == "agent@vm"
+        assert len(argv) == argv.index("--") + 3  # one remote command string
+
+    def test_remote_command_round_trips_through_a_shell(self) -> None:
+        cmd = remote_command(self.SETTINGS, launch())
+        words = shlex.split(cmd)
+        assert words[:3] == ["cd", "/work/repo", "&&"]
+        assert words[3] == "exec"
+        assert tuple(words[-len(CLAUDE_ARGV) :]) == CLAUDE_ARGV
+
+    @pytest.mark.parametrize(
+        "evil",
+        [
+            "$(touch /tmp/pwned)",
+            "`id`",
+            "a; rm -rf ~",
+            "x' ; echo 'y",
+            'x" && echo "y',
+            "line\nbreak",
+            "--option-looking",
+        ],
+    )
+    def test_injection_in_args_cwd_and_env_stays_literal(self, evil: str) -> None:
+        lch = Launch(
+            argv=("claude", "--append-system-prompt", evil),
+            env={**ENV, "DISCORD_THREAD_ID": evil},
+            cwd=f"/work/{evil.replace('/', '_')}",
+        )
+        cmd = remote_command(self.SETTINGS, lch)
+        words = shlex.split(cmd)
+        # Parsed by a POSIX shell, every value is exactly one literal word.
+        assert words[0] == "cd" and words[1] == lch.cwd
+        assert f"DISCORD_THREAD_ID={evil}" in words
+        assert words[-1] == evil
+        assert words[-3:-1] == ["claude", "--append-system-prompt"]
+
+    def test_secrets_not_forwarded_by_default(self) -> None:
+        cmd = remote_command(self.SETTINGS, launch(DISCORD_THREAD_ID="7", CCDB_API_SECRET="s3"))
+        assert "sk-secret" not in cmd
+        assert "s3" not in cmd
+        assert "DISCORD_THREAD_ID=7" in shlex.split(cmd)
+
+    def test_remote_path_and_workdir_mapping(self) -> None:
+        settings = replace(
+            self.SETTINGS,
+            remote_path="/opt/agent/bin:/usr/bin",
+            workdir_map=(("/work", "/srv/work"),),
+        )
+        cmd = remote_command(settings, launch(CODEX_ARGV))
+        words = shlex.split(cmd)
+        assert words[1] == "/srv/work/repo"
+        assert "PATH=/opt/agent/bin:/usr/bin" in words
+        # Codex's --cd follows the mapping too.
+        assert words[words.index("--cd") + 1] == "/srv/work/repo"
+
+    def test_map_workdir(self) -> None:
+        settings = SshSettings(workdir_map=(("/work/repo", "/r"), ("/work", "/w")))
+        assert map_workdir(settings, "/work/repo/sub") == "/r/sub"
+        assert map_workdir(settings, "/work/other") == "/w/other"
+        assert map_workdir(settings, "/workshop") == "/workshop"
+        assert map_workdir(settings, "/work") == "/w"
+
+    def test_cli_path_becomes_basename(self) -> None:
+        cmd = remote_command(self.SETTINGS, launch(("/home/me/.local/bin/claude", "-p")))
+        assert shlex.split(cmd)[-2:] == ["claude", "-p"]
+
+    async def test_preflight_requires_host(self) -> None:
+        problem = await SshEnvironment(SshSettings()).preflight("claude", launch())
+        assert problem is not None and "CCDB_SSH_HOST" in problem
+
+    async def test_preflight_rejects_option_like_host(self) -> None:
+        problem = await SshEnvironment(SshSettings(host="-oProxyCommand=x")).preflight(
+            "claude", launch()
+        )
+        assert problem is not None and "not a host name" in problem
+
+    async def test_preflight_unreachable_host(self) -> None:
+        env = SshEnvironment(SshSettings(host="vm", binary="/bin/sh"))
+        with patch(
+            "claude_code_core.execution.ssh.run_probe",
+            AsyncMock(return_value=(255, "ssh: connect to host vm port 22: Connection refused")),
+        ):
+            problem = await env.preflight("claude", launch())
+        assert problem is not None and "Connection refused" in problem
+
+    async def test_preflight_probe_success_is_cached(self) -> None:
+        env = SshEnvironment(SshSettings(host="cached-vm", binary="/bin/sh"))
+        probe = AsyncMock(return_value=(0, ""))
+        with patch("claude_code_core.execution.ssh.run_probe", probe):
+            assert await env.preflight("claude", launch()) is None
+            assert await env.preflight("claude", launch()) is None
+        assert probe.await_count == 1
+
+    async def test_probe_can_be_disabled(self) -> None:
+        env = SshEnvironment(SshSettings(host="vm", binary="/bin/sh", probe=False))
+        with patch("claude_code_core.execution.ssh.run_probe", AsyncMock()) as probe:
+            assert await env.preflight("claude", launch()) is None
+        probe.assert_not_awaited()
+
+
+class TestSshSecretsStayOffTheCommandLine:
+    def test_operator_env_goes_by_sendenv_name_only(self) -> None:
+        settings = replace(TestSsh.SETTINGS, forward_env=("ANTHROPIC_API_KEY", "ABSENT"))
+        argv = build_ssh_argv(settings, launch(), "/usr/bin/ssh")
+        joined = " ".join(argv)
+        assert "sk-secret" not in joined
+        assert "SendEnv=ANTHROPIC_API_KEY" in argv
+        assert "SendEnv=ABSENT" not in argv  # nothing to send
+
+    def test_no_env_value_on_argv_except_runner_defaults(self) -> None:
+        env = {**ENV, "OPENAI_API_KEY": "sk-openai", "CCDB_API_SECRET": "api-secret"}
+        settings = replace(TestSsh.SETTINGS, forward_env=("OPENAI_API_KEY", "CCDB_API_SECRET"))
+        argv = build_ssh_argv(settings, Launch(argv=CLAUDE_ARGV, env=env, cwd="/w"), "ssh")
+        for secret in ("sk-secret", "sk-openai", "api-secret"):
+            assert all(secret not in a for a in argv)
+
+
+class TestContainerSecretsStayOffTheCommandLine:
+    def test_no_env_value_in_argv(self) -> None:
+        env = {**ENV, "OPENAI_API_KEY": "sk-openai", "CCDB_API_SECRET": "api-secret"}
+        argv = container_argv(
+            ContainerSettings(image="img"), Launch(argv=CLAUDE_ARGV, env=env, cwd="/w")
+        )
+        for secret in ("sk-secret", "sk-openai", "api-secret"):
+            assert all(secret not in a for a in argv)
+        # Names only: never NAME=VALUE.
+        names = [argv[i + 1] for i, a in enumerate(argv) if a == "--env"]
+        assert names and all("=" not in n for n in names)
+
+
+class TestContainerProtection:
+    """The container reuses bwrap's guarded mount plan."""
+
+    @staticmethod
+    def volumes(argv: tuple[str, ...]) -> list[str]:
+        return [argv[i + 1] for i, a in enumerate(argv) if a == "--volume"]
+
+    def test_protected_config_is_mounted_read_only_after_the_state(self) -> None:
+        state = f"{HOME}/.claude"
+        volumes = self.volumes(container_argv(ContainerSettings(image="img"), launch()))
+        assert f"{state}:{state}" in volumes
+        ro = f"{state}/settings.json:{state}/settings.json:ro"
+        assert ro in volumes
+        assert f"{HOME}/.claude.json:{HOME}/.claude.json:ro" in volumes
+        assert volumes.index(ro) > volumes.index(f"{state}:{state}")
+
+    def test_codex_config_read_only_credentials_writable(self) -> None:
+        argv = container_argv(
+            ContainerSettings(image="img"), launch(CODEX_ARGV, CODEX_HOME="/c"), backend="codex"
+        )
+        volumes = self.volumes(argv)
+        assert "/c/config.toml:/c/config.toml:ro" in volumes
+        assert not any(v.startswith("/c/auth.json") for v in volumes)
+
+    def test_dotgit_mount_point_and_read_only_hooks(self) -> None:
+        layout = GitLayout(dotgit="/work/repo/.git")
+        volumes = self.volumes(
+            container_argv(ContainerSettings(image="img"), launch(), layout=layout)
+        )
+        assert "/work/repo/.git:/work/repo/.git:ro" in volumes
+        assert volumes.index("/work/repo/.git:/work/repo/.git:ro") > volumes.index(
+            "/work/repo:/work/repo"
+        )
+
+    def test_worktree_mounts_only_commit_paths(self) -> None:
+        layout = GitLayout(
+            dotgit="/work/repo/.git",
+            writable=("/src/.git/objects", "/src/.git/refs", "/src/.git/worktrees/repo"),
+            readonly=("/src/.git/config",),
+            hooks_dir="/src/.git/hooks",
+        )
+        volumes = self.volumes(
+            container_argv(ContainerSettings(image="img"), launch(), layout=layout)
+        )
+        assert "/src/.git/objects:/src/.git/objects" in volumes
+        assert "/src/.git:/src/.git" not in volumes
+        assert "/work/repo/.git:/work/repo/.git:ro" in volumes
+        assert "/src/.git/hooks:/src/.git/hooks:ro" in volumes
+
+    def test_missing_sources_are_not_mounted(self) -> None:
+        argv = container_argv(
+            ContainerSettings(image="img"), launch(), exists=lambda p: p == "/work/repo"
+        )
+        assert self.volumes(argv) == ["/work/repo:/work/repo"]
+
+    async def test_preflight_refuses_symlinked_config_and_creates_placeholders(
+        self, tmp_path
+    ) -> None:
+        home = tmp_path / "home"
+        state = home / ".claude"
+        state.mkdir(parents=True)
+        work = home / "work"
+        work.mkdir()
+        env = ContainerEnvironment(ContainerSettings(image="x", runtime="/bin/true"))
+        lch = Launch(argv=CLAUDE_ARGV, env={**ENV, "HOME": str(home)}, cwd=str(work))
+        assert await env.preflight("claude", lch) is None
+        assert (state / "settings.json").read_text() == "{}\n"
+        (state / "hooks").rmdir()
+        (state / "hooks").symlink_to(tmp_path)
+        problem = await env.preflight("claude", lch)
+        assert problem is not None and "symbolic link" in problem
+        with pytest.raises(ExecutionRefusedError):
+            env.transform("claude", lch)
+
+    async def test_preflight_refuses_home_as_working_dir(self, tmp_path) -> None:
+        env = ContainerEnvironment(ContainerSettings(image="x", runtime="/bin/true"))
+        lch = Launch(argv=CLAUDE_ARGV, env={**ENV, "HOME": str(tmp_path)}, cwd=str(tmp_path))
+        problem = await env.preflight("claude", lch)
+        assert problem is not None and "home directory" in problem
+
+
+class TestSshRefusesLocal:
+    async def test_local_backend_cannot_run_over_ssh(self) -> None:
+        env = SshEnvironment(SshSettings(host="vm", binary="/bin/sh", probe=False))
+        problem = await env.preflight("local", launch(CODEX_ARGV))
+        assert problem is not None and "local backend" in problem
+        assert await env.preflight("codex", launch(CODEX_ARGV)) is None
