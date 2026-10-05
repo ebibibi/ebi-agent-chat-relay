@@ -6,12 +6,42 @@ Class-level fixtures with the same name take precedence (pytest scoping rules).
 
 from __future__ import annotations
 
+import os
 from unittest.mock import AsyncMock, MagicMock
 
 import discord
 import pytest
 
 from claude_discord.claude.types import MessageType, StreamEvent
+
+# Environment the relay reads for itself. Cleared before every test so the suite
+# measures the code's defaults rather than the shell it happens to run in.
+# Prefixes rather than a list of names, because a list goes stale the first time
+# someone adds a variable and nothing fails until a machine happens to export it.
+_RELAY_ENV_PREFIXES = ("CCDB_", "CLAUDE_", "CODEX_", "DISCORD_", "ANTHROPIC_")
+
+# The same, for the handful of variables that predate the CCDB_ prefix and are
+# too generic to match on one.
+_RELAY_ENV_NAMES = ("API_PORT", "API_SECRET", "API_SECRET_KEY")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_operator_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run every test against a clean environment, not the operator's shell.
+
+    A developer running the suite on the machine that also runs the bot has the
+    deployment's own variables exported. CI does not, so a test that reads one
+    passes there and fails locally — or, worse, the other way round: a test
+    asserting a default silently measures whatever the host exports, and the
+    regression it was written to catch stops being caught on that machine.
+
+    Autouse, so an existing test cannot opt out by forgetting. A test that wants
+    a variable sets it with ``monkeypatch.setenv``; autouse fixtures of the same
+    scope are set up before explicitly requested ones, so that still wins.
+    """
+    for name in list(os.environ):
+        if name.startswith(_RELAY_ENV_PREFIXES) or name in _RELAY_ENV_NAMES:
+            monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture(autouse=True)
