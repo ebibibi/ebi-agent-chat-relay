@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 
 import aiosqlite
 
+from .account_pool import DEFAULT_PROFILE
+
 if TYPE_CHECKING:
     from .types import RateLimitInfo
 
@@ -215,25 +217,45 @@ class SessionRepository:
 
 
 class UsageStatsRepository:
-    """CRUD for rate limit usage stats (one row per rate_limit_type, upserted)."""
+    """CRUD for rate limit usage stats: one row per (profile, rate_limit_type), upserted.
+
+    ``profile`` is the account-pool profile the turn ran as. Without a pool
+    every row belongs to :data:`~claude_code_core.account_pool.DEFAULT_PROFILE`,
+    so callers that never pass it see exactly the old one-login behaviour.
+    """
 
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
+        self._ready = False
 
-    async def upsert(self, info: RateLimitInfo) -> None:
-        """Insert or replace the latest rate limit info for the given type."""
-        async with aiosqlite.connect(self.db_path) as db:
+    async def _connect(self) -> aiosqlite.Connection:
+        db = await aiosqlite.connect(self.db_path)
+        if not self._ready:
+            # Databases opened without init_db (embedders, tests) still get the
+            # per-profile shape before the first write.
+            from .account_pool_repo import ensure_account_schema
+
+            await ensure_account_schema(db)
+            await db.commit()
+            self._ready = True
+        return db
+
+    async def upsert(self, info: RateLimitInfo, profile: str = DEFAULT_PROFILE) -> None:
+        """Insert or replace the latest rate limit info for (profile, type)."""
+        db = await self._connect()
+        try:
             await db.execute(
                 """INSERT INTO usage_stats
-                     (rate_limit_type, status, utilization, resets_at, is_using_overage)
-                   VALUES (?, ?, ?, ?, ?)
-                   ON CONFLICT(rate_limit_type) DO UPDATE SET
+                     (profile, rate_limit_type, status, utilization, resets_at, is_using_overage)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(profile, rate_limit_type) DO UPDATE SET
                      status = excluded.status,
                      utilization = excluded.utilization,
                      resets_at = excluded.resets_at,
                      is_using_overage = excluded.is_using_overage,
                      recorded_at = datetime('now', 'localtime')""",
                 (
+                    profile,
                     info.rate_limit_type,
                     info.status,
                     info.utilization,
@@ -242,16 +264,27 @@ class UsageStatsRepository:
                 ),
             )
             await db.commit()
+        finally:
+            await db.close()
 
-    async def get_latest(self) -> list[RateLimitInfo]:
-        """Return all stored rate limit entries (one per type)."""
+    async def get_latest(self, profile: str = DEFAULT_PROFILE) -> list[RateLimitInfo]:
+        """Return the stored rate limit entries for one profile (one per type)."""
+        return (await self.get_by_profile()).get(profile, [])
+
+    async def get_by_profile(self) -> dict[str, list[RateLimitInfo]]:
+        """Return every stored entry, grouped by profile."""
         from .types import RateLimitInfo as _RateLimitInfo
 
-        async with aiosqlite.connect(self.db_path) as db:
+        db = await self._connect()
+        try:
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute("SELECT * FROM usage_stats ORDER BY rate_limit_type")
+            cursor = await db.execute("SELECT * FROM usage_stats ORDER BY profile, rate_limit_type")
             rows = await cursor.fetchall()
-            return [
+        finally:
+            await db.close()
+        grouped: dict[str, list[RateLimitInfo]] = {}
+        for row in rows:
+            grouped.setdefault(row["profile"], []).append(
                 _RateLimitInfo(
                     rate_limit_type=row["rate_limit_type"],
                     status=row["status"],
@@ -259,5 +292,5 @@ class UsageStatsRepository:
                     resets_at=row["resets_at"],
                     is_using_overage=bool(row["is_using_overage"]),
                 )
-                for row in rows
-            ]
+            )
+        return grouped

@@ -22,8 +22,15 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from claude_code_core.account_pool import AccountTurn
 from claude_code_core.backend import SessionBackend
 
+from ..account_turns import (
+    failover_notice,
+    plan_account_turn,
+    plan_notice,
+    refresh_codex_usage,
+)
 from ..backend_factory import BackendFactory
 from ..backend_settings import BackendSettings, session_is_resumable
 from ..claude.rewind import find_session_jsonl, parse_user_turns
@@ -58,7 +65,10 @@ from .prompt_builder import build_prompt_and_images, wants_file_attachment
 from .run_config import RunConfig
 
 if TYPE_CHECKING:
+    from claude_code_core.account_router import AccountRouter, Failover, TurnPlan
+
     from ..bot import ClaudeDiscordBot
+    from ..database.repository import UsageStatsRepository
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +148,8 @@ class ClaudeChatCog(commands.Cog):
         factory: BackendFactory | None = None,
         backend_settings: BackendSettings | None = None,
         conversation_history: ConversationHistoryReader | None = None,
+        usage_repo: UsageStatsRepository | None = None,
+        account_router: AccountRouter | None = None,
     ) -> None:
         self.bot = bot
         self.repo = repo
@@ -148,6 +160,10 @@ class ClaudeChatCog(commands.Cog):
         self._factory = factory
         self._backend_settings = backend_settings
         self._conversation_history = conversation_history or ConversationHistoryReader()
+        # Rate-limit windows from each turn land here so /usage has data.
+        self._usage_repo = usage_repo
+        # Account pools (CCDB_ACCOUNT_POOLS_FILE). None = one implicit login.
+        self._account_router = account_router
         self._max_concurrent = max_concurrent
         self._allowed_user_ids = allowed_user_ids
         # When True, skip channel-ID filtering and accept all guild channels.
@@ -1359,6 +1375,37 @@ class ClaudeChatCog(commands.Cog):
             )
         return None
 
+    async def _current_backend_name(self, thread_id: int) -> str:
+        """Backend the next turn in *thread_id* runs on (for account pools)."""
+        if self._backend_settings is not None:
+            return await self._backend_settings.current_backend(thread_id)
+        return self.runner.__class__.__name__.replace("Runner", "").lower()
+
+    async def _finish_account_turn(
+        self,
+        thread: discord.Thread | discord.TextChannel,
+        turn: AccountTurn | None,
+    ) -> Failover | None:
+        """Record a quota rejection, tell the thread, refresh Codex usage."""
+        if turn is None or self._account_router is None:
+            return None
+        if turn.binding.backend == "codex" and self._factory is not None:
+            asyncio.create_task(
+                refresh_codex_usage(
+                    self._account_router, turn.binding, self._factory.codex_command
+                ),
+                name=f"codex-usage-{turn.binding.profile}",
+            )
+        try:
+            failover = await self._account_router.finish_turn(turn)
+        except Exception:
+            logger.exception("Account pool: could not record the outcome of a turn")
+            return None
+        if failover is not None:
+            with contextlib.suppress(discord.HTTPException):
+                await thread.send(failover_notice(failover))
+        return failover
+
     async def _prepare_cross_backend_handoff(
         self,
         thread: discord.Thread | discord.TextChannel,
@@ -1499,6 +1546,7 @@ class ClaudeChatCog(commands.Cog):
         result_sink: Callable[[str | None, str | None], Awaitable[None]] | None = None,
         interrupt_existing: bool = False,
         interrupt_notice: str = "-# ⚡ Interrupted. Starting with new instruction...",
+        _account_retry: bool = False,
     ) -> None:
         """Execute Claude Code CLI and stream results to the thread.
 
@@ -1516,6 +1564,7 @@ class ClaudeChatCog(commands.Cog):
         thread. The subprocess itself runs *outside* the lock so a later message
         can still interrupt this run.
         """
+        user_prompt = prompt
         session_id, prompt = await self._prepare_cross_backend_handoff(
             thread,
             prompt,
@@ -1565,6 +1614,24 @@ class ClaudeChatCog(commands.Cog):
             tools_override = await self._get_allowed_tools()
             effort_override = await self._get_current_effort()
 
+            # Account pool: choose the login for this turn. Under the lock and
+            # after eviction, so a queued run's transcript is complete before
+            # it is copied to another profile.
+            account_plan: TurnPlan | None = None
+            if self._account_router is not None:
+                try:
+                    account_plan, session_id, prompt = await plan_account_turn(
+                        self._account_router,
+                        backend=await self._current_backend_name(thread.id),
+                        thread_id=thread.id,
+                        session_id=session_id,
+                        prompt=prompt,
+                    )
+                except Exception:
+                    # Never lose the user's turn to pool bookkeeping: run on
+                    # the relay's own login and say so in the log.
+                    logger.exception("Account pool: planning failed for thread %d", thread.id)
+
             runner = await self._build_runner_for_thread(
                 thread_id=thread.id,
                 model_override=model_override,
@@ -1573,6 +1640,27 @@ class ClaudeChatCog(commands.Cog):
                 working_dir_override=working_dir_override,
                 effort_override=effort_override,
             )
+            account_turn: AccountTurn | None = None
+            if account_plan is not None and hasattr(runner, "account"):
+                runner.account = account_plan.binding  # type: ignore[attr-defined]
+                account_turn = AccountTurn(binding=account_plan.binding)
+                notice = plan_notice(account_plan)
+                if notice:
+                    with contextlib.suppress(discord.HTTPException):
+                        await thread.send(notice)
+
+            # A turn that may be retried on another profile must not report
+            # its rejected attempt as the terminal outcome: hold the sink's
+            # result and deliver it only if no retry follows.
+            sink_outcome: list[tuple[str | None, str | None]] = []
+
+            async def _hold_sink(text: str | None, error: str | None) -> None:
+                sink_outcome.append((text, error))
+
+            run_sink: Callable[[str | None, str | None], Awaitable[None]] | None = result_sink
+            if account_turn is not None and result_sink is not None and not _account_retry:
+                run_sink = _hold_sink
+
             # Register as the sole active run BEFORE releasing the lock. Track
             # the task too so a later eviction can await our cleanup.
             self._active_runners[thread.id] = runner
@@ -1589,6 +1677,7 @@ class ClaudeChatCog(commands.Cog):
         # --- Phase 2: run the subprocess OUTSIDE the lock --------------------
         # The lock is released so a later message can interrupt this run. The
         # runner is already registered, so that message will find and evict it.
+        failover: Failover | None = None
         try:
             await run_claude_with_config(
                 RunConfig(
@@ -1611,13 +1700,16 @@ class ClaudeChatCog(commands.Cog):
                     claude_command=runner.command,
                     chat_only=chat_only,
                     notify_user_id=user_message.author.id,
-                    result_sink=result_sink,
+                    result_sink=run_sink,
                     backend_settings=self._backend_settings,
                     codex_command=(
                         self._factory.codex_command if self._factory is not None else "codex"
                     ),
+                    usage_repo=self._usage_repo,
+                    account_turn=account_turn,
                 )
             )
+            failover = await self._finish_account_turn(thread, account_turn)
         finally:
             if stop_view is not None:
                 await stop_view.disable()
@@ -1640,3 +1732,23 @@ class ClaudeChatCog(commands.Cog):
                     description,
                     thread=thread,
                 )
+
+        # Opt-in failover (retry_on_exhaustion): rerun the same message once on
+        # the next profile. Once only — a second rejection just reports.
+        retrying = failover is not None and failover.retry and not _account_retry
+        if result_sink is not None and run_sink is not result_sink and not retrying:
+            for text, error in sink_outcome:
+                await result_sink(text, error)
+        if retrying:
+            record = await self.repo.get(thread.id)
+            await self._run_claude(
+                user_message,
+                thread,
+                user_prompt,
+                record.session_id if record is not None else None,
+                images=images,
+                working_dir_override=working_dir_override,
+                chat_only=chat_only,
+                result_sink=result_sink,
+                _account_retry=True,
+            )
