@@ -421,6 +421,18 @@ Threads are filed one folder per company: `{root}/{company}/{title}--{root_mid}/
 
 Threads live under `{working_dir}/teams` by default, beside the `ingest/` tree — set `CCDB_TEAMS_VAULT_ROOT` (or `teams_vault_root=`) to keep them somewhere else, such as a notes vault you already read in an editor. Both routes use the same ingest bearer token as `/api/ingest`, are available on the external listener, and spawn nothing.
 
+### Your Own Attention, Metered (`/attention`)
+
+Agent time is cheap; the operator's own time — reading replies, deciding, instructing — is what runs out. The relay records metadata (never text) for every human message that reaches a session, on Discord and Teams, and estimates minutes of human attention per day and per thread: messages within 10 minutes of each other form a burst, a burst costs its span plus a 2-minute lead-in, and its minutes are split across threads by characters written.
+
+```bash
+/attention                                   # ephemeral: today, last 7 days, top threads
+curl "$CCDB_API_URL/api/attention?group_by=thread&from=2026-09-28&to=2026-10-04"
+ccdb attention-backfill --guild <id> --since 2026-09-01 --owner-only   # seed history
+```
+
+On by default (`CCDB_ATTENTION_ENABLED=false` stops recording); every number is labelled an estimate and reports its parameters. See [docs/attention.md](docs/attention.md).
+
 ### Startup Resume
 
 If the bot restarts mid-session, interrupted Claude sessions are automatically resumed when the bot comes back online. Sessions are marked for resume in three ways:
