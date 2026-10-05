@@ -72,7 +72,7 @@ Four rules shape the details:
 - **A sandbox must not be able to arm the next unsandboxed run.** The agent's state directory has
   to be writable, but the parts of it that execute later (Claude Code's `settings.json` hooks,
   `~/.claude.json` MCP servers, plugins and skills; Codex's `config.toml`, rules and skills;
-  `.git/hooks` and `.git/config`) are re-bound read-only inside it. The most dangerous ones are
+  a plain repository's whole `.git`, and a worktree's git pointers, hooks and config) are re-bound read-only inside it. The most dangerous ones are
   created empty first if they are missing.
 - **The home directory is an allowlist, not a deny list.** `bwrap` mounts `$HOME` as an empty tmpfs
   and binds back only the working directory, the agent's state, the CLI's own installation and
@@ -91,6 +91,19 @@ Four rules shape the details:
   `/engine-status` and `/ollama pull|rm|use` are limited to the users allowed to run `/skill`.
 
 ## Consequences
+
+- **`bwrap`, `container` and `ssh` ship as preview.** `host` stays the default. The recommended
+  setup for any sandboxed deployment is a dedicated `CLAUDE_CONFIG_DIR` / `CODEX_HOME` (one per
+  sandboxed deployment, which account pools make natural) and agents working in linked worktrees.
+- `bwrap` and `container` share one mount plan (`guarded_paths.py`), so a protection added for one
+  applies to both. A plain repository's `.git` is read-only in both, because a `commondir` file or
+  `modules/` would otherwise let the agent redirect a later git run. Commits happen in validated
+  worktrees, of which only `objects/`, `refs/`, `logs/` and the worktree's git dir are writable.
+- The CLI's install is discovered by following its symlinks and interpreter, but never through a
+  file the agent can write. Otherwise a rewritten shebang could choose a credential directory to
+  bind.
+- A configuration error for one mode refuses only that mode. `ssh` refuses the `local` backend,
+  whose guarantee depends on a relay-owned `CODEX_HOME` on this machine.
 
 - An operator can ship the relay with `bwrap` (or `container`, or `ssh`) as the default and know
   that an agent cannot write outside its working directory, gain root, or read the relay's
@@ -115,7 +128,8 @@ Four rules shape the details:
 - The host's default `~/.claude` and `~/.codex` keep symlinked `hooks`/`skills`/`AGENTS.md`, so
   `bwrap` refuses them. Sandboxed threads are expected to use dedicated state directories, which
   also keeps unrelated files in the operator's `~/.claude` out of the agent's view.
-- **Residual risks, accepted and documented:** the network namespace is shared, so localhost
+- **Residual risks, accepted and documented:** the agent can read (and could exfiltrate) its own
+  OAuth credential in the state directory; it must stay writable for token refresh. The network namespace is shared, so localhost
   services, the LAN and abstract Unix sockets stay reachable. `CCDB_BWRAP_UNSHARE_NET` cannot fix
   that for an API-backed agent. Project configuration in the writable working directory
   (`.claude/`, `.mcp.json`, `.codex/`, in-repo hook directories) can still affect a later

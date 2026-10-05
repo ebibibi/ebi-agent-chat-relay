@@ -11,12 +11,19 @@ working directory) before the process starts.
 |---|---|---|
 | `host` (default) | On the host, as the relay's user | None at the OS level. Identical to earlier versions |
 | `native` | On the host, inside the agent's own sandbox | Claude Code: its sandbox, passed with `--settings`. Codex: `--sandbox workspace-write`. pi refuses (it has no sandbox) |
-| `bwrap` | On the host, inside bubblewrap | Read-only host, writable working directory and agent state, private `/tmp`, no `sudo`, configurable hidden paths |
-| `container` | In a container image you provide | Whatever the image and runtime give. Only the working directory and agent state are mounted |
-| `ssh` | On a remote host you provide | A different machine. The relay only streams stdin and stdout |
+| `bwrap` (preview) | On the host, inside bubblewrap | Read-only system, empty `$HOME` with only the working directory, agent state and CLI install bound back, protected config, private `/tmp`, no `sudo`, hidden host sockets |
+| `container` (preview) | In a container image you provide | Only the working directory and agent state are mounted, with the same config and git protection as `bwrap` |
+| `ssh` (preview) | On a remote host you provide | A different machine. The relay only streams stdin and stdout |
 
 The AG-UI backend talks to a remote agent over HTTP and spawns nothing, so execution environments
 do not apply to it.
+
+> **Status: `bwrap`, `container` and `ssh` are preview.** `host` stays the default, and nothing
+> changes unless an operator opts in. The isolating modes have been hardened through several
+> security reviews and verified end to end, but they carry the residual risks listed in each
+> section. **Recommended setup for any sandboxed deployment:** a dedicated `CLAUDE_CONFIG_DIR` /
+> `CODEX_HOME` per sandboxed deployment (for example one account-pool profile per sandbox),
+> never the operator's own `~/.claude` / `~/.codex`, and agents working in linked worktrees.
 
 ## Selection rules
 
@@ -36,7 +43,10 @@ do not apply to it.
   not answer), the turn fails with one sentence in the thread and no process starts.
 - A **malformed configuration fails closed.** If you set `CCDB_EXECUTION_MODE=bwarp` (a typo),
   every turn refuses with a message that names the bad value. The relay never falls back to
-  `host`, because that is the opposite of what the operator asked for.
+  `host`, because that is the opposite of what the operator asked for. A bad value in a variable
+  that belongs to one mode (`CCDB_BWRAP_*`, `CCDB_CONTAINER_*`, `CCDB_SSH_*`,
+  `CCDB_NATIVE_CLAUDE_SANDBOX_JSON`) refuses only turns in that mode, and `/sandbox` refuses to
+  select it, so a typo for an unused mode does not stop `host` threads.
 - The completion notice shows which environment served the turn as an `Environment` field. On a
   deployment that allows only `host`, nobody can choose a different mode, so the field is left out
   and existing deployments look exactly as before.
@@ -127,7 +137,7 @@ would turn off is the sandbox. Codex's sandbox turns off network access for comm
 **pi** refuses with one sentence. pi has no sandbox of its own (ADR-0007), so a `native` pi thread
 would make a false claim. The `CCDB_PI_ALLOW_UNSANDBOXED` opt-in is still required in every mode.
 
-## `bwrap`
+## `bwrap` (preview)
 
 The relay runs the CLI under [bubblewrap](https://github.com/containers/bubblewrap). The home
 directory is an **allowlist**: it starts empty, and only what the agent needs is bound back.
@@ -161,12 +171,19 @@ bwrap --die-with-parent --unshare-pid --unshare-ipc --unshare-uts --unshare-cgro
   reach the host.
 - **The allowlist:**
   - the working directory, read-write;
-  - for a linked git worktree, the repository's common `.git` directory, read-write, so commits
-    work. The worktree's `.git` file lives in the writable working directory, so a previous
-    sandboxed run could have rewritten it. The common directory is trusted only when the layout is
-    the one git creates (`<common>/worktrees/<name>`, with `objects/` and `HEAD`) **and** git's
-    back-link `<common>/worktrees/<name>/gitdir` names this working directory. A forged pointer
-    (to `$HOME`, to another repository) is ignored;
+  - for a linked git worktree, only the parts of the repository's common directory a commit
+    writes: `objects/`, `refs/` and `logs/` read-write, plus the worktree's own git dir
+    (`<common>/worktrees/<name>`). Inside that git dir, `commondir`, `gitdir` and
+    `config.worktree` are read-only, so the agent cannot redirect git to another common directory.
+    `hooks/`, `config`, `config.worktree`, `packed-refs`, `HEAD`, `info/`, `shallow` and `modules/`
+    of the common dir are read-only, and nothing else of it is mounted. The worktree's `.git` file
+    lives in the writable working directory, so a previous sandboxed run could have rewritten it.
+    It is trusted only when **all** of these hold, and otherwise nothing outside the working
+    directory is mounted for git:
+    - the git dir it names resolves to `<common>/worktrees/<name>`;
+    - git's back-link `<common>/worktrees/<name>/gitdir` names this working directory's `.git`;
+    - `<common>` contains `HEAD`, `objects/` and `refs/`;
+    - `<common>` is not `/`, `$HOME`, or an ancestor of `$HOME` or of the working directory;
   - the agent's own state: `CLAUDE_CONFIG_DIR`, or `~/.claude` and `~/.claude.json` for Claude
     Code; `CODEX_HOME` or `~/.codex` for Codex and `local`; `PI_CODING_AGENT_DIR` or `~/.pi` for
     pi. The state comes from the final child environment, so an account pool's profile directory is
@@ -222,7 +239,7 @@ directory, these are re-bound **read-only**:
 | Claude Code | `settings.json`, `settings.local.json`, `.claude.json` (or `~/.claude.json`), `CLAUDE.md`, `AGENTS.md`, `keybindings.json`, `hooks/`, `plugins/`, `skills/`, `agents/`, `commands/`, `output-styles/`, `rules/`, `scripts/` |
 | Codex / `local` | `config.toml`, `AGENTS.md`, `AGENTS.override.md`, `hooks.json`, `hooks/`, `rules/`, `skills/`, `plugins/`, `prompts/`, `packages/` |
 | pi | `agent/settings.json`, `agent/models.json`, `agent/AGENTS.md`, `agent/extensions/`, `agent/skills/`, `agent/prompts/` |
-| git | `.git/hooks/`, `.git/config` and `.git/config.worktree` of the working directory's repository (the common dir for a worktree) |
+| git | a plain repository's whole `.git`; for a linked worktree its `.git` file, the git dir's `commondir`/`gitdir`/`config.worktree`, and the common dir's `hooks/`, `config`, `config.worktree`, `packed-refs`, `HEAD`, `info/`, `shallow`, `modules/` |
 
 - **Missing entries are created first, on the host,** so they can be bound read-only and cannot be
   created inside the sandbox: `{}` for a JSON file, an empty file otherwise (mode 0600), an empty
@@ -236,23 +253,30 @@ directory, these are re-bound **read-only**:
   sentence. Use a dedicated state directory (below), or set `CCDB_BWRAP_PROTECT_CONFIG=0` to accept
   the risk explicitly. The check runs before placeholders are created, so a refused layout leaves
   nothing behind.
-- **Git:** the working directory's `.git` is itself made a mount point, so it cannot be renamed
-  away and replaced by a fresh repository with its own hooks (`mv .git .git.x && git init`). A
-  worktree's `.git` file is bound read-only, so it cannot be pointed at a forged git directory. A
-  missing `.git/hooks` is created first, and a symlinked `.git`, `hooks` or `config` is refused.
-  Verified inside a real sandbox: renaming `.git`, writing `.git/hooks/pre-commit` and
-  `git config core.hooksPath` all fail, and `git commit` succeeds.
+- **Git, plain repository:** the whole `.git` is read-only (and a mount point, so it cannot be
+  renamed away and replaced with `git init`). Protecting only `hooks` and `config` is not enough:
+  a `commondir` file written into `.git` redirects git to a directory of the agent's choosing, with
+  its own hooks and config, and `modules/` holds submodule hooks. Git's lock files need the
+  directory itself writable, so no finer split is safe. The agent can edit files and run read-only
+  git commands, but **cannot commit in a plain repository**. Commits happen in linked worktrees,
+  which is how the relay runs sessions.
+- **Git, linked worktree:** `git commit` works. The worktree's `.git` file is read-only, so it
+  cannot be pointed at a forged git directory, and the pointers inside the worktree's git dir are
+  read-only too. A missing `hooks/` is created first. A symlinked `.git`, `hooks/`, `config` or any
+  other mounted git path is refused. Verified inside a real sandbox: writing the common dir's
+  hooks, rewriting `.git`, rewriting the worktree's `commondir` and reading other files in the
+  common dir all fail, and `git commit` succeeds and is visible from the main checkout.
 - **The CLI's installation** is read-only even when it lives inside a writable bind (a CLI
   installed under its own state directory or in the project's `node_modules`), so the binary
   cannot be swapped for the next unsandboxed run.
 - **A symlink anywhere between the state root and a protected name** (for example pi's `agent/`)
   is refused, and missing intermediate directories are created.
 - Credentials (`.credentials.json`, `auth.json`), sessions and caches stay writable.
-- Read-only `.git/config` means `git config` and `git push -u` (which records the upstream) fail
-  inside the sandbox. `git commit` and `git push origin HEAD` work, given credentials the sandbox
-  can see.
+- Read-only git configuration means `git config`, `git push -u` (which records the upstream),
+  deleting refs (which rewrites `packed-refs`) and `git gc` fail inside the sandbox. In a worktree,
+  `git commit` and `git push origin HEAD` work, given credentials the sandbox can see.
 
-**Recommended:** give sandboxed agents their **own** `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, separate
+**Recommended (and required with this host's layout):** give sandboxed agents their **own** `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, separate
 from the ones that `host` threads, scheduled jobs and your own terminal use. Account pools (#821)
 make that natural: one profile directory per pool member. The state directory is bound
 read-write, so anything else you keep in it (this host's `~/.claude` holds unrelated `.env` files
@@ -277,6 +301,19 @@ These are **not** covered by `bwrap`. Choose `container` or `ssh` if they matter
   cgroup) or a container network.
 - **A repository the sandbox creates.** In a working directory without `.git`, the agent can
   `git init` one with its own hooks, and a later unsandboxed `git` command there runs them.
+- **The agent's own credential.** The state directory holds the CLI's OAuth credential
+  (`.credentials.json`, `auth.json`). It stays readable and writable, because the CLI refreshes
+  it, and with refresh-token rotation a read-only copy would leave the host's credential
+  invalidated. So a sandboxed agent can read, and could exfiltrate, the credential of the account
+  it runs as. This is inherent, and it is why a dedicated profile per sandboxed deployment is
+  recommended: the blast radius is that one account, not the operator's own login. Placeholders
+  are created 0600/0700, and no credential is copied or logged by the relay.
+- **Shared refs.** A worktree's writable `refs/` is the whole repository's, so a sandboxed agent
+  can move any branch (as any process that can commit there can). That affects history, not what
+  runs later; protect important branches on the remote.
+- **Objects from elsewhere.** A worktree's writable `objects/` can gain an `info/alternates` file
+  that points object lookup at another repository. That changes which objects git can read, not
+  what it executes.
 - **Project configuration in the working directory** is writable by design:
   `.claude/settings*.json`, `.mcp.json`, `.codex/`, `AGENTS.md`/`CLAUDE.md`, and any
   `core.hooksPath` directory checked into the repository (husky, `.githooks/`). Whatever later
@@ -313,7 +350,7 @@ the sandbox for the same reason. That is intended; bind what they need, read-onl
 `--die-with-parent` kills the CLI, instead of the CLI stopping gracefully. Both CLIs write their
 session logs as they go, so the thread can still be resumed.
 
-## `container`
+## `container` (preview)
 
 ```text
 docker run --rm -i --init --workdir <dir> --user <uid>:<gid>
@@ -323,6 +360,12 @@ docker run --rm -i --init --workdir <dir> --user <uid>:<gid>
 
 - Paths are mounted at the **same path** inside the container, so every path in the argv
   (`--cd`, attachment marker files, `CLAUDE_CONFIG_DIR`) stays valid.
+- **The mount plan is `bwrap`'s** (`claude_code_core/execution/guarded_paths.py`, shared code). The
+  working directory and agent state are writable. The protected agent config is mounted `:ro` on
+  top, with placeholders created first and symlinks refused. A plain repository's `.git` is `:ro`,
+  and a linked worktree gets only its validated commit paths. A working directory or state
+  directory that is `$HOME` or above is refused. Only sources that exist are mounted, because the
+  runtime would otherwise create a missing one as root.
 - The container runs as the relay's uid and gid, so files it writes belong to the relay.
 - Environment variables are passed **by name** (`--env NAME`). Their values come from the runtime's
   own environment and never appear in the process list. Host-specific variables (`PATH`, `LD_*`,
@@ -342,7 +385,7 @@ docker build -t ccdb-agent:latest deploy/agent-container
 CCDB_EXECUTION_MODE=container CCDB_CONTAINER_IMAGE=ccdb-agent:latest
 ```
 
-## `ssh`
+## `ssh` (preview)
 
 ```text
 ssh -T -o BatchMode=yes <CCDB_SSH_OPTIONS> -- <host> \
@@ -368,6 +411,8 @@ ssh -T -o BatchMode=yes <CCDB_SSH_OPTIONS> -- <host> \
 - **Preflight** connects with `ConnectTimeout=10` and runs `<cli> --version` in the remote
   directory. That checks, in one round trip, that the host answers, that the directory exists and
   that the CLI is on `PATH`. Success is cached for five minutes.
+- **The `local` backend refuses `ssh`.** Its promise that nothing leaves the machine depends on a
+  `CODEX_HOME` the relay owns locally; the remote end would use its own `~/.codex`.
 - **Limitations:** session data (Claude's `~/.claude/projects`, Codex rollouts) lives on the remote
   host. Features that read it locally (Codex resume recovery, cross-backend handoff, transcript
   search) cannot see it. The Stop button ends the local ssh client. The remote CLI is not

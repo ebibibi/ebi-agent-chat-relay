@@ -16,8 +16,9 @@ Mount order (later mounts win, so the order is load-bearing):
 3. Read-only binds into home: the CLI's own install (found from its PATH entry,
    its real path and its interpreter), ``~/.gitconfig`` / ``~/.config/git``, and
    operator-listed ``CCDB_BWRAP_RO_PATHS``.
-4. Read-write binds: the working directory, a linked worktree's common git
-   directory (only when git's back-link confirms it), the agent's own state
+4. Read-write binds: the working directory, the parts of a linked worktree's
+   common git directory a commit writes (only when git's back-link confirms
+   it), the agent's own state
    (``CLAUDE_CONFIG_DIR`` or ``~/.claude`` + ``~/.claude.json``; ``CODEX_HOME`` or
    ``~/.codex``; pi's dir) and ``CCDB_BWRAP_RW_PATHS``.
 5. Read-only re-binds inside those: the agent configuration that can make a
@@ -42,28 +43,18 @@ import os
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 
-from .base import (
-    ExecutionRefusedError,
-    Launch,
-    agent_state_paths,
-    ensure_state_dirs,
-    home_dir,
-    resolve_binary,
-    run_probe,
-)
-from .bwrap_fs import (
-    DEFAULT_HOME_READONLY,
-    create_git_hooks_dir,
-    create_placeholders,
-    git_dirs,
-    git_link_problem,
-    inside,
-    layout_problem,
-    protected_entries,
-    symlinked_entries,
-    toolchain_paths,
-)
+from .base import ExecutionRefusedError, Launch, home_dir, resolve_binary, run_probe
 from .config import BWRAP, BwrapSettings
+from .guarded_paths import (
+    GitLayout,
+    GuardedMounts,
+    git_layout,
+    guard_refusal,
+    guarded_mounts,
+    inside,
+    prepare_guarded,
+)
+from .toolchain import DEFAULT_HOME_READONLY, toolchain_paths
 
 PROBE_TIMEOUT_SECONDS = 10.0
 
@@ -74,6 +65,8 @@ HOST_SESSION_ENV = (
     "SSH_AUTH_SOCK",
     "GPG_AGENT_INFO",
 )
+
+OPT_OUT = ", or set CCDB_BWRAP_PROTECT_CONFIG=0 to accept that risk"
 
 # Probed once per binary per process. Only success is cached: a host that is
 # fixed (userns enabled, bwrap installed) should not need a restart to notice.
@@ -145,22 +138,20 @@ def _unique(paths: list[str]) -> list[str]:
 
 def build_bwrap_argv(
     settings: BwrapSettings,
-    backend: str,
     launch: Launch,
+    mounts: GuardedMounts,
     *,
     relay_files: tuple[str, ...] = (),
     toolchain: tuple[str, ...] = (),
-    git: tuple[str | None, str | None] = (None, None),
     exists: Callable[[str], bool] = os.path.exists,
     isdir: Callable[[str], bool] = os.path.isdir,
     realpath: Callable[[str], str] = os.path.realpath,
 ) -> tuple[str, ...]:
     """Build the bubblewrap command line around ``launch.argv``.
 
-    Filesystem lookups are injectable so the mount list can be unit-tested
-    without the paths existing on the test machine. ``git`` is
-    :func:`bwrap_fs.git_dirs` for the working directory and ``toolchain`` is
-    :func:`bwrap_fs.toolchain_paths` for the CLI.
+    ``mounts`` comes from :func:`guarded_paths.guarded_mounts` (shared with the
+    container environment) and ``toolchain`` from :func:`toolchain.toolchain_paths`.
+    Filesystem lookups are injectable so the mount list can be unit-tested.
     """
     home = realpath(home_dir(launch.env))
     args: list[str] = [
@@ -191,47 +182,22 @@ def build_bwrap_argv(
         if inside(path, home) and exists(path):
             bind("--ro-bind", path)
 
-    git_writable, git_protect = git
-    cwd = realpath(os.path.abspath(launch.cwd))
-    writable = _unique(
-        [
-            realpath(p)
-            for p in (
-                cwd,
-                *((git_writable,) if git_writable else ()),
-                *agent_state_paths(backend, launch.env),
-                *settings.rw_paths,
-            )
-        ]
-    )
+    writable = mounts.writable
     for path in writable:
         if exists(path):
             bind("--bind", path)
 
-    # Read-only installs that sit inside a writable bind (a CLI installed under
-    # its own state directory or in the project's node_modules) would otherwise
-    # be writable, and the next unsandboxed run would execute the change.
+    # Read-only installs inside a writable bind (a CLI installed under its own
+    # state directory or in the project's node_modules) would otherwise be
+    # writable, and the next unsandboxed run would execute the change.
     for path in readable:
         if any(inside(path, w) for w in writable) and exists(path):
             bind("--ro-bind", path)
 
-    # Make the working directory's ``.git`` a mount point so it cannot be
-    # renamed away and replaced by a fresh repository with its own hooks. A
-    # worktree's ``.git`` file is also made read-only so it cannot be pointed
-    # at a forged git directory for the next unsandboxed run.
-    dotgit = os.path.join(cwd, ".git")
-    if settings.protect_config and exists(dotgit):
-        bind("--bind" if isdir(dotgit) else "--ro-bind", dotgit)
+    if mounts.dotgit and exists(mounts.dotgit):
+        bind("--ro-bind", mounts.dotgit)
 
-    protected: list[str] = []
-    if settings.protect_config:
-        protected += [path for path, _root in protected_entries(backend, launch.env)]
-        if git_protect:
-            protected += [
-                os.path.join(git_protect, name) for name in ("hooks", "config", "config.worktree")
-            ]
-    for raw in [*protected, *settings.ro_paths]:
-        path = realpath(raw)
+    for path in mounts.readonly:
         if path in readable and not any(inside(path, w) for w in writable):
             continue  # bound read-only above
         if (inside(path, home) or any(inside(path, w) for w in writable)) and exists(path):
@@ -255,6 +221,7 @@ def build_bwrap_argv(
         else:
             args += ["--ro-bind", "/dev/null", path]
 
+    cwd = realpath(os.path.abspath(launch.cwd))
     args += ["--chdir", cwd, "--", *launch.argv]
     return tuple(args)
 
@@ -266,31 +233,21 @@ def sandbox_env(settings: BwrapSettings, env: Mapping[str, str]) -> dict[str, st
     return {k: v for k, v in env.items() if k not in HOST_SESSION_ENV}
 
 
+def _git(launch: Launch) -> GitLayout:
+    return git_layout(os.path.realpath(launch.cwd), home_dir(launch.env))
+
+
 def layout_refusal(settings: BwrapSettings, backend: str, launch: Launch) -> str | None:
     """Why this launch's binds would be unsafe, or None."""
-    home = home_dir(launch.env)
-    problem = layout_problem(
-        launch.cwd,
-        agent_state_paths(backend, launch.env),
-        (*settings.rw_paths, *settings.ro_paths),
-        home,
+    return guard_refusal(
+        backend,
+        launch,
+        _git(launch),
+        environment="bwrap",
+        extra_paths=(*settings.rw_paths, *settings.ro_paths),
+        protect=settings.protect_config,
+        opt_out=OPT_OUT,
     )
-    if problem:
-        return problem
-    if settings.protect_config:
-        links = symlinked_entries(protected_entries(backend, launch.env))
-        cwd = os.path.realpath(launch.cwd)
-        git_link = git_link_problem(cwd, git_dirs(cwd)[1])
-        if git_link:
-            links.append(git_link)
-        if links:
-            return (
-                f"The bwrap execution environment cannot protect {links[0]}: it is a symbolic "
-                "link, which the sandbox could replace; use a dedicated CLAUDE_CONFIG_DIR / "
-                "CODEX_HOME for sandboxed threads, or set CCDB_BWRAP_PROTECT_CONFIG=0 to accept "
-                "that risk."
-            )
-    return None
 
 
 class BwrapEnvironment:
@@ -314,10 +271,7 @@ class BwrapEnvironment:
         if problem:
             return problem
         try:
-            ensure_state_dirs(agent_state_paths(backend, launch.env))
-            if self._settings.protect_config:
-                create_placeholders(protected_entries(backend, launch.env))
-                create_git_hooks_dir(git_dirs(os.path.realpath(launch.cwd))[1])
+            prepare_guarded(backend, launch, _git(launch), protect=self._settings.protect_config)
         except OSError as exc:
             return f"Could not prepare the agent's state directory for bwrap: {exc}."
         if binary not in _verified_binaries:
@@ -342,13 +296,20 @@ class BwrapEnvironment:
         problem = layout_refusal(settings, backend, launch)
         if problem:
             raise ExecutionRefusedError(problem)
+        mounts = guarded_mounts(
+            backend,
+            launch,
+            _git(launch),
+            rw_paths=settings.rw_paths,
+            ro_paths=settings.ro_paths,
+            protect=settings.protect_config,
+        )
         binary = resolve_binary(settings.binary, launch.env) or settings.binary
         argv = build_bwrap_argv(
             replace(settings, binary=binary),
-            backend,
             launch,
+            mounts,
             relay_files=relay_env_files(find_relay_dotenv()),
-            toolchain=toolchain_paths(launch.argv[0], launch.env),
-            git=git_dirs(os.path.realpath(launch.cwd)),
+            toolchain=toolchain_paths(launch.argv[0], launch.env, untrusted=mounts.writable),
         )
         return replace(launch, argv=argv, env=sandbox_env(settings, launch.env))

@@ -95,6 +95,8 @@ class SandboxCommandCog(commands.Cog):
         config = self._settings.config()
         if config.error:
             return f"⚠️ {config.error}", True
+        if mode is not None and mode != RESET and config.mode_errors.get(mode):
+            return f"⚠️ {config.mode_errors[mode]}", True
 
         if mode is None:
             lines = [f"🧱 **Deployment default**: `{config.default_mode}`"]

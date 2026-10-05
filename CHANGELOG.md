@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Execution environments** (#823) — the operator chooses where agent CLIs run:
+- **Execution environments** (#823) — the operator chooses where agent CLIs run (`bwrap`,
+  `container` and `ssh` are preview; use a dedicated `CLAUDE_CONFIG_DIR` / `CODEX_HOME` with them):
   `host` (default, unchanged), `native` (Claude Code's sandbox via `--settings`, Codex
   `--sandbox workspace-write`; pi refuses), `bwrap` (read-only host, writable working directory and
   agent state, private `/tmp`, no `sudo`, the relay's `.env` / `~/.ssh` / Docker socket hidden),
@@ -19,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ssh` (a remote host). Under `bwrap`, `$HOME` is an empty tmpfs with only the working directory,
   the agent's state and the CLI's install bound back, so `~/.config/gh`, `~/.aws`, other repositories
   and the relay's `.env` are absent by construction. The agent's own hook/config files (`settings.json`,
-  `~/.claude.json`, `~/.codex/config.toml`, plugins, skills, `.git/hooks`) are read-only so a
+  `~/.claude.json`, `~/.codex/config.toml`, plugins, skills, a plain repository's `.git`) are read-only so a
   sandboxed run cannot arm a later unsandboxed one, and the user runtime directory (systemd user
   bus), the system D-Bus socket and agent sockets are hidden. `CCDB_EXECUTION_MODE` sets the default and `CCDB_EXECUTION_ALLOWED_MODES`
   the allowlist; `/sandbox` (limited to `allowed_user_ids`, like `/skill`; `/backend`, `/model`, `/effort`,

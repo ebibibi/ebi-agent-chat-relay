@@ -481,15 +481,15 @@ Behind the scenes:
 
 ### Execution Environments — Where the Agent Runs
 
-By default every CLI backend runs on the host as the relay's own user (`host`, unchanged from earlier versions). An operator can put an OS boundary around it instead:
+By default every CLI backend runs on the host as the relay's own user (`host`, unchanged from earlier versions). An operator can put an OS boundary around it instead. `bwrap`, `container` and `ssh` are **preview**; `host` stays the default, and the recommended setup for a sandboxed deployment is a dedicated `CLAUDE_CONFIG_DIR` / `CODEX_HOME` (never your own `~/.claude`):
 
 | Mode | What it does |
 |---|---|
 | `host` | Today's behaviour. Default |
 | `native` | The agent's own sandbox: Claude Code's `sandbox` settings via `--settings`, Codex `--sandbox workspace-write`. pi refuses (it has none) |
-| `bwrap` | bubblewrap: read-only system, **empty `$HOME`** with only the working directory, the agent's state (its hook/config files read-only) and the CLI's install bound back; no `sudo`; the relay's `.env`, the user runtime dir / D-Bus and the Docker socket hidden. Network stays shared |
-| `container` | `docker run --rm -i` with your image ([sample Dockerfile](deploy/agent-container/Dockerfile)) |
-| `ssh` | Runs the CLI on another machine, streaming stdin/stdout |
+| `bwrap` (preview) | bubblewrap: read-only system, **empty `$HOME`** with only the working directory, the agent's state (its hook/config files read-only) and the CLI's install bound back; no `sudo`; the relay's `.env`, the user runtime dir / D-Bus and the Docker socket hidden. Network stays shared |
+| `container` (preview) | `docker run --rm -i` with your image, same config/git protection as `bwrap` ([sample Dockerfile](deploy/agent-container/Dockerfile)) |
+| `ssh` (preview) | Runs the CLI on another machine, streaming stdin/stdout |
 
 The operator sets the default and an allowlist in the environment (`CCDB_EXECUTION_MODE`, `CCDB_EXECUTION_ALLOWED_MODES`); `/sandbox` lets a user pick a mode for one thread **from that allowlist only**. Preflight failures (no `bwrap`, missing image, unreachable host) fail the turn with one sentence and start no process, and the completion notice shows which environment served the turn. See [docs/execution-environments.md](docs/execution-environments.md) and ADR-0008.
 

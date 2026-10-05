@@ -45,6 +45,9 @@ def resolve_mode(requested: str | None, config: ExecutionConfig) -> str:
             f"The {mode!r} execution environment is not allowed on this deployment "
             f"(allowed: {', '.join(config.allowed_modes)})."
         )
+    problem = config.problem_for(mode)
+    if problem:
+        raise ExecutionRefusedError(problem)
     return mode
 
 

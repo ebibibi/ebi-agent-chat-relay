@@ -7,6 +7,14 @@ attachment marker files, ``CLAUDE_CONFIG_DIR``) stays valid without rewriting.
 The container runs as the relay's own uid/gid so files it writes are owned by
 the relay, not root.
 
+The mount plan is the one ``bwrap`` uses (:mod:`guarded_paths`): agent
+configuration that would execute in a later unsandboxed run (``settings.json``
+hooks, ``.claude.json`` MCP servers, Codex's ``config.toml``, ...) and
+``.git/hooks`` / ``.git/config`` are mounted ``:ro`` over the writable state and
+working directory, missing ones are created first, symlinks at those names are
+refused, and a linked worktree's common git directory is mounted only after the
+same validation, and only the parts a commit writes.
+
 Environment values never appear on the command line: the runtime is given
 ``-e NAME`` and reads the value from its own environment, which is the child
 environment the runner built. Host-specific variables (``PATH``, ``LD_*``, the
@@ -19,8 +27,16 @@ import os
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 
-from .base import Launch, agent_state_paths, ensure_state_dirs, resolve_binary, run_probe
+from .base import ExecutionRefusedError, Launch, home_dir, resolve_binary, run_probe
 from .config import CONTAINER, ContainerSettings
+from .guarded_paths import (
+    GitLayout,
+    GuardedMounts,
+    git_layout,
+    guard_refusal,
+    guarded_mounts,
+    prepare_guarded,
+)
 
 PROBE_TIMEOUT_SECONDS = 20.0
 
@@ -68,22 +84,33 @@ def forwarded_env_names(env: Mapping[str, str]) -> tuple[str, ...]:
     )
 
 
-def _mount_paths(settings: ContainerSettings, backend: str, launch: Launch) -> list[str]:
-    paths: list[str] = []
-    for path in (
-        os.path.abspath(launch.cwd),
-        *agent_state_paths(backend, launch.env),
-        *settings.rw_paths,
-    ):
-        if path not in paths:
-            paths.append(path)
-    return paths
+def container_mounts(
+    mounts: GuardedMounts, exists: Callable[[str], bool] = os.path.exists
+) -> list[str]:
+    """``--volume`` specs in dependency order (the runtime mounts parents first).
+
+    The same plan as ``bwrap``: writable working directory, git's writable
+    parts and agent state; the working directory's ``.git`` as a mount point;
+    protected agent config and git hooks/config read-only on top. Only paths
+    that exist are mounted — a missing source would be created by the runtime
+    as root.
+    """
+    specs: list[str] = []
+    for index, path in enumerate(mounts.writable):
+        if index == 0 or exists(path):
+            specs.append(f"{path}:{path}")
+    if mounts.dotgit and exists(mounts.dotgit):
+        specs.append(f"{mounts.dotgit}:{mounts.dotgit}:ro")
+    for path in mounts.readonly:
+        if exists(path):
+            specs.append(f"{path}:{path}:ro")
+    return specs
 
 
 def build_container_argv(
     settings: ContainerSettings,
-    backend: str,
     launch: Launch,
+    mounts: GuardedMounts,
     *,
     uid: int | None,
     gid: int | None,
@@ -91,19 +118,36 @@ def build_container_argv(
 ) -> tuple[str, ...]:
     if not settings.image:
         raise ValueError("container image is not configured")
-    cwd = os.path.abspath(launch.cwd)
+    cwd = mounts.writable[0]
     args: list[str] = [settings.runtime, "run", "--rm", "-i", "--init", "--workdir", cwd]
     if uid is not None and gid is not None:
         args += ["--user", f"{uid}:{gid}"]
-    for path in _mount_paths(settings, backend, launch):
-        if path == cwd or exists(path):
-            args += ["--volume", f"{path}:{path}"]
+    for spec in container_mounts(mounts, exists):
+        args += ["--volume", spec]
     for name in forwarded_env_names(launch.env):
         args += ["--env", name]
     args += [*settings.extra_args, settings.image]
     # The host path of the CLI means nothing inside the image; its PATH decides.
     args += [os.path.basename(launch.argv[0]), *launch.argv[1:]]
     return tuple(args)
+
+
+def _git(launch: Launch) -> GitLayout:
+    return git_layout(os.path.realpath(launch.cwd), home_dir(launch.env))
+
+
+def _mounts(settings: ContainerSettings, backend: str, launch: Launch) -> GuardedMounts:
+    return guarded_mounts(backend, launch, _git(launch), rw_paths=settings.rw_paths)
+
+
+def _refusal(settings: ContainerSettings, backend: str, launch: Launch) -> str | None:
+    return guard_refusal(
+        backend,
+        launch,
+        _git(launch),
+        environment="container",
+        extra_paths=settings.rw_paths,
+    )
 
 
 class ContainerEnvironment:
@@ -121,13 +165,17 @@ class ContainerEnvironment:
             return f"The container runtime {settings.runtime!r} was not found on PATH."
         if not os.path.isdir(launch.cwd):
             return f"The working directory {launch.cwd} does not exist."
-        for path in _mount_paths(settings, backend, launch):
+        problem = _refusal(settings, backend, launch)
+        if problem:
+            return problem
+        mounts = _mounts(settings, backend, launch)
+        for path in (*mounts.writable, *mounts.readonly):
             if ":" in path or "," in path:
                 return f"The path {path} cannot be mounted into a container (contains ':' or ',')."
         try:
-            ensure_state_dirs(agent_state_paths(backend, launch.env))
+            prepare_guarded(backend, launch, _git(launch), protect=True)
         except OSError as exc:
-            return f"Could not create the agent's state directory for the container: {exc}."
+            return f"Could not prepare the agent's state directory for the container: {exc}."
         code, stderr = await run_probe(
             [runtime, "image", "inspect", settings.image], launch.env, PROBE_TIMEOUT_SECONDS
         )
@@ -140,12 +188,15 @@ class ContainerEnvironment:
         return None
 
     def transform(self, backend: str, launch: Launch) -> Launch:
+        problem = _refusal(self._settings, backend, launch)
+        if problem:
+            raise ExecutionRefusedError(problem)
         getuid = getattr(os, "getuid", None)
         getgid = getattr(os, "getgid", None)
         argv = build_container_argv(
             self._settings,
-            backend,
             launch,
+            _mounts(self._settings, backend, launch),
             uid=getuid() if getuid else None,
             gid=getgid() if getgid else None,
         )

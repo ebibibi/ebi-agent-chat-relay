@@ -103,6 +103,14 @@ class SshEnvironment:
 
     async def preflight(self, backend: str, launch: Launch) -> str | None:
         settings = self._settings
+        if backend == "local":
+            # The local backend's guarantee rests on a ccdb-owned CODEX_HOME on
+            # this machine (endpoint + telemetry off). The remote end would use
+            # its own ~/.codex and could reach a vendor: refuse, do not relabel.
+            return (
+                "The local backend cannot run over ssh: its guarantee that nothing leaves "
+                "this machine depends on a CODEX_HOME the relay owns here."
+            )
         if not settings.host:
             return "The ssh execution environment has no host; set CCDB_SSH_HOST."
         if settings.host.startswith("-"):
