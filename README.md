@@ -595,6 +595,7 @@ The operator sets the default and an allowlist in the environment (`CCDB_EXECUTI
 - **Self-registration** — Claude registers tasks via `POST /api/tasks` during a chat session
 - **No code changes** — Add, remove, or modify tasks at runtime
 - **Enable/disable** — Pause tasks without deleting them (`PATCH /api/tasks/{id}`)
+- **Per-task backend and model** — pin a task to one backend (and optionally one model) with `backend` / `model`; unpinned tasks keep following the active `/backend` and `/model`
 
 ### CI/CD Automation
 - **Webhook triggers** — Trigger Claude Code tasks from GitHub Actions or any CI/CD system
@@ -1238,6 +1239,36 @@ curl -X POST http://localhost:8080/api/tasks \
 
 The 30-second master loop picks up due tasks and spawns Claude Code sessions automatically.
 
+### Pinning a task to a backend and model
+
+A task runs on whatever backend `/backend` resolves to when it fires. That is usually
+what you want — switch the deployment to Codex and the nightly jobs move with it — but
+not always: a cheap digest belongs on a small model no matter what the humans are using,
+and a task written against one agent's tool vocabulary should not silently move to
+another.
+
+`backend` pins the backend, `model` pins the model inside it:
+
+```bash
+curl -X POST http://localhost:8080/api/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"name": "nightly-digest", "prompt": "Summarise today'"'"'s commits",
+       "interval_seconds": 86400, "channel_id": 123,
+       "backend": "codex", "model": "gpt-5.6-sol"}'
+```
+
+- `backend` must be one of `claude`, `codex`, `local`, `agui`, `pi`.
+- `model` is free text — the same ids `/model set` accepts — but is only valid
+  **together with a backend**, because a model id belongs to one backend. Sending a
+  model alone is a `400` rather than a task that fails every night on whichever backend
+  happened to be active.
+- Omit both and nothing changes: the task follows the thread/global setting, as every
+  existing task already does.
+- `PATCH /api/tasks/{id}` sets or changes the pin; `null` clears it. Clearing the
+  backend while a model is still pinned is refused for the same reason.
+- `/effort` is **not** pinned. It resolves from the settings of whichever backend the
+  task ends up on, so an effort change still reaches pinned tasks.
+
 ---
 
 ## Auto-Upgrade
@@ -1305,7 +1336,7 @@ uv sync --extra api
 | POST | `/api/tasks` | Register a scheduled Claude Code task |
 | GET | `/api/tasks` | List registered tasks |
 | DELETE | `/api/tasks/{id}` | Remove a task |
-| PATCH | `/api/tasks/{id}` | Update a task (enable/disable, change schedule) |
+| PATCH | `/api/tasks/{id}` | Update a task (enable/disable, change schedule, pin backend/model) |
 | POST | `/api/spawn` | Create a new Discord thread and start a Claude Code session (non-blocking); pass `auto_start: false` to defer Claude until the first user reply, or `user_id` to add the requester to the thread |
 | POST | `/api/ingest` | Authenticated external spawn (browser extension / webhook) with base64 attachments; returns a `result_id` when result retrieval is configured |
 | GET | `/api/ingest/{result_id}` | Poll the spawned session's final reply (`status`/`result`/`error`/`thread_id`) |

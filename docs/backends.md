@@ -136,6 +136,35 @@ Select a provider and model together, because pi resolves both from one value:
 
 See [pi backend](pi-backend.md) for the measured CLI contract and the event mapping.
 
+## Pinning a scheduled task to a backend
+
+A scheduled task resolves its backend the same way a chat turn does: whatever `/backend` is set to
+for its thread or globally when the 30-second master loop fires it. That default is the useful one
+— move the deployment to Codex and the nightly jobs move with it — but it makes a task's agent an
+ambient property of the deployment rather than part of the task.
+
+`POST /api/tasks` and `PATCH /api/tasks/{id}` take an optional `backend`, and an optional `model`
+alongside it:
+
+```bash
+curl -X POST http://localhost:8080/api/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"name": "nightly-digest", "prompt": "Summarise today'"'"'s commits",
+       "interval_seconds": 86400, "channel_id": 123,
+       "backend": "codex", "model": "gpt-5.6-sol"}'
+```
+
+`backend` is checked against the same list `/backend` accepts. `model` is free text, as `/model`
+is, but is only accepted **with** a backend: model ids are backend-specific, so a model pinned on
+its own would be handed to whichever backend happened to be active and fail there every night
+instead of being refused once, here. `null` on either field clears it.
+
+`/effort` is deliberately not part of the pin. It still resolves from the settings of whichever
+backend the task runs on, so raising the effort for a backend reaches its pinned tasks too.
+
+A task with no pin behaves exactly as before, which is what every task created before this feature
+does.
+
 ## Mixing frontends and backends
 
 Backend resolution belongs to the shared session layer, not the platform implementation. In v4,

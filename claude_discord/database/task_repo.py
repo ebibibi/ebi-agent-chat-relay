@@ -14,6 +14,13 @@ import aiosqlite
 
 logger = logging.getLogger(__name__)
 
+# Sentinel for update(): tells "the caller did not mention this field" (leave the
+# column alone) apart from "the caller passed None" (clear the pin, so the task
+# goes back to following the thread/global setting). Plain None cannot do both
+# jobs here the way it does for the other optional fields, because None is
+# itself a value worth persisting.
+_NOT_PROVIDED = object()
+
 TASK_SCHEMA = """
 CREATE TABLE IF NOT EXISTS scheduled_tasks (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,6 +51,14 @@ ALTER TABLE scheduled_tasks ADD COLUMN thread_id INTEGER;
 ALTER TABLE scheduled_tasks ADD COLUMN one_shot INTEGER DEFAULT 0;
 """
 
+# Migration: add the per-task backend/model pin. Both nullable — NULL means
+# "follow whatever /backend and /model resolve to at run time", which is the
+# behavior every existing row already has.
+_MIGRATION_BACKEND = """
+ALTER TABLE scheduled_tasks ADD COLUMN backend TEXT;
+ALTER TABLE scheduled_tasks ADD COLUMN model TEXT;
+"""
+
 
 class TaskRepository:
     """Async CRUD for scheduled_tasks table."""
@@ -70,6 +85,12 @@ class TaskRepository:
                     if stmt:
                         await db.execute(stmt)
                 logger.info("Migrated scheduled_tasks: added thread_id, one_shot")
+            if "backend" not in columns:
+                for stmt in _MIGRATION_BACKEND.strip().split(";"):
+                    stmt = stmt.strip()
+                    if stmt:
+                        await db.execute(stmt)
+                logger.info("Migrated scheduled_tasks: added backend, model")
             await db.commit()
         logger.info("Task DB initialized at %s", self.db_path)
 
@@ -167,6 +188,8 @@ class TaskRepository:
         anchor_minute: int | None = None,
         thread_id: int | None = None,
         one_shot: bool = False,
+        backend: str | None = None,
+        model: str | None = None,
     ) -> int:
         """Create a new scheduled task. Returns the created ID.
 
@@ -183,6 +206,12 @@ class TaskRepository:
                 the scheduler posts to this existing thread instead of
                 creating a new one (follow-up mode).
             one_shot: If True, the task auto-disables after a single execution.
+            backend: Optional backend name to pin this task to. None (default)
+                keeps the existing behavior: the task runs on whichever backend
+                is active for its thread/global setting when it fires.
+            model: Optional model id to pin, meaningful only alongside
+                ``backend`` — a model id belongs to one backend. The caller is
+                responsible for that pairing; the repository only stores it.
         """
         now = time.time()
         if anchor_hour is not None and not run_immediately:
@@ -196,8 +225,8 @@ class TaskRepository:
                 """INSERT INTO scheduled_tasks
                    (name, prompt, interval_seconds, channel_id, working_dir,
                     enabled, next_run_at, created_at, anchor_hour, anchor_minute,
-                    thread_id, one_shot)
-                   VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)""",
+                    thread_id, one_shot, backend, model)
+                   VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     name,
                     prompt,
@@ -210,6 +239,8 @@ class TaskRepository:
                     anchor_minute,
                     thread_id,
                     1 if one_shot else 0,
+                    backend,
+                    model,
                 ),
             )
             await db.commit()
@@ -283,11 +314,15 @@ class TaskRepository:
         anchor_hour: int | None = None,
         anchor_minute: int | None = None,
         thread_id: int | None = None,
+        backend: str | None | object = _NOT_PROVIDED,
+        model: str | None | object = _NOT_PROVIDED,
     ) -> bool:
         """Partially update a task. Returns True if updated.
 
         Set ``anchor_hour=-1`` to clear the anchor (reset to relative mode).
         Set ``thread_id=-1`` to clear the thread (reset to new-thread mode).
+        Pass ``backend=None`` / ``model=None`` to clear those pins; omit them
+        entirely to leave the stored values alone.
         """
         fields: list[str] = []
         values: list[object] = []
@@ -319,6 +354,12 @@ class TaskRepository:
             else:
                 fields.append("thread_id = ?")
                 values.append(thread_id)
+        if backend is not _NOT_PROVIDED:
+            fields.append("backend = ?")
+            values.append(backend)
+        if model is not _NOT_PROVIDED:
+            fields.append("model = ?")
+            values.append(model)
         if not fields:
             return False
         values.append(task_id)

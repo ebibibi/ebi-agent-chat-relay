@@ -37,6 +37,7 @@ from aiohttp import web
 from claude_code_core.thread_search import run_thread_search
 from claude_code_core.transcript_search import default_transcripts_root
 
+from ..backend_settings import ALL_BACKENDS
 from ..discord_ui.file_sender import send_file_blobs
 from ..lounge import length_hint
 from ..relay import MODE_INTERRUPT, MODE_QUEUE, VALID_MODES, RelayGuard, build_relay_prompt
@@ -192,6 +193,20 @@ def _decode_spawn_attachments(
 
 
 logger = logging.getLogger(__name__)
+
+
+# A scheduled task may pin a model only together with a backend. Model ids are
+# backend-specific — "gpt-6-astra" means nothing to the Claude CLI — so a model
+# pinned on its own would be handed to whichever backend happened to be active
+# when the task fired, and fail there instead of here.
+_MODEL_WITHOUT_BACKEND_ERROR = (
+    "model requires backend: a model id belongs to one backend, so pin both or neither."
+)
+
+
+def _unknown_backend_error(name: str) -> str:
+    """Error text naming the backend that was rejected and the ones accepted."""
+    return f"Unknown backend {name!r}. Choose: {', '.join(ALL_BACKENDS)}."
 
 
 def _sanitize_log(value: object) -> str:
@@ -733,6 +748,14 @@ class ApiServer:
                 instead of creating a new one.
             one_shot: (optional, default false) If true, auto-disable after
                 a single execution.
+            backend: (optional) Pin the task to one backend — one of
+                ``claude``, ``codex``, ``local``, ``agui``, ``pi``. Omit it and
+                the task keeps following whatever backend is active for its
+                thread/global setting when it fires.
+            model: (optional) Pin the model too. Only accepted together with
+                ``backend``, because a model id belongs to one backend —
+                ``gpt-6-astra`` means nothing to the Claude CLI. Omit it and
+                the pinned backend uses its configured ``/model``.
         """
         if err := self._require_task_repo():
             return err
@@ -759,6 +782,15 @@ class ApiServer:
 
         one_shot = bool(data.get("one_shot", False))
 
+        raw_backend = data.get("backend")
+        backend = None if raw_backend is None else str(raw_backend)
+        if backend is not None and backend not in ALL_BACKENDS:
+            return web.json_response({"error": _unknown_backend_error(backend)}, status=400)
+        raw_model = data.get("model")
+        model = None if raw_model is None else str(raw_model)
+        if model is not None and backend is None:
+            return web.json_response({"error": _MODEL_WITHOUT_BACKEND_ERROR}, status=400)
+
         try:
             task_id = await self.task_repo.create(  # type: ignore[union-attr]
                 name=str(data["name"]),
@@ -771,6 +803,8 @@ class ApiServer:
                 anchor_minute=anchor_minute,
                 thread_id=thread_id,
                 one_shot=one_shot,
+                backend=backend,
+                model=model,
             )
         except Exception as exc:
             # Most likely a UNIQUE constraint violation on name
@@ -810,6 +844,12 @@ class ApiServer:
             interval_seconds: int
             working_dir: str
             anchor_time: ``"HH:MM"`` to set, or ``null`` to clear
+            backend: backend name to pin, or ``null`` to clear the pin and
+                resume following the thread/global setting
+            model: model id to pin, or ``null`` to clear it. A pinned model
+                needs a pinned backend — whether it arrives in this request or
+                is already stored — so clearing the backend while a model is
+                still pinned is rejected rather than silently stranding it.
             next_run_at: float (epoch) — manual schedule reset
         """
         if err := self._require_task_repo():
@@ -849,6 +889,30 @@ class ApiServer:
                     return web.json_response({"error": str(exc)}, status=400)
                 patch_kwargs["anchor_hour"] = h
                 patch_kwargs["anchor_minute"] = m
+
+        # backend/model: a name to pin, null to clear. Validated as the pair the
+        # task ends up with, not as the fields this request happens to carry, so
+        # dropping the backend out from under a stored model is caught too.
+        if "backend" in data or "model" in data:
+            task = await self.task_repo.get(task_id)  # type: ignore[union-attr]
+            if task is None:
+                return web.json_response({"error": "Task not found"}, status=404)
+            effective_backend = task.get("backend")
+            effective_model = task.get("model")
+            if "backend" in data:
+                raw = data["backend"]
+                effective_backend = None if raw is None else str(raw)
+                if effective_backend is not None and effective_backend not in ALL_BACKENDS:
+                    return web.json_response(
+                        {"error": _unknown_backend_error(effective_backend)}, status=400
+                    )
+                patch_kwargs["backend"] = effective_backend
+            if "model" in data:
+                raw = data["model"]
+                effective_model = None if raw is None else str(raw)
+                patch_kwargs["model"] = effective_model
+            if effective_model is not None and effective_backend is None:
+                return web.json_response({"error": _MODEL_WITHOUT_BACKEND_ERROR}, status=400)
 
         if patch_kwargs:
             result = await self.task_repo.update(task_id, **patch_kwargs)  # type: ignore[union-attr]

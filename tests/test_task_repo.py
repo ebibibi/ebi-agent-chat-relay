@@ -368,3 +368,120 @@ class TestTaskRepoOneShot:
         task = await repo.get(task_id)
         assert task is not None
         assert task["one_shot"] is True
+
+
+class TestTaskRepoBackendPin:
+    """A task may pin the backend (and model) it runs on, or pin neither."""
+
+    async def test_create_without_pin_leaves_both_null(self, repo: TaskRepository) -> None:
+        """The existing behaviour — follow /backend at run time — is the default."""
+        task_id = await repo.create(name="unpinned", prompt="p", interval_seconds=60, channel_id=1)
+        task = await repo.get(task_id)
+        assert task is not None
+        assert task["backend"] is None
+        assert task["model"] is None
+
+    async def test_create_persists_backend_and_model(self, repo: TaskRepository) -> None:
+        task_id = await repo.create(
+            name="pinned",
+            prompt="p",
+            interval_seconds=60,
+            channel_id=1,
+            backend="codex",
+            model="gpt-6-astra",
+        )
+        task = await repo.get(task_id)
+        assert task is not None
+        assert task["backend"] == "codex"
+        assert task["model"] == "gpt-6-astra"
+
+    async def test_get_due_carries_the_pin(self, repo: TaskRepository) -> None:
+        """The master loop reads tasks through get_due(), not get()."""
+        await repo.create(
+            name="due-pinned",
+            prompt="p",
+            interval_seconds=60,
+            channel_id=1,
+            backend="pi",
+            model="anthropic/claude-opus-5",
+        )
+        due = await repo.get_due(now=time.time() + 1)
+        assert len(due) == 1
+        assert due[0]["backend"] == "pi"
+        assert due[0]["model"] == "anthropic/claude-opus-5"
+
+    async def test_update_sets_the_pin(self, repo: TaskRepository) -> None:
+        task_id = await repo.create(name="to-pin", prompt="p", interval_seconds=60, channel_id=1)
+        assert await repo.update(task_id, backend="local", model="qwen3.5:35b") is True
+        task = await repo.get(task_id)
+        assert task is not None
+        assert task["backend"] == "local"
+        assert task["model"] == "qwen3.5:35b"
+
+    async def test_update_clears_the_pin_with_none(self, repo: TaskRepository) -> None:
+        """None means "clear", which is why update() needs a separate sentinel."""
+        task_id = await repo.create(
+            name="to-unpin",
+            prompt="p",
+            interval_seconds=60,
+            channel_id=1,
+            backend="codex",
+            model="gpt-6-astra",
+        )
+        assert await repo.update(task_id, backend=None, model=None) is True
+        task = await repo.get(task_id)
+        assert task is not None
+        assert task["backend"] is None
+        assert task["model"] is None
+
+    async def test_update_without_mentioning_the_pin_leaves_it_alone(
+        self, repo: TaskRepository
+    ) -> None:
+        """Omitting the field must not clear it — the sentinel's whole purpose."""
+        task_id = await repo.create(
+            name="keep-pin",
+            prompt="p",
+            interval_seconds=60,
+            channel_id=1,
+            backend="codex",
+            model="gpt-6-astra",
+        )
+        assert await repo.update(task_id, prompt="changed") is True
+        task = await repo.get(task_id)
+        assert task is not None
+        assert task["prompt"] == "changed"
+        assert task["backend"] == "codex"
+        assert task["model"] == "gpt-6-astra"
+
+    async def test_migration_adds_columns_to_a_pre_existing_db(self, tmp_path) -> None:
+        """A database written before this change must gain the columns, not fail."""
+        import aiosqlite
+
+        db_path = str(tmp_path / "legacy.db")
+        async with aiosqlite.connect(db_path) as db:
+            await db.execute(
+                """CREATE TABLE scheduled_tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    prompt TEXT NOT NULL,
+                    interval_seconds INTEGER NOT NULL,
+                    channel_id INTEGER NOT NULL,
+                    working_dir TEXT,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    next_run_at REAL NOT NULL,
+                    last_run_at REAL,
+                    created_at REAL NOT NULL
+                )"""
+            )
+            await db.execute(
+                "INSERT INTO scheduled_tasks (name, prompt, interval_seconds, channel_id,"
+                " next_run_at, created_at) VALUES ('old', 'p', 60, 1, 0, 0)"
+            )
+            await db.commit()
+
+        repo = TaskRepository(db_path)
+        await repo.init_db()
+        tasks = await repo.get_all()
+        assert len(tasks) == 1
+        assert tasks[0]["backend"] is None
+        assert tasks[0]["model"] is None
