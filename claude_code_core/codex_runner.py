@@ -16,6 +16,7 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .account_pool import AccountBinding
 from .child_env import STRIPPED_ENV_KEYS
 from .execution import ExecutionRefusedError, carry_execution_mode, prepare_launch, refusal_event
 from .types import (
@@ -347,6 +348,9 @@ class CodexRunner:
         self.thread_id = thread_id
         self.append_system_prompt = append_system_prompt
         self.images = images
+        # Account-pool profile this runner spawns as (CODEX_HOME). None means
+        # the relay's own environment — the behaviour without a pool.
+        self.account: AccountBinding | None = None
         self._process: asyncio.subprocess.Process | None = None
         self._interrupt_requested = False
 
@@ -480,6 +484,7 @@ class CodexRunner:
             images=self.images,
             effort=self.effort if effort is _UNSET else effort,  # type: ignore[arg-type]
         )
+        cloned.account = self.account
         return carry_execution_mode(self, cloned)
 
     async def interrupt(self) -> None:
@@ -601,6 +606,8 @@ class CodexRunner:
     def _build_env(self) -> dict[str, str]:
         """Build environment variables for the subprocess."""
         env = {k: v for k, v in os.environ.items() if k not in self._STRIPPED_ENV_KEYS}
+        if self.account is not None:
+            env.update(self.account.env)
         if self.api_port is not None:
             env["CCDB_API_URL"] = f"http://127.0.0.1:{self.api_port}"
         if self.api_secret is not None:

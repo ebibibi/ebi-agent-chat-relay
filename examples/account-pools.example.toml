@@ -1,0 +1,36 @@
+# Account pools — choose which logged-in CLI profile serves each turn.
+#
+# Point the relay at this file with CCDB_ACCOUNT_POOLS_FILE=/path/to/account-pools.toml.
+# See docs/account-pools.md for the strategies and what happens on a switch.
+#
+# Each profile is a directory you have already logged in with the vendor CLI:
+#   CLAUDE_CONFIG_DIR=/home/me/.claude-work claude   # then /login
+#   CODEX_HOME=/home/me/.codex-work codex login
+# The relay never reads or copies tokens; it only chooses the directory.
+# You are responsible for complying with each vendor's terms for every login.
+
+[pools.claude]
+strategy = "priority"          # priority | sticky | round_robin | most_headroom
+switch_at = 0.95               # utilization (0-1] at which a profile counts as exhausted
+windows = ["five_hour", "seven_day"]
+assign = "session"             # session: a thread keeps its profile while it has headroom
+                               # turn:    the strategy decides every turn
+retry_on_exhaustion = false    # true: rerun a rejected turn once on the next profile
+cooldown_seconds = 3600        # block after a rejection that reported no reset time
+
+[[pools.claude.profiles]]
+name = "personal"              # no config_dir: the relay's own login (~/.claude)
+
+[[pools.claude.profiles]]
+name = "work"
+config_dir = "/home/me/.claude-work"
+
+[pools.codex]
+strategy = "most_headroom"
+
+[[pools.codex.profiles]]
+name = "codex-personal"        # no codex_home: the relay's own login (~/.codex)
+
+[[pools.codex.profiles]]
+name = "codex-work"
+codex_home = "/home/me/.codex-work"

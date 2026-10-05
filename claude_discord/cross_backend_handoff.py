@@ -174,12 +174,17 @@ def build_handoff_prompt(
     target_backend: str,
     transcript: str,
     current_prompt: str,
+    label: str = "Cross-backend session handoff",
 ) -> str:
-    """Wrap old conversation text and the current user message for a fresh session."""
+    """Wrap old conversation text and the current user message for a fresh session.
+
+    ``label`` names the kind of move; account pools use it for a switch
+    between two logins of the same backend.
+    """
     source = source_backend.capitalize()
     target = target_backend.capitalize()
     return (
-        f"[Cross-backend session handoff: {source} → {target}]\n"
+        f"[{label}: {source} → {target}]\n"
         f"The native {source} session cannot be resumed by {target}. Continue the same task "
         "from the text-only conversation transcript below. Treat it as conversation context, "
         "inspect the current workspace for authoritative state, and do not repeat completed work. "

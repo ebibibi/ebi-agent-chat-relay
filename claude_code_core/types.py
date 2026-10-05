@@ -231,5 +231,8 @@ class StreamEvent:
     context_window: int | None = None
     error: str | None = None
     rate_limit_info: RateLimitInfo | None = None
+    # Every window a rate_limit_event reported (``unifiedWindows``), including
+    # the one in ``rate_limit_info``. Empty for CLIs that report a single window.
+    rate_limit_windows: list[RateLimitInfo] = field(default_factory=list)
     hook_event: HookEvent | None = None
     stop_hook_has_output: bool = False

@@ -377,6 +377,12 @@ async def setup_bridge(
     resume_repo = stores.resumes
     usage_repo = stores.usage
     ingest_repo = stores.ingest
+    # Account pools (CCDB_ACCOUNT_POOLS_FILE). None without the file — one
+    # implicit login per backend, exactly as before. An invalid file raises
+    # here so the bot does not start routing turns to the wrong login.
+    from claude_code_core.account_router import build_account_router
+
+    account_router = build_account_router(session_db_path)
     summary_repo = stores.summaries
 
     # --- Attention metering (on by default; CCDB_ATTENTION_ENABLED=false stops recording) ---
@@ -443,6 +449,8 @@ async def setup_bridge(
         monitor_all_channels=monitor_all_channels,
         mention_anywhere=mention_anywhere,
         thread_context_days=thread_context_days,
+        usage_repo=usage_repo,
+        account_router=account_router,
         attention_recorder=attention_recorder,
     )
     await bot.add_cog(chat_cog)
@@ -465,6 +473,7 @@ async def setup_bridge(
         cli_sessions_path=cli_sessions_path,
         settings_repo=settings_repo,
         usage_repo=usage_repo,
+        account_router=account_router,
     )
     await bot.add_cog(session_manage_cog)
     logger.info("Registered SessionManageCog")

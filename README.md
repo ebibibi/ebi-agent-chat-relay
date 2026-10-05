@@ -491,6 +491,31 @@ Behind the scenes:
 
 **Where does each backend authenticate?** Claude Code uses your existing Claude Pro/Max subscription via the `claude` CLI's `claude login`. Codex uses your existing ChatGPT Plus/Pro/Business subscription via the `codex` CLI's `codex login`. ccdb never sees raw API keys — it just shells out to whichever CLI is selected.
 
+### Account Pools — Several Logins per Backend
+
+When one login hits its usage limit, every thread on that backend normally stops until the window resets. If you hold more than one login, list them in a TOML file and point `CCDB_ACCOUNT_POOLS_FILE` at it; the relay then picks a profile (a pre-logged-in `CLAUDE_CONFIG_DIR` or `CODEX_HOME`) for each session or turn:
+
+```toml
+[pools.claude]
+strategy = "priority"        # priority | sticky | round_robin | most_headroom
+[[pools.claude.profiles]]
+name = "personal"            # the relay's own login
+[[pools.claude.profiles]]
+name = "work"
+config_dir = "/home/me/.claude-work"
+```
+
+- **Strategies**: `priority` drains profiles in order and returns to an earlier one when it resets; `sticky` switches on exhaustion and stays; `round_robin` rotates per new session; `most_headroom` picks the lowest utilization.
+- **Continuity**: when a thread moves to another profile, its session transcript is copied into that profile and the same session resumes there (measured on Claude Code 2.1.289 and codex-cli 0.160.0). If that is impossible, the new session is seeded with the conversation text.
+- **Failover**: a quota rejection marks the profile exhausted until its reset and tells the thread which profile is next; `retry_on_exhaustion = true` reruns the turn there instead.
+- **Visibility**: `/usage` lists every profile; the completion notice names the profile that served the turn.
+
+**Terms of service.** You are responsible for complying with each vendor's terms for every login you put in a pool. The feature only selects among logins you already hold — it sets one environment variable on the child process and never reads, copies or stores tokens.
+
+Provider credentials in the relay's environment (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `OPENAI_API_KEY`, …) take precedence over each profile's login and defeat pooling — unset them; the relay warns at startup.
+
+Without the file, nothing changes. Full reference: [docs/account-pools.md](docs/account-pools.md) · sample: [examples/account-pools.example.toml](examples/account-pools.example.toml).
+
 ### Execution Environments — Where the Agent Runs
 
 By default every CLI backend runs on the host as the relay's own user (`host`, unchanged from earlier versions). An operator can put an OS boundary around it instead. `bwrap`, `container` and `ssh` are **preview**; `host` stays the default, and the recommended setup for a sandboxed deployment is a dedicated `CLAUDE_CONFIG_DIR` / `CODEX_HOME` (never your own `~/.claude`):
@@ -1033,6 +1058,7 @@ for idle deadlines, attachment retries, credentials and startup rollback.
 | `CCDB_SCHEDULED_THREAD_MARKER` | Marker prepended to a thread while a scheduled task is waiting to post into it (removed when it fires, or the task is disabled or deleted). Set to an empty string to disable | `⏰` |
 | `THREAD_INBOX_ENABLED` | Enable the persistent thread inbox (classifies sessions as `waiting`/`done`/`ambiguous` via `claude -p`; shown in thread dashboard) | `false` |
 | `THREAD_AUTO_RENAME` | Auto-rename new thread titles using Claude AI — generates a short, descriptive title from the first user message via a background `claude -p` call (never delays session start), and re-titles the thread later when its subject has clearly moved on (rate-limited to one rename per 15 minutes; lineage tags are preserved) | `false` |
+| `CCDB_ACCOUNT_POOLS_FILE` | Path to a TOML file listing pre-logged-in Claude Code / Codex profile directories per backend and the strategy that picks one per session or turn. Validated at startup; unset keeps one implicit login per backend. See [Account Pools](docs/account-pools.md) | (optional) |
 | `CCDB_CLI_ENV_FILE` | Path to a `KEY=VALUE` file whose variables are merged into the CLI subprocess environment on every invocation. Changes take effect immediately without restarting the bot. Useful for temporary API routing (e.g., Azure Foundry) | (optional) |
 | `CCDB_LOG_FILE` | Path to a log file. When set, a rotating file handler (10 MB × 5 backups) is added alongside the default stdout handler. Useful for monitoring and alerting. | (optional) |
 | `API_HOST` | REST API bind address | `127.0.0.1` |

@@ -18,6 +18,7 @@ import time
 from collections.abc import Callable, Coroutine
 from pathlib import Path
 
+from claude_code_core.account_pool import DEFAULT_PROFILE, AccountBinding
 from claude_code_core.approvals import (
     elicitation_form_prompt,
     elicitation_form_result,
@@ -124,6 +125,11 @@ def _completion_fields(event: StreamEvent, runner: object) -> tuple[tuple[str, s
     backend = _backend_name_from_runner(runner)
     model = getattr(runner, "model", None)
     fields.append(("Backend", f"{backend}{f' · {model}' if model else ''}"))
+    account = getattr(runner, "account", None)
+    if isinstance(account, AccountBinding):
+        # Only set when an account pool is configured, so the footer is
+        # unchanged for a single-login deployment.
+        fields.append(("Account", account.profile))
     # Which execution environment ran the turn. A deployment that only allows
     # ``host`` (the default) has nothing to choose between, so it stays
     # unlabelled there and existing deployments see no change.
@@ -569,10 +575,24 @@ class EventProcessor:
         await self._config.surface.set_status(StatusKind.THINKING)
 
     async def _on_rate_limit_event(self, event: StreamEvent) -> None:
-        """Handle RATE_LIMIT_EVENT — persist latest rate limit info to usage_stats."""
-        if self._config.usage_repo is None or event.rate_limit_info is None:
+        """Handle RATE_LIMIT_EVENT — persist every reported window to usage_stats.
+
+        Rows are attributed to the account-pool profile this turn runs as
+        (``default`` without a pool), and a rejected window is recorded on the
+        turn so the router can mark that profile exhausted afterwards.
+        """
+        if event.rate_limit_info is None:
             return
-        await self._config.usage_repo.upsert(event.rate_limit_info)
+        windows = event.rate_limit_windows or [event.rate_limit_info]
+        turn = self._config.account_turn
+        if turn is not None:
+            turn.rejections.extend(w for w in windows if w.status == "rejected")
+        if self._config.usage_repo is None:
+            return
+        account = getattr(self._config.runner, "account", None)
+        profile = account.profile if isinstance(account, AccountBinding) else DEFAULT_PROFILE
+        for window in windows:
+            await self._config.usage_repo.upsert(window, profile=profile)
 
     async def _on_complete(self, event: StreamEvent) -> None:
         """Handle RESULT events — finalize streaming and post a summary notice."""
@@ -601,6 +621,8 @@ class EventProcessor:
             # error field, not a raised exception). Capture it so result_sink
             # consumers report a real error instead of an empty "done".
             self._final_error = event.error
+            if self._config.account_turn is not None:
+                self._config.account_turn.error = event.error
             await self._config.surface.send_notice(_error_notice(event.error))
             await self._config.surface.set_status(StatusKind.ERROR)
         else:

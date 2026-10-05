@@ -12,6 +12,9 @@ from typing import TYPE_CHECKING
 
 import aiosqlite
 
+from .account_pool import DEFAULT_PROFILE
+from .types import RateLimitInfo as _RateLimitInfo
+
 if TYPE_CHECKING:
     from .types import RateLimitInfo
 
@@ -215,43 +218,96 @@ class SessionRepository:
 
 
 class UsageStatsRepository:
-    """CRUD for rate limit usage stats (one row per rate_limit_type, upserted)."""
+    """CRUD for rate limit usage stats, one row per (profile, rate_limit_type).
+
+    The implicit login (:data:`~claude_code_core.account_pool.DEFAULT_PROFILE`)
+    is stored in ``usage_stats`` exactly as before, so callers that never pass a
+    profile — and older releases sharing the database — see no change. Named
+    account-pool profiles are stored in ``account_usage_stats``.
+    """
 
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
+        self._ready = False
 
-    async def upsert(self, info: RateLimitInfo) -> None:
-        """Insert or replace the latest rate limit info for the given type."""
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(
-                """INSERT INTO usage_stats
-                     (rate_limit_type, status, utilization, resets_at, is_using_overage)
-                   VALUES (?, ?, ?, ?, ?)
-                   ON CONFLICT(rate_limit_type) DO UPDATE SET
-                     status = excluded.status,
-                     utilization = excluded.utilization,
-                     resets_at = excluded.resets_at,
-                     is_using_overage = excluded.is_using_overage,
-                     recorded_at = datetime('now', 'localtime')""",
-                (
-                    info.rate_limit_type,
-                    info.status,
-                    info.utilization,
-                    info.resets_at,
-                    int(info.is_using_overage),
-                ),
-            )
+    async def _connect(self) -> aiosqlite.Connection:
+        db = await aiosqlite.connect(self.db_path)
+        if not self._ready:
+            # Databases opened without init_db (embedders, tests) still get the
+            # tables before the first write.
+            from .account_pool_repo import ensure_account_schema
+
+            await db.execute(_LEGACY_USAGE_STATS)
+            await ensure_account_schema(db)
             await db.commit()
+            self._ready = True
+        return db
 
-    async def get_latest(self) -> list[RateLimitInfo]:
-        """Return all stored rate limit entries (one per type)."""
-        from .types import RateLimitInfo as _RateLimitInfo
+    async def upsert(self, info: RateLimitInfo, profile: str = DEFAULT_PROFILE) -> None:
+        """Insert or replace the latest rate limit info for (profile, type)."""
+        values = (
+            info.rate_limit_type,
+            info.status,
+            info.utilization,
+            info.resets_at,
+            int(info.is_using_overage),
+        )
+        db = await self._connect()
+        try:
+            if profile == DEFAULT_PROFILE:
+                await db.execute(
+                    """INSERT INTO usage_stats
+                         (rate_limit_type, status, utilization, resets_at, is_using_overage)
+                       VALUES (?, ?, ?, ?, ?)
+                       ON CONFLICT(rate_limit_type) DO UPDATE SET
+                         status = excluded.status,
+                         utilization = excluded.utilization,
+                         resets_at = excluded.resets_at,
+                         is_using_overage = excluded.is_using_overage,
+                         recorded_at = datetime('now', 'localtime')""",
+                    values,
+                )
+            else:
+                await db.execute(
+                    """INSERT INTO account_usage_stats
+                         (profile, rate_limit_type, status, utilization, resets_at,
+                          is_using_overage)
+                       VALUES (?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(profile, rate_limit_type) DO UPDATE SET
+                         status = excluded.status,
+                         utilization = excluded.utilization,
+                         resets_at = excluded.resets_at,
+                         is_using_overage = excluded.is_using_overage,
+                         recorded_at = datetime('now', 'localtime')""",
+                    (profile, *values),
+                )
+            await db.commit()
+        finally:
+            await db.close()
 
-        async with aiosqlite.connect(self.db_path) as db:
+    async def get_latest(self, profile: str = DEFAULT_PROFILE) -> list[RateLimitInfo]:
+        """Return the stored rate limit entries for one profile (one per type)."""
+        return (await self.get_by_profile()).get(profile, [])
+
+    async def get_by_profile(self) -> dict[str, list[RateLimitInfo]]:
+        """Return every stored entry, grouped by profile."""
+        db = await self._connect()
+        try:
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute("SELECT * FROM usage_stats ORDER BY rate_limit_type")
-            rows = await cursor.fetchall()
-            return [
+            cursor = await db.execute(
+                f"SELECT '{DEFAULT_PROFILE}' AS profile, * FROM usage_stats "  # noqa: S608
+                "ORDER BY rate_limit_type"
+            )
+            rows = list(await cursor.fetchall())
+            cursor = await db.execute(
+                "SELECT * FROM account_usage_stats ORDER BY profile, rate_limit_type"
+            )
+            rows.extend(await cursor.fetchall())
+        finally:
+            await db.close()
+        grouped: dict[str, list[RateLimitInfo]] = {}
+        for row in rows:
+            grouped.setdefault(row["profile"], []).append(
                 _RateLimitInfo(
                     rate_limit_type=row["rate_limit_type"],
                     status=row["status"],
@@ -259,5 +315,18 @@ class UsageStatsRepository:
                     resets_at=row["resets_at"],
                     is_using_overage=bool(row["is_using_overage"]),
                 )
-                for row in rows
-            ]
+            )
+        return grouped
+
+
+# The original usage_stats shape. Created only if missing (a database that never
+# ran init_db); never altered.
+_LEGACY_USAGE_STATS = (
+    "CREATE TABLE IF NOT EXISTS usage_stats ("
+    "rate_limit_type TEXT PRIMARY KEY, "
+    "status TEXT NOT NULL, "
+    "utilization REAL NOT NULL, "
+    "resets_at INTEGER NOT NULL, "
+    "is_using_overage INTEGER NOT NULL DEFAULT 0, "
+    "recorded_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')))"
+)

@@ -7,6 +7,8 @@ import logging
 
 import aiosqlite
 
+from claude_code_core.account_pool_repo import ensure_account_schema
+
 logger = logging.getLogger(__name__)
 
 SCHEMA = """
@@ -218,5 +220,9 @@ async def init_db(db_path: str) -> None:
         for stmt in _MIGRATIONS:
             with contextlib.suppress(Exception):
                 await db.execute(stmt)
+        await db.commit()
+        # Account-pool tables. Additive only: usage_stats keeps its original shape
+        # (and the implicit login's rows), so an older release can still run here.
+        await ensure_account_schema(db)
         await db.commit()
     logger.info("Database initialized at %s", db_path)

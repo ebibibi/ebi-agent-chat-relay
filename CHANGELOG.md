@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Account pools** (#821) — `CCDB_ACCOUNT_POOLS_FILE` names a TOML file of pre-logged-in Claude
+  Code / Codex profile directories per backend and a strategy (`priority`, `sticky`,
+  `round_robin`, `most_headroom`). Each session or turn runs as the chosen profile; a thread that
+  moves keeps its session by copying the transcript into the new profile; a quota rejection marks
+  the profile exhausted and names (or, with `retry_on_exhaustion`, retries on) the next one.
+  `/usage` lists every profile. Storage is additive (`usage_stats` is untouched and keeps the
+  relay's own login; named profiles go to `account_usage_stats`), so reverting is safe.
+  Model-scoped limits (Opus-only, per-model Codex) do not exhaust a profile unless listed in
+  `windows`. Credentials in the environment (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`,
+  `OPENAI_API_KEY`, …) override profile logins; a startup warning says so. Discord chat turns
+  now record their rate-limit windows, so `/usage` has data without Teams. The relay never
+  handles tokens; complying with each vendor's terms is the operator's responsibility. See `docs/account-pools.md`.
 - **Execution environments** (#823) — the operator chooses where agent CLIs run (`bwrap`,
   `container` and `ssh` are preview; use a dedicated `CLAUDE_CONFIG_DIR` / `CODEX_HOME` with them):
   `host` (default, unchanged), `native` (Claude Code's sandbox via `--settings`, Codex

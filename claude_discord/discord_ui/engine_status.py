@@ -83,6 +83,7 @@ def codex_status_unavailable_line() -> str:
 async def fetch_codex_rate_limits(
     codex_command: str = "codex",
     timeout: float = _DEFAULT_TIMEOUT,
+    env: dict[str, str] | None = None,
 ) -> dict | None:
     """Return the raw ``account/rateLimits/read`` result, or ``None`` on failure.
 
@@ -90,6 +91,9 @@ async def fetch_codex_rate_limits(
     handshake, then calls the rate-limits method and returns its ``result``
     object. Any error (codex not installed, not logged in, protocol change,
     timeout) yields ``None`` — callers treat that as "Codex status unavailable".
+
+    ``env`` replaces the child's environment; account pools pass one with the
+    profile's ``CODEX_HOME`` so each login is read separately.
 
     Security: always ``create_subprocess_exec`` (never a shell). ``codex_command``
     comes from trusted configuration, not user input, but is still split with
@@ -106,6 +110,7 @@ async def fetch_codex_rate_limits(
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            env=env,
         )
     except (OSError, ValueError):
         logger.debug("Failed to spawn codex app-server", exc_info=True)

@@ -308,17 +308,56 @@ def _parse_progress(data: dict[str, Any], event: StreamEvent) -> None:
 
 
 def _parse_rate_limit_event(data: dict[str, Any], event: StreamEvent) -> None:
-    """Parse rate_limit_event message into a RateLimitInfo dataclass."""
+    """Parse rate_limit_event message into a RateLimitInfo dataclass.
+
+    Claude Code 2.1.289 reports the triggering window at the top level
+    (``rateLimitType``/``status``/``resetsAt``) but puts utilization only in
+    ``unifiedWindows`` — one entry per window. The top-level utilization falls
+    back to that window's entry, and every window is exposed as
+    ``rate_limit_windows`` so per-window headroom is not lost.
+    """
     info = data.get("rate_limit_info", {})
     if not info:
         return
+    rate_limit_type = info.get("rateLimitType", "")
+    status = info.get("status", "")
+    overage = bool(info.get("isUsingOverage", False))
+    unified = info.get("unifiedWindows")
+    windows: list[RateLimitInfo] = []
+    if isinstance(unified, dict):
+        for name, window in unified.items():
+            if not isinstance(window, dict):
+                continue
+            try:
+                windows.append(
+                    RateLimitInfo(
+                        rate_limit_type=str(name),
+                        status=status if name == rate_limit_type else "allowed",
+                        utilization=float(window.get("utilization", 0.0)),
+                        resets_at=int(window.get("resetsAt", 0)),
+                        is_using_overage=overage,
+                    )
+                )
+            except (TypeError, ValueError):
+                continue
+    same = next((w for w in windows if w.rate_limit_type == rate_limit_type), None)
+    utilization = info.get("utilization")
     event.rate_limit_info = RateLimitInfo(
-        rate_limit_type=info.get("rateLimitType", ""),
-        status=info.get("status", ""),
-        utilization=float(info.get("utilization", 0.0)),
-        resets_at=int(info.get("resetsAt", 0)),
-        is_using_overage=bool(info.get("isUsingOverage", False)),
+        rate_limit_type=rate_limit_type,
+        status=status,
+        utilization=(
+            float(utilization)
+            if utilization is not None
+            else (same.utilization if same is not None else 0.0)
+        ),
+        resets_at=int(info.get("resetsAt", same.resets_at if same is not None else 0)),
+        is_using_overage=overage,
     )
+    if same is None and rate_limit_type:
+        windows.append(event.rate_limit_info)
+    else:
+        windows = [event.rate_limit_info if w is same else w for w in windows]
+    event.rate_limit_windows = windows
 
 
 def _parse_stream_event(data: dict[str, Any], event: StreamEvent) -> None:
