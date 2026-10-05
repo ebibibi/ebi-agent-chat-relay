@@ -103,9 +103,12 @@ class AttentionCog(commands.Cog):
         description="Estimate how much of your own time threads took today and this week",
     )
     async def attention(self, interaction: discord.Interaction) -> None:
+        # Three reports over a week of rows can outlast Discord's 3-second
+        # acknowledgement window, so acknowledge first and answer through the followup.
+        await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             text = await self.build_summary(str(interaction.user.id))
         except Exception:
             logger.exception("Could not build the /attention summary")
             text = "⚠️ Could not read the attention data. See the bot log."
-        await interaction.response.send_message(text, ephemeral=True)
+        await interaction.followup.send(text, ephemeral=True)

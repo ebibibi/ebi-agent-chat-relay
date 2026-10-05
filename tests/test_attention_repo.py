@@ -63,6 +63,64 @@ class TestRepository:
         assert await repo.record_many([act(0, msg="m1"), act(1, msg="m2")]) == 1
         assert await repo.count() == 2
 
+    async def test_message_ids_are_unique_per_conversation(
+        self, repo: HumanActivityRepository
+    ) -> None:
+        # Teams activity ids are only unique within their conversation.
+        def teams(conv: str) -> HumanActivity:
+            return HumanActivity("teams", conv, "op", T0, "1", char_count=3)
+
+        assert await repo.record(teams("a")) is True
+        assert await repo.record(teams("b")) is True
+        assert await repo.record(teams("a")) is False
+        assert await repo.existing_message_ids("teams", ["1", "2"]) == {"1"}
+        assert await repo.existing_message_ids("discord", ["1"]) == set()
+
+    async def test_sources_are_stored_and_can_be_excluded(
+        self, repo: HumanActivityRepository
+    ) -> None:
+        backfilled = HumanActivity("discord", "t", "op", T0, "b", source="backfill")
+        await repo.record_many([act(1, msg="l"), backfilled])
+        window = (T0 - timedelta(hours=1), T0 + timedelta(hours=1))
+        assert {r.source for r in await repo.list_between(*window)} == {"live", "backfill"}
+        live = await repo.list_between(*window, include_backfill=False)
+        assert [r.message_id for r in live] == ["l"]
+        assert await repo.count_between(*window) == 2
+        assert await repo.count_between(*window, source="live") == 1
+
+    async def test_migrates_a_database_from_the_first_schema(self, tmp_path: Path) -> None:
+        import aiosqlite
+
+        path = str(tmp_path / "old.db")
+        async with aiosqlite.connect(path) as db:
+            await db.executescript(
+                """
+                CREATE TABLE human_activity (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, frontend TEXT NOT NULL,
+                    conversation_id TEXT NOT NULL, parent_id TEXT, thread_title TEXT,
+                    author_id TEXT NOT NULL, occurred_at TEXT NOT NULL,
+                    char_count INTEGER NOT NULL DEFAULT 0,
+                    attachment_count INTEGER NOT NULL DEFAULT 0, message_id TEXT NOT NULL);
+                CREATE UNIQUE INDEX idx_human_activity_message
+                    ON human_activity(frontend, message_id);
+                INSERT INTO human_activity (frontend, conversation_id, author_id, occurred_at,
+                    message_id) VALUES ('teams', 'a', 'op', '2026-10-05T01:00:00.000+00:00', '1');
+                """
+            )
+            await db.commit()
+        repo = HumanActivityRepository(path)
+        await repo.init_db()
+        await repo.init_db()  # idempotent
+        [old] = await repo.list_between(T0 - timedelta(hours=1), T0 + timedelta(hours=1))
+        assert old.source == "live"
+        # The old (frontend, message_id) key no longer blocks another conversation.
+        assert await repo.record(HumanActivity("teams", "b", "op", T0, "1")) is True
+        async with aiosqlite.connect(path) as db:
+            cursor = await db.execute("PRAGMA index_list(human_activity)")
+            names = {row[1] for row in await cursor.fetchall()}
+        assert "idx_human_activity_message" not in names
+        assert "idx_human_activity_key" in names
+
     async def test_message_ids_are_unique_per_frontend(self, repo: HumanActivityRepository) -> None:
         teams = HumanActivity(
             frontend="teams",
@@ -173,8 +231,8 @@ class TestApi:
         )
         data = await resp.json()
         assert [(r["title"], r["minutes"], r["messages"]) for r in data["rows"]] == [
-            ("title t1", 5.2, 1),
-            ("title t2", 1.8, 1),
+            ("title t1", 4.0, 1),  # 30 chars + 50 for its attachment
+            ("title t2", 3.0, 1),  # 10 chars + 50
         ]
 
     @pytest.mark.parametrize(
@@ -184,11 +242,29 @@ class TestApi:
             "from=yesterday",
             "from=2026-10-05&to=2026-10-01",
             "from=2020-01-01&to=2026-10-05",
+            "from=0001-01-01&to=0001-01-02",
+            "from=9999-12-30&to=9999-12-31",
+            "from=1969-12-31&to=1970-01-01",
+            "include_backfill=maybe",
         ],
     )
     async def test_bad_queries_are_400(self, api_client: TestClient, query: str) -> None:
         resp = await api_client.get(f"/api/attention?{query}", headers=AUTH)
         assert resp.status == 400
+
+    async def test_backfill_rows_can_be_excluded(
+        self, api_client: TestClient, repo: HumanActivityRepository
+    ) -> None:
+        backfilled = HumanActivity(
+            "discord", "t", "op", T0 + timedelta(minutes=30), "b", char_count=5, source="backfill"
+        )
+        await repo.record_many([act(0, msg="a"), backfilled])
+        base = "/api/attention?from=2026-10-05&to=2026-10-05"
+        both = await (await api_client.get(base, headers=AUTH)).json()
+        live = await (await api_client.get(f"{base}&include_backfill=false", headers=AUTH)).json()
+        assert both["sources"] == {"backfill": 1, "live": 1}
+        assert (both["total_messages"], live["total_messages"]) == (2, 1)
+        assert live["include_backfill"] is False and live["sources"] == {"live": 1}
 
     async def test_unconfigured_repo_is_503(self, tmp_path: Path) -> None:
         notifications = NotificationRepository(str(tmp_path / "n.db"))
@@ -250,9 +326,11 @@ class TestSlashCommand:
         cog = AttentionCog(MagicMock(), repo=repo, params=AttentionParams(timezone="UTC"))
         interaction = MagicMock()
         interaction.user.id = 42
-        interaction.response.send_message = AsyncMock()
+        interaction.response.defer = AsyncMock()
+        interaction.followup.send = AsyncMock()
         await AttentionCog.attention.callback(cog, interaction)  # type: ignore[arg-type]
-        text = interaction.response.send_message.await_args.args[0]
-        assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+        assert interaction.response.defer.await_args.kwargs["ephemeral"] is True
+        text = interaction.followup.send.await_args.args[0]
+        assert interaction.followup.send.await_args.kwargs["ephemeral"] is True
         assert "mine" in text and "theirs" not in text
         assert "Today: **2m**" in text

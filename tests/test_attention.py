@@ -105,6 +105,48 @@ class TestProportionalSplit:
         assert [s.minutes for s in shares] == [0, pytest.approx(6)]
 
 
+class TestAttachmentWeight:
+    def test_attachment_only_message_still_counts(self) -> None:
+        shot = HumanActivity(
+            "discord", "b", "op", T0 + timedelta(minutes=4), "shot", attachment_count=1
+        )
+        items = [act(0, thread="a", chars=50), shot]
+        report = build_report(
+            items, TOKYO, start=date(2026, 10, 5), end=date(2026, 10, 5), group_by="thread"
+        )
+        rows = {r["conversation_id"]: r["minutes"] for r in report["rows"]}
+        assert rows == {"a": pytest.approx(3.0), "b": pytest.approx(3.0)}
+
+    def test_attachment_weight_is_configurable(self) -> None:
+        params = AttentionParams(timezone="UTC", attachment_weight=0)
+        shot = HumanActivity(
+            "discord", "b", "op", T0 + timedelta(minutes=4), "s", attachment_count=3
+        )
+        shares = estimate_shares([act(0, chars=50), shot], params)
+        assert [s.minutes for s in shares] == [pytest.approx(6), 0]
+        config = AttentionConfig.from_env({"CCDB_ATTENTION_ATTACHMENT_WEIGHT": "120"})
+        assert config.params.attachment_weight == 120
+        assert config.params.as_dict()["attachment_weight_chars"] == 120
+
+
+class TestSources:
+    def test_backfill_rows_can_be_left_out(self) -> None:
+        backfilled = HumanActivity(
+            "discord", "t1", "op", T0 + timedelta(minutes=4), "b", char_count=10, source="backfill"
+        )
+        items = [act(0), backfilled]
+        day = date(2026, 10, 5)
+        both = build_report(items, TOKYO, start=day, end=day)
+        live = build_report(items, TOKYO, start=day, end=day, include_backfill=False)
+        assert (both["total_minutes"], live["total_minutes"]) == (6.0, 2.0)
+        assert both["sources"] == {"backfill": 1, "live": 1}
+        assert live["sources"] == {"live": 1} and live["include_backfill"] is False
+
+    def test_unknown_source_is_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            HumanActivity("discord", "t", "op", T0, "m", source="guess")
+
+
 class TestDayBucketing:
     def test_a_burst_across_local_midnight_is_split_between_days(self) -> None:
         # 23:55 and 00:05 Tokyo time: one burst of 10 + 2 minutes.
@@ -127,6 +169,12 @@ class TestDayBucketing:
         report = build_report(items, TOKYO, start=date(2026, 10, 5), end=date(2026, 10, 5))
         assert report["total_messages"] == 1
         assert report["total_minutes"] == 2.0
+
+    def test_years_outside_the_supported_window_are_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            local_day_bounds_utc(date(1, 1, 1), date(1, 1, 2), TOKYO)
+        with pytest.raises(ValueError):
+            local_day_bounds_utc(date(9999, 12, 30), date(9999, 12, 31), TOKYO)
 
     def test_local_day_bounds(self) -> None:
         first, after = local_day_bounds_utc(date(2026, 10, 5), date(2026, 10, 5), TOKYO)
@@ -236,6 +284,7 @@ class TestConfig:
             {"CCDB_ATTENTION_IDLE_GAP_MINUTES": "ten"},
             {"CCDB_ATTENTION_LEAD_IN_MINUTES": "-3"},
             {"CCDB_ATTENTION_TIMEZONE": "Nowhere/Land"},
+            {"CCDB_ATTENTION_ATTACHMENT_WEIGHT": "-1"},
         ],
     )
     def test_malformed_settings_name_the_variable(self, env: dict[str, str]) -> None:

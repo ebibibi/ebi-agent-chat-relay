@@ -22,11 +22,14 @@ to the `human_activity` table in the deployment's session database:
 | `author_id` | Discord user id or Teams `from.id` |
 | `occurred_at` | when the message was sent, UTC |
 | `char_count`, `attachment_count` | how much was written / attached |
-| `message_id` | the platform's message id — unique per frontend, so recording is idempotent |
+| `message_id` | the platform's message id; `(frontend, conversation_id, message_id)` is unique, so recording is idempotent (Teams activity ids are only unique within a conversation) |
+| `source` | `live` — recorded as it reached a session; `backfill` — read back from history |
 
-**No message text is stored.** Only the metadata above. Note that a Discord thread opened by a
-message is titled with the first 100 characters of that message, so the title can echo it — it
-is the same title every member of the channel already sees.
+**No message text is stored.** Only the metadata above. One caveat: when a message opens a new
+Discord thread, the relay names that thread after the first 100 characters of the message, and
+the row stores that exact name. So the title of a new thread can repeat the opening of its first
+message. Every member of the channel already sees the same title in the sidebar. A later rename
+reaches reports through the next message in the thread, because reports use the newest title.
 
 What does **not** count:
 
@@ -49,9 +52,10 @@ fills that gap with three assumptions:
 2. **Lead-in.** A burst costs its span (first to last message) **plus a lead-in** for the
    reading and deciding that came before its first message. A lone one-line reply therefore costs
    the lead-in, not zero.
-3. **Proportional split.** A burst's minutes are shared among its messages by the characters
-   each wrote, falling back to an equal share per message when the whole burst wrote nothing
-   (attachment-only replies). Summed per thread, this splits the burst across the threads it
+3. **Proportional split.** A burst's minutes are shared among its messages by weight:
+   characters written plus `attachment_weight` (default 50) characters per attachment, so a
+   pasted screenshot counts like a short sentence instead of nothing. When a whole burst has
+   no weight at all, each message gets an equal share. Summed per thread, this splits the burst across the threads it
    touched by characters written; summed per day, a burst that crosses local midnight is split
    between the two days instead of landing whole on one side.
 
@@ -78,6 +82,7 @@ All optional; recording is on by default.
 | `CCDB_ATTENTION_ENABLED` | `true` | `false` stops recording. Existing rows stay readable. |
 | `CCDB_ATTENTION_IDLE_GAP_MINUTES` | `10` | gap that ends a burst |
 | `CCDB_ATTENTION_LEAD_IN_MINUTES` | `2` | minutes added before each burst |
+| `CCDB_ATTENTION_ATTACHMENT_WEIGHT` | `50` | characters one attachment counts as in the split |
 | `CCDB_ATTENTION_TIMEZONE` | host local zone | IANA zone for day buckets, e.g. `Asia/Tokyo` |
 
 The parameters apply when a report is computed, not when rows are recorded, so changing them
@@ -102,6 +107,9 @@ $CCDB_API_SECRET` when a secret is configured).
 | `from`, `to` | last 7 days ending today | local days `YYYY-MM-DD`, inclusive, at most 366 days |
 | `group_by` | `day` | `day` or `thread` |
 | `author` | all authors | restrict to one author id |
+| `include_backfill` | `true` | `false` estimates from live rows only |
+
+Dates must fall between the years 1970 and 9998; anything else is a `400`.
 
 ```bash
 curl -s -H "Authorization: Bearer $CCDB_API_SECRET" \
@@ -114,6 +122,7 @@ curl -s -H "Authorization: Bearer $CCDB_API_SECRET" \
   "parameters": {"idle_gap_minutes": 10.0, "lead_in_minutes": 2.0,
                  "timezone": "Asia/Tokyo", "weighting": "characters (...)"},
   "from": "2026-09-28", "to": "2026-10-04", "group_by": "thread", "author": "123",
+  "include_backfill": true, "sources": {"backfill": 40, "live": 120},
   "total_minutes": 412.5, "total_messages": 160,
   "rows": [
     {"frontend": "discord", "conversation_id": "1529...", "parent_id": "1528...",
@@ -130,21 +139,32 @@ With `group_by=day`, each row is `{"day", "minutes", "messages", "threads"}`.
 New rows only start when the feature is deployed. To seed history from Discord:
 
 ```bash
-ccdb attention-backfill --guild <guild id> --since 2026-09-01 --owner-only
+ccdb attention-backfill --guild <guild id> --since 2026-09-01
 ```
 
-It reads `DISCORD_BOT_TOKEN` (and `DISCORD_OWNER_ID` for `--owner-only`) from the environment or
-`--env` (default `.env`), and writes to the deployment's session database (`--db` to override).
-It walks the guild's text channels, its active threads, and the public — and, where the bot may
-read them, private — archived threads of every channel, and records every human message since
-`--since` (`--until` for an end day, `--author` repeatable to restrict authors). Rows are keyed
-by message id, so it can be re-run safely and never duplicates what the live hook recorded.
-Discord rate limits are honoured (`429 retry_after` and exhausted buckets).
+The command reads `DISCORD_BOT_TOKEN` and `DISCORD_OWNER_ID` from the environment or from
+`--env` (default `.env`). It writes to the deployment's session database; use `--db` to write
+somewhere else. It walks the guild's text channels, its active threads, and the public archived
+threads of every channel. It also walks private archived threads where the bot may read them.
+It records human messages since `--since`; use `--until` to set the last day.
+
+- **Whose messages:** only `DISCORD_OWNER_ID` by default. `--author ID` (repeatable) picks other
+  authors, and `--all-humans` records everyone. Other people's messages are not the operator's
+  attention, so recording everyone needs that explicit flag.
+- **Marking:** every backfilled row has `source = 'backfill'`.
+- **No double counting:** a message whose id is already recorded is skipped, whether the live
+  hook or an earlier backfill recorded it, and even under another conversation. Re-running is
+  safe.
+- **Overlap warning:** when live rows already exist in the range, the command warns. Backfill
+  counts every message by the chosen authors, not only messages that reached a session, so the
+  backfilled days and the live days are not quite the same measure. Use
+  `include_backfill=false` when you want only the live measure.
+- Discord rate limits are honoured (`429 retry_after` and exhausted buckets).
 
 Backfill limitations:
 
-- It cannot know which past messages reached a session, so it counts every human message in the
-  guild's channels and threads. Restrict with `--owner-only` / `--author`.
+- It cannot know which past messages reached a session. Rows are marked so that you can
+  exclude them.
 - Deleted threads are gone from the API. Their opening message still exists in the parent
   channel, and is counted under the channel rather than the vanished thread.
 - Thread titles are the titles at backfill time.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -9,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from claude_code_core.attention import HumanActivity
 from claude_code_core.attention_repo import HumanActivityRepository
 from claude_discord.attention_backfill import (
     DISCORD_EPOCH_MS,
@@ -17,6 +19,7 @@ from claude_discord.attention_backfill import (
     backfill_guild,
     snowflake_for,
 )
+from claude_discord.cli import _backfill_authors
 from claude_discord.cli import main as cli_main
 
 SINCE = datetime(2026, 9, 21, tzinfo=UTC)
@@ -240,8 +243,35 @@ class TestBackfill:
         first = await backfill_guild(rest, repo, guild_id="g", since=SINCE)
         second = await backfill_guild(rest, repo, guild_id="g", since=SINCE)
         assert first.inserted == 3
-        assert (second.human_messages, second.inserted) == (3, 0)
+        assert (second.human_messages, second.already_recorded, second.inserted) == (3, 3, 0)
         assert await repo.count() == 3
+
+    async def test_rows_are_marked_as_backfill(self, repo: HumanActivityRepository) -> None:
+        fake = self.guild(thread_messages=[])
+        await backfill_guild(DiscordRest(fake, sleep=no_sleep), repo, guild_id="g", since=SINCE)
+        rows = await repo.list_between(SINCE, SINCE + timedelta(days=10))
+        assert rows and {r.source for r in rows} == {"backfill"}
+
+    async def test_ids_recorded_live_are_skipped_even_under_another_conversation(
+        self, repo: HumanActivityRepository
+    ) -> None:
+        # Live recorded this message under its thread; that thread was deleted,
+        # so history now shows it under the channel. It must not count twice.
+        day = SINCE + timedelta(days=2)
+        plain = msg(day, 2, content="plain channel chat")
+        live = HumanActivity("discord", "deleted-thread", "op", day, plain["id"], char_count=18)
+        await repo.record(live)
+        fake = self.guild(thread_messages=[])
+        stats = await backfill_guild(
+            DiscordRest(fake, sleep=no_sleep), repo, guild_id="g", since=SINCE
+        )
+        assert stats.live_rows_in_range == 1
+        assert stats.already_recorded == 1
+        assert await repo.count() == 2  # the live row + the thread starter
+        conversations = {
+            r.conversation_id for r in await repo.list_between(SINCE, day + timedelta(days=1))
+        }
+        assert "100" not in conversations
 
     async def test_author_restriction_and_until(self, repo: HumanActivityRepository) -> None:
         day = SINCE + timedelta(days=2)
@@ -267,6 +297,38 @@ class TestBackfill:
             await backfill_guild(
                 DiscordRest(FakeDiscord({}), sleep=no_sleep), repo, guild_id="g", since=SINCE
             )
+
+
+def backfill_args(**overrides: Any) -> argparse.Namespace:
+    base = {"author": None, "all_humans": False}
+    base.update(overrides)
+    return argparse.Namespace(**base)
+
+
+class TestAuthorPolicy:
+    def test_defaults_to_the_owner(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DISCORD_OWNER_ID", "42")
+        assert _backfill_authors(backfill_args()) == {"42"}
+
+    def test_explicit_authors_win(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DISCORD_OWNER_ID", "42")
+        assert _backfill_authors(backfill_args(author=["7", "8"])) == {"7", "8"}
+
+    def test_everyone_needs_all_humans(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DISCORD_OWNER_ID", "42")
+        assert _backfill_authors(backfill_args(all_humans=True)) is None
+
+    def test_no_owner_and_no_choice_refuses(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        monkeypatch.delenv("DISCORD_OWNER_ID", raising=False)
+        with pytest.raises(SystemExit):
+            _backfill_authors(backfill_args())
+        assert "--all-humans" in capsys.readouterr().err
+
+    def test_all_humans_with_authors_is_contradictory(self) -> None:
+        with pytest.raises(SystemExit):
+            _backfill_authors(backfill_args(all_humans=True, author=["7"]))
 
 
 class TestCli:

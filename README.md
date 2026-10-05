@@ -423,12 +423,12 @@ Threads live under `{working_dir}/teams` by default, beside the `ingest/` tree �
 
 ### Your Own Attention, Metered (`/attention`)
 
-Agent time is cheap; the operator's own time — reading replies, deciding, instructing — is what runs out. The relay records metadata (never text) for every human message that reaches a session, on Discord and Teams, and estimates minutes of human attention per day and per thread: messages within 10 minutes of each other form a burst, a burst costs its span plus a 2-minute lead-in, and its minutes are split across threads by characters written.
+Agent time is cheap; the operator's own time — reading replies, deciding, instructing — is what runs out. The relay records metadata (never text) for every human message that reaches a session, on Discord and Teams, and estimates minutes of human attention per day and per thread: messages within 10 minutes of each other form a burst, a burst costs its span plus a 2-minute lead-in, and its minutes are split across threads by characters written (each attachment counts as 50 characters).
 
 ```bash
 /attention                                   # ephemeral: today, last 7 days, top threads
 curl "$CCDB_API_URL/api/attention?group_by=thread&from=2026-09-28&to=2026-10-04"
-ccdb attention-backfill --guild <id> --since 2026-09-01 --owner-only   # seed history
+ccdb attention-backfill --guild <id> --since 2026-09-01   # seed history (owner only)
 ```
 
 On by default (`CCDB_ATTENTION_ENABLED=false` stops recording); every number is labelled an estimate and reports its parameters. See [docs/attention.md](docs/attention.md).

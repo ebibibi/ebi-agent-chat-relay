@@ -29,18 +29,24 @@ from __future__ import annotations
 
 import math
 import time
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta, tzinfo
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 __all__ = [
+    "DEFAULT_ATTACHMENT_WEIGHT",
     "DEFAULT_IDLE_GAP_MINUTES",
+    "MAX_YEAR",
+    "MIN_YEAR",
     "DEFAULT_LEAD_IN_MINUTES",
     "AttentionConfig",
     "AttentionParams",
     "HumanActivity",
     "MessageShare",
+    "SOURCE_BACKFILL",
+    "SOURCE_LIVE",
     "build_report",
     "estimate_shares",
     "local_day_bounds_utc",
@@ -48,6 +54,18 @@ __all__ = [
 
 DEFAULT_IDLE_GAP_MINUTES = 10.0
 DEFAULT_LEAD_IN_MINUTES = 2.0
+DEFAULT_ATTACHMENT_WEIGHT = 50.0
+
+# Days outside this window cannot be converted to UTC with a day of margin on
+# either side without overflowing ``datetime``; nothing real lives there.
+MIN_YEAR = 1970
+MAX_YEAR = 9998
+
+#: Where a row came from. Live rows are messages that reached a session;
+#: backfilled rows are every human message history still holds.
+SOURCE_LIVE = "live"
+SOURCE_BACKFILL = "backfill"
+SOURCES = (SOURCE_LIVE, SOURCE_BACKFILL)
 
 GROUP_BY_DAY = "day"
 GROUP_BY_THREAD = "thread"
@@ -72,8 +90,11 @@ class HumanActivity:
     attachment_count: int = 0
     parent_id: str | None = None
     thread_title: str | None = None
+    source: str = SOURCE_LIVE
 
     def __post_init__(self) -> None:
+        if self.source not in SOURCES:
+            raise ValueError(f"HumanActivity.source must be one of {', '.join(SOURCES)}")
         if self.occurred_at.tzinfo is None:
             raise ValueError("HumanActivity.occurred_at must be timezone-aware")
         if self.char_count < 0 or self.attachment_count < 0:
@@ -90,8 +111,13 @@ class AttentionParams:
     idle_gap_minutes: float = DEFAULT_IDLE_GAP_MINUTES
     lead_in_minutes: float = DEFAULT_LEAD_IN_MINUTES
     timezone: str | None = None
+    #: Characters an attachment counts as when splitting a burst, so a pasted
+    #: screenshot is not worth nothing next to a typed sentence.
+    attachment_weight: float = DEFAULT_ATTACHMENT_WEIGHT
 
     def __post_init__(self) -> None:
+        if not math.isfinite(self.attachment_weight) or self.attachment_weight < 0:
+            raise ValueError("attachment_weight must be zero or a positive number")
         if not math.isfinite(self.idle_gap_minutes) or self.idle_gap_minutes <= 0:
             raise ValueError("idle_gap_minutes must be a positive number")
         if not math.isfinite(self.lead_in_minutes) or self.lead_in_minutes < 0:
@@ -115,12 +141,19 @@ class AttentionParams:
     def local_day(self, moment: datetime) -> date:
         return moment.astimezone(self.tz).date()
 
+    def weight(self, activity: HumanActivity) -> float:
+        return activity.char_count + self.attachment_weight * activity.attachment_count
+
     def as_dict(self) -> dict[str, object]:
         return {
             "idle_gap_minutes": self.idle_gap_minutes,
             "lead_in_minutes": self.lead_in_minutes,
             "timezone": self.timezone_label(),
-            "weighting": "characters (message count when a burst wrote none)",
+            "attachment_weight_chars": self.attachment_weight,
+            "weighting": (
+                "characters + attachment_weight_chars per attachment"
+                " (message count when a burst has no weight)"
+            ),
         }
 
 
@@ -137,9 +170,15 @@ class AttentionConfig:
         enabled = env.get("CCDB_ATTENTION_ENABLED", "").strip().lower() not in _FALSE_VALUES
         idle = _float_env(env, "CCDB_ATTENTION_IDLE_GAP_MINUTES", DEFAULT_IDLE_GAP_MINUTES)
         lead = _float_env(env, "CCDB_ATTENTION_LEAD_IN_MINUTES", DEFAULT_LEAD_IN_MINUTES)
+        attach = _float_env(env, "CCDB_ATTENTION_ATTACHMENT_WEIGHT", DEFAULT_ATTACHMENT_WEIGHT)
         tz_name = env.get("CCDB_ATTENTION_TIMEZONE", "").strip() or None
         try:
-            params = AttentionParams(idle_gap_minutes=idle, lead_in_minutes=lead, timezone=tz_name)
+            params = AttentionParams(
+                idle_gap_minutes=idle,
+                lead_in_minutes=lead,
+                timezone=tz_name,
+                attachment_weight=attach,
+            )
         except ValueError as exc:
             raise ValueError(f"invalid CCDB_ATTENTION_* setting: {exc}") from exc
         return cls(enabled=enabled, params=params)
@@ -152,7 +191,7 @@ def _float_env(env: Mapping[str, str], name: str, default: float) -> float:
     try:
         return float(raw)
     except ValueError as exc:
-        raise ValueError(f"{name} must be a number of minutes, got {raw!r}") from exc
+        raise ValueError(f"{name} must be a number, got {raw!r}") from exc
 
 
 @dataclass(frozen=True)
@@ -180,7 +219,7 @@ def estimate_shares(
     burst_index = 0
     for author in sorted(by_author):
         for burst in _bursts(by_author[author], params.idle_gap_minutes):
-            shares.extend(_share_burst(burst, params.lead_in_minutes, burst_index))
+            shares.extend(_share_burst(burst, params, burst_index))
             burst_index += 1
     return shares
 
@@ -198,15 +237,14 @@ def _bursts(activities: list[HumanActivity], idle_gap_minutes: float) -> list[li
 
 
 def _share_burst(
-    burst: list[HumanActivity], lead_in_minutes: float, burst_index: int
+    burst: list[HumanActivity], params: AttentionParams, burst_index: int
 ) -> list[MessageShare]:
     span = (burst[-1].occurred_at - burst[0].occurred_at).total_seconds() / 60
-    minutes = span + lead_in_minutes
-    total_chars = sum(a.char_count for a in burst)
-    if total_chars > 0:
-        weights = [a.char_count / total_chars for a in burst]
-    else:
-        weights = [1 / len(burst)] * len(burst)
+    minutes = span + params.lead_in_minutes
+    raw = [params.weight(a) for a in burst]
+    total = sum(raw)
+    # Nothing written or attached at all: every message counts the same.
+    weights = [w / total for w in raw] if total > 0 else [1 / len(burst)] * len(burst)
     return [
         MessageShare(activity=a, minutes=minutes * w, burst_index=burst_index)
         for a, w in zip(burst, weights, strict=True)
@@ -217,6 +255,8 @@ def local_day_bounds_utc(
     start: date, end: date, params: AttentionParams
 ) -> tuple[datetime, datetime]:
     """UTC instants covering local days ``start``..``end`` inclusive."""
+    if start.year < MIN_YEAR or end.year > MAX_YEAR:
+        raise ValueError(f"days must fall between the years {MIN_YEAR} and {MAX_YEAR}")
     tz = params.tz
     first = datetime.combine(start, datetime.min.time())
     after = datetime.combine(end + timedelta(days=1), datetime.min.time())
@@ -236,19 +276,26 @@ def build_report(
     end: date,
     group_by: str = GROUP_BY_DAY,
     author_id: str | None = None,
+    include_backfill: bool = True,
 ) -> dict[str, object]:
     """Aggregate shares into a JSON-ready report for local days ``start``..``end``.
 
     *activities* may (and should) extend an ``idle_gap`` beyond the range on
     both sides so bursts at the edges are formed correctly; only messages whose
-    local day falls inside the range are counted.
+    local day falls inside the range are counted. ``include_backfill=False``
+    estimates from live rows only — the messages known to have reached a session.
     """
     if group_by not in GROUP_BY_CHOICES:
         raise ValueError(f"group_by must be one of {', '.join(GROUP_BY_CHOICES)}")
     if end < start:
         raise ValueError("the range ends before it starts")
 
-    pool = [a for a in activities if author_id is None or a.author_id == author_id]
+    pool = [
+        a
+        for a in activities
+        if (author_id is None or a.author_id == author_id)
+        and (include_backfill or a.source == SOURCE_LIVE)
+    ]
     counted = [
         s
         for s in estimate_shares(pool, params)
@@ -262,6 +309,8 @@ def build_report(
         "to": end.isoformat(),
         "group_by": group_by,
         "author": author_id,
+        "include_backfill": include_backfill,
+        "sources": dict(sorted(Counter(s.activity.source for s in counted).items())),
         "total_minutes": _round(sum(s.minutes for s in counted)),
         "total_messages": len(counted),
         "rows": rows,

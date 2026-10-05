@@ -19,6 +19,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 # aiohttp is an optional dependency ([api] extra) but is already present in the
 # dev environment and widely installed.  We import lazily so that the core
@@ -149,7 +150,7 @@ def _print(msg: str = "", end: str = "\n") -> None:
     print(msg, end=end, flush=True)
 
 
-def _die(msg: str, code: int = 1) -> None:
+def _die(msg: str, code: int = 1) -> NoReturn:
     print(f"\n❌  {msg}", file=sys.stderr)
     sys.exit(code)
 
@@ -386,17 +387,15 @@ async def _run_attention_backfill(args: argparse.Namespace) -> int:
     except ValueError:
         _die("--since/--until must be dates in YYYY-MM-DD form.")
     params = AttentionConfig.from_env(os.environ).params
-    since, _ = local_day_bounds_utc(since_day, since_day, params)
-    until = local_day_bounds_utc(until_day, until_day, params)[1] if until_day else None
+    try:
+        since, _ = local_day_bounds_utc(since_day, since_day, params)
+        until = local_day_bounds_utc(until_day, until_day, params)[1] if until_day else None
+    except ValueError as exc:
+        _die(str(exc))
     if until is not None and until <= since:
         _die("--until must not be before --since.")
 
-    authors: set[str] = set(args.author or [])
-    if args.owner_only:
-        owner = os.getenv("DISCORD_OWNER_ID", "").strip()
-        if not owner:
-            _die("--owner-only needs DISCORD_OWNER_ID to be set.")
-        authors.add(owner)
+    authors = _backfill_authors(args)
 
     db_path = args.db or DataLayout.from_env().sessions_db
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -413,16 +412,42 @@ async def _run_attention_backfill(args: argparse.Namespace) -> int:
             guild_id=args.guild,
             since=since,
             until=until or datetime.now(UTC),
-            author_ids=authors or None,
+            author_ids=authors,
             progress=lambda line: print(line, file=sys.stderr),
+        )
+    if stats.live_rows_in_range:
+        print(
+            f"⚠️  {stats.live_rows_in_range} live rows already cover this range. Backfilled "
+            "rows count every message by the chosen authors, not only those that reached a "
+            "session; use include_backfill=false to report live rows only.",
+            file=sys.stderr,
         )
     print(
         f"Scanned {stats.channels} channels and {stats.threads} threads: "
-        f"{stats.human_messages} human messages, {stats.inserted} newly recorded in {db_path}."
+        f"{stats.human_messages} human messages, {stats.already_recorded} already recorded, "
+        f"{stats.inserted} newly recorded in {db_path}."
     )
     for skipped in stats.skipped_containers:
         print(f"  skipped: {skipped}", file=sys.stderr)
     return 0
+
+
+def _backfill_authors(args: argparse.Namespace) -> set[str] | None:
+    """Whose messages to record: explicit authors, else the owner, else refuse.
+
+    ``None`` means every human, and only an explicit ``--all-humans`` asks for it:
+    other people's messages are not the operator's attention.
+    """
+    if args.all_humans:
+        if args.author:
+            _die("--all-humans and --author are mutually exclusive.")
+        return None
+    if args.author:
+        return set(args.author)
+    owner = os.getenv("DISCORD_OWNER_ID", "").strip()
+    if not owner:
+        _die("No author to backfill: set DISCORD_OWNER_ID, pass --author, or --all-humans.")
+    return {owner}
 
 
 def cmd_attention_backfill(args: argparse.Namespace) -> None:
@@ -487,10 +512,12 @@ def main() -> None:
         "--author",
         action="append",
         metavar="ID",
-        help="Only record this author id (repeatable). Default: every human.",
+        help="Only record this author id (repeatable). Default: DISCORD_OWNER_ID.",
     )
     backfill_parser.add_argument(
-        "--owner-only", action="store_true", help="Only record DISCORD_OWNER_ID"
+        "--all-humans",
+        action="store_true",
+        help="Record every human author instead of only the owner",
     )
     backfill_parser.add_argument(
         "--db", default=None, metavar="PATH", help="Session DB (default: the data root's)"

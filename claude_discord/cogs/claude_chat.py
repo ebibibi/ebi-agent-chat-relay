@@ -54,7 +54,7 @@ from ..thread_marker import (
     retag_thread_name,
     set_outcome_thread_name,
 )
-from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
+from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES, initial_thread_name
 from ._run_helper import run_claude_with_config
 from .prompt_builder import build_prompt_and_images, wants_file_attachment
 from .run_config import RunConfig
@@ -813,7 +813,7 @@ class ClaudeChatCog(commands.Cog):
                 chat_only=chat_only,
             )
         else:
-            thread_name = message.content[:100] if message.content else "Claude Chat"
+            thread_name = initial_thread_name(message.content)
             thread = await message.create_thread(
                 name=thread_name,
                 auto_archive_duration=THREAD_AUTO_ARCHIVE_MINUTES,

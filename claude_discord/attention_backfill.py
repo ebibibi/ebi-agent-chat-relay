@@ -6,9 +6,10 @@ since a date, so the attention estimate does not start from zero. Rows are keyed
 by message id, so running it twice — or over days the live hook already
 recorded — adds nothing twice.
 
-The backfill cannot know which past messages "reached a session"; it counts
-every human (non-bot, non-webhook) message in the guild, optionally restricted
-to the given author ids. Thread titles are the titles at backfill time.
+The backfill cannot know which past messages "reached a session": it records
+human (non-bot, non-webhook) messages by the given authors, marked
+``source = 'backfill'`` so reports can leave them out. Message ids that are
+already recorded are skipped. Thread titles are the titles at backfill time.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from claude_code_core.attention import HumanActivity
+from claude_code_core.attention import SOURCE_BACKFILL, SOURCE_LIVE, HumanActivity
 from claude_code_core.attention_repo import HumanActivityRepository
 
 logger = logging.getLogger(__name__)
@@ -148,6 +149,7 @@ def activity_from_payload(
         char_count=len(message.get("content") or ""),
         attachment_count=len(attachments) if isinstance(attachments, list) else 0,
         message_id=message_id,
+        source=SOURCE_BACKFILL,
     )
 
 
@@ -157,6 +159,11 @@ class BackfillStats:
     threads: int = 0
     human_messages: int = 0
     inserted: int = 0
+    #: Messages not written because their id is already recorded — by the live
+    #: hook (possibly under a different conversation) or an earlier backfill.
+    already_recorded: int = 0
+    #: Live rows already inside the range: backfill only fills the gaps around them.
+    live_rows_in_range: int = 0
     skipped_containers: list[str] = field(default_factory=list)
 
 
@@ -182,6 +189,9 @@ async def backfill_guild(
 ) -> BackfillStats:
     """Record human messages in *guild_id* sent in ``[since, until)``."""
     stats = BackfillStats()
+    stats.live_rows_in_range = await repo.count_between(
+        since, until or datetime.now(UTC), source=SOURCE_LIVE
+    )
     authors = {str(a) for a in author_ids} if author_ids else None
     since_flake = snowflake_for(since)
     until_flake = snowflake_for(until) if until else None
@@ -208,7 +218,13 @@ async def backfill_guild(
                 continue
             batch.append(activity)
         stats.human_messages += len(batch)
-        stats.inserted += await repo.record_many(batch)
+        # Skip ids already recorded anywhere: a live row for a thread that has
+        # since been deleted sits under the thread, while history now shows the
+        # same message under the channel — the key alone would count it twice.
+        known = await repo.existing_message_ids("discord", (a.message_id for a in batch))
+        fresh = [a for a in batch if a.message_id not in known]
+        stats.already_recorded += len(batch) - len(fresh)
+        stats.inserted += await repo.record_many(fresh)
         if progress is not None and index % 25 == 0:
             progress(f"... {index}/{len(texts) + len(threads)} channels and threads scanned")
     return stats

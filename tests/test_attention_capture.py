@@ -15,6 +15,7 @@ from claude_code_core.attention_repo import AttentionRecorder
 from claude_discord.attention_capture import activity_from_message, is_human_message
 from claude_discord.cogs.claude_chat import ClaudeChatCog
 from claude_discord.teams_integration import TeamsSessionHost, teams_activity
+from claude_discord.thread_policy import initial_thread_name
 from claude_teams.activity import parse_activity
 
 CREATED = datetime(2026, 10, 5, 1, 0, tzinfo=UTC)
@@ -99,6 +100,13 @@ class TestDiscordFilters:
         assert (a.conversation_id, a.parent_id, a.message_id) == ("5001", "111", "5001")
         assert a.thread_title == "please fix the build"
         assert (a.char_count, a.attachment_count) == (len("please fix the build"), 2)
+
+    def test_new_thread_title_matches_the_name_the_thread_is_created_with(self) -> None:
+        empty = message(channel=text_channel(), content="")
+        assert activity_from_message(empty, opens_thread=True).thread_title == "Claude Chat"
+        long = message(channel=text_channel(), content="x" * 300)
+        assert activity_from_message(long, opens_thread=True).thread_title == "x" * 100
+        assert initial_thread_name("x" * 300) == "x" * 100
 
     def test_thread_reply_is_keyed_by_the_thread(self) -> None:
         a = activity_from_message(message(channel=thread()), opens_thread=False)

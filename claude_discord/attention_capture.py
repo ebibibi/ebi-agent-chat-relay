@@ -15,11 +15,11 @@ import discord
 
 from claude_code_core.attention import HumanActivity
 
+from .thread_policy import initial_thread_name
+
 __all__ = ["activity_from_message", "is_human_message"]
 
 FRONTEND = "discord"
-_FALLBACK_THREAD_TITLE = "Claude Chat"
-_TITLE_LIMIT = 100
 
 
 def is_human_message(message: Any) -> bool:
@@ -53,7 +53,10 @@ def activity_from_message(
     elif opens_thread:
         conversation_id = str(message.id)
         parent_id = str(channel.id)
-        title = (message.content or "")[:_TITLE_LIMIT] or _FALLBACK_THREAD_TITLE
+        # The thread does not exist yet; this is the exact name it is about to
+        # be created with (the opening text, as Discord shows it), so the row
+        # agrees with the sidebar. Renames are picked up by later messages.
+        title = initial_thread_name(message.content)
     else:
         conversation_id = str(channel.id)
         parent_id = None
