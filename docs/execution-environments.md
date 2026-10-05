@@ -24,7 +24,8 @@ do not apply to it.
   (`CCDB_EXECUTION_MODE`, `CCDB_EXECUTION_ALLOWED_MODES`). Nothing in Discord or Teams can change
   either value.
 - `/sandbox` is restricted to the same users as `/skill` (`allowed_user_ids`, wired from
-  `DISCORD_OWNER_ID`). Anyone else is refused, including for showing the current mode.
+  `DISCORD_OWNER_ID`). Anyone else is refused, including for showing the current mode. `/backend`,
+  `/model`, `/effort`, `/engine-status` and `/ollama pull|rm|use` follow the same rule.
 - A user can choose a mode for one thread with `/sandbox`, but **only from the allowlist**. If you
   ask for a mode that is not allowed, the command refuses and stores nothing. The runner checks the
   allowlist again at spawn time, so a custom Cog that sets `runner.execution_mode` directly cannot
@@ -61,7 +62,7 @@ are separated with `:`, the same way as `PATH`.
 | `CCDB_BWRAP_HIDE_PATHS` | unset | Extra paths to hide, added to the default list |
 | `CCDB_BWRAP_HIDE_DEFAULTS` | `1` | Set to `0` to stop hiding the default list |
 | `CCDB_BWRAP_UNSHARE_NET` | `0` | Set to `1` to give the agent no network. Breaks every API-backed agent (Claude Code, Codex against a cloud model); only for a model reachable without the network |
-| `CCDB_BWRAP_RO_PATHS` | unset | Extra paths re-bound read-only inside the writable ones (for example, a hook script under the state directory) |
+| `CCDB_BWRAP_RO_PATHS` | unset | Extra paths bound read-only: toolchains under `$HOME` the agent's work needs, or a hook script inside the state directory |
 | `CCDB_BWRAP_PROTECT_CONFIG` | `1` | Set to `0` to stop re-binding agent configuration and `.git/hooks` / `.git/config` read-only |
 | `CCDB_CONTAINER_RUNTIME` | `docker` | Container CLI (`docker`, `podman`, ...) |
 | `CCDB_CONTAINER_IMAGE` | unset | Image to run. Required for `container` |
@@ -128,116 +129,172 @@ would make a false claim. The `CCDB_PI_ALLOW_UNSANDBOXED` opt-in is still requir
 
 ## `bwrap`
 
-The relay runs the CLI under [bubblewrap](https://github.com/containers/bubblewrap):
+The relay runs the CLI under [bubblewrap](https://github.com/containers/bubblewrap). The home
+directory is an **allowlist**: it starts empty, and only what the agent needs is bound back.
 
 ```text
 bwrap --die-with-parent --unshare-pid --unshare-ipc --unshare-uts --unshare-cgroup-try
       --new-session [--unshare-net]
       --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp
+      --tmpfs $HOME                                  # empty; writes here are thrown away
+      --ro-bind <CLI install dirs under $HOME> ...   # found from the CLI's PATH entry
+      --ro-bind ~/.gitconfig ~/.config/git ...       # commit identity
       --bind <working dir> <working dir>
-      --bind <worktree's common .git dir> ...      # only for a linked git worktree
-      --bind <agent state> <agent state> ...       # see below
+      --bind <worktree's common .git dir> ...        # only when git's back-link confirms it
+      --bind <agent state> ...                       # ~/.claude + ~/.claude.json, ~/.codex, ...
       --bind <CCDB_BWRAP_RW_PATHS> ...
-      --ro-bind <agent config inside the state> ... # see "Persistence"
-      --ro-bind <.git/hooks> <.git/config> ...
+      --ro-bind <agent config inside the state> ...  # see "Persistence"
+      --ro-bind <.git/hooks> <.git/config> <CCDB_BWRAP_RO_PATHS> ...
       --tmpfs <hidden dir> | --ro-bind /dev/null <hidden file> ...
       --chdir <working dir> -- <the CLI argv>
 ```
 
-- **Read-write paths:** the working directory, plus the agent's own state, taken from the final
-  child environment. For Claude Code, that is `CLAUDE_CONFIG_DIR`, or `~/.claude` and
-  `~/.claude.json`. For Codex and `local`, it is `CODEX_HOME` or `~/.codex`. For pi, it is
-  `PI_CODING_AGENT_DIR` or `~/.pi`. Anything injected into the environment (an account pool's
-  profile directory, the local backend's generated home) is what gets mounted. Missing state
-  directories are created first. When the working directory is a linked git worktree, its
-  repository's common `.git` directory is writable too, so the agent can commit.
-- **Hidden by default:** the relay's own `.env` (the first `.env` at or above the relay's working
-  directory, which is how the relay finds it), `~/.ssh`, `~/.gnupg`, the user's runtime directory
-  (`$XDG_RUNTIME_DIR`, normally `/run/user/<uid>`), the system D-Bus socket
-  (`/run/dbus/system_bus_socket`), the ssh-agent socket and the Docker socket. The runtime
-  directory matters most. It holds the systemd user bus, and `systemd-run --user` or
-  `busctl --user` would run a command **outside** the sandbox through it. It also holds the gpg and
-  ssh agent sockets and any other per-user service. `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR`,
-  `SSH_AUTH_SOCK` and `GPG_AGENT_INFO` are removed from the child environment. Hiding sockets
-  matters even though the filesystem is read-only, because connecting to a socket is not a write.
-  Hidden paths are mounted last, so a secret inside the working directory is still hidden. A hide
-  that would cover a writable path (the working directory itself) is skipped. Symlinks are
-  resolved before mounting.
+### What the agent can see
+
+- **Outside `$HOME`:** everything, read-only (`/usr`, `/etc`, `/opt`, `/var`, ...), except the
+  hidden sockets below. `/tmp` is private.
+- **Inside `$HOME`:** only the allowlist. `~/.config/gh` (GitHub token), `~/.aws`, `~/.azure`,
+  `~/.kube`, `~/.docker/config.json`, `~/.netrc`, `~/.git-credentials`, `~/.ssh`, `~/.gnupg`, other
+  repositories, the relay's own clone and its `.env`, notes and documents are **absent by
+  construction**. Nobody has to remember to list them. `$HOME` itself is a writable tmpfs, so a
+  tool that writes a cache there still works; the writes disappear with the sandbox and never
+  reach the host.
+- **The allowlist:**
+  - the working directory, read-write;
+  - for a linked git worktree, the repository's common `.git` directory, read-write, so commits
+    work. The worktree's `.git` file lives in the writable working directory, so a previous
+    sandboxed run could have rewritten it. The common directory is trusted only when the layout is
+    the one git creates (`<common>/worktrees/<name>`, with `objects/` and `HEAD`) **and** git's
+    back-link `<common>/worktrees/<name>/gitdir` names this working directory. A forged pointer
+    (to `$HOME`, to another repository) is ignored;
+  - the agent's own state: `CLAUDE_CONFIG_DIR`, or `~/.claude` and `~/.claude.json` for Claude
+    Code; `CODEX_HOME` or `~/.codex` for Codex and `local`; `PI_CODING_AGENT_DIR` or `~/.pi` for
+    pi. The state comes from the final child environment, so an account pool's profile directory is
+    the one that gets mounted;
+  - the CLI's own installation, read-only. Starting from the command as found on the child's
+    `PATH`, the relay binds the directory of every symlink hop (`~/.local/bin/codex` →
+    `~/.npm-global/bin/codex` → ...), the install root of the real file (a versions directory,
+    a global `node_modules`, a toolchain prefix such as `~/.local/share/nodejs/node-v22`), and the
+    same again for a script's interpreter (`#!/usr/bin/env node`). Measured for this host's Claude
+    Code (native binary under `~/.local/share/claude/versions`) and Codex (npm package plus a node
+    under `~/.local/share/nodejs`);
+  - `~/.gitconfig` and `~/.config/git`, read-only, so commits have an author;
+  - `CCDB_BWRAP_RO_PATHS` and `CCDB_BWRAP_RW_PATHS`, for anything else the agent's work needs (a
+    language toolchain in `~/.cargo` or `~/.local/share/uv`, a cache).
+- **Refused layouts:** the working directory, the state directory, or an operator path that is
+  `$HOME`, `/` or an ancestor of `$HOME` is refused in one sentence, because binding it would expose
+  everything the allowlist keeps out. A relay whose working directory is the home directory needs a
+  narrower one (a worktree) for `bwrap` threads.
+- **Hidden** (they are outside `$HOME`, or inside a bound path): the relay's `.env` and its siblings
+  (`.env.bak-*`, `.env.local`; `.env.example` stays), the Docker socket, the system D-Bus socket,
+  the user runtime directory (`$XDG_RUNTIME_DIR`, normally `/run/user/<uid>`) and the ssh-agent
+  socket. The runtime directory matters most. It holds the systemd user bus, and
+  `systemd-run --user` or `busctl --user` would run a command **outside** the sandbox through it.
+  It also holds the gpg and ssh agent sockets. This closes the user bus on hosts where it is a
+  path socket in the runtime directory (systemd's default). A session bus that listens on an
+  **abstract** address (`unix:abstract=...`, common for a `dbus-launch` X11 session) cannot be
+  hidden by a mount; see the shared network namespace below. `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR`,
+  `SSH_AUTH_SOCK` and `GPG_AGENT_INFO` are removed from the child environment. Hiding a socket
+  matters even on a read-only filesystem, because connecting to a socket is not a write.
 - **Namespaces:** PID, IPC (no System V or POSIX shared memory with host processes), UTS and,
   where the kernel allows it, cgroup are new. `--new-session` (`setsid`) is kept. With piped stdio
   it costs nothing (stdin streaming was verified end to end), and it stops `TIOCSTI` keystroke
-  injection into a controlling terminal should the relay ever run with one.
-- **Mount order matters:** `/tmp` is a private tmpfs, and the binds come after it, so a working
-  directory under `/tmp` stays the real one.
+  injection should the relay ever run with a controlling terminal.
 - **No privilege escalation:** bubblewrap always sets `no_new_privs`. `sudo` fails with
   *"The "no new privileges" flag is set"*, and other setuid binaries cannot gain privileges.
-- **Preflight** checks for the binary, the working directory and the state directories, creates
+- **Preflight** checks for the binary and the working directory, refuses unsafe layouts, creates
   the protected placeholders (see below), then makes one test sandbox. A host with unprivileged
   user namespaces disabled (for example, by AppArmor's `apparmor_restrict_unprivileged_userns`) is
-  reported in one sentence. Success is cached for the life of the process.
+  reported in one sentence. The layout is checked again immediately before the spawn.
 
 ### Persistence across modes
 
-The agent's state directory has to be writable: sessions, credentials refresh and caches live
+The agent's state directory has to be writable: sessions, credential refresh and caches live
 there. But some of what lives there makes an agent **run something later**: Claude Code's
-`settings.json` (hooks, `statusLine`, `apiKeyHelper`), `~/.claude.json` (user MCP servers),
-plugins, skills, agents and commands, and Codex's `config.toml` (MCP servers, hooks), rules and
-skills. A sandboxed agent that could edit them would plant a hook that the next **unsandboxed**
-run executes: a `host` thread, a scheduled job, or the operator's own terminal.
-
-So inside the writable state directory, these are re-bound **read-only**:
+`settings.json` (hooks, `statusLine`, `apiKeyHelper`), `.claude.json` (user MCP servers), plugins,
+skills, agents and commands, and Codex's `config.toml` (MCP servers, hooks), rules and skills. A
+sandboxed agent that could edit them would plant a hook that the next **unsandboxed** run executes:
+a `host` thread, a scheduled job, or the operator's own terminal. So inside the writable state
+directory, these are re-bound **read-only**:
 
 | Backend | Read-only (relative to the state directory) |
 |---|---|
 | Claude Code | `settings.json`, `settings.local.json`, `.claude.json` (or `~/.claude.json`), `CLAUDE.md`, `AGENTS.md`, `keybindings.json`, `hooks/`, `plugins/`, `skills/`, `agents/`, `commands/`, `output-styles/`, `rules/`, `scripts/` |
 | Codex / `local` | `config.toml`, `AGENTS.md`, `AGENTS.override.md`, `hooks.json`, `hooks/`, `rules/`, `skills/`, `plugins/`, `prompts/`, `packages/` |
 | pi | `agent/settings.json`, `agent/models.json`, `agent/AGENTS.md`, `agent/extensions/`, `agent/skills/`, `agent/prompts/` |
-| git | `.git/hooks/` and `.git/config` of the working directory's repository (the common dir for a worktree) |
+| git | `.git/hooks/`, `.git/config` and `.git/config.worktree` of the working directory's repository (the common dir for a worktree) |
 
-Credentials (`.credentials.json`, `auth.json`), sessions and caches stay writable. If one of the
-most dangerous entries is missing, preflight creates it **on the host** first, so it can be bound
-read-only and cannot be created inside the sandbox. That applies to Claude's `settings.json`,
-`hooks/`, `plugins/`, `skills/`, `agents/` and `commands/`, and to Codex's `config.toml`, `rules/`
-and `skills/`. Each is created as an empty file (mode 0600) or directory (0700); Claude Code 2.1.289
-and codex-cli 0.160.0 treat those like absent ones. Verified end to end: both CLIs run normally
-with their configuration read-only, and `touch ~/.claude/settings.json`, `touch ~/.claude.json` and
-`touch ~/.codex/config.toml` fail with `Read-only file system` inside the sandbox.
+- **Missing entries are created first, on the host,** so they can be bound read-only and cannot be
+  created inside the sandbox: `{}` for a JSON file, an empty file otherwise (mode 0600), an empty
+  directory (0700) for a name without an extension. Claude Code 2.1.289, codex-cli 0.160.0 and pi
+  were each run against exactly these placeholders and treat them as absent. (An *empty*
+  `.claude.json` is reported by Claude Code as corrupted, which is why JSON gets `{}`.) Creation
+  never follows a symlink at the name (`O_NOFOLLOW`), never truncates (`O_EXCL`), and is skipped
+  when the parent is a symlink or resolves outside the state root.
+- **A symlink at a protected name is refused.** A mount cannot be placed on a symlink, so the
+  sandbox could delete the link and create a real `hooks/` in its place. Preflight refuses with one
+  sentence. Use a dedicated state directory (below), or set `CCDB_BWRAP_PROTECT_CONFIG=0` to accept
+  the risk explicitly. The check runs before placeholders are created, so a refused layout leaves
+  nothing behind.
+- **Git:** the working directory's `.git` is itself made a mount point, so it cannot be renamed
+  away and replaced by a fresh repository with its own hooks (`mv .git .git.x && git init`). A
+  worktree's `.git` file is bound read-only, so it cannot be pointed at a forged git directory. A
+  missing `.git/hooks` is created first, and a symlinked `.git`, `hooks` or `config` is refused.
+  Verified inside a real sandbox: renaming `.git`, writing `.git/hooks/pre-commit` and
+  `git config core.hooksPath` all fail, and `git commit` succeeds.
+- **The CLI's installation** is read-only even when it lives inside a writable bind (a CLI
+  installed under its own state directory or in the project's `node_modules`), so the binary
+  cannot be swapped for the next unsandboxed run.
+- **A symlink anywhere between the state root and a protected name** (for example pi's `agent/`)
+  is refused, and missing intermediate directories are created.
+- Credentials (`.credentials.json`, `auth.json`), sessions and caches stay writable.
+- Read-only `.git/config` means `git config` and `git push -u` (which records the upstream) fail
+  inside the sandbox. `git commit` and `git push origin HEAD` work, given credentials the sandbox
+  can see.
 
-Read-only `.git/config` means `git config` and `git push -u` (which records the upstream) fail
-inside the sandbox. `git commit` and `git push origin HEAD` work.
-
-**Recommended:** give sandboxed agents their own `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, separate from
-the ones used by `host` threads, scheduled jobs and your own terminal. Account pools (#821) make
-that natural: one profile directory per pool member. Then even a missed persistence path only
-affects other sandboxed runs.
+**Recommended:** give sandboxed agents their **own** `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, separate
+from the ones that `host` threads, scheduled jobs and your own terminal use. Account pools (#821)
+make that natural: one profile directory per pool member. The state directory is bound
+read-write, so anything else you keep in it (this host's `~/.claude` holds unrelated `.env` files
+and token caches) is visible to the agent. A dedicated directory contains only what the CLI wrote,
+and a missed persistence path only affects other sandboxed runs. The end-to-end runs below used
+dedicated directories, because this host's `~/.claude` and `~/.codex` contain symlinked
+`hooks`/`skills`/`AGENTS.md` and are refused.
 
 ### Residual risks
 
 These are **not** covered by `bwrap`. Choose `container` or `ssh` if they matter to you.
 
 - **Shared network namespace.** The agent reaches everything the relay's user can reach over the
-  network. That includes every service listening on `127.0.0.1` (the relay's own REST API, which
-  the agent is meant to use, but also databases, dev servers and admin UIs), the LAN and the cloud
-  metadata endpoint. It also includes **abstract Unix sockets**, which belong to the network
-  namespace rather than the filesystem and so cannot be hidden by a mount. On the test host these
-  were root services only (`multipathd`, `iscsiadm`). `CCDB_BWRAP_UNSHARE_NET=1` removes all of it,
-  but it also removes the model API, so it only suits an agent whose model needs no network.
-  bubblewrap has no allow list for destinations; a per-destination policy needs a firewall
-  (`nftables` by uid or cgroup) or a container network.
-- **Project configuration in the working directory** is writable by design: `.claude/settings*.json`,
-  `.mcp.json`, `.codex/`, `AGENTS.md`/`CLAUDE.md`, and any `core.hooksPath` directory checked into
-  the repository (husky, `.githooks/`). Whatever runs later **in the same working directory**
-  without a sandbox will load them. Do not reuse a sandboxed thread's worktree from a `host` thread
-  without reviewing the diff.
-- **Unprotected names in the state directory.** Only the entries in the table are read-only. A hook
-  in `settings.json` that runs a script stored elsewhere under the state directory (for example
-  `~/.claude/statusline.sh`) can have that script rewritten. Add such paths to
-  `CCDB_BWRAP_RO_PATHS`, or use a dedicated state directory. Claude's per-project memory and
-  session transcripts under `projects/` stay writable, so they can carry instructions (not code)
-  into a later session.
-- **Entries that are protected only when they exist** (for example `settings.local.json`,
-  `CLAUDE.md` in the state directory, `hooks.json`) can be created by a sandboxed agent if they
-  are absent.
+  network. That includes every service on `127.0.0.1` (the relay's own REST API, which the agent is
+  meant to use, but also databases, dev servers and admin UIs), the LAN and the cloud metadata
+  endpoint. It also includes **abstract Unix sockets**, which belong to the network namespace
+  rather than the filesystem, so a mount cannot hide them. That includes a D-Bus session bus or
+  an X11 display listening on an abstract address. On the test host these were root services only
+  (`multipathd`, `iscsiadm`). `CCDB_BWRAP_UNSHARE_NET=1` removes all of it, but it
+  also removes the model API, so it only suits an agent whose model needs no network. bubblewrap
+  has no destination allow list; a per-destination policy needs a firewall (`nftables` by uid or
+  cgroup) or a container network.
+- **A repository the sandbox creates.** In a working directory without `.git`, the agent can
+  `git init` one with its own hooks, and a later unsandboxed `git` command there runs them.
+- **Project configuration in the working directory** is writable by design:
+  `.claude/settings*.json`, `.mcp.json`, `.codex/`, `AGENTS.md`/`CLAUDE.md`, and any
+  `core.hooksPath` directory checked into the repository (husky, `.githooks/`). Whatever later
+  runs **in the same working directory** without a sandbox loads them. Do not reuse a sandboxed
+  thread's worktree from a `host` thread without reviewing the diff.
+- **Unprotected names in the state directory.** Only the entries in the table are read-only.
+  Claude's per-project memory and transcripts under `projects/` stay writable, so they can carry
+  instructions (not code) into a later session. A hook that runs a script stored under some other
+  name in the state directory can have that script rewritten; add it to `CCDB_BWRAP_RO_PATHS`.
+- **Environment variables.** The child environment is the relay's minus the stripped credentials
+  (see [SECURITY.md](SECURITY.md#environment-isolation)). A token you export to the relay's
+  process (`GH_TOKEN`, `AWS_*`) reaches the agent in every mode, `bwrap` included.
+- **Time of check to time of use.** Paths are resolved (`realpath`) and checked immediately before
+  the spawn, and the resolved paths are what bwrap binds. A concurrent **unsandboxed** process that
+  swaps a path for a symlink in the milliseconds between that check and bwrap's mount could still
+  redirect a bind. A sandboxed process cannot do this to the protected names, because they are
+  read-only mount points in every running sandbox. Binding by file descriptor (`--ro-bind-fd`)
+  would close the window, and needs the runners to pass descriptors to the child.
 
 **Codex inside bwrap** still applies its own `--sandbox` policy unless `dangerously_skip_permissions`
 is on. The nested sandbox works on hosts that allow nested user namespaces. Codex's default
@@ -245,11 +302,12 @@ is on. The nested sandbox works on hosts that allow nested user namespaces. Code
 `dangerously_skip_permissions` (bwrap becomes the only boundary) or set
 `CCDB_CODEX_SANDBOX_OVERRIDE=workspace-write`.
 
-**What breaks when `$HOME` is read-only:** a tool or MCP server that writes under `$HOME` outside
-the agent's state (`~/.cache`, `~/.npm`, `~/.config/gh`, `~/.azure`, ...) fails. Add those paths to
-`CCDB_BWRAP_RW_PATHS`. Hiding `~/.ssh` and the ssh-agent also stops `git push` over SSH. If agents
-should push, use HTTPS credentials, or set `CCDB_BWRAP_HIDE_DEFAULTS=0` and list only the paths you
-want hidden in `CCDB_BWRAP_HIDE_PATHS` (that also gives back the runtime directory, so list it).
+**Tools the agent's work needs** that live in `$HOME` (`uv`, `cargo`, `gh`, a language toolchain)
+are not visible unless they are the CLI's own installation or listed in `CCDB_BWRAP_RO_PATHS`. A
+symlink in a bound directory such as `~/.local/bin` whose target is not bound dangles. Note that a
+bound directory is bound whole: every file in `~/.local/bin` is readable, not only the CLI. Hooks and
+MCP servers configured in the state directory that run code from elsewhere in `$HOME` fail inside
+the sandbox for the same reason. That is intended; bind what they need, read-only.
 
 **Interrupts:** bubblewrap does not forward `SIGINT`. The Stop button ends the sandbox, and
 `--die-with-parent` kills the CLI, instead of the CLI stopping gracefully. Both CLIs write their
@@ -322,8 +380,9 @@ Run one turn in a scratch thread and ask the agent to run `touch ~/should_fail`,
 and `touch ./inside_ok`. Under `native` and `bwrap`, the first two fail (`Read-only file system`,
 `"no new privileges" flag is set`) and the third succeeds. Under `bwrap`, also check
 `systemd-run --user true`, `busctl --user list`, `touch ~/.claude/settings.json` (or
-`~/.codex/config.toml`) and `curl --unix-socket /var/run/docker.sock http://localhost/version`.
-All four must fail. The completion notice shows the
+`~/.codex/config.toml`), `curl --unix-socket /var/run/docker.sock http://localhost/version`,
+`cat ~/.config/gh/hosts.yml` and reading another repository under `$HOME`. All of them must fail,
+and `ls -A ~` must show only the allowlist. The completion notice shows the
 `Environment` field. The pull request that added this layer records those runs for Claude Code and
 Codex on Linux with bubblewrap 0.6.1, Claude Code 2.1.289 and codex-cli 0.160.0.
 

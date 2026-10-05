@@ -1,38 +1,39 @@
 """``bwrap``: the relay wraps the CLI in bubblewrap.
 
-The boundary, in mount order (later mounts win, so the order is load-bearing):
+The home directory is an **allowlist**, not a deny list. Everything outside
+``$HOME`` is visible read-only (system directories, toolchains in ``/usr``);
+``$HOME`` itself is an empty tmpfs, and only what the agent needs is bound back.
+Credentials and data that live in the home directory — ``~/.config/gh``,
+``~/.aws``, ``~/.azure``, ``~/.kube``, ``~/.docker``, ``~/.netrc``,
+``~/.git-credentials``, ``~/.ssh``, other repositories, the relay's own clone
+and ``.env`` — are absent by construction, without anyone having to list them.
 
-1. ``--ro-bind / /`` — the whole host is visible and read-only.
-2. ``--dev /dev``, ``--proc /proc`` (a new PID namespace's own), ``--tmpfs /tmp``.
-3. Read-write binds: the working directory, its git directory when the working
-   directory is a linked worktree, the agent's own state (``CLAUDE_CONFIG_DIR``
-   or ``~/.claude`` + ``~/.claude.json``; ``CODEX_HOME`` or ``~/.codex``; pi's
-   agent dir) and any operator-listed paths. They come after ``/tmp`` so a
-   working directory under ``/tmp`` stays the real one.
-4. Read-only re-binds inside those writable trees: the files that make an agent
-   *run something later* — Claude Code's ``settings.json`` (hooks), plugins,
-   skills, agents and commands, ``~/.claude.json`` (MCP servers), Codex's
-   ``config.toml``, rules, skills and plugins, pi's settings and extensions, and
-   ``.git/hooks`` + ``.git/config``. Without this a sandboxed agent could plant a
-   hook that the next *unsandboxed* run (a ``host`` thread, a scheduled job)
-   executes. The most dangerous missing ones (Claude's ``settings.json``,
-   Codex's ``config.toml``, extension directories) are created empty by
-   preflight so they cannot be created inside the sandbox either.
-5. Hidden paths: a directory becomes an empty tmpfs, a file becomes
-   ``/dev/null``. They come last so a secret inside the working directory (the
-   relay's own ``.env`` when the agent works in the relay's checkout) is still
-   hidden. The defaults include the user's runtime directory
-   (``/run/user/<uid>``: the systemd user bus — ``systemd-run --user`` would run
-   a command outside the sandbox — and the gpg/ssh agent sockets) and the
-   system D-Bus socket.
+Mount order (later mounts win, so the order is load-bearing):
 
-Namespaces: PID, IPC, UTS and (where available) cgroup are new. bubblewrap
-always sets ``PR_SET_NO_NEW_PRIVS``, so ``sudo`` and other setuid binaries
-cannot gain privileges. ``--new-session`` (``setsid``) is kept: it costs nothing
-with piped stdio and stops ``TIOCSTI`` keystroke injection should the relay
-ever run with a controlling terminal. The network namespace is shared unless the
-operator sets ``CCDB_BWRAP_UNSHARE_NET=1``, because the agent has to reach its
-model API — see docs/execution-environments.md for what that leaves reachable.
+1. ``--ro-bind / /``, ``--dev /dev``, ``--proc /proc``, ``--tmpfs /tmp``.
+2. ``--tmpfs $HOME`` — empty and writable; whatever the CLI writes there that
+   is not bound below (caches, logs) disappears with the sandbox.
+3. Read-only binds into home: the CLI's own install (found from its PATH entry,
+   its real path and its interpreter), ``~/.gitconfig`` / ``~/.config/git``, and
+   operator-listed ``CCDB_BWRAP_RO_PATHS``.
+4. Read-write binds: the working directory, a linked worktree's common git
+   directory (only when git's back-link confirms it), the agent's own state
+   (``CLAUDE_CONFIG_DIR`` or ``~/.claude`` + ``~/.claude.json``; ``CODEX_HOME`` or
+   ``~/.codex``; pi's dir) and ``CCDB_BWRAP_RW_PATHS``.
+5. Read-only re-binds inside those: the agent configuration that can make a
+   later, unsandboxed run execute something (Claude Code's ``settings.json``
+   hooks, ``.claude.json`` MCP servers, plugins, skills; Codex's ``config.toml``,
+   rules, skills; pi's settings and extensions), ``.git/hooks`` and
+   ``.git/config``, and ``CCDB_BWRAP_RO_PATHS`` that fall inside writable binds.
+6. Hidden paths that are still visible: the relay's ``.env*`` files, the Docker
+   socket, the system D-Bus socket, the user runtime directory (systemd user
+   bus — ``systemd-run --user`` would escape — and agent sockets), the
+   ssh-agent socket, and ``CCDB_BWRAP_HIDE_PATHS``.
+
+Namespaces: PID, IPC, UTS and (where available) cgroup are new; the network
+namespace is shared because the agent has to reach its model API.
+``--new-session`` stops ``TIOCSTI`` injection should a tty ever be attached.
+bubblewrap sets ``PR_SET_NO_NEW_PRIVS``, so ``sudo`` cannot gain privileges.
 """
 
 from __future__ import annotations
@@ -42,7 +43,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import replace
 
 from .base import (
-    CODEX_BACKENDS,
+    ExecutionRefusedError,
     Launch,
     agent_state_paths,
     ensure_state_dirs,
@@ -50,56 +51,28 @@ from .base import (
     resolve_binary,
     run_probe,
 )
+from .bwrap_fs import (
+    DEFAULT_HOME_READONLY,
+    create_git_hooks_dir,
+    create_placeholders,
+    git_dirs,
+    git_link_problem,
+    inside,
+    layout_problem,
+    protected_entries,
+    symlinked_entries,
+    toolchain_paths,
+)
 from .config import BWRAP, BwrapSettings
 
 PROBE_TIMEOUT_SECONDS = 10.0
 
-# Variables that point the child at host services the mounts just hid.
-HOST_SESSION_ENV = ("DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR")
-
-# Agent configuration that can make a *later* run execute something: hooks,
-# MCP servers, plugins, skills/commands with scripts, instructions. Paths are
-# relative to the agent's state directory. ``(name, create_if_missing)``: a
-# missing entry marked True is created on the host by preflight — an empty file
-# (mode 0600) or directory (0700), which every CLI we measured treats like an
-# absent one — so it can be bound read-only and the agent cannot create it inside
-# the sandbox. Unmarked ones are protected only when they exist, because
-# creating them empty could change behaviour.
-CLAUDE_PROTECTED: tuple[tuple[str, bool], ...] = (
-    ("settings.json", True),
-    ("settings.local.json", False),
-    ("CLAUDE.md", False),
-    ("AGENTS.md", False),
-    ("keybindings.json", False),
-    (".claude.json", False),
-    ("hooks", True),
-    ("plugins", True),
-    ("skills", True),
-    ("agents", True),
-    ("commands", True),
-    ("output-styles", False),
-    ("rules", False),
-    ("scripts", False),
-)
-CODEX_PROTECTED: tuple[tuple[str, bool], ...] = (
-    ("config.toml", True),
-    ("AGENTS.md", False),
-    ("AGENTS.override.md", False),
-    ("hooks.json", False),
-    ("hooks", False),
-    ("rules", True),
-    ("skills", True),
-    ("plugins", False),
-    ("prompts", False),
-    ("packages", False),
-)
-PI_PROTECTED: tuple[tuple[str, bool], ...] = (
-    ("settings.json", False),
-    ("models.json", False),
-    ("AGENTS.md", False),
-    ("extensions", False),
-    ("skills", False),
-    ("prompts", False),
+# Variables that point the child at host services the mounts hide.
+HOST_SESSION_ENV = (
+    "DBUS_SESSION_BUS_ADDRESS",
+    "XDG_RUNTIME_DIR",
+    "SSH_AUTH_SOCK",
+    "GPG_AGENT_INFO",
 )
 
 # Probed once per binary per process. Only success is cached: a host that is
@@ -120,6 +93,23 @@ def find_relay_dotenv(start: str | None = None) -> str | None:
         current = parent
 
 
+def relay_env_files(relay_dotenv: str | None) -> tuple[str, ...]:
+    """The relay's ``.env`` and its siblings (``.env.bak-…``, ``.env.local``)."""
+    if not relay_dotenv:
+        return ()
+    directory = os.path.dirname(relay_dotenv)
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return (relay_dotenv,)
+    files = [
+        os.path.join(directory, name)
+        for name in sorted(names)
+        if name.startswith(".env") and name != ".env.example"
+    ]
+    return tuple(files) or (relay_dotenv,)
+
+
 def runtime_dir(env: Mapping[str, str]) -> str | None:
     configured = env.get("XDG_RUNTIME_DIR")
     if configured:
@@ -128,11 +118,9 @@ def runtime_dir(env: Mapping[str, str]) -> str | None:
     return f"/run/user/{getuid()}" if getuid else None
 
 
-def default_hide_paths(env: Mapping[str, str], relay_dotenv: str | None) -> tuple[str, ...]:
-    home = home_dir(env)
+def default_hide_paths(env: Mapping[str, str], relay_files: tuple[str, ...]) -> tuple[str, ...]:
     paths = [
-        os.path.join(home, ".ssh"),
-        os.path.join(home, ".gnupg"),
+        *relay_files,
         "/var/run/docker.sock",
         "/run/docker.sock",
         "/run/dbus/system_bus_socket",
@@ -142,82 +130,7 @@ def default_hide_paths(env: Mapping[str, str], relay_dotenv: str | None) -> tupl
         paths.append(runtime)
     if env.get("SSH_AUTH_SOCK"):
         paths.append(env["SSH_AUTH_SOCK"])
-    if relay_dotenv:
-        paths.insert(0, relay_dotenv)
     return tuple(paths)
-
-
-def protected_entries(backend: str, env: Mapping[str, str]) -> tuple[tuple[str, bool], ...]:
-    """Absolute agent-config paths to bind read-only, with create-if-missing flags."""
-    entries: list[tuple[str, bool]] = []
-    if backend == "claude":
-        configured = env.get("CLAUDE_CONFIG_DIR")
-        base = configured or os.path.join(home_dir(env), ".claude")
-        names = [(n, c) for n, c in CLAUDE_PROTECTED if configured or n != ".claude.json"]
-        entries += [(os.path.join(base, n), c) for n, c in names]
-        if not configured:
-            entries.append((os.path.join(home_dir(env), ".claude.json"), False))
-    elif backend in CODEX_BACKENDS:
-        base = env.get("CODEX_HOME") or os.path.join(home_dir(env), ".codex")
-        entries += [(os.path.join(base, n), c) for n, c in CODEX_PROTECTED]
-    elif backend == "pi":
-        configured = env.get("PI_CODING_AGENT_DIR")
-        base = configured or os.path.join(home_dir(env), ".pi", "agent")
-        entries += [(os.path.join(base, n), c) for n, c in PI_PROTECTED]
-    return tuple(entries)
-
-
-def git_paths(cwd: str, read_text: Callable[[str], str | None]) -> tuple[str | None, str | None]:
-    """Return (writable git dir outside cwd, git common dir) for ``cwd``.
-
-    A linked worktree's ``.git`` is a file naming a directory inside the main
-    repository's ``.git``; commits write objects and refs to the *common* dir,
-    which lives outside the working directory. That directory is made writable
-    so the agent can commit; its hooks and config are re-bound read-only.
-    """
-    dotgit = os.path.join(cwd, ".git")
-    content = read_text(dotgit)
-    if content is None:
-        return None, dotgit  # a plain repository (or none): .git is inside cwd
-    line = content.strip()
-    if not line.startswith("gitdir:"):
-        return None, None
-    gitdir = line[len("gitdir:") :].strip()
-    if not os.path.isabs(gitdir):
-        gitdir = os.path.normpath(os.path.join(cwd, gitdir))
-    common = gitdir
-    commondir = read_text(os.path.join(gitdir, "commondir"))
-    if commondir is not None:
-        rel = commondir.strip()
-        common = os.path.normpath(rel if os.path.isabs(rel) else os.path.join(gitdir, rel))
-    return common, common
-
-
-def create_protected_placeholders(entries: tuple[tuple[str, bool], ...]) -> None:
-    """Create missing create-if-missing entries so they can be bound read-only.
-
-    Done on the host before the sandbox starts, with ordinary permissions, so the
-    operator can still edit the file later. ``O_EXCL`` never truncates an
-    existing file, and a symlink in place of the name is left alone.
-    """
-    for path, create in entries:
-        if not create or os.path.lexists(path) or not os.path.isdir(os.path.dirname(path)):
-            continue
-        if "." in os.path.basename(path):
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-            os.close(fd)
-        else:
-            os.mkdir(path, 0o700)
-
-
-def _read_small_file(path: str) -> str | None:
-    if not os.path.isfile(path):
-        return None
-    try:
-        with open(path, encoding="utf-8") as handle:
-            return handle.read(4096)
-    except OSError:
-        return None
 
 
 def _unique(paths: list[str]) -> list[str]:
@@ -230,26 +143,26 @@ def _unique(paths: list[str]) -> list[str]:
     return result
 
 
-def _inside(path: str, parent: str) -> bool:
-    return path == parent or path.startswith(parent.rstrip("/") + "/")
-
-
 def build_bwrap_argv(
     settings: BwrapSettings,
     backend: str,
     launch: Launch,
     *,
-    relay_dotenv: str | None,
+    relay_files: tuple[str, ...] = (),
+    toolchain: tuple[str, ...] = (),
+    git: tuple[str | None, str | None] = (None, None),
     exists: Callable[[str], bool] = os.path.exists,
     isdir: Callable[[str], bool] = os.path.isdir,
     realpath: Callable[[str], str] = os.path.realpath,
-    read_text: Callable[[str], str | None] = _read_small_file,
 ) -> tuple[str, ...]:
     """Build the bubblewrap command line around ``launch.argv``.
 
-    The filesystem callables are injectable so the mount list can be
-    unit-tested without the paths existing on the test machine.
+    Filesystem lookups are injectable so the mount list can be unit-tested
+    without the paths existing on the test machine. ``git`` is
+    :func:`bwrap_fs.git_dirs` for the working directory and ``toolchain`` is
+    :func:`bwrap_fs.toolchain_paths` for the CLI.
     """
+    home = realpath(home_dir(launch.env))
     args: list[str] = [
         settings.binary,
         "--die-with-parent",
@@ -262,9 +175,24 @@ def build_bwrap_argv(
     if settings.unshare_net:
         args.append("--unshare-net")
     args += ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"]
+    args += ["--tmpfs", home]
 
-    cwd = os.path.abspath(launch.cwd)
-    git_writable, git_common = git_paths(cwd, read_text)
+    bound: list[str] = []
+
+    def bind(flag: str, path: str) -> None:
+        args.extend([flag, path, path])
+        bound.append(path)
+
+    readable = _unique(
+        [realpath(p) for p in toolchain]
+        + [realpath(os.path.join(home, rel)) for rel in DEFAULT_HOME_READONLY]
+    )
+    for path in readable:
+        if inside(path, home) and exists(path):
+            bind("--ro-bind", path)
+
+    git_writable, git_protect = git
+    cwd = realpath(os.path.abspath(launch.cwd))
     writable = _unique(
         [
             realpath(p)
@@ -274,42 +202,53 @@ def build_bwrap_argv(
                 *agent_state_paths(backend, launch.env),
                 *settings.rw_paths,
             )
-        ],
+        ]
     )
     for path in writable:
         if exists(path):
-            args += ["--bind", path, path]
+            bind("--bind", path)
 
-    readonly: list[tuple[str, bool]] = []
+    # Read-only installs that sit inside a writable bind (a CLI installed under
+    # its own state directory or in the project's node_modules) would otherwise
+    # be writable, and the next unsandboxed run would execute the change.
+    for path in readable:
+        if any(inside(path, w) for w in writable) and exists(path):
+            bind("--ro-bind", path)
+
+    # Make the working directory's ``.git`` a mount point so it cannot be
+    # renamed away and replaced by a fresh repository with its own hooks. A
+    # worktree's ``.git`` file is also made read-only so it cannot be pointed
+    # at a forged git directory for the next unsandboxed run.
+    dotgit = os.path.join(cwd, ".git")
+    if settings.protect_config and exists(dotgit):
+        bind("--bind" if isdir(dotgit) else "--ro-bind", dotgit)
+
+    protected: list[str] = []
     if settings.protect_config:
-        readonly += list(protected_entries(backend, launch.env))
-        if git_common:
-            readonly += [
-                (os.path.join(git_common, "hooks"), False),
-                (os.path.join(git_common, "config"), False),
+        protected += [path for path, _root in protected_entries(backend, launch.env)]
+        if git_protect:
+            protected += [
+                os.path.join(git_protect, name) for name in ("hooks", "config", "config.worktree")
             ]
-    readonly += [(p, False) for p in settings.ro_paths]
-    for raw, create in readonly:
+    for raw in [*protected, *settings.ro_paths]:
         path = realpath(raw)
-        if not any(_inside(path, w) for w in writable):
-            continue  # already read-only via the root bind
-        if exists(path):
-            args += ["--ro-bind", path, path]
-        elif create and exists(os.path.dirname(path)):
-            if "." in os.path.basename(path):
-                args += ["--ro-bind", "/dev/null", path]
-            else:
-                args += ["--tmpfs", path, "--remount-ro", path]
+        if path in readable and not any(inside(path, w) for w in writable):
+            continue  # bound read-only above
+        if (inside(path, home) or any(inside(path, w) for w in writable)) and exists(path):
+            bind("--ro-bind", path)
 
     hidden = list(settings.hide_paths)
     if settings.hide_defaults:
-        hidden = [*default_hide_paths(launch.env, relay_dotenv), *hidden]
+        hidden = [*default_hide_paths(launch.env, relay_files), *hidden]
     # Resolve symlinks: ``/var/run`` is usually a link to ``/run``, and bwrap
     # cannot create a mount point through a link it has not resolved itself.
     for path in _unique([realpath(p) for p in hidden]):
         if not exists(path):
             continue
-        if any(_inside(w, path) for w in writable):
+        visible = not inside(path, home) or any(inside(path, b) for b in bound)
+        if not visible:
+            continue  # under the empty home already
+        if any(inside(w, path) for w in writable):
             continue  # hiding it would hide the working directory itself
         if isdir(path):
             args += ["--tmpfs", path]
@@ -324,8 +263,34 @@ def sandbox_env(settings: BwrapSettings, env: Mapping[str, str]) -> dict[str, st
     """Drop variables that point at host services the sandbox hides."""
     if not settings.hide_defaults:
         return dict(env)
-    dropped = {*HOST_SESSION_ENV, "SSH_AUTH_SOCK", "GPG_AGENT_INFO"}
-    return {k: v for k, v in env.items() if k not in dropped}
+    return {k: v for k, v in env.items() if k not in HOST_SESSION_ENV}
+
+
+def layout_refusal(settings: BwrapSettings, backend: str, launch: Launch) -> str | None:
+    """Why this launch's binds would be unsafe, or None."""
+    home = home_dir(launch.env)
+    problem = layout_problem(
+        launch.cwd,
+        agent_state_paths(backend, launch.env),
+        (*settings.rw_paths, *settings.ro_paths),
+        home,
+    )
+    if problem:
+        return problem
+    if settings.protect_config:
+        links = symlinked_entries(protected_entries(backend, launch.env))
+        cwd = os.path.realpath(launch.cwd)
+        git_link = git_link_problem(cwd, git_dirs(cwd)[1])
+        if git_link:
+            links.append(git_link)
+        if links:
+            return (
+                f"The bwrap execution environment cannot protect {links[0]}: it is a symbolic "
+                "link, which the sandbox could replace; use a dedicated CLAUDE_CONFIG_DIR / "
+                "CODEX_HOME for sandboxed threads, or set CCDB_BWRAP_PROTECT_CONFIG=0 to accept "
+                "that risk."
+            )
+    return None
 
 
 class BwrapEnvironment:
@@ -343,10 +308,16 @@ class BwrapEnvironment:
             )
         if not os.path.isdir(launch.cwd):
             return f"The working directory {launch.cwd} does not exist."
+        # Refuse before touching the state directory, so a refused layout
+        # leaves no placeholders behind.
+        problem = layout_refusal(self._settings, backend, launch)
+        if problem:
+            return problem
         try:
             ensure_state_dirs(agent_state_paths(backend, launch.env))
             if self._settings.protect_config:
-                create_protected_placeholders(protected_entries(backend, launch.env))
+                create_placeholders(protected_entries(backend, launch.env))
+                create_git_hooks_dir(git_dirs(os.path.realpath(launch.cwd))[1])
         except OSError as exc:
             return f"Could not prepare the agent's state directory for bwrap: {exc}."
         if binary not in _verified_binaries:
@@ -366,11 +337,18 @@ class BwrapEnvironment:
 
     def transform(self, backend: str, launch: Launch) -> Launch:
         settings = self._settings
+        # Re-checked here, immediately before the spawn, so a layout changed
+        # since preflight (a symlink swapped in) is refused rather than bound.
+        problem = layout_refusal(settings, backend, launch)
+        if problem:
+            raise ExecutionRefusedError(problem)
         binary = resolve_binary(settings.binary, launch.env) or settings.binary
         argv = build_bwrap_argv(
             replace(settings, binary=binary),
             backend,
             launch,
-            relay_dotenv=find_relay_dotenv(),
+            relay_files=relay_env_files(find_relay_dotenv()),
+            toolchain=toolchain_paths(launch.argv[0], launch.env),
+            git=git_dirs(os.path.realpath(launch.cwd)),
         )
         return replace(launch, argv=argv, env=sandbox_env(settings, launch.env))

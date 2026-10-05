@@ -509,6 +509,7 @@ async def setup_bridge(
             settings=backend_settings,
             factory=backend_factory,
             chat_cog=chat_cog,
+            allowed_user_ids=allowed_user_ids,
         )
         await bot.add_cog(backend_cmd_cog)
         logger.info("Registered BackendCommandCog")
@@ -536,6 +537,7 @@ async def setup_bridge(
                 bot,  # type: ignore[arg-type]
                 settings=backend_settings,
                 chat_cog=chat_cog,
+                allowed_user_ids=allowed_user_ids,
             )
         )
         logger.info("Registered OllamaCommandCog")

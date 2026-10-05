@@ -74,11 +74,21 @@ Four rules shape the details:
   `~/.claude.json` MCP servers, plugins and skills; Codex's `config.toml`, rules and skills;
   `.git/hooks` and `.git/config`) are re-bound read-only inside it. The most dangerous ones are
   created empty first if they are missing.
+- **The home directory is an allowlist, not a deny list.** `bwrap` mounts `$HOME` as an empty tmpfs
+  and binds back only the working directory, the agent's state, the CLI's own installation and
+  `~/.gitconfig`. A deny list of secrets (`~/.ssh`, the relay's `.env`) was the first design. A
+  review showed it leaks whatever nobody thought to list (`~/.config/gh`, `~/.aws`, other
+  repositories), so it was replaced. Binds that would re-expose home (a working directory equal to
+  `$HOME`) are refused, and paths are resolved with `realpath` and checked again immediately before
+  the spawn.
+- **Paths the sandbox can write are not trusted.** A linked worktree's `.git` file is honoured only
+  when git's back-link confirms it. A symlink at a protected config name is refused, because a
+  mount cannot cover a symlink.
 - **Host services are hidden, not just files.** The user's runtime directory (systemd user bus,
   agent sockets) and the system D-Bus socket are hidden, and the variables pointing at them are
   dropped, because `systemd-run --user` would otherwise run a command outside the sandbox.
-- **Choosing the environment is itself a privilege.** `/sandbox` is limited to the users allowed to
-  run `/skill`.
+- **Choosing the environment is itself a privilege.** `/sandbox`, `/backend`, `/model`, `/effort`,
+  `/engine-status` and `/ollama pull|rm|use` are limited to the users allowed to run `/skill`.
 
 ## Consequences
 
@@ -99,12 +109,19 @@ Four rules shape the details:
   not exist). Writing `~/.claude/settings.json`, `~/.claude.json` or `~/.codex/config.toml` fails
   with `Read-only file system`, and the Docker socket refuses connections. Both CLIs work normally
   with their configuration read-only.
+- Under `bwrap`, `ls -A ~` shows only the allowlist. `cat ~/.config/gh/hosts.yml` and reading
+  the relay's own clone fail with `No such file or directory`. Writes to `$HOME` land in the empty
+  tmpfs and never reach the host.
+- The host's default `~/.claude` and `~/.codex` keep symlinked `hooks`/`skills`/`AGENTS.md`, so
+  `bwrap` refuses them. Sandboxed threads are expected to use dedicated state directories, which
+  also keeps unrelated files in the operator's `~/.claude` out of the agent's view.
 - **Residual risks, accepted and documented:** the network namespace is shared, so localhost
   services, the LAN and abstract Unix sockets stay reachable. `CCDB_BWRAP_UNSHARE_NET` cannot fix
   that for an API-backed agent. Project configuration in the writable working directory
   (`.claude/`, `.mcp.json`, `.codex/`, in-repo hook directories) can still affect a later
   unsandboxed run in the same directory. Scripts stored under unprotected names in the state
-  directory can be rewritten. The recommended mitigation for the last two is a dedicated
+  directory can be rewritten. Exported environment variables reach the agent in every mode. A
+  concurrent unsandboxed process could race the `realpath` check against bwrap's mount. The recommended mitigation for the last two is a dedicated
   `CLAUDE_CONFIG_DIR` / `CODEX_HOME` per sandbox and not reusing a sandboxed worktree from `host`.
 - pi still needs `CCDB_PI_ALLOW_UNSANDBOXED` in every mode. Relaxing that gate for `bwrap` and
   `container`, which do provide an OS boundary, is a separate decision that would supersede part

@@ -145,8 +145,10 @@ the default `host` execution environment, the CLI runs as the relay's user and c
 that user can: the relay's `.env`, `~/.ssh`, the Docker socket. To put an OS boundary around the
 agent, choose an execution environment:
 
-- `bwrap`: read-only host, writable working directory and agent state, private `/tmp`,
-  `no_new_privs` (so `sudo` fails), and the relay's `.env`, `~/.ssh` and the Docker socket hidden.
+- `bwrap`: read-only system, an empty `$HOME` with only the working directory, the agent's state
+  (its hook/config files read-only) and the CLI's install bound back, private `/tmp`,
+  `no_new_privs` (so `sudo` fails), and the relay's `.env`, the user runtime directory and the
+  Docker socket hidden.
 - `native`: the agent's own sandbox.
 - `container`: an image you provide.
 - `ssh`: another machine.

@@ -103,14 +103,31 @@ class OllamaCommandCog(commands.Cog):
         settings: BackendSettings,
         chat_cog: ClaudeChatCog | None = None,
         config: LocalModelConfig | None = None,
+        allowed_user_ids: set[int] | None = None,
     ) -> None:
         self.bot = bot
+        # Who may install, delete or select models: the same set as /skill.
+        self._allowed_user_ids = allowed_user_ids
         self._settings = settings
         self._chat_cog = chat_cog
         # Read once at construction: the endpoint is an operator-level setting,
         # and re-reading os.environ per command would let a half-applied env
         # change split one command's calls across two servers.
         self._config = config or LocalModelConfig.from_env()
+
+    def _is_authorized(self, user_id: int) -> bool:
+        """Same rule as /skill: ``None`` means every user who can reach the bot."""
+        if self._allowed_user_ids is None:
+            return True
+        return user_id in self._allowed_user_ids
+
+    async def _refuse_unauthorized(self, interaction: discord.Interaction) -> bool:
+        if self._is_authorized(interaction.user.id):
+            return False
+        await interaction.response.send_message(
+            "You don't have permission to use this command.", ephemeral=True
+        )
+        return True
 
     # ── helpers ────────────────────────────────────────────────────
 
@@ -374,6 +391,8 @@ class OllamaCommandCog(commands.Cog):
         use="Also select it for the local backend once the download finishes.",
     )
     async def pull(self, interaction: discord.Interaction, model: str, use: bool = False) -> None:
+        if await self._refuse_unauthorized(interaction):
+            return
         try:
             name = validate_ollama_model_name(model)
         except ValueError as exc:
@@ -436,6 +455,8 @@ class OllamaCommandCog(commands.Cog):
     @app_commands.autocomplete(model=_installed_autocomplete)
     @app_commands.describe(model="Installed model to delete")
     async def rm(self, interaction: discord.Interaction, model: str) -> None:
+        if await self._refuse_unauthorized(interaction):
+            return
         await interaction.response.defer(ephemeral=True)
         try:
             name = validate_ollama_model_name(model)
@@ -473,6 +494,8 @@ class OllamaCommandCog(commands.Cog):
     async def use(
         self, interaction: discord.Interaction, model: str, thread_only: bool = False
     ) -> None:
+        if await self._refuse_unauthorized(interaction):
+            return
         await interaction.response.defer()
         try:
             name = validate_ollama_model_name(model)
