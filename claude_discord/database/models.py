@@ -75,17 +75,14 @@ CREATE TABLE IF NOT EXISTS thread_inbox (
 );
 
 -- Rate limit events emitted by the Claude Code CLI (rate_limit_event stream-json type).
--- One row per (profile, rate_limit_type); upserted on every event so this holds the
--- latest state. profile is the account-pool profile ('default' without a pool).
+-- One row per rate_limit_type; upserted on every event so this holds the latest state.
 CREATE TABLE IF NOT EXISTS usage_stats (
-    profile TEXT NOT NULL DEFAULT 'default',
-    rate_limit_type TEXT NOT NULL,
+    rate_limit_type TEXT PRIMARY KEY,
     status TEXT NOT NULL,
     utilization REAL NOT NULL,
     resets_at INTEGER NOT NULL,
     is_using_overage INTEGER NOT NULL DEFAULT 0,
-    recorded_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-    PRIMARY KEY (profile, rate_limit_type)
+    recorded_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
 -- Advisory resource claims: a session announces "I am working on X" so a
@@ -224,7 +221,8 @@ async def init_db(db_path: str) -> None:
             with contextlib.suppress(Exception):
                 await db.execute(stmt)
         await db.commit()
-        # usage_stats keyed by (profile, rate_limit_type) + account-pool tables.
+        # Account-pool tables. Additive only: usage_stats keeps its original shape
+        # (and the implicit login's rows), so an older release can still run here.
         await ensure_account_schema(db)
         await db.commit()
     logger.info("Database initialized at %s", db_path)

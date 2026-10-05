@@ -23,6 +23,7 @@ import logging
 import os
 import re
 import shutil
+from collections.abc import Mapping
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -30,11 +31,35 @@ logger = logging.getLogger(__name__)
 _SESSION_ID = re.compile(r"^[a-f0-9-]+$")
 
 
-def ambient_home(backend: str, env: dict[str, str] | None = None) -> Path:
-    """The directory a CLI uses when the relay does not choose one."""
+def _overlay_value(key: str, source: Mapping[str, str]) -> str | None:
+    """Read *key* from the ``CCDB_CLI_ENV_FILE`` overlay, as ClaudeRunner does."""
+    path = source.get("CCDB_CLI_ENV_FILE")
+    if not path:
+        return None
+    try:
+        lines = Path(path).read_text().splitlines()
+    except OSError:
+        return None
+    value: str | None = None
+    for line in lines:
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            name, raw = line.split("=", 1)
+            if name == key:
+                value = raw
+    return value
+
+
+def ambient_home(backend: str, env: Mapping[str, str] | None = None) -> Path:
+    """The directory a CLI uses when the relay does not choose one.
+
+    For Claude this honours a ``CLAUDE_CONFIG_DIR`` set by the
+    ``CCDB_CLI_ENV_FILE`` overlay, because ClaudeRunner applies that overlay to
+    every spawn. (CodexRunner does not read the overlay.)
+    """
     source = os.environ if env is None else env
     if backend == "claude":
-        configured = source.get("CLAUDE_CONFIG_DIR")
+        configured = _overlay_value("CLAUDE_CONFIG_DIR", source) or source.get("CLAUDE_CONFIG_DIR")
         return Path(configured).expanduser() if configured else Path.home() / ".claude"
     if backend == "codex":
         configured = source.get("CODEX_HOME")

@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .account_pool import (
+    DEFAULT_PROFILE,
     AccountBinding,
     AccountTurn,
     PoolConfig,
@@ -114,6 +115,21 @@ class AccountRouter:
             return Path(spec.home)
         return ambient_home(backend)
 
+    def ambient_profile(self, backend: str) -> str | None:
+        """The pool profile that is the relay's own login, if any.
+
+        A profile without a directory, or whose directory is the ambient one;
+        failing that, a profile named ``default``.
+        """
+        pool = self.pools.get(backend)
+        if pool is None:
+            return None
+        ambient = ambient_home(backend).resolve()
+        for spec in pool.profiles:
+            if spec.home is None or Path(spec.home).resolve() == ambient:
+                return spec.name
+        return DEFAULT_PROFILE if DEFAULT_PROFILE in pool.names else None
+
     async def plan_turn(
         self, *, backend: str, thread_id: int, session_id: str | None
     ) -> TurnPlan | None:
@@ -128,6 +144,12 @@ class AccountRouter:
         # A profile removed from the pool file can no longer be chosen, but its
         # directory (stored with the pin) is still where the transcript lives.
         current = pinned if session_id and pinned in pool.names else None
+        if session_id and pin is None:
+            # A session from before the pool existed lives in the relay's own
+            # login. Treat the profile that *is* that login as current, so the
+            # thread keeps it (and its prompt cache) while it has headroom
+            # instead of every old thread jumping to the strategy's first pick.
+            current = self.ambient_profile(backend)
 
         async with self._select_lock:
             usage = await self._usage.get_by_profile()
@@ -182,15 +204,23 @@ class AccountRouter:
 
     async def finish_turn(self, turn: AccountTurn) -> Failover | None:
         """Mark the profile exhausted if the turn was rejected; say what comes next."""
-        if not turn.rejected:
-            return None
         pool = self.pools.get(turn.binding.backend)
-        if pool is None:
+        if pool is None or not turn.exhausts(pool):
+            # Includes model-scoped limits (an Opus-only window) the operator
+            # did not list in ``windows``: the login still serves other models.
             return None
         now = self._clock()
-        resets = [r.resets_at for r in turn.rejections if r.resets_at > now]
+        rejections = turn.exhausting_rejections(pool)
+        limit = turn.exhausting_error(pool)
+        resets = [r.resets_at for r in rejections if r.resets_at > now]
+        if limit is not None and limit.resets_at is not None and limit.resets_at > now:
+            resets.append(limit.resets_at)
         until = max(resets) if resets else int(now) + pool.cooldown_seconds
-        reason = "rate_limit_event rejected" if turn.rejections else (turn.error or "")[:200]
+        reason = (
+            "rate_limit_event rejected: " + ",".join(r.rate_limit_type for r in rejections)
+            if rejections
+            else (turn.error or "")[:200]
+        )
         await self._repo.set_block(turn.binding.profile, until, reason)
         logger.warning(
             "Account pool %s: profile %s rejected for quota until %d",
@@ -237,6 +267,30 @@ class AccountRouter:
         return rows
 
 
+#: Credentials in the relay's environment that the CLI prefers over the login
+#: stored in the profile directory. With one of these set, every profile runs
+#: as the same account and pooling has no effect.
+ENV_CREDENTIALS: dict[str, tuple[str, ...]] = {
+    "claude": ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"),
+    "codex": ("OPENAI_API_KEY", "CODEX_API_KEY"),
+}
+
+
+def _warn_about_env_credentials(pools: dict[str, PoolConfig]) -> None:
+    import os
+
+    for backend in pools:
+        present = [name for name in ENV_CREDENTIALS.get(backend, ()) if os.environ.get(name)]
+        if present:
+            logger.warning(
+                "Account pool %s: %s is set in the relay environment and overrides the "
+                "login stored in each profile directory, so every profile will run as "
+                "that credential. Unset it for pooling to take effect.",
+                backend,
+                ", ".join(present),
+            )
+
+
 def build_account_router(db_path: str) -> AccountRouter | None:
     """Build a router from ``CCDB_ACCOUNT_POOLS_FILE``; ``None`` when unset.
 
@@ -251,6 +305,7 @@ def build_account_router(db_path: str) -> AccountRouter | None:
     pools = load_from_env()
     if not pools:
         return None
+    _warn_about_env_credentials(pools)
     for backend, pool in pools.items():
         logger.info(
             "Account pool %s: strategy=%s assign=%s profiles=%s",

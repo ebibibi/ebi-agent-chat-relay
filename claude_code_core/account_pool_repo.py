@@ -1,10 +1,11 @@
-"""Persistence for account pools: thread pins, pool cursors, rejection markers.
+"""Persistence for account pools: per-profile usage, thread pins, cursors, rejections.
 
-Also owns the one schema change pools need in a shared table: ``usage_stats``
-was keyed by ``rate_limit_type`` alone and is now keyed by
-``(profile, rate_limit_type)``. :func:`ensure_account_schema` rebuilds an old
-table in place, assigning every existing row to :data:`DEFAULT_PROFILE`, and is
-idempotent so both ``init_db`` implementations can call it on every start.
+Every table here is new and additive. ``usage_stats`` is deliberately left in
+its original shape (primary key ``rate_limit_type``) and keeps holding the
+implicit login's rows (:data:`DEFAULT_PROFILE`); named profiles live in
+``account_usage_stats``. That keeps the database usable by an older release:
+a revert, or switching a dev worktree off, must not break the old
+``ON CONFLICT(rate_limit_type)`` upsert that runs on every turn.
 """
 
 from __future__ import annotations
@@ -13,13 +14,15 @@ import logging
 
 import aiosqlite
 
-from .account_pool import DEFAULT_PROFILE, PoolCursor
+from .account_pool import PoolCursor
 
 logger = logging.getLogger(__name__)
 
-USAGE_STATS_SCHEMA = f"""
-CREATE TABLE IF NOT EXISTS usage_stats (
-    profile TEXT NOT NULL DEFAULT '{DEFAULT_PROFILE}',
+ACCOUNT_SCHEMA = """
+-- Latest rate-limit window per named account-pool profile. The implicit
+-- login (profile 'default') stays in usage_stats, unchanged.
+CREATE TABLE IF NOT EXISTS account_usage_stats (
+    profile TEXT NOT NULL,
     rate_limit_type TEXT NOT NULL,
     status TEXT NOT NULL,
     utilization REAL NOT NULL,
@@ -28,9 +31,7 @@ CREATE TABLE IF NOT EXISTS usage_stats (
     recorded_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     PRIMARY KEY (profile, rate_limit_type)
 );
-"""
 
-ACCOUNT_SCHEMA = """
 -- Which profile a thread's session currently lives in. The session transcript
 -- is stored under that profile's directory, so this is where it is copied
 -- *from* when the thread moves to another profile.
@@ -63,42 +64,8 @@ CREATE TABLE IF NOT EXISTS account_blocks (
 
 
 async def ensure_account_schema(db: aiosqlite.Connection) -> None:
-    """Create the pool tables and migrate ``usage_stats`` to per-profile keys."""
-    await _migrate_usage_stats(db)
-    await db.executescript(USAGE_STATS_SCHEMA + ACCOUNT_SCHEMA)
-
-
-async def _migrate_usage_stats(db: aiosqlite.Connection) -> None:
-    cursor = await db.execute("PRAGMA table_info(usage_stats)")
-    columns = [row[1] for row in await cursor.fetchall()]
-    if not columns or "profile" in columns:
-        return
-    # Rebuild: SQLite cannot change a primary key in place. One transaction,
-    # so a crash midway leaves the old table intact.
-    await db.commit()
-    await db.execute("BEGIN IMMEDIATE")
-    try:
-        # Re-check under the write lock: another connection may have migrated
-        # between the first look and the lock.
-        cursor = await db.execute("PRAGMA table_info(usage_stats)")
-        if "profile" in [row[1] for row in await cursor.fetchall()]:
-            await db.rollback()
-            return
-        await db.execute("ALTER TABLE usage_stats RENAME TO usage_stats_pre_profile")
-        await db.execute(USAGE_STATS_SCHEMA)
-        await db.execute(
-            "INSERT INTO usage_stats (profile, rate_limit_type, status, utilization, "
-            "resets_at, is_using_overage, recorded_at) "
-            "SELECT ?, rate_limit_type, status, utilization, resets_at, is_using_overage, "
-            "recorded_at FROM usage_stats_pre_profile",
-            (DEFAULT_PROFILE,),
-        )
-        await db.execute("DROP TABLE usage_stats_pre_profile")
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        raise
-    logger.info("Migrated usage_stats to per-profile keys (existing rows → %r)", DEFAULT_PROFILE)
+    """Create the account-pool tables. Idempotent and purely additive."""
+    await db.executescript(ACCOUNT_SCHEMA)
 
 
 class AccountPoolRepository:

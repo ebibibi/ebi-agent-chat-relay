@@ -164,6 +164,9 @@ class ClaudeChatCog(commands.Cog):
         self._usage_repo = usage_repo
         # Account pools (CCDB_ACCOUNT_POOLS_FILE). None = one implicit login.
         self._account_router = account_router
+        # Strong references to fire-and-forget tasks (asyncio keeps only weak
+        # ones, so an unreferenced task can be garbage-collected mid-run).
+        self._background_tasks: set[asyncio.Task] = set()
         self._max_concurrent = max_concurrent
         self._allowed_user_ids = allowed_user_ids
         # When True, skip channel-ID filtering and accept all guild channels.
@@ -1390,12 +1393,14 @@ class ClaudeChatCog(commands.Cog):
         if turn is None or self._account_router is None:
             return None
         if turn.binding.backend == "codex" and self._factory is not None:
-            asyncio.create_task(
+            task = asyncio.create_task(
                 refresh_codex_usage(
                     self._account_router, turn.binding, self._factory.codex_command
                 ),
                 name=f"codex-usage-{turn.binding.profile}",
             )
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
         try:
             failover = await self._account_router.finish_turn(turn)
         except Exception:

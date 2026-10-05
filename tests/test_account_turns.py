@@ -16,6 +16,7 @@ from claude_code_core.account_pool import (
     PoolConfig,
     ProfileSpec,
     Selection,
+    is_limit_error,
 )
 from claude_code_core.account_pool_repo import AccountPoolRepository
 from claude_code_core.account_router import AccountRouter, Failover, ProfileStatus, TurnPlan
@@ -164,7 +165,7 @@ class TestEventProcessor:
         grouped = await usage.get_by_profile()
         assert sorted(i.rate_limit_type for i in grouped["work"]) == ["five_hour", "seven_day"]
         assert DEFAULT_PROFILE not in grouped
-        assert not turn.rejected
+        assert not turn.exhausts(PoolConfig(backend="claude", profiles=()))
 
     async def test_without_a_pool_rows_go_to_default(
         self, thread: MagicMock, runner: MagicMock, tmp_path: Path
@@ -180,7 +181,7 @@ class TestEventProcessor:
         turn = AccountTurn(BINDING)
         config = RunConfig(thread=thread, runner=runner, prompt="p", account_turn=turn)
         await EventProcessor(config).process(_rate_event("rejected"))
-        assert turn.rejected
+        assert turn.rejections and turn.rejections[0].status == "rejected"
         assert [r.rate_limit_type for r in turn.rejections] == ["five_hour"]
 
     async def test_terminal_error_is_recorded_on_the_turn(
@@ -196,7 +197,7 @@ class TestEventProcessor:
                 error="You've hit your limit · resets 3pm",
             )
         )
-        assert turn.error is not None and turn.rejected
+        assert turn.error is not None and is_limit_error(turn.error)
 
     def test_footer_names_the_account_only_with_a_pool(self) -> None:
         runner = ClaudeRunner(model="opus")
@@ -546,3 +547,31 @@ class TestResultSinkOnRetry:
 
         await cog._run_claude(MagicMock(), _thread(), "x", None, result_sink=sink)
         assert outcomes == [("ok", None)]
+
+
+async def test_codex_usage_probe_task_is_referenced(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import asyncio
+
+    import claude_discord.cogs.claude_chat as chat_mod
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def probe(*args: object) -> None:
+        started.set()
+        await release.wait()
+
+    monkeypatch.setattr(chat_mod, "refresh_codex_usage", probe)
+    router = _router(tmp_path, retry=False)
+    cog = _cog(monkeypatch, router, [])
+    cog._factory = MagicMock(codex_command="codex")
+    turn = AccountTurn(AccountBinding("codex", "cx", {}))
+    await cog._finish_account_turn(_thread(), turn)
+    await started.wait()
+    assert len(cog._background_tasks) == 1
+    release.set()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert not cog._background_tasks

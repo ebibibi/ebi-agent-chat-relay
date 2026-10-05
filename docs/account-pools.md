@@ -92,10 +92,17 @@ A profile is **exhausted** while any of these holds:
 
 - a window listed in `windows` is at or above `switch_at` and its reset time is
   still in the future;
-- any window reported a rate-limit **rejection** that has not reset yet — a
-  rejection always counts, whether or not the window is listed;
+- a window reported a rate-limit **rejection** that has not reset yet, and that
+  window either is listed in `windows` or limits the whole login (`five_hour`,
+  `seven_day`);
 - a rejection marker is still active (a rejected turn whose CLI gave no reset
   time blocks the profile for `cooldown_seconds`).
+
+Model-scoped limits do **not** exhaust a profile unless you list them: a
+rejection in `seven_day_opus` or `seven_day_sonnet`, Claude Code's "fast" limit,
+or Codex's "usage limit for <model>" leaves the login available for other
+models. Add `"seven_day_opus"` to `windows` if your threads only run Opus and
+you want that limit to move them.
 
 A window whose reset time has passed says nothing about the present and is
 ignored. When every profile is exhausted, the turn runs on the one that frees up
@@ -108,6 +115,11 @@ first and the thread is told so.
   The strategy decides for new sessions and for threads whose profile ran out.
   With `priority`, this means a thread that moved to the second profile stays
   there after the first one resets; new threads go back to the first.
+  A thread whose session predates the pool (no pin yet) starts on the profile
+  that *is* the relay's own login — the one without a directory, or whose
+  directory is the ambient one, or failing that one named `default` — and stays
+  there while it has headroom, so enabling a pool does not move every existing
+  thread at once.
 - `turn`: the strategy decides every turn. `priority` then returns immediately,
   and `round_robin` rotates on every message.
 
@@ -148,9 +160,19 @@ turn after a switch is billed as uncached input.
 ## Failover
 
 A turn counts as rejected for quota when Claude Code reports a `rate_limit_event`
-with `status: "rejected"`, or when the turn ends with a usage-limit error
-("usage limit", "hit your limit", "limit reached"). Codex's `exec --json` stream
-carries no structured rate-limit event, so for Codex only the error text counts.
+with `status: "rejected"`, or when the turn ends with a quota error. Codex's
+`exec --json` stream carries no structured rate-limit event, so for Codex only the
+error text counts. In both cases the scope rule above applies.
+
+The error text is matched against the wording the CLIs actually emit (read from
+the Claude Code 2.1.289 and codex-cli 0.160.0 binaries): Claude's "You've hit your
+limit / session limit / weekly limit / Opus limit …", "You're out of usage
+credits" and the legacy "Claude AI usage limit reached|<reset>"; Codex's "You've
+hit your usage limit" (whole login) or "… usage limit for <model>" (one model) and
+"You hit your spend cap". A bare "limit reached" is deliberately not matched: the
+same binaries print "Context limit reached", "Budget limit reached" and
+"Concurrent subagent limit reached", none of which mean the login is out of
+quota, and blocking a profile for those would only move the thread to fail again.
 
 On rejection the profile is marked exhausted until the window's reset time (or
 `cooldown_seconds` if none was reported), and:
@@ -176,9 +198,25 @@ Where the usage numbers come from:
   for `account/rateLimits/read` — the read-only call the Codex TUI makes on
   startup — and stores the windows it reports.
 
-`usage_stats` is keyed by `(profile, rate_limit_type)`. Rows recorded before
-pools existed, and every row recorded without a pool, belong to the profile
-named `default`; naming a profile `default` adopts that history.
+Storage is additive so an older release can still run on the same database
+(a revert, or switching a dev worktree off): `usage_stats` keeps its original
+shape and holds the relay's own login under the name `default` — every row
+recorded before pools existed, and every row recorded without a pool. Named
+profiles are stored in a new `account_usage_stats` table keyed by
+`(profile, rate_limit_type)`. Naming a profile `default` adopts that history.
+
+## Credentials in the relay environment defeat pooling
+
+The CLIs prefer credentials in the environment over the login stored in the
+profile directory. If the relay's environment (or `CCDB_CLI_ENV_FILE`) sets
+`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or `CLAUDE_CODE_OAUTH_TOKEN` (Claude
+Code), or `OPENAI_API_KEY` / `CODEX_API_KEY` (Codex), every profile runs as that
+credential and switching profiles changes nothing. The relay logs a warning at
+startup when it sees one of these alongside a pool; unset it for pooling to work.
+
+A `CLAUDE_CONFIG_DIR` set through `CCDB_CLI_ENV_FILE` is taken into account as
+the relay's own login (Claude Code applies that overlay to every spawn). The
+chosen profile's directory always wins over it for the turn itself.
 
 ## Limitations
 

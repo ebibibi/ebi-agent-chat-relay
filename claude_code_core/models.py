@@ -39,14 +39,12 @@ CREATE INDEX IF NOT EXISTS idx_sessions_last_used ON sessions(last_used_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_session_id ON sessions(session_id);
 
 CREATE TABLE IF NOT EXISTS usage_stats (
-    profile TEXT NOT NULL DEFAULT 'default',
-    rate_limit_type TEXT NOT NULL,
+    rate_limit_type TEXT PRIMARY KEY,
     status TEXT NOT NULL,
     utilization REAL NOT NULL,
     resets_at INTEGER NOT NULL,
     is_using_overage INTEGER NOT NULL DEFAULT 0,
-    recorded_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-    PRIMARY KEY (profile, rate_limit_type)
+    recorded_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE TABLE IF NOT EXISTS lounge_messages (
@@ -106,7 +104,8 @@ async def init_db(db_path: str) -> None:
             with contextlib.suppress(Exception):
                 await db.execute(stmt)
         await db.commit()
-        # usage_stats keyed by (profile, rate_limit_type) + account-pool tables.
+        # Account-pool tables. Additive only: usage_stats keeps its original shape
+        # (and the implicit login's rows), so an older release can still run here.
         await ensure_account_schema(db)
         await db.commit()
     logger.info("Core database initialized at %s", db_path)

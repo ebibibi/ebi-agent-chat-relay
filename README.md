@@ -500,6 +500,8 @@ config_dir = "/home/me/.claude-work"
 
 **Terms of service.** You are responsible for complying with each vendor's terms for every login you put in a pool. The feature only selects among logins you already hold — it sets one environment variable on the child process and never reads, copies or stores tokens.
 
+Provider credentials in the relay's environment (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `OPENAI_API_KEY`, …) take precedence over each profile's login and defeat pooling — unset them; the relay warns at startup.
+
 Without the file, nothing changes. Full reference: [docs/account-pools.md](docs/account-pools.md) · sample: [examples/account-pools.example.toml](examples/account-pools.example.toml).
 
 ---

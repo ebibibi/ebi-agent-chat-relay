@@ -298,3 +298,125 @@ async def test_removed_profile_is_still_the_transcript_source(
     assert (plan.profile, plan.moved_from, plan.session_id) == ("a", "retired", SID)
     assert find_transcript("claude", homes["a"], SID) is not None
     assert await router._repo.get_pin_home(1) == ("claude", "a", str(homes["a"]))
+
+
+class TestReviewFollowUps:
+    async def test_pinless_session_stays_on_the_inheriting_profile(
+        self, tmp_path: Path, homes: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A thread from before the pool keeps the relay's own login (and its cache)."""
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(homes["ambient"]))
+        _claude_transcript(homes["ambient"])
+        pool = PoolConfig(
+            backend="claude",
+            profiles=(ProfileSpec("work", str(homes["a"])), ProfileSpec("own")),
+        )
+        db = str(tmp_path / "s.db")
+        router = AccountRouter(
+            {"claude": pool}, AccountPoolRepository(db), UsageStatsRepository(db), clock=Clock()
+        )
+        assert router.ambient_profile("claude") == "own"
+        plan = await router.plan_turn(backend="claude", thread_id=5, session_id=SID)
+        assert plan is not None
+        assert (plan.profile, plan.moved_from, plan.session_id) == ("own", None, SID)
+        assert find_transcript("claude", homes["a"], SID) is None  # nothing copied
+        # A brand-new thread still follows the strategy.
+        fresh = await router.plan_turn(backend="claude", thread_id=6, session_id=None)
+        assert fresh is not None and fresh.profile == "work"
+
+    async def test_pinless_session_leaves_the_ambient_profile_once_exhausted(
+        self, tmp_path: Path, homes: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(homes["ambient"]))
+        _claude_transcript(homes["ambient"])
+        pool = PoolConfig(
+            backend="claude",
+            profiles=(ProfileSpec("work", str(homes["a"])), ProfileSpec("own")),
+        )
+        db = str(tmp_path / "s.db")
+        router = AccountRouter(
+            {"claude": pool}, AccountPoolRepository(db), UsageStatsRepository(db), clock=Clock()
+        )
+        await router._repo.set_block("own", int(NOW) + 60)
+        plan = await router.plan_turn(backend="claude", thread_id=5, session_id=SID)
+        assert plan is not None
+        assert (plan.profile, plan.moved_from) == ("work", RELAY_DEFAULT_LABEL)
+        assert find_transcript("claude", homes["a"], SID) is not None
+
+    def test_profile_named_default_or_pointing_at_ambient_is_ambient(
+        self, tmp_path: Path, homes: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(homes["ambient"]))
+        db = str(tmp_path / "s.db")
+        explicit = PoolConfig(
+            backend="claude",
+            profiles=(ProfileSpec("x", str(homes["a"])), ProfileSpec("y", str(homes["ambient"]))),
+        )
+        named = PoolConfig(
+            backend="claude",
+            profiles=(ProfileSpec("x", str(homes["a"])), ProfileSpec("default", str(homes["b"]))),
+        )
+        none = PoolConfig(backend="claude", profiles=(ProfileSpec("x", str(homes["a"])),))
+        for pool, want in ((explicit, "y"), (named, "default"), (none, None)):
+            router = AccountRouter(
+                {"claude": pool}, AccountPoolRepository(db), UsageStatsRepository(db)
+            )
+            assert router.ambient_profile("claude") == want
+
+    async def test_model_scoped_rejection_does_not_block(
+        self, tmp_path: Path, homes: dict[str, Path]
+    ) -> None:
+        router = _router(tmp_path, homes, retry_on_exhaustion=True)
+        binding = AccountBinding("claude", "a", {})
+        opus = RateLimitInfo("seven_day_opus", "rejected", 1.0, int(NOW) + 600_000)
+        turn = AccountTurn(binding, rejections=[opus], error="You've hit your Opus limit")
+        assert await router.finish_turn(turn) is None
+        assert await router._repo.get_blocks() == {}
+
+    async def test_context_limit_error_does_not_block(
+        self, tmp_path: Path, homes: dict[str, Path]
+    ) -> None:
+        router = _router(tmp_path, homes, retry_on_exhaustion=True)
+        turn = AccountTurn(AccountBinding("claude", "a", {}), error="Context limit reached")
+        assert await router.finish_turn(turn) is None
+
+    async def test_legacy_error_reset_time_is_used(
+        self, tmp_path: Path, homes: dict[str, Path]
+    ) -> None:
+        router = _router(tmp_path, homes)
+        resets = int(NOW) + 1234
+        turn = AccountTurn(
+            AccountBinding("claude", "a", {}), error=f"Claude AI usage limit reached|{resets}"
+        )
+        failover = await router.finish_turn(turn)
+        assert failover is not None and failover.blocked_until == resets
+
+    def test_ambient_home_honours_cli_env_overlay(self, tmp_path: Path) -> None:
+        overlay = tmp_path / "overlay.env"
+        overlay.write_text("# comment\nCLAUDE_CONFIG_DIR=/overlay/claude\n")
+        env = {"CCDB_CLI_ENV_FILE": str(overlay), "CLAUDE_CONFIG_DIR": "/env/claude"}
+        assert ambient_home("claude", env) == Path("/overlay/claude")
+        assert ambient_home("claude", {"CCDB_CLI_ENV_FILE": str(tmp_path / "missing")}) == (
+            Path.home() / ".claude"
+        )
+        # CodexRunner does not apply the overlay, so neither does its ambient home.
+        overlay.write_text("CODEX_HOME=/overlay/codex\n")
+        assert ambient_home("codex", {"CCDB_CLI_ENV_FILE": str(overlay)}) == Path.home() / ".codex"
+
+    def test_env_credentials_are_warned_about(
+        self, tmp_path: Path, homes: dict[str, Path], monkeypatch: pytest.MonkeyPatch, caplog
+    ) -> None:
+        import logging
+
+        from claude_code_core.account_pool_config import ENV_VAR
+        from claude_code_core.account_router import build_account_router
+
+        pools = tmp_path / "pools.toml"
+        pools.write_text(
+            f'[pools.claude]\n[[pools.claude.profiles]]\nname = "a"\nconfig_dir = "{homes["a"]}"\n'
+        )
+        monkeypatch.setenv(ENV_VAR, str(pools))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+        with caplog.at_level(logging.WARNING, logger="claude_code_core.account_router"):
+            assert build_account_router(str(tmp_path / "s.db")) is not None
+        assert "ANTHROPIC_API_KEY is set" in caplog.text

@@ -5,13 +5,17 @@ from __future__ import annotations
 import pytest
 
 from claude_code_core.account_pool import (
+    ACCOUNT_SCOPE,
     AccountBinding,
     AccountTurn,
+    LimitError,
     PoolConfig,
     PoolCursor,
     ProfileSpec,
     binding_for,
     is_limit_error,
+    parse_limit_error,
+    rejection_exhausts,
     select_profile,
     unavailable_until,
     utilization,
@@ -54,10 +58,23 @@ class TestUnavailableUntil:
     def test_window_already_reset_is_ignored(self) -> None:
         assert unavailable_until(_pool(), [_w("five_hour", 1.0, resets=EARLIER)], None, NOW) is None
 
-    def test_unlisted_window_is_ignored_unless_rejected(self) -> None:
+    def test_unlisted_window_utilization_is_ignored(self) -> None:
         pool = _pool(windows=("five_hour",))
         assert unavailable_until(pool, [_w("seven_day", 0.99)], None, NOW) is None
-        rejected = [_w("seven_day_opus", 0.5, status="rejected")]
+
+    def test_unlisted_model_window_rejection_does_not_exhaust(self) -> None:
+        """Running out of Opus must not take the login out for Sonnet turns."""
+        rejected = [_w("seven_day_opus", 1.0, resets=LATER + 600_000, status="rejected")]
+        assert unavailable_until(_pool(), rejected, None, NOW) is None
+
+    def test_listed_model_window_rejection_exhausts(self) -> None:
+        pool = _pool(windows=("five_hour", "seven_day", "seven_day_opus"))
+        rejected = [_w("seven_day_opus", 1.0, status="rejected")]
+        assert unavailable_until(pool, rejected, None, NOW) == LATER
+
+    def test_account_wide_rejection_exhausts_even_if_unlisted(self) -> None:
+        pool = _pool(windows=("five_hour",))
+        rejected = [_w("seven_day", 0.5, status="rejected")]
         assert unavailable_until(pool, rejected, None, NOW) == LATER
 
     def test_rejection_marker_counts_until_it_expires(self) -> None:
@@ -247,15 +264,32 @@ class TestBindingAndTurn:
             binding_for(_pool(), "zzz")
 
     @pytest.mark.parametrize(
-        "text",
+        ("text", "scope", "resets"),
         [
-            "Claude AI usage limit reached|1791194400",
-            "You've hit your limit · resets 3pm (Asia/Tokyo)",
-            "You've hit your usage limit. Upgrade to Pro",
-            "5-hour limit reached ∙ resets 7pm",
+            # Claude Code 2.1.289 wording ("You've hit your ${label}").
+            ("You've hit your limit · resets 3pm (Asia/Tokyo)", ACCOUNT_SCOPE, None),
+            ("You\u2019ve hit your limit", ACCOUNT_SCOPE, None),
+            ("You've hit your session limit · resets 7pm", "five_hour", None),
+            ("You've hit your weekly limit · resets Mon 9am", "seven_day", None),
+            ("You've hit your Opus limit · resets Mon 9am", "seven_day_opus", None),
+            ("You've hit your Sonnet limit", "seven_day_sonnet", None),
+            ("You've hit your fast limit · resets in 5m", "fast", None),
+            ("You've hit your monthly spend limit.", ACCOUNT_SCOPE, None),
+            ("You've hit your team's shared budget. /model to switch models.", ACCOUNT_SCOPE, None),
+            ("You're out of usage credits. Switch to another model", ACCOUNT_SCOPE, None),
+            ("Claude AI usage limit reached|1791194400", ACCOUNT_SCOPE, 1791194400),
+            # codex-cli 0.160.0 wording.
+            ("You've hit your usage limit. Upgrade to Pro", ACCOUNT_SCOPE, None),
+            (
+                "You've hit your usage limit for gpt-5.6-sol. Try again later",
+                "model:gpt-5.6-sol",
+                None,
+            ),
+            ("You hit your spend cap set in your workspace.", ACCOUNT_SCOPE, None),
         ],
     )
-    def test_limit_errors_are_recognised(self, text: str) -> None:
+    def test_limit_errors_and_their_scope(self, text: str, scope: str, resets: int | None) -> None:
+        assert parse_limit_error(text) == LimitError(scope, resets)
         assert is_limit_error(text)
 
     @pytest.mark.parametrize(
@@ -266,13 +300,37 @@ class TestBindingAndTurn:
             "API Error: 500 overloaded",
             "Timed out after 5s",
             "Rate limit reached for requests per min. Please try again in 2s.",
+            # Strings in the Claude Code 2.1.289 binary that are not quota limits.
+            "Context limit reached · /compact or /clear to continue",
+            "Budget limit reached ($5.00 of $5); stopping",
+            "Concurrent subagent limit reached. You can run 4 subagents at once.",
+            # codex-cli 0.160.0.
+            "Agent depth limit reached. Solve the task yourself.",
+            "Responses websocket connection limit reached (60 minutes).",
         ],
     )
     def test_other_errors_are_not(self, text: str | None) -> None:
-        assert not is_limit_error(text)
+        assert parse_limit_error(text) is None
 
-    def test_turn_rejected_by_event_or_text(self) -> None:
+    def test_turn_exhausts_by_scope(self) -> None:
+        pool = _pool()
         binding = AccountBinding(backend="claude", profile="a")
-        assert not AccountTurn(binding).rejected
-        assert AccountTurn(binding, rejections=[_w("five_hour", 1.0, status="rejected")]).rejected
-        assert AccountTurn(binding, error="You've hit your limit").rejected
+        assert not AccountTurn(binding).exhausts(pool)
+        assert AccountTurn(binding, rejections=[_w("five_hour", 1.0, status="rejected")]).exhausts(
+            pool
+        )
+        assert AccountTurn(binding, error="You've hit your limit").exhausts(pool)
+        assert AccountTurn(binding, error="You've hit your weekly limit").exhausts(pool)
+        opus = [_w("seven_day_opus", 1.0, status="rejected")]
+        assert not AccountTurn(binding, rejections=opus).exhausts(pool)
+        assert not AccountTurn(binding, error="You've hit your Opus limit").exhausts(pool)
+        assert not AccountTurn(binding, error="You've hit your fast limit").exhausts(pool)
+        assert not AccountTurn(binding, error="Context limit reached").exhausts(pool)
+
+    def test_rejection_exhausts_rule(self) -> None:
+        pool = _pool(windows=("five_hour",))
+        assert rejection_exhausts(pool, ACCOUNT_SCOPE)
+        assert rejection_exhausts(pool, "five_hour")
+        assert rejection_exhausts(pool, "seven_day")  # account-wide, even unlisted
+        assert not rejection_exhausts(pool, "seven_day_opus")
+        assert not rejection_exhausts(pool, "model:gpt-5")

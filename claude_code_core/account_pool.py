@@ -36,17 +36,97 @@ ASSIGN_MODES = ("session", "turn")
 #: Environment variable each backend's CLI reads its configuration directory from.
 HOME_ENV_VAR: Mapping[str, str] = {"claude": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME"}
 
-# Terminal error text that means "this login is out of quota", as opposed to a
-# transient 429 or a server fault. Claude Code also emits a structured
-# ``rate_limit_event`` with ``status == "rejected"``, which is preferred; the
-# text match exists for Codex, whose ``exec --json`` stream carries no
-# structured rate-limit event, and as a fallback for CLI versions that omit it.
-_LIMIT_TEXT = re.compile(
-    # "limit reached" alone also matches a transient "Rate limit reached for
-    # requests" 429, which must not block a login for the whole cooldown.
-    r"usage limit|hit your (?:usage )?limit|(?<!rate )limit reached|out of (?:extra )?usage",
+#: Windows that limit the whole login, not one model. A rejection in one of
+#: these exhausts the profile even when the operator did not list it in
+#: ``windows``. Model-scoped windows (``seven_day_opus``, ``seven_day_sonnet``)
+#: only count when listed: running out of Opus must not stop Sonnet turns.
+ACCOUNT_WIDE_WINDOWS = frozenset({"five_hour", "seven_day"})
+
+#: Scope returned by :func:`parse_limit_error` for a limit on the whole login.
+ACCOUNT_SCOPE = "account"
+
+# Terminal error text that means "this login is out of quota". Matched against
+# the wording the CLIs actually emit (Claude Code 2.1.289 / codex-cli 0.160.0
+# binaries), never a bare "limit reached": that also matches "Context limit
+# reached", "Budget limit reached", "Concurrent subagent limit reached" and a
+# transient "Rate limit reached for requests", none of which mean the login is
+# out of quota.
+#
+# Claude Code: "You've hit your {label}" where label is the window's name
+# ("session limit" = five_hour, "weekly limit" = seven_day, "Opus limit",
+# "Sonnet limit", "fast limit"), or plain "You've hit your limit"; "You're out
+# of usage credits"; legacy "Claude AI usage limit reached|<epoch>".
+# Codex: "You've hit your usage limit." (whole login) or
+# "You've hit your usage limit for <model>" (one model), "You hit your spend cap".
+_HIT_YOUR = re.compile(
+    r"you(?:'|\u2019)?ve hit your ([\w' -]{1,40}?)(?:[.·,!\u00b7]|$| for | \u2014)", re.IGNORECASE
+)
+_LABEL_SCOPE: Mapping[str, str] = {
+    "limit": ACCOUNT_SCOPE,
+    "usage limit": ACCOUNT_SCOPE,
+    "session limit": "five_hour",
+    "weekly limit": "seven_day",
+    "opus limit": "seven_day_opus",
+    "sonnet limit": "seven_day_sonnet",
+    "fast limit": "fast",
+}
+_ACCOUNT_TEXT = re.compile(
+    r"usage limit reached|out of usage credits|org is out of usage|you hit your spend cap",
     re.IGNORECASE,
 )
+_LEGACY_RESET = re.compile(r"usage limit reached\|(\d{9,11})", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class LimitError:
+    """A terminal error recognised as a quota limit, and what it limits."""
+
+    #: :data:`ACCOUNT_SCOPE`, a window name (``five_hour``, ``seven_day_opus``…),
+    #: or another model-scoped name (``fast``, ``model:<name>``).
+    scope: str
+    resets_at: int | None = None
+
+
+def parse_limit_error(error: str | None) -> LimitError | None:
+    """Recognise a quota-limit error and its scope; ``None`` for anything else."""
+    if not error:
+        return None
+    legacy = _LEGACY_RESET.search(error)
+    if legacy:
+        return LimitError(ACCOUNT_SCOPE, int(legacy.group(1)))
+    hit = _HIT_YOUR.search(error)
+    if hit:
+        label = hit.group(1).strip().lower()
+        rest = error[hit.end(1) :].lstrip()
+        if label == "usage limit" and rest.lower().startswith("for "):
+            model = rest[4:].split()[0].strip(".,") if rest[4:].split() else "?"
+            return LimitError(f"model:{model}")
+        scope = _LABEL_SCOPE.get(label)
+        if scope is not None:
+            return LimitError(scope)
+        # Spend caps and shared budgets ("monthly spend limit", "team's shared
+        # budget") stop the whole login.
+        if "spend" in label or "budget" in label or "monthly" in label:
+            return LimitError(ACCOUNT_SCOPE)
+        return None
+    if _ACCOUNT_TEXT.search(error):
+        return LimitError(ACCOUNT_SCOPE)
+    return None
+
+
+def is_limit_error(error: str | None) -> bool:
+    """Return True when a terminal error reads as a quota/usage-limit rejection."""
+    return parse_limit_error(error) is not None
+
+
+def rejection_exhausts(pool: PoolConfig, scope: str) -> bool:
+    """Whether a rejection with *scope* takes the whole profile out of the pool.
+
+    True for the whole login, for a window listed in ``pool.windows``, and for
+    an account-wide window (five-hour / seven-day) even if unlisted. False for
+    model-scoped limits the operator did not list.
+    """
+    return scope == ACCOUNT_SCOPE or scope in pool.windows or scope in ACCOUNT_WIDE_WINDOWS
 
 
 @dataclass(frozen=True)
@@ -131,14 +211,17 @@ class AccountTurn:
     rejections: list[RateLimitInfo] = field(default_factory=list)
     error: str | None = None
 
-    @property
-    def rejected(self) -> bool:
-        return bool(self.rejections) or is_limit_error(self.error)
+    def exhausting_rejections(self, pool: PoolConfig) -> list[RateLimitInfo]:
+        """Structured rejections that take the whole profile out (see rejection_exhausts)."""
+        return [r for r in self.rejections if rejection_exhausts(pool, r.rate_limit_type)]
 
+    def exhausting_error(self, pool: PoolConfig) -> LimitError | None:
+        """The terminal error, if it is a limit that takes the whole profile out."""
+        limit = parse_limit_error(self.error)
+        return limit if limit is not None and rejection_exhausts(pool, limit.scope) else None
 
-def is_limit_error(error: str | None) -> bool:
-    """Return True when a terminal error reads as a quota/usage-limit rejection."""
-    return bool(error) and _LIMIT_TEXT.search(error or "") is not None
+    def exhausts(self, pool: PoolConfig) -> bool:
+        return bool(self.exhausting_rejections(pool)) or self.exhausting_error(pool) is not None
 
 
 def binding_for(pool: PoolConfig, name: str) -> AccountBinding:
@@ -164,8 +247,10 @@ def unavailable_until(
 
     - a window listed in ``pool.windows`` is at or above ``switch_at`` and its
       ``resets_at`` is still in the future;
-    - any window (listed or not) reported ``status == "rejected"`` and has not
-      reset yet — a rejection always counts;
+    - a window reported ``status == "rejected"`` and has not reset yet, when
+      that window is listed in ``pool.windows`` or limits the whole login
+      (:data:`ACCOUNT_WIDE_WINDOWS`) — a rejected Opus-only window does not
+      stop the profile unless the operator listed it;
     - a rejection marker (``blocked_until``) is still in the future.
 
     A window whose reset time has passed no longer says anything about the
@@ -176,7 +261,8 @@ def unavailable_until(
         if info.resets_at <= now:
             continue
         over = info.rate_limit_type in pool.windows and info.utilization >= pool.switch_at
-        if over or info.status == "rejected":
+        rejected = info.status == "rejected" and rejection_exhausts(pool, info.rate_limit_type)
+        if over or rejected:
             until.append(info.resets_at)
     if blocked_until is not None and blocked_until > now:
         until.append(blocked_until)

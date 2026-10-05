@@ -1,4 +1,4 @@
-"""Account-pool persistence and the usage_stats per-profile migration."""
+"""Account-pool persistence. usage_stats must stay usable by the previous release."""
 
 from __future__ import annotations
 
@@ -6,101 +6,100 @@ import aiosqlite
 import pytest
 
 from claude_code_core.account_pool import DEFAULT_PROFILE, PoolCursor
-from claude_code_core.account_pool_repo import AccountPoolRepository, ensure_account_schema
+from claude_code_core.account_pool_repo import AccountPoolRepository
 from claude_code_core.session_repo import UsageStatsRepository
 from claude_code_core.types import RateLimitInfo
 
-OLD_USAGE_STATS = (
-    "CREATE TABLE usage_stats ("
-    "rate_limit_type TEXT PRIMARY KEY, "
-    "status TEXT NOT NULL, "
-    "utilization REAL NOT NULL, "
-    "resets_at INTEGER NOT NULL, "
-    "is_using_overage INTEGER NOT NULL DEFAULT 0, "
-    "recorded_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')))"
-)
-
-
-async def _old_db(path: str) -> None:
-    async with aiosqlite.connect(path) as db:
-        await db.execute(OLD_USAGE_STATS)
-        await db.execute(
-            "INSERT INTO usage_stats (rate_limit_type, status, utilization, resets_at, "
-            "is_using_overage, recorded_at) VALUES "
-            "('five_hour', 'allowed', 0.4, 111, 0, '2026-01-01 00:00:00'), "
-            "('seven_day', 'allowed_warning', 0.8, 222, 1, '2026-01-02 00:00:00')"
-        )
-        await db.commit()
+# Verbatim from the release before account pools (claude_code_core/session_repo.py).
+# It runs on every rate_limit_event, so if a revert or `make dev-off` puts the old
+# code back on a database this release touched, it must still succeed.
+OLD_UPSERT = """INSERT INTO usage_stats
+                     (rate_limit_type, status, utilization, resets_at, is_using_overage)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(rate_limit_type) DO UPDATE SET
+                     status = excluded.status,
+                     utilization = excluded.utilization,
+                     resets_at = excluded.resets_at,
+                     is_using_overage = excluded.is_using_overage,
+                     recorded_at = datetime('now', 'localtime')"""
+OLD_SELECT = "SELECT * FROM usage_stats ORDER BY rate_limit_type"
 
 
 def _info(kind: str, util: float, resets: int = 999) -> RateLimitInfo:
     return RateLimitInfo(rate_limit_type=kind, status="allowed", utilization=util, resets_at=resets)
 
 
-class TestUsageStatsMigration:
-    async def test_existing_rows_move_to_the_default_profile(self, tmp_path) -> None:
-        path = str(tmp_path / "s.db")
-        await _old_db(path)
-        async with aiosqlite.connect(path) as db:
-            await ensure_account_schema(db)
-            await db.commit()
-            cursor = await db.execute(
-                "SELECT profile, rate_limit_type, status, utilization, resets_at, "
-                "is_using_overage, recorded_at FROM usage_stats ORDER BY rate_limit_type"
-            )
-            rows = await cursor.fetchall()
-        assert rows == [
-            (DEFAULT_PROFILE, "five_hour", "allowed", 0.4, 111, 0, "2026-01-01 00:00:00"),
-            (DEFAULT_PROFILE, "seven_day", "allowed_warning", 0.8, 222, 1, "2026-01-02 00:00:00"),
-        ]
+async def _init_both(tmp_path):
+    from claude_code_core.models import init_db as core_init
+    from claude_discord.database.models import init_db as discord_init
 
-    async def test_migration_is_idempotent(self, tmp_path) -> None:
-        path = str(tmp_path / "s.db")
-        await _old_db(path)
-        for _ in range(3):
+    paths = []
+    for name, init in (("core.db", core_init), ("discord.db", discord_init)):
+        path = str(tmp_path / name)
+        await init(path)
+        paths.append(path)
+    return paths
+
+
+class TestRollbackSafety:
+    async def test_old_upsert_still_works_after_this_release_used_the_db(self, tmp_path) -> None:
+        for path in await _init_both(tmp_path):
+            repo = UsageStatsRepository(path)
+            await repo.upsert(_info("five_hour", 0.2))
+            await repo.upsert(_info("five_hour", 0.7), profile="work")
             async with aiosqlite.connect(path) as db:
-                await ensure_account_schema(db)
+                for util in (0.3, 0.4):  # insert, then the ON CONFLICT path
+                    await db.execute(OLD_UPSERT, ("five_hour", "allowed", util, 5, 0))
+                await db.execute(OLD_UPSERT, ("seven_day", "allowed", 0.1, 6, 0))
                 await db.commit()
-        repo = UsageStatsRepository(path)
-        assert len(await repo.get_latest()) == 2
+                cursor = await db.execute(OLD_SELECT)
+                rows = await cursor.fetchall()
+            assert [(r[0], r[2]) for r in rows] == [("five_hour", 0.4), ("seven_day", 0.1)]
+            # And this release reads what the old code wrote as the default profile.
+            latest = await repo.get_latest()
+            assert {i.rate_limit_type: i.utilization for i in latest} == {
+                "five_hour": 0.4,
+                "seven_day": 0.1,
+            }
+            assert [i.utilization for i in await repo.get_latest("work")] == [0.7]
 
-    async def test_same_type_can_exist_per_profile(self, tmp_path) -> None:
-        path = str(tmp_path / "s.db")
-        await _old_db(path)
-        repo = UsageStatsRepository(path)  # migrates lazily on first use
-        await repo.upsert(_info("five_hour", 0.1), profile="work")
-        await repo.upsert(_info("five_hour", 0.2), profile="work")
-        grouped = await repo.get_by_profile()
-        assert {k: [i.utilization for i in v] for k, v in grouped.items()} == {
-            DEFAULT_PROFILE: [0.4, 0.8],
-            "work": [0.2],
-        }
-        assert [i.utilization for i in await repo.get_latest("work")] == [0.2]
-
-    async def test_both_init_db_produce_the_new_shape(self, tmp_path) -> None:
-        from claude_code_core.models import init_db as core_init
-        from claude_discord.database.models import init_db as discord_init
-
-        for name, init in (("core.db", core_init), ("discord.db", discord_init)):
-            path = str(tmp_path / name)
-            await _old_db(path)
-            await init(path)
+    async def test_usage_stats_schema_is_unchanged(self, tmp_path) -> None:
+        for path in await _init_both(tmp_path):
             async with aiosqlite.connect(path) as db:
                 cursor = await db.execute("PRAGMA table_info(usage_stats)")
-                columns = [row[1] for row in await cursor.fetchall()]
-                cursor = await db.execute("SELECT count(*) FROM usage_stats")
-                (count,) = await cursor.fetchone()  # type: ignore[misc]
-            assert columns[0] == "profile", name
-            assert count == 2, name
+                columns = {row[1]: row[5] for row in await cursor.fetchall()}  # name -> pk
+            assert "profile" not in columns
+            assert columns["rate_limit_type"] == 1
 
-    async def test_fresh_database(self, tmp_path) -> None:
-        from claude_discord.database.models import init_db
+    async def test_pre_existing_rows_belong_to_the_default_profile(self, tmp_path) -> None:
+        path = str(tmp_path / "old.db")
+        async with aiosqlite.connect(path) as db:
+            await db.execute(
+                "CREATE TABLE usage_stats (rate_limit_type TEXT PRIMARY KEY, status TEXT NOT NULL, "
+                "utilization REAL NOT NULL, resets_at INTEGER NOT NULL, "
+                "is_using_overage INTEGER NOT NULL DEFAULT 0, "
+                "recorded_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')))"
+            )
+            await db.execute(OLD_UPSERT, ("five_hour", "allowed", 0.4, 111, 0))
+            await db.commit()
+        repo = UsageStatsRepository(path)  # creates the new tables lazily
+        await repo.upsert(_info("five_hour", 0.1), profile="work")
+        grouped = await repo.get_by_profile()
+        assert {k: [i.utilization for i in v] for k, v in grouped.items()} == {
+            DEFAULT_PROFILE: [0.4],
+            "work": [0.1],
+        }
 
-        path = str(tmp_path / "fresh.db")
-        await init_db(path)
-        repo = UsageStatsRepository(path)
-        await repo.upsert(_info("five_hour", 0.5))
-        assert [i.rate_limit_type for i in await repo.get_latest()] == ["five_hour"]
+    async def test_same_type_upserts_per_named_profile(self, tmp_path) -> None:
+        repo = UsageStatsRepository(str(tmp_path / "s.db"))
+        await repo.upsert(_info("five_hour", 0.1), profile="work")
+        await repo.upsert(_info("five_hour", 0.2), profile="work")
+        await repo.upsert(_info("five_hour", 0.3), profile="home")
+        grouped = await repo.get_by_profile()
+        assert {k: [i.utilization for i in v] for k, v in grouped.items()} == {
+            "home": [0.3],
+            "work": [0.2],
+        }
 
 
 @pytest.fixture()

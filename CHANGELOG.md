@@ -16,10 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `round_robin`, `most_headroom`). Each session or turn runs as the chosen profile; a thread that
   moves keeps its session by copying the transcript into the new profile; a quota rejection marks
   the profile exhausted and names (or, with `retry_on_exhaustion`, retries on) the next one.
-  `/usage` lists every profile, and `usage_stats` is now keyed by `(profile, rate_limit_type)`
-  with existing rows migrated to `default`. Discord chat turns now record their rate-limit
-  windows, so `/usage` has data without Teams. The relay never handles tokens; complying with
-  each vendor's terms is the operator's responsibility. See `docs/account-pools.md`.
+  `/usage` lists every profile. Storage is additive (`usage_stats` is untouched and keeps the
+  relay's own login; named profiles go to `account_usage_stats`), so reverting is safe.
+  Model-scoped limits (Opus-only, per-model Codex) do not exhaust a profile unless listed in
+  `windows`. Credentials in the environment (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`,
+  `OPENAI_API_KEY`, …) override profile logins; a startup warning says so. Discord chat turns
+  now record their rate-limit windows, so `/usage` has data without Teams. The relay never
+  handles tokens; complying with each vendor's terms is the operator's responsibility. See `docs/account-pools.md`.
 
 - **Bundled manager skill** (#807) — `skills/relay-thread-manager/SKILL.md` teaches an agent to
   run worker threads on top of `/api/spawn`, `/api/sessions` lineage and the relay: self-contained

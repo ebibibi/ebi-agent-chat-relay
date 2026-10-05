@@ -64,7 +64,16 @@ with the CLI that owns the directory, and the relay cannot leak what it never re
   fully unit-tested. Exhausted means a listed window at or above `switch_at` that has not reset,
   any rejected window that has not reset, or an active rejection marker. Unknown usage means
   available.
-- `usage_stats` is keyed by `(profile, rate_limit_type)`; existing rows migrate to `default`.
+- Storage is additive. `usage_stats` keeps its original shape and the relay's own login
+  (`default`); named profiles go to a new `account_usage_stats` table. A rename/copy migration
+  of `usage_stats` was rejected: the previous release upserts `ON CONFLICT(rate_limit_type)` on
+  every rate-limit event, so a revert or a dev worktree switch would break every turn.
+- Only windows listed in `windows`, or windows that limit the whole login (`five_hour`,
+  `seven_day`), exhaust a profile; a model-scoped rejection (Opus-only, a per-model Codex limit)
+  does not take the login away from other models. Error text is matched against the wording the
+  CLIs emit, never a bare "limit reached" (which also means a full context window).
+- A thread whose session predates the pool stays on the profile that is the relay's own login
+  while it has headroom.
 - Thread pins, the round-robin cursor, the sticky profile and rejection markers are persisted.
 - On a profile change the transcript is copied (overwriting a stale copy), else a text handoff.
 - A quota rejection marks the profile until its reset (or a cooldown) and either tells the user
