@@ -398,11 +398,16 @@ class TestBwrapArgv:
         assert "/var/run/docker.sock" not in argv
 
     def test_default_hide_paths(self) -> None:
-        assert default_hide_paths(ENV, "/r/.env") == (
+        env = {**ENV, "XDG_RUNTIME_DIR": "/run/user/1000", "SSH_AUTH_SOCK": "/tmp/a.sock"}
+        assert default_hide_paths(env, "/r/.env") == (
             "/r/.env",
             f"{HOME}/.ssh",
+            f"{HOME}/.gnupg",
             "/var/run/docker.sock",
             "/run/docker.sock",
+            "/run/dbus/system_bus_socket",
+            "/run/user/1000",
+            "/tmp/a.sock",
         )
 
     def test_find_relay_dotenv(self, tmp_path) -> None:
@@ -527,17 +532,16 @@ class TestSsh:
         ],
     )
     def test_injection_in_args_cwd_and_env_stays_literal(self, evil: str) -> None:
-        settings = replace(self.SETTINGS, forward_env=("EVIL",))
         lch = Launch(
             argv=("claude", "--append-system-prompt", evil),
-            env={**ENV, "EVIL": evil, "DISCORD_THREAD_ID": "42"},
+            env={**ENV, "DISCORD_THREAD_ID": evil},
             cwd=f"/work/{evil.replace('/', '_')}",
         )
-        cmd = remote_command(settings, lch)
+        cmd = remote_command(self.SETTINGS, lch)
         words = shlex.split(cmd)
         # Parsed by a POSIX shell, every value is exactly one literal word.
         assert words[0] == "cd" and words[1] == lch.cwd
-        assert f"EVIL={evil}" in words
+        assert f"DISCORD_THREAD_ID={evil}" in words
         assert words[-1] == evil
         assert words[-3:-1] == ["claude", "--append-system-prompt"]
 
@@ -625,3 +629,232 @@ class TestBwrapSshAgent:
         env = BwrapEnvironment(BwrapSettings(hide_defaults=False))
         out = env.transform("claude", launch(SSH_AUTH_SOCK="/run/a.sock"))
         assert out.env["SSH_AUTH_SOCK"] == "/run/a.sock"
+
+
+def _argv(
+    lch: Launch,
+    existing: set[str],
+    dirs: set[str] | None = None,
+    settings: BwrapSettings | None = None,
+    backend: str = "claude",
+    files: dict[str, str] | None = None,
+) -> list[str]:
+    dirs = dirs if dirs is not None else set()
+    contents = files or {}
+    return list(
+        build_bwrap_argv(
+            settings or BwrapSettings(),
+            backend,
+            lch,
+            relay_dotenv=None,
+            exists=lambda p: p in existing or p in dirs or p in contents,
+            isdir=lambda p: p in dirs,
+            realpath=lambda p: p,
+            read_text=lambda p: contents.get(p),
+        )
+    )
+
+
+def _pairs(argv: list[str], flag: str) -> list[str]:
+    return [argv[i + 1] for i, a in enumerate(argv) if a == flag]
+
+
+class TestBwrapHardening:
+    def test_namespaces(self) -> None:
+        argv = _argv(launch(), {"/work/repo"})
+        for flag in ("--unshare-pid", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try"):
+            assert flag in argv
+        assert "--new-session" in argv
+        assert "--unshare-net" not in argv
+
+    def test_runtime_dir_and_system_bus_hidden(self) -> None:
+        lch = launch(XDG_RUNTIME_DIR="/run/user/1000")
+        argv = _argv(
+            lch,
+            {"/work/repo", "/run/dbus/system_bus_socket"},
+            dirs={"/run/user/1000"},
+        )
+        joined = " ".join(argv)
+        assert "--tmpfs /run/user/1000" in joined
+        assert "--ro-bind /dev/null /run/dbus/system_bus_socket" in joined
+
+    def test_session_variables_dropped(self) -> None:
+        lch = launch(
+            XDG_RUNTIME_DIR="/run/user/1000",
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/1000/bus",
+            SSH_AUTH_SOCK="/run/user/1000/ssh",
+        )
+        out = BwrapEnvironment(BwrapSettings()).transform("claude", lch)
+        for name in ("XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "SSH_AUTH_SOCK"):
+            assert name not in out.env
+        assert out.env["ANTHROPIC_API_KEY"] == "sk-secret"
+
+    def test_hide_never_covers_a_writable_path(self) -> None:
+        settings = BwrapSettings(hide_paths=("/work",))
+        argv = _argv(launch(), {"/work/repo"}, dirs={"/work"}, settings=settings)
+        assert "/work" not in _pairs(argv, "--tmpfs")
+
+    def test_claude_config_is_read_only_inside_writable_state(self) -> None:
+        state = f"{HOME}/.claude"
+        existing = {
+            "/work/repo",
+            f"{state}/settings.json",
+            f"{HOME}/.claude.json",
+            f"{state}/plugins",
+        }
+        argv = _argv(launch(), existing, dirs={state, f"{state}/plugins"})
+        ro = _pairs(argv, "--ro-bind")
+        assert f"{state}/settings.json" in ro
+        assert f"{HOME}/.claude.json" in ro
+        assert f"{state}/plugins" in ro
+        # Read-only binds come after the writable state bind.
+        assert argv.index(f"{state}/settings.json") > argv.index(state)
+
+    def test_missing_protected_entries_are_created_read_only(self) -> None:
+        state = f"{HOME}/.claude"
+        argv = _argv(launch(), {"/work/repo"}, dirs={state})
+        joined = " ".join(argv)
+        # A missing settings.json becomes an empty read-only file ...
+        assert f"--ro-bind /dev/null {state}/settings.json" in joined
+        # ... a missing hooks directory an empty read-only tmpfs ...
+        assert f"--tmpfs {state}/hooks --remount-ro {state}/hooks" in joined
+        # ... and entries not safe to create empty are left alone.
+        assert f"{state}/settings.local.json" not in joined
+        assert f"{state}/CLAUDE.md" not in joined
+
+    def test_protection_can_be_disabled(self) -> None:
+        state = f"{HOME}/.claude"
+        argv = _argv(
+            launch(),
+            {"/work/repo", f"{state}/settings.json"},
+            dirs={state},
+            settings=BwrapSettings(protect_config=False),
+        )
+        assert f"{state}/settings.json" not in argv
+
+    def test_claude_config_dir_protected(self) -> None:
+        lch = launch(CLAUDE_CONFIG_DIR="/pool/a")
+        argv = _argv(lch, {"/work/repo", "/pool/a/.claude.json"}, dirs={"/pool/a"})
+        assert "/pool/a/.claude.json" in _pairs(argv, "--ro-bind")
+
+    def test_codex_config_read_only(self) -> None:
+        lch = launch(CODEX_ARGV, CODEX_HOME="/pool/codex")
+        argv = _argv(
+            lch,
+            {"/work/repo", "/pool/codex/config.toml", "/pool/codex/auth.json"},
+            dirs={"/pool/codex", "/pool/codex/rules"},
+            backend="codex",
+        )
+        ro = _pairs(argv, "--ro-bind")
+        assert "/pool/codex/config.toml" in ro
+        assert "/pool/codex/rules" in ro
+        # Credentials stay writable for token refresh.
+        assert "/pool/codex/auth.json" not in ro
+
+    def test_plain_repo_git_hooks_and_config_read_only(self) -> None:
+        argv = _argv(
+            launch(),
+            {"/work/repo", "/work/repo/.git/config"},
+            dirs={"/work/repo/.git/hooks"},
+        )
+        ro = _pairs(argv, "--ro-bind")
+        assert "/work/repo/.git/hooks" in ro
+        assert "/work/repo/.git/config" in ro
+
+    def test_worktree_common_git_dir_writable_hooks_read_only(self) -> None:
+        files = {
+            "/work/repo/.git": "gitdir: /src/main/.git/worktrees/repo\n",
+            "/src/main/.git/worktrees/repo/commondir": "../..\n",
+        }
+        argv = _argv(
+            launch(),
+            {"/work/repo", "/src/main/.git/config"},
+            dirs={"/src/main/.git", "/src/main/.git/hooks"},
+            files=files,
+        )
+        assert "/src/main/.git" in _pairs(argv, "--bind")
+        ro = _pairs(argv, "--ro-bind")
+        assert "/src/main/.git/hooks" in ro
+        assert "/src/main/.git/config" in ro
+
+    def test_operator_ro_paths(self) -> None:
+        settings = BwrapSettings(rw_paths=("/data",), ro_paths=("/data/bin",))
+        argv = _argv(launch(), {"/work/repo", "/data", "/data/bin"}, settings=settings)
+        assert "/data/bin" in _pairs(argv, "--ro-bind")
+
+    def test_config_parses_new_settings(self) -> None:
+        config = ExecutionConfig.from_env(
+            {"CCDB_BWRAP_RO_PATHS": "/a:/b", "CCDB_BWRAP_PROTECT_CONFIG": "0"}
+        )
+        assert config.bwrap.ro_paths == ("/a", "/b")
+        assert config.bwrap.protect_config is False
+
+
+class TestSshSecretsStayOffTheCommandLine:
+    def test_operator_env_goes_by_sendenv_name_only(self) -> None:
+        settings = replace(TestSsh.SETTINGS, forward_env=("ANTHROPIC_API_KEY", "ABSENT"))
+        argv = build_ssh_argv(settings, launch(), "/usr/bin/ssh")
+        joined = " ".join(argv)
+        assert "sk-secret" not in joined
+        assert "SendEnv=ANTHROPIC_API_KEY" in argv
+        assert "SendEnv=ABSENT" not in argv  # nothing to send
+
+    def test_no_env_value_on_argv_except_runner_defaults(self) -> None:
+        env = {**ENV, "OPENAI_API_KEY": "sk-openai", "CCDB_API_SECRET": "api-secret"}
+        settings = replace(TestSsh.SETTINGS, forward_env=("OPENAI_API_KEY", "CCDB_API_SECRET"))
+        argv = build_ssh_argv(settings, Launch(argv=CLAUDE_ARGV, env=env, cwd="/w"), "ssh")
+        for secret in ("sk-secret", "sk-openai", "api-secret"):
+            assert all(secret not in a for a in argv)
+
+
+class TestContainerSecretsStayOffTheCommandLine:
+    def test_no_env_value_in_argv(self) -> None:
+        env = {**ENV, "OPENAI_API_KEY": "sk-openai", "CCDB_API_SECRET": "api-secret"}
+        argv = build_container_argv(
+            ContainerSettings(image="img"),
+            "claude",
+            Launch(argv=CLAUDE_ARGV, env=env, cwd="/w"),
+            uid=1,
+            gid=1,
+            exists=lambda p: True,
+        )
+        for secret in ("sk-secret", "sk-openai", "api-secret"):
+            assert all(secret not in a for a in argv)
+        # Names only: never NAME=VALUE.
+        names = [argv[i + 1] for i, a in enumerate(argv) if a == "--env"]
+        assert names and all("=" not in n for n in names)
+
+
+class TestProtectedPlaceholders:
+    def test_preflight_creates_missing_entries_with_normal_permissions(self, tmp_path) -> None:
+        from claude_code_core.execution.bwrap import create_protected_placeholders
+
+        state = tmp_path / ".claude"
+        state.mkdir()
+        (state / "plugins").mkdir()
+        existing = state / "settings.local.json"
+        existing.write_text("keep")
+        create_protected_placeholders(
+            (
+                (str(state / "settings.json"), True),
+                (str(state / "hooks"), True),
+                (str(state / "plugins"), True),
+                (str(existing), True),
+                (str(state / "CLAUDE.md"), False),
+                (str(tmp_path / "missing-parent" / "x.json"), True),
+            )
+        )
+        settings = state / "settings.json"
+        assert settings.read_text() == ""
+        assert settings.stat().st_mode & 0o777 == 0o600
+        assert (state / "hooks").is_dir()
+        assert existing.read_text() == "keep"
+        assert not (state / "CLAUDE.md").exists()
+        assert not (tmp_path / "missing-parent").exists()
+
+    async def test_preflight_wires_placeholder_creation(self, tmp_path) -> None:
+        env = BwrapEnvironment(BwrapSettings(binary="/bin/true"))
+        lch = launch(cwd=str(tmp_path), HOME=str(tmp_path))
+        assert await env.preflight("claude", lch) is None
+        assert (tmp_path / ".claude" / "settings.json").is_file()
+        assert (tmp_path / ".claude" / "hooks").is_dir()

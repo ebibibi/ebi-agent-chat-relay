@@ -16,8 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--sandbox workspace-write`; pi refuses), `bwrap` (read-only host, writable working directory and
   agent state, private `/tmp`, no `sudo`, the relay's `.env` / `~/.ssh` / Docker socket hidden),
   `container` (`docker run --rm -i` with your image; sample `deploy/agent-container/Dockerfile`) or
-  `ssh` (a remote host). `CCDB_EXECUTION_MODE` sets the default and `CCDB_EXECUTION_ALLOWED_MODES`
-  the allowlist; `/sandbox` picks a mode per thread from that list only. Preflight failures and
+  `ssh` (a remote host). Under `bwrap` the agent's own hook/config files (`settings.json`,
+  `~/.claude.json`, `~/.codex/config.toml`, plugins, skills, `.git/hooks`) are read-only so a
+  sandboxed run cannot arm a later unsandboxed one, and the user runtime directory (systemd user
+  bus), the system D-Bus socket and agent sockets are hidden. `CCDB_EXECUTION_MODE` sets the default and `CCDB_EXECUTION_ALLOWED_MODES`
+  the allowlist; `/sandbox` (limited to `allowed_user_ids`, like `/skill`) picks a mode per thread
+  from that list only. Preflight failures and
   misconfiguration fail the turn with one sentence and start no process; the completion notice
   shows the environment that served the turn. See `docs/execution-environments.md` and ADR-0008.
 

@@ -487,7 +487,7 @@ By default every CLI backend runs on the host as the relay's own user (`host`, u
 |---|---|
 | `host` | Today's behaviour. Default |
 | `native` | The agent's own sandbox: Claude Code's `sandbox` settings via `--settings`, Codex `--sandbox workspace-write`. pi refuses (it has none) |
-| `bwrap` | bubblewrap: read-only host, writable working directory and agent state, private `/tmp`, no `sudo`, the relay's `.env`, `~/.ssh` and the Docker socket hidden |
+| `bwrap` | bubblewrap: read-only host, writable working directory and agent state (its hook/config files stay read-only), private `/tmp`, no `sudo`, the relay's `.env`, `~/.ssh`, the user runtime dir / D-Bus and the Docker socket hidden. Network stays shared |
 | `container` | `docker run --rm -i` with your image ([sample Dockerfile](deploy/agent-container/Dockerfile)) |
 | `ssh` | Runs the CLI on another machine, streaming stdin/stdout |
 

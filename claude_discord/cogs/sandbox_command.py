@@ -48,9 +48,22 @@ def describe_modes(settings: ExecutionSettings) -> str:
 class SandboxCommandCog(commands.Cog):
     """The ``/sandbox`` slash command."""
 
-    def __init__(self, bot: commands.Bot, *, settings_repo: SettingsRepository) -> None:
+    def __init__(
+        self,
+        bot: commands.Bot,
+        *,
+        settings_repo: SettingsRepository,
+        allowed_user_ids: set[int] | None = None,
+    ) -> None:
         self.bot = bot
         self._settings = ExecutionSettings(settings_repo)
+        # Same rule as /skill: ``None`` means every user who can reach the bot.
+        self._allowed_user_ids = allowed_user_ids
+
+    def _is_authorized(self, user_id: int | None) -> bool:
+        if self._allowed_user_ids is None:
+            return True
+        return user_id is not None and user_id in self._allowed_user_ids
 
     @app_commands.command(
         name="sandbox",
@@ -70,11 +83,15 @@ class SandboxCommandCog(commands.Cog):
     ) -> None:
         channel = interaction.channel
         thread_id = channel.id if isinstance(channel, discord.Thread) else None
-        message, ephemeral = await self.handle(thread_id, mode)
+        message, ephemeral = await self.handle(thread_id, mode, user_id=interaction.user.id)
         await interaction.response.send_message(message, ephemeral=ephemeral)
 
-    async def handle(self, thread_id: int | None, mode: str | None) -> tuple[str, bool]:
+    async def handle(
+        self, thread_id: int | None, mode: str | None, *, user_id: int | None = None
+    ) -> tuple[str, bool]:
         """Return (reply, ephemeral). Separated from Discord for testing."""
+        if not self._is_authorized(user_id):
+            return "You don't have permission to use this command.", True
         config = self._settings.config()
         if config.error:
             return f"⚠️ {config.error}", True

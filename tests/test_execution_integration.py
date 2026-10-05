@@ -264,3 +264,48 @@ class TestSkillCommandHonoursSandbox:
         with patch("claude_discord.cogs.skill_command.run_claude_with_config", fake_run):
             await cog.run_skill.callback(cog, interaction, name="demo", args=None)
         assert captured["runner"].execution_mode == "bwrap"  # type: ignore[attr-defined]
+
+
+class TestSandboxAuthorization:
+    async def _cog(self, allowed: set[int] | None) -> SandboxCommandCog:
+        return SandboxCommandCog(MagicMock(), settings_repo=await _repo(), allowed_user_ids=allowed)
+
+    async def test_unauthorized_user_cannot_change_mode(self, allow_bwrap: None) -> None:
+        cog = await self._cog({1})
+        reply, ephemeral = await cog.handle(10, "bwrap", user_id=2)
+        assert "permission" in reply and ephemeral
+        assert await cog._settings.stored_mode(10) is None
+
+    async def test_unauthorized_user_cannot_reset_or_show(self, allow_bwrap: None) -> None:
+        cog = await self._cog({1})
+        await cog.handle(10, "bwrap", user_id=1)
+        reply, _ = await cog.handle(10, "default", user_id=2)
+        assert "permission" in reply
+        assert await cog._settings.stored_mode(10) == "bwrap"
+        reply, _ = await cog.handle(10, None, user_id=2)
+        assert "permission" in reply
+
+    async def test_missing_user_is_refused_when_restricted(self, allow_bwrap: None) -> None:
+        cog = await self._cog({1})
+        reply, _ = await cog.handle(10, "bwrap")
+        assert "permission" in reply
+
+    async def test_authorized_user_allowed(self, allow_bwrap: None) -> None:
+        cog = await self._cog({1})
+        reply, _ = await cog.handle(10, "bwrap", user_id=1)
+        assert "set to `bwrap`" in reply
+
+    async def test_slash_command_passes_the_invoking_user(self, allow_bwrap: None) -> None:
+        import discord
+
+        cog = await self._cog({1})
+        thread = MagicMock(spec=discord.Thread)
+        thread.id = 10
+        interaction = MagicMock()
+        interaction.channel = thread
+        interaction.user.id = 2
+        interaction.response.send_message = AsyncMock()
+        await cog.sandbox_command.callback(cog, interaction, mode="bwrap")
+        sent = interaction.response.send_message.await_args
+        assert "permission" in sent.args[0]
+        assert await cog._settings.stored_mode(10) is None

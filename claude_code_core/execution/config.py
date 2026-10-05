@@ -38,6 +38,8 @@ BWRAP_RW_PATHS_ENV = "CCDB_BWRAP_RW_PATHS"
 BWRAP_HIDE_PATHS_ENV = "CCDB_BWRAP_HIDE_PATHS"
 BWRAP_HIDE_DEFAULTS_ENV = "CCDB_BWRAP_HIDE_DEFAULTS"
 BWRAP_UNSHARE_NET_ENV = "CCDB_BWRAP_UNSHARE_NET"
+BWRAP_RO_PATHS_ENV = "CCDB_BWRAP_RO_PATHS"
+BWRAP_PROTECT_CONFIG_ENV = "CCDB_BWRAP_PROTECT_CONFIG"
 CONTAINER_RUNTIME_ENV = "CCDB_CONTAINER_RUNTIME"
 CONTAINER_IMAGE_ENV = "CCDB_CONTAINER_IMAGE"
 CONTAINER_ARGS_ENV = "CCDB_CONTAINER_ARGS"
@@ -118,6 +120,8 @@ class BwrapSettings:
     hide_paths: tuple[str, ...] = ()
     hide_defaults: bool = True
     unshare_net: bool = False
+    ro_paths: tuple[str, ...] = ()
+    protect_config: bool = True
 
 
 @dataclass(frozen=True)
@@ -233,6 +237,8 @@ class ExecutionConfig:
             hide_paths=_paths(source, BWRAP_HIDE_PATHS_ENV, errors),
             hide_defaults=_flag(source, BWRAP_HIDE_DEFAULTS_ENV, True, errors),
             unshare_net=_flag(source, BWRAP_UNSHARE_NET_ENV, False, errors),
+            ro_paths=_paths(source, BWRAP_RO_PATHS_ENV, errors),
+            protect_config=_flag(source, BWRAP_PROTECT_CONFIG_ENV, True, errors),
         )
         container = ContainerSettings(
             runtime=_get(source, CONTAINER_RUNTIME_ENV) or "docker",

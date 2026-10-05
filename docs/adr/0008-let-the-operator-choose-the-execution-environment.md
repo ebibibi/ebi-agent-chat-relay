@@ -67,8 +67,18 @@ Four rules shape the details:
   and it removes Codex's sandbox-bypass flag, because otherwise the thread would show `native`
   while running unsandboxed.
 - **Secrets stay off command lines.** The container runtime receives variable names, not values.
-  ssh forwards only an explicit list of names, because remote command lines are visible in
-  process listings on both machines.
+  ssh sends operator-listed variables with `SendEnv`, so only their names are on the local command
+  line. Remote command lines are visible in process listings on both machines.
+- **A sandbox must not be able to arm the next unsandboxed run.** The agent's state directory has
+  to be writable, but the parts of it that execute later (Claude Code's `settings.json` hooks,
+  `~/.claude.json` MCP servers, plugins and skills; Codex's `config.toml`, rules and skills;
+  `.git/hooks` and `.git/config`) are re-bound read-only inside it. The most dangerous ones are
+  created empty first if they are missing.
+- **Host services are hidden, not just files.** The user's runtime directory (systemd user bus,
+  agent sockets) and the system D-Bus socket are hidden, and the variables pointing at them are
+  dropped, because `systemd-run --user` would otherwise run a command outside the sandbox.
+- **Choosing the environment is itself a privilege.** `/sandbox` is limited to the users allowed to
+  run `/skill`.
 
 ## Consequences
 
@@ -84,6 +94,18 @@ Four rules shape the details:
   gracefully. Session logs are written as the CLI goes, so the thread can still be resumed.
 - Under `ssh`, session data lives on the remote host, so local readers of it (Codex resume
   recovery, cross-backend handoff) do not see it.
+- Measured escape probes under `bwrap`, for both CLIs: `systemd-run --user true` and
+  `busctl --user list` fail (no bus address, and with the address given explicitly the socket does
+  not exist). Writing `~/.claude/settings.json`, `~/.claude.json` or `~/.codex/config.toml` fails
+  with `Read-only file system`, and the Docker socket refuses connections. Both CLIs work normally
+  with their configuration read-only.
+- **Residual risks, accepted and documented:** the network namespace is shared, so localhost
+  services, the LAN and abstract Unix sockets stay reachable. `CCDB_BWRAP_UNSHARE_NET` cannot fix
+  that for an API-backed agent. Project configuration in the writable working directory
+  (`.claude/`, `.mcp.json`, `.codex/`, in-repo hook directories) can still affect a later
+  unsandboxed run in the same directory. Scripts stored under unprotected names in the state
+  directory can be rewritten. The recommended mitigation for the last two is a dedicated
+  `CLAUDE_CONFIG_DIR` / `CODEX_HOME` per sandbox and not reusing a sandboxed worktree from `host`.
 - pi still needs `CCDB_PI_ALLOW_UNSANDBOXED` in every mode. Relaxing that gate for `bwrap` and
   `container`, which do provide an OS boundary, is a separate decision that would supersede part
   of ADR-0007.

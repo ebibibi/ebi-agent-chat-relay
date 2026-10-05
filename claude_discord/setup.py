@@ -516,7 +516,13 @@ async def setup_bridge(
         # --- SandboxCommandCog: per-thread execution environment (/sandbox) ---
         from .cogs.sandbox_command import SandboxCommandCog
 
-        await bot.add_cog(SandboxCommandCog(bot, settings_repo=settings_repo))  # type: ignore[arg-type]
+        await bot.add_cog(
+            SandboxCommandCog(
+                bot,  # type: ignore[arg-type]
+                settings_repo=settings_repo,
+                allowed_user_ids=allowed_user_ids,
+            )
+        )
         logger.info("Registered SandboxCommandCog")
 
         # --- OllamaCommandCog: management for the `local` backend's runtime ---

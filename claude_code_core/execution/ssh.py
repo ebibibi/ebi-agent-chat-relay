@@ -6,9 +6,12 @@ command), so the remote command is assembled from :func:`shlex.quote`-d words
 only: the working directory, every ``NAME=value`` and every argv element. The
 host comes after ``--`` so it can never be read as an ssh option.
 
-Which environment crosses the wire is an explicit list (``CCDB_SSH_ENV``):
-values given to ``env`` on the remote command line are visible in process
-listings on both ends, so nothing is forwarded by default. The remote host is
+Environment values never go on a command line, where they would be visible in
+process listings on both ends. Only two non-secret values the runner sets
+(``DEFAULT_FORWARDED_ENV``) are placed on the remote command line. Variables the
+operator lists in ``CCDB_SSH_ENV`` travel with ssh's own ``SendEnv`` — the local
+command line carries only their *names*, the values go inside the encrypted
+session — and the server must accept them (``AcceptEnv``). The remote host is
 expected to be logged in to the agent's provider itself.
 """
 
@@ -58,8 +61,8 @@ def remote_command(settings: SshSettings, launch: Launch) -> str:
     assignments: list[str] = []
     if settings.remote_path:
         assignments.append(f"PATH={settings.remote_path}")
-    for name in (*DEFAULT_FORWARDED_ENV, *settings.forward_env):
-        if name in launch.env and not any(a.startswith(f"{name}=") for a in assignments):
+    for name in DEFAULT_FORWARDED_ENV:
+        if name in launch.env:
             assignments.append(f"{name}={launch.env[name]}")
 
     words = ["env", *assignments, *argv] if assignments else argv
@@ -69,11 +72,16 @@ def remote_command(settings: SshSettings, launch: Launch) -> str:
 def build_ssh_argv(settings: SshSettings, launch: Launch, binary: str) -> tuple[str, ...]:
     if not settings.host:
         raise ValueError("ssh host is not configured")
+    send_env: list[str] = []
+    for name in settings.forward_env:
+        if name in launch.env:
+            send_env += ["-o", f"SendEnv={name}"]
     return (
         binary,
         "-T",
         "-o",
         "BatchMode=yes",
+        *send_env,
         *settings.options,
         "--",
         settings.host,
