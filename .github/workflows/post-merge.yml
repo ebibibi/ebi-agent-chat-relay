@@ -43,9 +43,13 @@ jobs:
           HEAD_REF: ${{ steps.pr.outputs.head_ref }}
           PR_TITLE: ${{ steps.pr.outputs.title }}
         run: |
-          if [[ "$HEAD_REF" == docs-sync/* ]] \
-            || [[ "$PR_TITLE" == '[docs-sync]'* ]] \
-            || [[ "$HEAD_REF" == auto/bump-* ]]; then
+          if [[ "$HEAD_REF" == auto/bump-* ]]; then
+            # The bump itself is what gets released; nothing else to do for it.
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "Bump PR merged: releasing it"
+          elif [[ "$HEAD_REF" == docs-sync/* ]] \
+            || [[ "$PR_TITLE" == '[docs-sync]'* ]]; then
             echo "eligible=false" >> "$GITHUB_OUTPUT"
             echo "Skipping post-merge work for excluded PR: $HEAD_REF"
           else
@@ -94,17 +98,21 @@ jobs:
             -d '{"content":"🔄 docs-sync"}' \
             "$WEBHOOK_URL"
 
-      - name: Dispatch the patch version bump
-        if: steps.classify.outputs.eligible == 'true'
+      - name: Dispatch the patch version bump or release
+        if: steps.classify.outputs.eligible == 'true' || steps.classify.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           PR_TITLE: ${{ steps.pr.outputs.title }}
+          RELEASE: ${{ steps.classify.outputs.release == 'true' }}
         run: |
           jq -c -n \
             --arg event_type "pr-merged" \
             --arg pr_number "$PR_NUMBER" \
             --arg pr_title "$PR_TITLE" \
+            --arg release "$RELEASE" \
+            --arg sha "$GITHUB_SHA" \
             '{event_type: $event_type,
-              client_payload: {pr_number: $pr_number, pr_title: $pr_title}}' \
+              client_payload: {pr_number: $pr_number, pr_title: $pr_title,
+                               release: $release, sha: $sha}}' \
           | gh api "repos/$GITHUB_REPOSITORY/dispatches" --method POST --input -
