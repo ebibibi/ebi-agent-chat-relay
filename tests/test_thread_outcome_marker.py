@@ -45,7 +45,7 @@ from claude_discord.thread_marker import (
     set_outcome_thread_name,
     unmark_done_thread_name,
 )
-from claude_discord.thread_status import apply_thread_outcome
+from claude_discord.thread_status import apply_thread_outcome, request_thread_outcome
 
 from .conftest import make_async_gen
 
@@ -215,6 +215,51 @@ async def test_waiting_endpoint_is_idempotent(api_client: TestClient, bot: Magic
     bot.get_channel.return_value = _thread(f"{WAIT} Fix")
     resp = await api_client.post("/api/threads/42/waiting")
     assert (await resp.json())["status"] == "unchanged"
+
+
+class _SlowRename:
+    """A thread whose rename sits in a rate-limit sleep until released."""
+
+    def __init__(self, name: str) -> None:
+        self.release = asyncio.Event()
+        self.thread = _thread(name)
+        self.thread.edit = AsyncMock(side_effect=self._edit)
+
+    async def _edit(self, *, name: str) -> None:
+        await self.release.wait()
+        self.thread.name = name
+
+
+async def test_rate_limited_mark_answers_queued_and_lands_later(
+    api_client: TestClient, bot: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("claude_discord.ext.api_server._MARK_WAIT_SECONDS", 0.05)
+    slow = _SlowRename("Fix")
+    bot.get_channel.return_value = slow.thread
+
+    resp = await api_client.post("/api/threads/42/waiting")
+
+    assert resp.status == 202
+    assert await resp.json() == {"status": "queued", "thread_name": f"{WAIT} Fix"}
+    slow.release.set()
+    await request_thread_outcome(slow.thread, OUTCOME_WAITING)
+    assert slow.thread.name == f"{WAIT} Fix"
+
+
+async def test_requests_during_a_pending_rename_collapse_to_the_latest() -> None:
+    slow = _SlowRename(f"{DONE} Fix")
+    request_thread_outcome(slow.thread, None)  # human replied: clear ✅
+    await asyncio.sleep(0)
+    request_thread_outcome(slow.thread, OUTCOME_ERROR)
+    last = request_thread_outcome(slow.thread, OUTCOME_WAITING)
+
+    slow.release.set()
+    assert await last is None
+
+    assert [c.kwargs["name"] for c in slow.thread.edit.await_args_list] == [
+        "Fix",
+        f"{WAIT} Fix",
+    ]
 
 
 # ---------------------------------------------------------------------------
