@@ -51,6 +51,7 @@ from ..thread_marker import (
     set_outcome_thread_name,
 )
 from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
+from ..thread_status import request_thread_outcome
 from . import ingest_manifest, teams_sync
 from .attention_api import handle_attention
 from .teams_store import TeamsVaultStore
@@ -95,6 +96,8 @@ _MAX_DISCORD_THREAD_NAME_LENGTH = MAX_THREAD_NAME_LENGTH
 # Bounded so one session peeking at another can never pull an unbounded amount
 # of history into its own context window.
 _DEFAULT_SESSION_LIMIT = 20
+# How long a mark request waits for the rename before answering "queued".
+_MARK_WAIT_SECONDS = 5.0
 _MAX_SESSION_LIMIT = 100
 _DEFAULT_THREAD_MESSAGE_LIMIT = 30
 _MAX_THREAD_MESSAGE_LIMIT = 100
@@ -1493,9 +1496,10 @@ class ApiServer:
         Idempotent: an already-marked thread is not renamed, because Discord
         allows a thread only two renames per ten minutes.
 
-        Returns ``{"status": "marked" | "unchanged", "thread_name": ...}``;
-        404 for an unknown channel, 400 when it is not a thread, 502 when the
-        rename itself fails (e.g. rate limited).
+        Returns ``{"status": "marked" | "unchanged", "thread_name": ...}``, or
+        202 ``{"status": "queued", ...}`` when the rename is waiting out
+        Discord's rate limit and will land on its own; 404 for an unknown
+        channel, 400 when it is not a thread, 502 when the rename fails.
         """
         return await self._mark_thread_outcome(request, OUTCOME_DONE)
 
@@ -1544,11 +1548,18 @@ class ApiServer:
         marked = set_outcome_thread_name(current, outcome)
         if marked == current:
             return web.json_response({"status": "unchanged", "thread_name": current})
-        try:
-            await channel.edit(name=marked)
-        except Exception as exc:  # rate limited, archived, missing permission
-            logger.warning("Failed to mark thread %d %s", thread_id, outcome, exc_info=True)
-            return web.json_response({"error": str(exc)}, status=502)
+        # A thread may be renamed twice per ten minutes and discord.py sleeps
+        # out the limit, so the rename runs in the background.  Waiting for it
+        # would hold the caller's curl for up to ten minutes and make it
+        # report a failure for a mark that does land later.
+        rename = request_thread_outcome(channel, outcome)
+        done, _ = await asyncio.wait({rename}, timeout=_MARK_WAIT_SECONDS)
+        if not done:
+            logger.info("thread %d mark %s queued behind the rename rate limit", thread_id, outcome)
+            return web.json_response({"status": "queued", "thread_name": marked}, status=202)
+        error = rename.result()
+        if error is not None:
+            return web.json_response({"error": str(error)}, status=502)
         logger.info("thread %d marked %s: %r -> %r", thread_id, outcome, current, marked)
         return web.json_response({"status": "marked", "thread_name": marked})
 
