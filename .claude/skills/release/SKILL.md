@@ -102,9 +102,12 @@ PR マージ（auto-approve.yml）
   └── repository_dispatch: pr-merged
         └── auto-version-bump.yml
               ├── [release] あり → 現在バージョンでタグ & Release（バンプなし）
-              └── [release] なし → patch++ の bump PR を自動で開く（タグ・Release なし）
+              └── [release] なし → patch++ の bump PR を自動で開く
                     └── auto-approve.yml が承認 → CI 通過後に自動マージ
+                          └── bump PR のマージ → そのコミットに vX.Y.Z タグ & Release
 ```
+
+- **マージ1回ごとにパッチ版が GitHub Release として公開される**（手作業不要）
 
 - docs-sync PR（翻訳・ドキュメント更新）はバンプも Release も発生しない
 - patch-bump は `auto/bump-vX.Y.Z` ブランチからの PR。`issue-driven-main`
@@ -115,8 +118,8 @@ PR マージ（auto-approve.yml）
   GITHUB_TOKEN で作ると pull_request イベントが発火せず、必須チェックが
   「Expected」のまま永久に埋まらない（過去2回この理由で revert されている）
 - bump PR が既に開いているあいだの追加マージは、その1件に集約される
-- bump PR のマージでは dispatch を送らない（無限ループ防止）
-- リリース時にはえびログ（Discord）に自動通知
+- bump PR のマージでは release モードの dispatch だけを送る（新しい bump は開かないのでループしない）
+- えびログ（Discord）通知と全言語翻訳（docs-translate）はマイナー/メジャー（X.Y.0）のときだけ
 
 ---
 

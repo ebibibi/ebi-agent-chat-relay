@@ -5,9 +5,11 @@ name: Auto Patch Version Bump
 # merged with ADMIN_PAT so GitHub emits the main push event; post-merge.yml then
 # converts that event into this explicit repository_dispatch.
 #
-# Two modes, determined by PR title:
-#   [release] in title → tag & release the current version as-is (no bump)
+# Two modes:
+#   auto/bump-* PR merged, or [release] in title
+#                      → tag & release the current version as-is (no bump)
 #   anything else      → open a bump PR against main; no tag/release
+# So every merge ends up as its own patch release: merge → bump PR → release.
 #
 # Why a PR and not a direct push (issue #725):
 #   The `issue-driven-main` ruleset is created with an empty bypass_actors
@@ -43,13 +45,15 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.ADMIN_PAT }}
+          ref: ${{ github.event.client_payload.sha || 'main' }}
 
-      - name: Detect release mode from PR title
+      - name: Detect release mode
         id: mode
         env:
           PR_TITLE: ${{ github.event.client_payload.pr_title }}
+          RELEASE: ${{ github.event.client_payload.release }}
         run: |
-          if [[ "$PR_TITLE" == *"[release]"* ]]; then
+          if [[ "$RELEASE" == "true" ]] || [[ "$PR_TITLE" == *"[release]"* ]]; then
             echo "mode=release" >> "$GITHUB_OUTPUT"
             echo "Mode: release (tag current version as-is)"
           else
@@ -173,8 +177,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.ADMIN_PAT }}
           RELEASE_TAG: ${{ steps.read.outputs.release_tag }}
+          MERGE_SHA: ${{ github.event.client_payload.sha }}
         run: |
-          TAG_SHA=$(gh api "repos/$GITHUB_REPOSITORY/git/refs/heads/main" --jq '.object.sha')
+          # Tag the merge that produced this version; main may already have
+          # moved on by the time this run gets the concurrency slot.
+          TAG_SHA="$MERGE_SHA"
+          if [ -z "$TAG_SHA" ]; then
+            TAG_SHA=$(gh api "repos/$GITHUB_REPOSITORY/git/refs/heads/main" --jq '.object.sha')
+          fi
 
           # Create tag (idempotent)
           if gh api "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
@@ -202,7 +212,8 @@ jobs:
           fi
 
       - name: Notify えびログ (Discord)
-        if: steps.mode.outputs.mode == 'release'
+        # Announced for minor/major releases only; patch releases ship quietly.
+        if: steps.mode.outputs.mode == 'release' && endsWith(steps.read.outputs.release_version, '.0')
         env:
           EBILOG_WEBHOOK_URL: ${{ secrets.EBILOG_WEBHOOK_URL }}
           RELEASE_TAG: ${{ steps.read.outputs.release_tag }}
