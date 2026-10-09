@@ -545,6 +545,7 @@ The operator sets the default and an allowlist in the environment (`CCDB_EXECUTI
 - **Cross-backend conversation handoff** — Switching a live thread between Claude and Codex seeds the new native session from a bounded, text-only reading of the previous backend's local JSONL; no manual summary or copy/paste required
 - **Automatic Codex resume recovery** — If a resumed Codex session repeatedly loses its WebSocket before producing output, ccdb starts a replacement session with a bounded, text-only transcript of the prior conversation; image and tool payloads are excluded
 - **Concurrent sessions** — Multiple parallel sessions with configurable limit
+- **Steerable session queue** — When every `MAX_CONCURRENT_SESSIONS` slot is busy, the waiting message carries **⏫ Run this next** / **⏬ Let others go first** buttons; `/queue` lists running and waiting threads from any channel and can **⏸ pause** a running thread, which frees its slot and resumes automatically (same session, via `--resume`) once the threads it yielded to are through. Pause is refused when nothing is waiting. Same controls on `GET /api/slots` and `POST /api/slots/{thread_id}/{prioritize|defer|pause}`. See [docs/session-queue.md](docs/session-queue.md)
 - **Stop without clearing** — `/stop` halts a session while preserving it for resume
 - **Session interrupt** — Sending a new message to an active thread sends SIGINT to the running session and starts fresh with the new instruction; no manual `/stop` needed
 - **Auto-rename threads** — When `THREAD_AUTO_RENAME=true`, each new thread is automatically renamed with a Claude-generated title derived from the first message (background task, never delays session start). The title is kept honest as the thread goes on: once the work has clearly moved to a different subject, it is re-titled — at most once every 15 minutes, and only for threads ccdb opened
@@ -1318,6 +1319,8 @@ uv sync --extra api
 | GET | `/api/lounge` | Read recent AI Lounge messages |
 | POST | `/api/lounge` | Post a message to the AI Lounge (with optional `label`); returns a `hint` field when the message exceeds 200 characters |
 | GET | `/api/sessions` | List every session — live and stored — with state, working dir and latest lounge note (`state=running`, `exclude_thread`, `limit`) |
+| GET | `/api/slots` | Session slot queue: `max_slots`, threads holding a slot (`running`) and the queue in start order (`waiting`) |
+| POST | `/api/slots/{thread_id}/{action}` | Steer the queue — `prioritize` / `defer` a waiting thread, `pause` a running one (404 wrong state, 409 conflict such as `nothing_waiting`, 503 no limit configured) |
 | GET | `/api/search` | Find a past thread by keyword — `LIKE` over summary and working dir; add `body=1` to also grep local Claude transcripts (each hit then carries a `snippet` and `source`); returns each hit with a Discord `deep_link` (`q` required, optional `origin`, `limit` max 50) |
 | GET | `/api/threads/{thread_id}/messages` | Read another thread's conversation, oldest first (`limit`) |
 | POST | `/api/claims` | Claim a resource before working on it — 201 when acquired, 409 with the holder when taken |
@@ -1443,6 +1446,7 @@ claude_discord/
   collision.py             # File-write tracking + collision rules (pure, clock-injected)
   lounge.py                # AI Lounge prompt builder
   session_view.py          # Cross-session views for GET /api/sessions (pure merge logic)
+  session_slots.py         # Steerable session slot queue (prioritize / defer / pause + auto-resume)
   relay.py                 # RelayGuard + relay prompt wrapper (hop/cooldown/rate limits)
   session_sync.py          # CLI session discovery and import
   worktree.py              # WorktreeManager — safe git worktree lifecycle
@@ -1450,6 +1454,7 @@ claude_discord/
     claude_chat.py         # Interactive chat (thread creation, message handling)
     skill_command.py       # /skill slash command with autocomplete
     session_manage.py      # /sessions, /search, /sync-sessions, /resume, /resume-info, /sync-settings
+    session_queue.py       # /queue — see and steer the session slot queue
     session_sync.py        # Thread-creation and message-posting logic for sync-sessions
     prompt_builder.py      # build_prompt_and_images() — pure function, no Cog/Bot state
     scheduler.py           # Periodic Claude Code task executor
@@ -1488,6 +1493,7 @@ claude_discord/
     streaming_manager.py   # StreamingMessageManager — debounced in-place message edits
     tool_timer.py          # LiveToolTimer — elapsed time counter for long-running tools
     thread_dashboard.py    # Live pinned embed showing session states
+    slot_views.py          # Queue buttons/menus (⏫ / ⏬ / ⏸) for the waiting message and /queue
     file_sender.py         # File delivery via .ccdb-attachments
     inbox_classifier.py    # classify() — lightweight claude -p call to label sessions
     thread_renamer.py      # suggest_title() — background claude -p call for auto thread naming
