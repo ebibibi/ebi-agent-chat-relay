@@ -285,14 +285,15 @@ def allowed_cwd(raw: object) -> str | None:
     if not isinstance(raw, str) or not os.path.isabs(raw):
         return None
     resolved = os.path.realpath(raw)
-    for root in _cwd_roots():
-        # Spelled exactly like ApiServer._contained_path: realpath + a negative
-        # prefix test against root + os.sep, in the function that touches the
-        # path — the form CodeQL recognises as a path sanitiser.
-        if resolved != root and not resolved.startswith(root + os.sep):
-            continue
-        return resolved if os.path.isdir(resolved) else None
-    return None
+    root = next((r for r in _cwd_roots() if resolved == r or resolved.startswith(r + os.sep)), None)
+    if root is None:
+        return None
+    # Repeated as a straight-line guard right before the filesystem call, spelled
+    # like ApiServer._contained_path: CodeQL recognises realpath + a negative
+    # prefix test as a path sanitiser, but not one inside the search above.
+    if resolved != root and not resolved.startswith(root + os.sep):
+        return None
+    return resolved if os.path.isdir(resolved) else None
 
 
 def _parse_cwd(raw: object) -> str | None:
