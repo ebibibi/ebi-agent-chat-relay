@@ -113,3 +113,23 @@ async def test_queue_command_honours_allowed_users(slots) -> None:
     await cog.queue_command.callback(cog, interaction)
     args = interaction.response.send_message.call_args
     assert "permission" in args.args[0]
+
+
+async def test_wait_buttons_refuse_users_outside_allowed_ids() -> None:
+    from claude_discord.discord_ui.slot_views import SlotWaitView
+
+    scheduler = SessionSlotScheduler(1, allowed_user_ids={42})
+    await scheduler.acquire(1)
+    asyncio.ensure_future(scheduler.acquire(2))
+    asyncio.ensure_future(scheduler.acquire(3))
+    await asyncio.sleep(0)
+    view = SlotWaitView(scheduler, 3)
+
+    stranger = _interaction(7)
+    await view.prioritize_button.callback(stranger)
+    assert "permission" in stranger.response.send_message.call_args.args[0]
+    assert scheduler.position(3) == 2
+
+    owner = _interaction(42)
+    await view.prioritize_button.callback(owner)
+    assert scheduler.position(3) == 1

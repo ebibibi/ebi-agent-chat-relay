@@ -94,10 +94,13 @@ class SlotActionError(Exception):
 class SessionSlotScheduler:
     """Concurrency limiter whose waiting queue can be reordered at runtime."""
 
-    def __init__(self, max_slots: int) -> None:
+    def __init__(self, max_slots: int, *, allowed_user_ids: set[int] | None = None) -> None:
         if max_slots < 1:
             raise ValueError("max_slots must be >= 1")
         self._max_slots = max_slots
+        # Who may steer the queue from a frontend. ``None`` = everyone who can
+        # reach the bot, the same rule as /skill.
+        self._allowed_user_ids = allowed_user_ids
         self._running: list[SlotEntry] = []
         self._waiting: list[SlotEntry] = []
         self._seq = itertools.count()
@@ -109,6 +112,10 @@ class SessionSlotScheduler:
     @property
     def running_count(self) -> int:
         return len(self._running)
+
+    def is_authorized(self, user_id: int) -> bool:
+        """Whether a frontend user may reorder or pause sessions."""
+        return self._allowed_user_ids is None or user_id in self._allowed_user_ids
 
     # ------------------------------------------------------------------
     # Acquire / release
@@ -284,10 +291,12 @@ class SessionSlotScheduler:
 _scheduler: SessionSlotScheduler | None = None
 
 
-def configure_session_slots(max_slots: int) -> SessionSlotScheduler:
+def configure_session_slots(
+    max_slots: int, *, allowed_user_ids: set[int] | None = None
+) -> SessionSlotScheduler:
     """Create the process-wide scheduler. Called once from ``setup_bridge()``."""
     global _scheduler  # noqa: PLW0603
-    _scheduler = SessionSlotScheduler(max_slots)
+    _scheduler = SessionSlotScheduler(max_slots, allowed_user_ids=allowed_user_ids)
     return _scheduler
 
 

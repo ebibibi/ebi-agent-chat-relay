@@ -78,6 +78,14 @@ async def _apply(
     thread_key: int,
 ) -> None:
     """Run a queue action and answer the click ephemerally."""
+    # The waiting message sits in a shared thread, so anyone who can see it
+    # can click it. Steering the queue is an operator action.
+    if not scheduler.is_authorized(interaction.user.id):
+        with contextlib.suppress(discord.HTTPException):
+            await interaction.response.send_message(
+                "You don't have permission to change the session queue.", ephemeral=True
+            )
+        return
     try:
         if action == "prioritize":
             scheduler.prioritize(thread_key)

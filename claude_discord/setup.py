@@ -313,7 +313,7 @@ async def setup_bridge(
 
     from .cogs._run_helper import configure_pr_completion_gate, configure_session_limit
 
-    configure_session_limit(max_concurrent)
+    configure_session_limit(max_concurrent, allowed_user_ids=allowed_user_ids)
     pr_completion_owner = os.getenv("CCDB_PR_COMPLETION_OWNER", "").strip()
     configure_pr_completion_gate(pr_completion_owner or None)
     if pr_completion_owner:

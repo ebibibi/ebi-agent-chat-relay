@@ -17,7 +17,7 @@ restart the same session immediately. To end a run, use ⏹ Stop instead.
 
 ## Where to use them
 
-- **The waiting thread**: the "Waiting for a free session slot" message has the ⏫ / ⏬ buttons.
+- **The waiting thread**: the "Waiting for a free session slot" message has the ⏫ / ⏬ buttons. Clicks from users outside `allowed_user_ids` are refused.
 - **`/queue`** (any channel, ephemeral): lists running and waiting threads, with menus to
   prioritize, defer, or pause. It follows the same `allowed_user_ids` rule as `/skill`.
 - **REST API** (loopback control plane):

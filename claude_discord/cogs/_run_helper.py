@@ -59,14 +59,16 @@ PAUSE_RESUME_PROMPT = (
 )
 
 
-def configure_session_limit(max_concurrent: int) -> None:
+def configure_session_limit(
+    max_concurrent: int, *, allowed_user_ids: set[int] | None = None
+) -> None:
     """Set the process-wide concurrent session limit.
 
     Called once from ``setup_bridge()`` during startup.  All subsequent calls to
     ``run_claude_with_config()`` — regardless of which Cog invokes them — will
     honour the limit, through one reorderable queue (``session_slots.py``).
     """
-    configure_session_slots(max_concurrent)
+    configure_session_slots(max_concurrent, allowed_user_ids=allowed_user_ids)
 
 
 def configure_pr_completion_gate(owner: str | None) -> None:
