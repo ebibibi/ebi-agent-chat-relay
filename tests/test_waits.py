@@ -25,6 +25,12 @@ from claude_discord.waits import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _cwd_roots(monkeypatch, tmp_path_factory) -> None:
+    """Allow probe working directories under pytest's temp root."""
+    monkeypatch.setenv("CCDB_WAIT_CWD_ROOTS", str(tmp_path_factory.getbasetemp()))
+
+
 def _spec(**overrides: object) -> dict:
     body: dict = {
         "thread_id": 123,
@@ -108,6 +114,19 @@ class TestParseWaitSpec:
             parse_wait_spec(_spec(cwd="relative/dir"))
         with pytest.raises(WaitSpecError, match="cwd"):
             parse_wait_spec(_spec(cwd=str(tmp_path / "missing")))
+
+    def test_cwd_outside_the_allowed_roots_is_refused(self, tmp_path, monkeypatch) -> None:
+        allowed = tmp_path / "allowed"
+        allowed.mkdir()
+        monkeypatch.setenv("CCDB_WAIT_CWD_ROOTS", str(allowed))
+        assert parse_wait_spec(_spec(cwd=str(allowed))).cwd == str(allowed.resolve())
+        with pytest.raises(WaitSpecError, match="cwd"):
+            parse_wait_spec(_spec(cwd=str(tmp_path)))
+        with pytest.raises(WaitSpecError, match="cwd"):
+            parse_wait_spec(_spec(cwd=str(allowed / "..")))
+        (allowed / "escape").symlink_to(tmp_path)
+        with pytest.raises(WaitSpecError, match="cwd"):
+            parse_wait_spec(_spec(cwd=str(allowed / "escape")))
 
     def test_body_must_be_an_object(self) -> None:
         with pytest.raises(WaitSpecError):

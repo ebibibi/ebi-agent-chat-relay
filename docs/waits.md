@@ -67,7 +67,7 @@ curl -s -X POST "$CCDB_API_URL/api/waits" -H "Content-Type: application/json" -d
 | `timeout_seconds` | 10800 (3 h) | 60–86400. On timeout the thread is resumed and told so |
 | `label` | the argv | Shown in the resume prompt |
 | `note` | — | Up to 1,000 chars, handed back in the resume prompt |
-| `cwd` | session working dir | Must exist. Defaults to the thread's working directory when it still exists |
+| `cwd` | session working dir | Must be an existing directory under `CCDB_WAIT_CWD_ROOTS` (`os.pathsep`-separated; default: the relay user's home), checked after `realpath`. Defaults to the thread's working directory when it qualifies |
 
 Responses: `201` with the stored wait; `200` with the live wait when the thread already waits on
 the same `argv` (an agent told twice to wait is resumed once); `400` for an invalid spec; `429`

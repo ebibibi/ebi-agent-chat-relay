@@ -17,6 +17,12 @@ from claude_discord.ext.api_server import ApiServer
 from claude_discord.waits import MAX_WAITS_PER_THREAD
 
 
+@pytest.fixture(autouse=True)
+def _cwd_roots(monkeypatch, tmp_path_factory) -> None:
+    """Allow probe working directories under pytest's temp root."""
+    monkeypatch.setenv("CCDB_WAIT_CWD_ROOTS", str(tmp_path_factory.getbasetemp()))
+
+
 @pytest.fixture
 async def db_path() -> str:
     fd, path = tempfile.mkstemp(suffix=".db")

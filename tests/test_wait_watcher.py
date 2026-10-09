@@ -13,6 +13,12 @@ from claude_discord.database.wait_repo import WaitRepository
 from claude_discord.waits import MAX_CONSECUTIVE_ERRORS, ProbeResult, parse_wait_spec
 
 
+@pytest.fixture(autouse=True)
+def _cwd_roots(monkeypatch, tmp_path_factory) -> None:
+    """Allow probe working directories under pytest's temp root."""
+    monkeypatch.setenv("CCDB_WAIT_CWD_ROOTS", str(tmp_path_factory.getbasetemp()))
+
+
 class FakeClock:
     def __init__(self, now: float) -> None:
         self.now = now

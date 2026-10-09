@@ -266,12 +266,40 @@ def _parse_text(body: dict, key: str, limit: int) -> str | None:
     return text or None
 
 
+#: ``os.pathsep``-separated directories a probe's ``cwd`` must lie under.
+CWD_ROOTS_ENV = "CCDB_WAIT_CWD_ROOTS"
+
+
+def _cwd_roots() -> list[str]:
+    raw = os.environ.get(CWD_ROOTS_ENV, "")
+    roots = [r for r in raw.split(os.pathsep) if r.strip()] or [os.path.expanduser("~")]
+    return [os.path.realpath(r) for r in roots]
+
+
+def allowed_cwd(raw: object) -> str | None:
+    """*raw* resolved, if it is an existing directory under an allowed root; else None.
+
+    Roots default to the relay user's home. Resolved with ``realpath`` before
+    the prefix test, so ``..`` or a symlink cannot point a probe elsewhere.
+    """
+    if not isinstance(raw, str) or not os.path.isabs(raw):
+        return None
+    resolved = os.path.realpath(raw)
+    for root in _cwd_roots():
+        if resolved == root or resolved.startswith(root.rstrip(os.sep) + os.sep):
+            return resolved if os.path.isdir(resolved) else None
+    return None
+
+
 def _parse_cwd(raw: object) -> str | None:
     if raw is None or raw == "":
         return None
-    if not isinstance(raw, str) or not os.path.isabs(raw) or not os.path.isdir(raw):
-        raise WaitSpecError("cwd must be an absolute path to an existing directory")
-    return raw
+    resolved = allowed_cwd(raw)
+    if resolved is None:
+        raise WaitSpecError(
+            f"cwd must be an existing absolute directory under the allowed roots ({CWD_ROOTS_ENV})"
+        )
+    return resolved
 
 
 def evaluate_probe(spec: WaitSpec, result: ProbeResult) -> Verdict:
