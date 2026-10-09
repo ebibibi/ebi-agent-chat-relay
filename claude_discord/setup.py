@@ -233,6 +233,7 @@ async def setup_bridge(
     from .cogs.context_links import ContextLinksCog
     from .cogs.scheduler import SchedulerCog
     from .cogs.session_manage import SessionManageCog
+    from .cogs.session_queue import SessionQueueCog
     from .cogs.skill_command import SkillCommandCog
     from .cross_backend_handoff import ConversationHistoryReader
     from .database.inbox_repo import ThreadInboxRepository
@@ -321,7 +322,7 @@ async def setup_bridge(
 
     from .cogs._run_helper import configure_pr_completion_gate, configure_session_limit
 
-    configure_session_limit(max_concurrent)
+    configure_session_limit(max_concurrent, allowed_user_ids=allowed_user_ids)
     pr_completion_owner = os.getenv("CCDB_PR_COMPLETION_OWNER", "").strip()
     configure_pr_completion_gate(pr_completion_owner or None)
     if pr_completion_owner:
@@ -486,6 +487,10 @@ async def setup_bridge(
     )
     await bot.add_cog(session_manage_cog)
     logger.info("Registered SessionManageCog")
+
+    # --- SessionQueueCog (/queue: steer the session slot queue) ---
+    await bot.add_cog(SessionQueueCog(bot, allowed_user_ids=allowed_user_ids))
+    logger.info("Registered SessionQueueCog")
 
     # --- SkillCommandCog (requires at least one channel ID) ---
     if _all_channel_ids:

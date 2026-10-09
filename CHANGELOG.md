@@ -23,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tell agents to register a wait instead of watching pipelines in the turn (only where waits
   work), and the gate stays quiet while the thread has an active wait. On by default
   (`enable_waits=False` to turn off). See `docs/waits.md`.
+- **Steerable session queue** — when every `MAX_CONCURRENT_SESSIONS` slot is busy, the waiting
+  message now carries **⏫ Run this next** / **⏬ Let others go first** buttons. `/queue` shows
+  running and waiting threads from any channel and can also **pause** a running thread: it is
+  interrupted to free its slot and resumes automatically (same session, via `--resume`) once the
+  threads it yielded to are through. Pausing is refused when nothing is waiting. The same
+  controls are on the REST API: `GET /api/slots`, `POST /api/slots/{thread_id}/{prioritize|defer|pause}`.
+  No configuration needed. See `docs/session-queue.md`.
 - **Account pools** (#821) — `CCDB_ACCOUNT_POOLS_FILE` names a TOML file of pre-logged-in Claude
   Code / Codex profile directories per backend and a strategy (`priority`, `sticky`,
   `round_robin`, `most_headroom`). Each session or turn runs as the chosen profile; a thread that
