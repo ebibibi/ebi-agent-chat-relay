@@ -56,6 +56,7 @@ from . import ingest_manifest, teams_sync
 from .attention_api import handle_attention
 from .teams_store import TeamsVaultStore
 from .teams_sync import ThreadRef
+from .wait_api import handle_cancel_wait, handle_create_wait, handle_list_waits
 
 if TYPE_CHECKING:
     import discord
@@ -73,6 +74,7 @@ if TYPE_CHECKING:
     from ..database.resume_repo import PendingResumeRepository
     from ..database.summary_repo import ThreadSummaryRepository
     from ..database.task_repo import TaskRepository
+    from ..database.wait_repo import WaitRepository
 
 # /api/ingest — authenticated spawn for untrusted external clients (browser
 # extensions, mobile shortcuts, webhooks) that may carry file attachments.
@@ -288,6 +290,8 @@ class ApiServer:
         # Human-activity metering (GET /api/attention). Wired by
         # BridgeComponents.apply_to_api_server; 503 until then.
         self.attention_repo: HumanActivityRepository | None = None
+        # Waits (POST /api/waits): wired by BridgeComponents; 503 until then.
+        self.wait_repo: WaitRepository | None = None
         self.attention_params: AttentionParams | None = None
         # Where Claude Code transcripts live, for /api/search?body=1. Falls back
         # to the standard ~/.claude/projects location so body search is
@@ -359,6 +363,10 @@ class ApiServer:
         self.app.router.add_post("/api/claims", self.create_claim)
         self.app.router.add_get("/api/claims", self.list_claims)
         self.app.router.add_delete("/api/claims", self.delete_claim)
+        # Waits — end the turn, resume when a probe says done (requires wait_repo)
+        self.app.router.add_post("/api/waits", self.create_wait)
+        self.app.router.add_get("/api/waits", self.list_waits)
+        self.app.router.add_delete("/api/waits/{id}", self.cancel_wait)
         # Cross-session observability routes (requires session_repo)
         self.app.router.add_get("/api/sessions", self.list_sessions)
         self.app.router.add_get("/api/slots", self.list_slots)
@@ -884,6 +892,29 @@ class ApiServer:
                 status=503,
             )
         return None
+
+    def _require_wait_repo(self) -> web.Response | None:
+        if self.wait_repo is None:
+            return web.json_response({"error": "wait_repo is not configured"}, status=503)
+        return None
+
+    async def create_wait(self, request: web.Request) -> web.Response:
+        """POST /api/waits — resume this thread when a probe says done (see wait_api)."""
+        if err := self._require_wait_repo():
+            return err
+        return await handle_create_wait(request, self.wait_repo, self.session_repo)  # type: ignore[arg-type]
+
+    async def list_waits(self, request: web.Request) -> web.Response:
+        """GET /api/waits — active waits, optionally for one thread."""
+        if err := self._require_wait_repo():
+            return err
+        return await handle_list_waits(request, self.wait_repo)  # type: ignore[arg-type]
+
+    async def cancel_wait(self, request: web.Request) -> web.Response:
+        """DELETE /api/waits/{id} — cancel an active wait."""
+        if err := self._require_wait_repo():
+            return err
+        return await handle_cancel_wait(request, self.wait_repo)  # type: ignore[arg-type]
 
     async def get_attention(self, request: web.Request) -> web.Response:
         """GET /api/attention — estimated operator attention (see attention_api)."""

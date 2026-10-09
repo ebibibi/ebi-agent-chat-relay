@@ -256,6 +256,22 @@ class TestPendingThreads:
         cog._running.add(task_id)
         assert await cog._pending_thread_ids() == {555}
 
+    async def test_thread_with_an_active_wait_is_pending(
+        self, repo: TaskRepository, tmp_path
+    ) -> None:
+        from claude_discord.database.models import init_db
+        from claude_discord.database.wait_repo import WaitRepository
+        from claude_discord.waits import parse_wait_spec
+
+        db = str(tmp_path / "sessions.db")
+        await init_db(db)
+        waits = WaitRepository(db)
+        spec = parse_wait_spec({"thread_id": 777, "argv": ["true"], "pending_exit_codes": [8]})
+        await waits.create(spec, now=time.time())
+        runner = MagicMock()
+        cog = SchedulerCog(MagicMock(), runner, repo=repo, wait_repo=waits)
+        assert await cog._pending_thread_ids() == {777}
+
     async def test_master_loop_reconciles_even_with_nothing_due(self, repo: TaskRepository) -> None:
         await _future(repo, name="merge", thread_id=555, one_shot=True)
         cog = _cog(repo)

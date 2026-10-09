@@ -1,0 +1,216 @@
+"""WaitWatcherCog — runs due wait probes and resumes threads when a wait ends.
+
+See :mod:`claude_discord.waits` for what a wait is and why it exists.  This Cog
+is the "when": a loop that looks at due waits, runs each probe (no model, no
+session slot), stores the result, and — once the probe says done, the wait
+times out, or the probe keeps failing — starts the thread's next turn with a
+fixed continuation prompt.
+
+The resume goes through ``ClaudeChatCog.deliver_relayed_message`` with
+``interrupt=False``: it posts the prompt into the thread so the humans watching
+see why the session woke up, and it queues behind a turn already running in the
+thread under the per-thread lock, exactly like a human reply.
+
+A resume is never dropped silently: the wait stays ``resuming`` until that turn
+has run, a failed delivery puts it back to ``active`` (the next probe decides
+again), and a restart in between is recovered on load (see ``wait_repo``).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING
+
+from discord.ext import commands, tasks
+
+from .. import waits
+from ..waits import (
+    MAX_CONSECUTIVE_ERRORS,
+    MAX_DELIVERY_FAILURES,
+    OUTCOME_DONE,
+    OUTCOME_PROBE_ERROR,
+    OUTCOME_TIMEOUT,
+    ProbeResult,
+    Verdict,
+    build_wait_prompt,
+    evaluate_probe,
+    run_probe,
+)
+
+if TYPE_CHECKING:
+    from ..database.wait_repo import Wait, WaitRepository
+
+logger = logging.getLogger(__name__)
+
+#: How often due waits are looked for. Each wait has its own interval (>= 30 s);
+#: this only bounds how late a due probe can start.
+LOOP_INTERVAL_SECONDS = 15
+#: Probes run at the same time — they are cheap, but a burst of 50 `az` calls is not.
+MAX_PARALLEL_PROBES = 4
+#: After a failed delivery, how long before the wait is looked at again.
+DELIVERY_RETRY_SECONDS = 60
+
+ProbeFn = Callable[..., Awaitable[ProbeResult]]
+DeliverFn = Callable[[int, str], Awaitable[bool]]
+
+
+class WaitWatcherCog(commands.Cog):
+    """Poll due waits and resume their threads.
+
+    Args:
+        bot: The Discord bot.
+        repo: Where waits are stored.
+        probe: Runs one probe (tests inject a fake).
+        deliver: Runs the thread's next turn with a prompt; returns False when
+            the thread could not be reached. Defaults to the Discord path.
+        clock: Unix-time source (tests inject a fake).
+    """
+
+    def __init__(
+        self,
+        bot: commands.Bot,
+        repo: WaitRepository,
+        *,
+        probe: ProbeFn | None = None,
+        deliver: DeliverFn | None = None,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
+        self.bot = bot
+        self.repo = repo
+        self._probe: ProbeFn = probe or run_probe
+        self._deliver: DeliverFn = deliver or self._deliver_to_discord
+        self._clock = clock or time.time
+        self._slots = asyncio.Semaphore(MAX_PARALLEL_PROBES)
+        self._in_flight: set[int] = set()
+        self._resumes: set[asyncio.Task[None]] = set()
+        self._loop = self._watch_loop
+
+    async def cog_load(self) -> None:
+        recovered = await self.repo.recover_interrupted(now=self._clock())
+        if recovered:
+            logger.info("WaitWatcherCog: %d resume(s) cut off by a restart will retry", recovered)
+        self._loop.start()
+        waits.register_watcher(self.repo)
+        logger.info("WaitWatcherCog loaded — watching for due waits")
+
+    async def cog_unload(self) -> None:
+        self._loop.cancel()
+        waits.register_watcher(None)
+
+    @tasks.loop(seconds=LOOP_INTERVAL_SECONDS)
+    async def _watch_loop(self) -> None:
+        try:
+            await self.tick()
+        except Exception:
+            logger.exception("WaitWatcherCog: tick failed")
+
+    @_watch_loop.before_loop
+    async def _before_loop(self) -> None:
+        await self.bot.wait_until_ready()
+
+    async def tick(self) -> None:
+        """Check every due wait once. Waits whose previous check is still running are skipped."""
+        due = [w for w in await self.repo.due(now=self._clock()) if w.id not in self._in_flight]
+        await asyncio.gather(*(self._check(w) for w in due))
+
+    async def drain(self) -> None:
+        """Wait for resumes started by earlier ticks (tests, clean shutdown)."""
+        if self._resumes:
+            await asyncio.gather(*self._resumes, return_exceptions=True)
+
+    async def _check(self, wait: Wait) -> None:
+        self._in_flight.add(wait.id)
+        try:
+            async with self._slots:
+                result = await self._probe(wait.argv, cwd=wait.cwd)
+            now = self._clock()
+            verdict = evaluate_probe(wait.to_spec(), result)
+            errors = wait.consecutive_errors + 1 if verdict is Verdict.ERROR else 0
+            await self.repo.record_probe(
+                wait.id,
+                result,
+                next_check_at=now + wait.interval_seconds,
+                consecutive_errors=errors,
+            )
+            if verdict is Verdict.DONE:
+                await self._finish(wait, OUTCOME_DONE, result)
+            elif errors >= MAX_CONSECUTIVE_ERRORS:
+                await self._finish(wait, OUTCOME_PROBE_ERROR, result)
+            elif now >= wait.deadline:
+                await self._finish(wait, OUTCOME_TIMEOUT, result)
+        except Exception:
+            logger.exception("WaitWatcherCog: checking wait %d failed", wait.id)
+        finally:
+            self._in_flight.discard(wait.id)
+
+    async def _finish(self, wait: Wait, outcome: str, result: ProbeResult) -> None:
+        # claim() is the guard: only the caller that flips the row resumes, so a
+        # cancel or a second watcher racing this one cannot double-fire.
+        if not await self.repo.claim(wait.id, outcome):
+            return
+        logger.info("Wait %d (thread %d) ended: %s", wait.id, wait.thread_id, outcome)
+        prompt = build_wait_prompt(
+            wait_id=wait.id,
+            label=wait.label,
+            argv=wait.argv,
+            outcome=outcome,
+            exit_code=result.exit_code,
+            output=result.output,
+            note=wait.note,
+            error=result.error,
+        )
+        # The resumed turn can run for a long time; it must not hold up the loop.
+        task = asyncio.create_task(self._resume(wait, prompt), name=f"ccdb-wait-{wait.id}")
+        self._resumes.add(task)
+        task.add_done_callback(self._resumes.discard)
+
+    async def _resume(self, wait: Wait, prompt: str) -> None:
+        try:
+            delivered = await self._deliver(wait.thread_id, prompt)
+        except Exception:
+            logger.exception("WaitWatcherCog: resuming thread %d failed", wait.thread_id)
+            delivered = False
+        now = self._clock()
+        if delivered:
+            await self.repo.mark_delivered(wait.id, now=now)
+            return
+        if wait.delivery_failures + 1 >= MAX_DELIVERY_FAILURES:
+            await self.repo.give_up(wait.id, now=now)
+            logger.error(
+                "WaitWatcherCog: could not resume thread %d for wait %d; giving up after %d tries",
+                wait.thread_id,
+                wait.id,
+                MAX_DELIVERY_FAILURES,
+            )
+            return
+        await self.repo.release_for_retry(wait.id, next_check_at=now + DELIVERY_RETRY_SECONDS)
+        logger.warning(
+            "WaitWatcherCog: could not resume thread %d for wait %d; will retry",
+            wait.thread_id,
+            wait.id,
+        )
+
+    async def _deliver_to_discord(self, thread_id: int, prompt: str) -> bool:
+        import discord
+
+        cog = self.bot.cogs.get("ClaudeChatCog")
+        if cog is None:
+            return False
+        thread = self.bot.get_channel(thread_id)
+        if thread is None:
+            try:
+                thread = await self.bot.fetch_channel(thread_id)
+            except discord.NotFound:
+                # Deleted: nobody is left to resume, and retrying cannot change that.
+                logger.info("WaitWatcherCog: thread %d no longer exists", thread_id)
+                return True
+            except discord.HTTPException:
+                return False
+        if not isinstance(thread, discord.Thread):
+            return True
+        # Returns once the resumed turn has run (it queues behind a running one).
+        await cog.deliver_relayed_message(thread, prompt, interrupt=False)  # type: ignore[attr-defined]
+        return True

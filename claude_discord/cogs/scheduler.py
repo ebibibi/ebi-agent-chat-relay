@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from ..backend_settings import BackendSettings
     from ..database.repository import SessionRepository
     from ..database.task_repo import TaskRepository
+    from ..database.wait_repo import WaitRepository
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +63,13 @@ class SchedulerCog(commands.Cog):
         backend_factory: BackendFactory | None = None,
         backend_settings: BackendSettings | None = None,
         frontend: SessionFrontend | None = None,
+        wait_repo: WaitRepository | None = None,
     ) -> None:
         self.bot = bot
+        # Threads with an active wait (/api/waits) will also be posted into
+        # later, so they share the ⏰ marker. One reconciler owns the marker —
+        # two would keep undoing each other's renames.
+        self.wait_repo = wait_repo
         self.runner = runner
         self.repo = repo
         self.session_repo = session_repo
@@ -142,13 +148,16 @@ class SchedulerCog(commands.Cog):
         disabled when it finishes — so its thread drops out as soon as it fires.
         A recurring task keeps its thread pending while it runs.
         """
-        return {
+        pending = {
             task["thread_id"]
             for task in await self.repo.get_all()
             if task["enabled"]
             and task.get("thread_id")
             and not (task["one_shot"] and task["id"] in self._running)
         }
+        if self.wait_repo is not None:
+            pending |= await self.wait_repo.active_thread_ids()
+        return pending
 
     @_master_loop.before_loop
     async def _before_master_loop(self) -> None:

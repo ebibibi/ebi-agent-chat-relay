@@ -112,6 +112,16 @@ Claude calls POST /api/tasks    → registers a periodic task
 SchedulerCog (30s master loop)  → fires due tasks automatically
 ```
 
+### Waiting on CI Without Holding a Slot (WaitWatcherCog)
+
+A turn that watches a pipeline holds a concurrency slot while doing nothing. Instead, the session registers a **wait** — a probe command such as `gh pr checks 12` — and ends its turn. ccdb re-runs the probe (no shell, no model, no slot) and resumes the thread with the result when it says done, times out, or keeps failing. Works for GitHub, Azure Pipelines or anything with a status command; no webhook or public ingress needed. See [docs/waits.md](docs/waits.md).
+
+```
+Claude calls POST /api/waits    → registers the probe, ends its turn
+WaitWatcherCog (15s loop)       → runs due probes
+probe says done                 → "[WAIT FINISHED]" continuation in the same thread
+```
+
 ### CI/CD Automation
 
 Trigger Claude Code tasks from GitHub Actions via Discord webhooks. Claude runs autonomously — reads code, updates docs, creates PRs, enables auto-merge.
@@ -596,6 +606,7 @@ The operator sets the default and an allowlist in the environment (`CCDB_EXECUTI
 - **Self-registration** — Claude registers tasks via `POST /api/tasks` during a chat session
 - **No code changes** — Add, remove, or modify tasks at runtime
 - **Enable/disable** — Pause tasks without deleting them (`PATCH /api/tasks/{id}`)
+- **Waits** — `POST /api/waits` lets a session end its turn while CI runs; ccdb polls the probe and resumes the thread when it is done (persistent across restarts, see `docs/waits.md`)
 
 ### CI/CD Automation
 - **Webhook triggers** — Trigger Claude Code tasks from GitHub Actions or any CI/CD system
