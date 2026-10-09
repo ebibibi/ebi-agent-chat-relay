@@ -125,3 +125,21 @@ class TestCompactStatus:
         # Callback should NOT have fired because compact reset the timer
         callback.assert_not_awaited()
         await sm.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_rename_of_deleted_thread_is_not_warned(caplog: pytest.LogCaptureFixture) -> None:
+    import discord
+
+    from claude_discord.thread_status import _rename
+
+    thread = MagicMock(spec=discord.Thread)
+    thread.id = 1
+    thread.name = "title"
+    thread.edit = AsyncMock(
+        side_effect=discord.NotFound(MagicMock(status=404, reason="x"), "Unknown Channel")
+    )
+    with caplog.at_level("WARNING"):
+        exc = await _rename(thread, "done")
+    assert isinstance(exc, discord.NotFound)
+    assert not caplog.records

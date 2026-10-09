@@ -42,6 +42,9 @@ async def _rename(thread: discord.Thread, outcome: str | None) -> Exception | No
         return None
     try:
         await thread.edit(name=renamed)
+    except discord.NotFound as exc:  # thread deleted since the turn ended; nothing to title
+        logger.info("Thread %d is gone; skipping outcome %r", thread.id, outcome)
+        return exc
     except Exception as exc:  # rate limited, archived, missing permission
         logger.warning("Failed to set outcome %r on thread %d", outcome, thread.id, exc_info=True)
         return exc
