@@ -174,9 +174,12 @@ def build_completion_prompt(prs: tuple[PullRequestStatus, ...]) -> str:
         [
             "",
             "The previous answer is not a terminal completion while these owner PRs remain open.",
-            "For each PR: inspect it, wait for all checks, fix failures when in scope, merge it,",
+            "For each PR: inspect it, fix failures when in scope, merge it once checks pass,",
             "then verify the PR is closed and perform any required post-merge deployment or",
             "installed-consumer update. Do not claim completion merely because a PR exists.",
+            "If checks are still running, do not watch them in this turn: register a wait",
+            "(POST $CCDB_API_URL/api/waits, see the system instructions), say what you are",
+            "waiting for, and end the turn — you will be resumed when the checks finish.",
             "If a PR is genuinely blocked by a decision or authority outside the current request,",
             "report the exact blocker and evidence instead of looping or broadening scope.",
         ]

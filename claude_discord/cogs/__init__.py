@@ -14,6 +14,7 @@ from .sandbox_command import SandboxCommandCog
 from .scheduler import SchedulerCog
 from .session_manage import SessionManageCog
 from .skill_command import SkillCommandCog
+from .wait_watcher import WaitWatcherCog
 from .webhook_trigger import WebhookTriggerCog
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "NotificationDispatchCog",
     "OllamaCommandCog",
     "SchedulerCog",
+    "WaitWatcherCog",
     "SessionManageCog",
     "AskCommandCog",
     "SkillCommandCog",

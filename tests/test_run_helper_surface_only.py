@@ -81,3 +81,20 @@ async def test_lounge_context_is_built_without_a_discord_thread() -> None:
     await _build_system_context(config)
 
     lounge_repo.get_recent.assert_awaited_once()
+
+
+async def test_wait_guidance_appears_only_while_a_watcher_runs() -> None:
+    from claude_discord import waits
+
+    runner = _runner()
+    runner.api_port = 8099
+    config = RunConfig(surface=MemorySurface(), runner=runner, prompt="push and wait for CI")
+
+    waits.set_watcher_active(False)
+    assert "/api/waits" not in (await _build_system_context(config) or "")
+
+    waits.set_watcher_active(True)
+    try:
+        assert "/api/waits" in (await _build_system_context(config) or "")
+    finally:
+        waits.set_watcher_active(False)

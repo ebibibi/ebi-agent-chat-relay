@@ -155,6 +155,15 @@ def _build_done_marker_section(config: RunConfig) -> str | None:
     )
 
 
+def _build_wait_section(config: RunConfig) -> str | None:
+    """Tell the agent to end its turn while CI runs — only where a watcher will resume it."""
+    from .. import waits
+
+    if not waits.watcher_active() or getattr(config.runner, "api_port", None) is None:
+        return None
+    return waits.build_wait_section()
+
+
 def _waiting_marker_hint() -> str:
     """The counterpart of done: the turn ends because the human has to move next.
 
@@ -261,6 +270,10 @@ async def _build_system_context(config: RunConfig) -> str | None:
     done_section = _build_done_marker_section(config)
     if done_section:
         parts.append(done_section)
+
+    wait_section = _build_wait_section(config)
+    if wait_section:
+        parts.append(wait_section)
 
     # Post-compact guardrail: prevent auto-execution of "pending tasks" from summary.
     if config.post_compact_rerun:
