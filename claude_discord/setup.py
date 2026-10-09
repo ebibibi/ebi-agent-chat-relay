@@ -224,6 +224,7 @@ async def setup_bridge(
     from .cogs.context_links import ContextLinksCog
     from .cogs.scheduler import SchedulerCog
     from .cogs.session_manage import SessionManageCog
+    from .cogs.session_queue import SessionQueueCog
     from .cogs.skill_command import SkillCommandCog
     from .cross_backend_handoff import ConversationHistoryReader
     from .database.inbox_repo import ThreadInboxRepository
@@ -477,6 +478,10 @@ async def setup_bridge(
     )
     await bot.add_cog(session_manage_cog)
     logger.info("Registered SessionManageCog")
+
+    # --- SessionQueueCog (/queue: steer the session slot queue) ---
+    await bot.add_cog(SessionQueueCog(bot, allowed_user_ids=allowed_user_ids))
+    logger.info("Registered SessionQueueCog")
 
     # --- SkillCommandCog (requires at least one channel ID) ---
     if _all_channel_ids:

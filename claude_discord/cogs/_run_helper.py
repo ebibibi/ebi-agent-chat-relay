@@ -27,8 +27,16 @@ from claude_code_core.frontend import Notice, NoticeLevel
 
 from ..discord_ui.ask_handler import collect_ask_answers
 from ..discord_ui.embeds import error_embed, timeout_embed
+from ..discord_ui.slot_views import SlotWaitView, waiting_embed
 from ..lounge import build_lounge_prompt
 from ..pr_completion_gate import GitHubPrCompletionGate, build_completion_prompt
+from ..session_slots import (
+    SessionSlotScheduler,
+    SlotEntry,
+    SlotPriority,
+    configure_session_slots,
+    get_session_slots,
+)
 from ..thread_marker import OUTCOME_ERROR, OUTCOME_WAITING
 from ..thread_status import schedule_thread_outcome
 from .event_processor import EventProcessor
@@ -39,9 +47,16 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Global session slot limiter
 # ---------------------------------------------------------------------------
-_global_semaphore: asyncio.Semaphore | None = None
-_max_concurrent: int = 3
 _pr_completion_gate: GitHubPrCompletionGate | None = None
+
+# Prompt for the automatic continuation of a session paused to free its slot.
+# The interrupted turn is already in the transcript, so --resume plus this
+# prompt picks the work up where it stopped.
+PAUSE_RESUME_PROMPT = (
+    "[Resumed automatically] This session was paused mid-turn so another "
+    "session could use its slot. Continue the interrupted work from where it "
+    "stopped. Do not redo steps that already completed."
+)
 
 
 def configure_session_limit(max_concurrent: int) -> None:
@@ -49,11 +64,9 @@ def configure_session_limit(max_concurrent: int) -> None:
 
     Called once from ``setup_bridge()`` during startup.  All subsequent calls to
     ``run_claude_with_config()`` — regardless of which Cog invokes them — will
-    honour the limit.
+    honour the limit, through one reorderable queue (``session_slots.py``).
     """
-    global _global_semaphore, _max_concurrent  # noqa: PLW0603
-    _max_concurrent = max_concurrent
-    _global_semaphore = asyncio.Semaphore(max_concurrent)
+    configure_session_slots(max_concurrent)
 
 
 def configure_pr_completion_gate(owner: str | None) -> None:
@@ -475,21 +488,14 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
 
     processor = EventProcessor(config)
 
-    # --- Session slot limiter (global semaphore) ---
-    sem = _global_semaphore
-    if sem is not None and sem.locked():
-        with contextlib.suppress(Exception):
-            await config.surface.send_notice(
-                Notice(
-                    level=NoticeLevel.SUBTLE,
-                    body=(
-                        f"\u23f3 Waiting for a free session slot\u2026 "
-                        f"({_max_concurrent} max sessions running)"
-                    ),
-                )
-            )
-    if sem is not None:
-        await sem.acquire()
+    # --- Session slot limiter (reorderable queue) ---
+    slots = get_session_slots()
+    slot = await _acquire_slot(config, slots) if slots is not None else None
+    if slot is not None:
+        slot.on_pause = runner.interrupt
+    if config.resumed_from_pause:
+        # Deferred only while queueing; later compact/ask reruns queue normally.
+        config = replace(config, resumed_from_pause=False)
 
     try:
         async for event in runner.run(config.prompt, session_id=config.session_id):
@@ -514,13 +520,18 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
         await _emit_result_sink(config, None, f"{type(exc).__name__}: {exc}")
         return processor.session_id
     finally:
-        if sem is not None:
-            sem.release()
+        if slots is not None and slot is not None:
+            slots.release(slot)
         await processor.finalize()
         if config.registry is not None:
             config.registry.unregister(config.surface.thread_key)
         if config.worktree_manager is not None:
             await _cleanup_session_worktree(config)
+
+    # Paused to free the slot: queue the continuation as deferred so it
+    # resumes on its own once the sessions it yielded to are through.
+    if slot is not None and slot.pause_requested:
+        return await _requeue_paused(config, processor)
 
     # After compact_boundary, rerun with a guardrail to prevent Claude from
     # auto-executing "pending tasks" from the compacted context summary.
@@ -585,6 +596,70 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
         schedule_thread_outcome(config.thread, OUTCOME_ERROR)
     await _emit_result_sink(config, processor.final_assistant_text, processor.final_error)
     return processor.session_id
+
+
+def _slot_label(config: RunConfig) -> str:
+    name = getattr(config.thread, "name", None)
+    return name if isinstance(name, str) and name else str(config.surface.thread_key)
+
+
+async def _acquire_slot(config: RunConfig, slots: SessionSlotScheduler) -> SlotEntry:
+    """Take a session slot, showing queue controls while the run waits."""
+    thread_key = config.surface.thread_key
+    priority = SlotPriority.DEFERRED if config.resumed_from_pause else SlotPriority.NORMAL
+    acquire_coro = slots.acquire(
+        thread_key,
+        label=_slot_label(config),
+        priority=priority,
+        resumed_from_pause=config.resumed_from_pause,
+    )
+    if not slots.would_wait(priority):
+        return await acquire_coro
+
+    acquire = asyncio.ensure_future(acquire_coro)
+    # Let the entry join the queue first so the message shows its position.
+    await asyncio.sleep(0)
+
+    view: SlotWaitView | None = None
+    message: discord.Message | None = None
+    if isinstance(config.thread, discord.abc.Messageable):
+        view = SlotWaitView(slots, thread_key)
+        with contextlib.suppress(Exception):
+            message = await config.thread.send(
+                embed=waiting_embed(slots, thread_key, resumed=config.resumed_from_pause),
+                view=view,
+            )
+    else:
+        with contextlib.suppress(Exception):
+            await config.surface.send_notice(
+                Notice(
+                    level=NoticeLevel.SUBTLE,
+                    body=(
+                        f"\u23f3 Waiting for a free session slot\u2026 "
+                        f"({slots.max_slots} max sessions running)"
+                    ),
+                )
+            )
+    try:
+        return await acquire
+    finally:
+        if view is not None:
+            await view.close(message, resumed=config.resumed_from_pause)
+
+
+async def _requeue_paused(config: RunConfig, processor: EventProcessor) -> str | None:
+    """Continue a paused session once a slot is free again."""
+    session_id = processor.session_id or config.session_id
+    logger.info("Thread %d paused to free its slot; re-queued", config.surface.thread_key)
+    resume_config = replace(
+        config,
+        # Without a session there is nothing to resume, so the original
+        # request runs again from the start.
+        prompt=PAUSE_RESUME_PROMPT if session_id else config.prompt,
+        session_id=session_id,
+        resumed_from_pause=True,
+    )
+    return await run_claude_with_config(resume_config)
 
 
 async def _emit_result_sink(config: RunConfig, text: str | None, error: str | None) -> None:
