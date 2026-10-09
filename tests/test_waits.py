@@ -108,12 +108,13 @@ class TestParseWaitSpec:
         with pytest.raises(WaitSpecError, match="note"):
             parse_wait_spec(_spec(note="x" * 1001))
 
-    def test_cwd_must_be_an_existing_absolute_directory(self, tmp_path) -> None:
+    def test_cwd_must_be_an_absolute_directory_under_a_root(self, tmp_path) -> None:
         assert parse_wait_spec(_spec(cwd=str(tmp_path))).cwd == str(tmp_path)
         with pytest.raises(WaitSpecError, match="cwd"):
             parse_wait_spec(_spec(cwd="relative/dir"))
-        with pytest.raises(WaitSpecError, match="cwd"):
-            parse_wait_spec(_spec(cwd=str(tmp_path / "missing")))
+        # Existence is the probe's problem: it fails to start and says so.
+        missing = str(tmp_path / "missing")
+        assert parse_wait_spec(_spec(cwd=missing)).cwd == missing
 
     def test_cwd_outside_the_allowed_roots_is_refused(self, tmp_path, monkeypatch) -> None:
         allowed = tmp_path / "allowed"

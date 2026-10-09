@@ -276,33 +276,32 @@ def _cwd_roots() -> list[str]:
     return [os.path.realpath(r) for r in roots]
 
 
-def allowed_cwd(raw: object) -> str | None:
-    """*raw* resolved, if it is an existing directory under an allowed root; else None.
+def contained_cwd(raw: object) -> str | None:
+    """*raw* resolved, if it lies under an allowed root; else None.
 
     Roots default to the relay user's home. Resolved with ``realpath`` before
     the prefix test, so ``..`` or a symlink cannot point a probe elsewhere.
+    Existence is deliberately not checked here: a caller-supplied path never
+    reaches a filesystem call in ccdb — a directory that does not exist makes
+    the probe fail to start, which the session is told about like any other
+    probe error.
     """
     if not isinstance(raw, str) or not os.path.isabs(raw):
         return None
     resolved = os.path.realpath(raw)
-    root = next((r for r in _cwd_roots() if resolved == r or resolved.startswith(r + os.sep)), None)
-    if root is None:
-        return None
-    # Repeated as a straight-line guard right before the filesystem call, spelled
-    # like ApiServer._contained_path: CodeQL recognises realpath + a negative
-    # prefix test as a path sanitiser, but not one inside the search above.
-    if resolved != root and not resolved.startswith(root + os.sep):
-        return None
-    return resolved if os.path.isdir(resolved) else None
+    for root in _cwd_roots():
+        if resolved == root or resolved.startswith(root + os.sep):
+            return resolved
+    return None
 
 
 def _parse_cwd(raw: object) -> str | None:
     if raw is None or raw == "":
         return None
-    resolved = allowed_cwd(raw)
+    resolved = contained_cwd(raw)
     if resolved is None:
         raise WaitSpecError(
-            f"cwd must be an existing absolute directory under the allowed roots ({CWD_ROOTS_ENV})"
+            f"cwd must be an absolute directory under the allowed roots ({CWD_ROOTS_ENV})"
         )
     return resolved
 

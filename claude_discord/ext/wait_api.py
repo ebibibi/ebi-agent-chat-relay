@@ -12,13 +12,14 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from typing import TYPE_CHECKING
 
 from aiohttp import web
 
 from ..database.wait_repo import WaitLimitError
-from ..waits import WaitSpecError, allowed_cwd, parse_wait_spec
+from ..waits import WaitSpecError, contained_cwd, parse_wait_spec
 
 if TYPE_CHECKING:
     from claude_code_core.session_repo import SessionRepository
@@ -60,7 +61,11 @@ async def _session_dir(session_repo: SessionRepository, raw_thread_id: object) -
     except (TypeError, ValueError):
         return None
     record = await session_repo.get(thread_id)
-    return allowed_cwd(getattr(record, "working_dir", None) if record else None)
+    working_dir = getattr(record, "working_dir", None) if record else None
+    # The session's own stored directory, not request input — safe to stat.
+    if isinstance(working_dir, str) and os.path.isdir(working_dir):
+        return contained_cwd(working_dir)
+    return None
 
 
 async def handle_list_waits(request: web.Request, repo: WaitRepository) -> web.Response:
