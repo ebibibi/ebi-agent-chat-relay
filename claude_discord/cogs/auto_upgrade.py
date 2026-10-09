@@ -330,15 +330,30 @@ class AutoUpgradeCog(commands.Cog):
                     await status_target.add_reaction("✅")
                 await thread.send("✅ Upgrade complete (no restart configured).")
 
+        except discord.NotFound:
+            # The thread was deleted mid-pipeline (e.g. swept while awaiting approval).
+            logger.info("Upgrade thread %d no longer exists; aborting pipeline", thread.id)
         except TimeoutError:
-            await thread.send("❌ Step timed out.")
-            if status_target is not None:
-                await status_target.add_reaction("❌")
+            await self._report_failure(thread, status_target, "❌ Step timed out.")
         except Exception:
             logger.exception("Auto-upgrade error")
-            await thread.send("❌ Upgrade failed with an unexpected error.")
+            await self._report_failure(
+                thread, status_target, "❌ Upgrade failed with an unexpected error."
+            )
+
+    async def _report_failure(
+        self,
+        thread: discord.Thread,
+        status_target: discord.Message | None,
+        text: str,
+    ) -> None:
+        """Post *text* and mark the trigger ❌; a deleted thread/message is not an error."""
+        try:
+            await thread.send(text)
             if status_target is not None:
                 await status_target.add_reaction("❌")
+        except discord.NotFound:
+            logger.info("Upgrade thread %d vanished before failure was reported", thread.id)
 
     def _collect_active_thread_ids(self) -> frozenset[int]:
         """Return the IDs of threads with currently-running Claude sessions.
