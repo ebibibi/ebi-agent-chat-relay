@@ -1107,7 +1107,8 @@ class ClaudeChatCog(commands.Cog):
 
         Args:
             thread: The receiving thread.
-            text: Already-wrapped message (see ``relay.build_relay_prompt``).
+            text: Already-wrapped message (``relay.build_relay_prompt``, or a
+                finished wait's ``waits.build_wait_prompt``).
             interrupt: When True, SIGINT the turn in flight so a "stop, I have
                 this" reaches Claude within seconds. When False, wait for the
                 current turn to finish — the right default, because a message

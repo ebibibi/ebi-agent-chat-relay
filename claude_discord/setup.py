@@ -503,6 +503,16 @@ async def setup_bridge(
         await bot.add_cog(skill_cog)
         logger.info("Registered SkillCommandCog")
 
+    # --- Waits (on by default) ---
+    # Refused where an agent may run sandboxed: a probe runs on the host.
+    if enable_waits:
+        from .waits import waits_unavailable_reason
+
+        reason = waits_unavailable_reason()
+        if reason is not None:
+            enable_waits = False
+            logger.warning("Waits disabled: %s", reason)
+
     # --- SchedulerCog (optional) ---
     task_repo: TaskRepository | None = None
     if enable_scheduler:
@@ -527,7 +537,7 @@ async def setup_bridge(
         await bot.add_cog(scheduler_cog)
         logger.info("Registered SchedulerCog")
 
-    # --- WaitWatcherCog (on by default) ---
+    # --- WaitWatcherCog ---
     # Resumes a thread when a wait registered via /api/waits ends, so a session
     # can end its turn (and free its slot) while CI runs.
     if enable_waits:

@@ -15,10 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while CI/CD runs. ccdb re-runs the registered probe (`argv`, no shell, relay credentials
   stripped) every `interval_seconds` and resumes the thread with a fixed
   `[WAIT FINISHED — automatic continuation]` prompt when the probe says done
-  (`pending_exit_codes` / `done_pattern`), the wait times out, or the probe fails 5 times in a
-  row. Waits are stored in the session database and survive restarts; threads with one carry ⏰.
+  (`pending_exit_codes` / `done_values`), the wait times out, or the probe fails 5 times in a
+  row. Waits are stored in the session database and survive restarts (a resume cut off by a
+  restart or a failed delivery is retried); threads with one carry ⏰. Re-registering the same
+  probe returns the live wait. Disabled when execution modes other than `host` are allowed.
   `GET` / `DELETE /api/waits` list and cancel. The system instructions and the PR completion gate
-  now tell agents to register a wait instead of watching pipelines in the turn. On by default
+  tell agents to register a wait instead of watching pipelines in the turn (only where waits
+  work), and the gate stays quiet while the thread has an active wait. On by default
   (`enable_waits=False` to turn off). See `docs/waits.md`.
 - **Account pools** (#821) — `CCDB_ACCOUNT_POOLS_FILE` names a TOML file of pre-logged-in Claude
   Code / Codex profile directories per backend and a strategy (`priority`, `sticky`,

@@ -159,8 +159,30 @@ class GitHubPrCompletionGate:
         return tuple(results)
 
 
-def build_completion_prompt(prs: tuple[PullRequestStatus, ...]) -> str:
-    """Build the single automatic continuation used to finish owner PRs."""
+def build_completion_prompt(
+    prs: tuple[PullRequestStatus, ...], *, waits_available: bool = False
+) -> str:
+    """Build the single automatic continuation used to finish owner PRs.
+
+    With *waits_available* the agent is told to end the turn while checks run
+    (``/api/waits`` resumes it); without, nothing would resume it, so it waits
+    in the turn as before.
+    """
+    if waits_available:
+        waiting = [
+            "For each PR: inspect it, fix failures when in scope, merge it once checks pass,",
+            "then verify the PR is closed and perform any required post-merge deployment or",
+            "installed-consumer update. Do not claim completion merely because a PR exists.",
+            "If checks are still running, do not watch them in this turn: register a wait",
+            "(POST $CCDB_API_URL/api/waits, see the system instructions), say what you are",
+            "waiting for, and end the turn — you will be resumed when the checks finish.",
+        ]
+    else:
+        waiting = [
+            "For each PR: inspect it, wait for all checks, fix failures when in scope, merge it,",
+            "then verify the PR is closed and perform any required post-merge deployment or",
+            "installed-consumer update. Do not claim completion merely because a PR exists.",
+        ]
     lines = [
         "[PR COMPLETION GATE — automatic continuation]",
         "This session created or owns non-draft PRs that are still open:",
@@ -174,12 +196,7 @@ def build_completion_prompt(prs: tuple[PullRequestStatus, ...]) -> str:
         [
             "",
             "The previous answer is not a terminal completion while these owner PRs remain open.",
-            "For each PR: inspect it, fix failures when in scope, merge it once checks pass,",
-            "then verify the PR is closed and perform any required post-merge deployment or",
-            "installed-consumer update. Do not claim completion merely because a PR exists.",
-            "If checks are still running, do not watch them in this turn: register a wait",
-            "(POST $CCDB_API_URL/api/waits, see the system instructions), say what you are",
-            "waiting for, and end the turn — you will be resumed when the checks finish.",
+            *waiting,
             "If a PR is genuinely blocked by a decision or authority outside the current request,",
             "report the exact blocker and evidence instead of looping or broadening scope.",
         ]

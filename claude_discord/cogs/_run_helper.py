@@ -20,6 +20,7 @@ import contextlib
 import logging
 import re
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 import discord
 
@@ -33,6 +34,9 @@ from ..thread_marker import OUTCOME_ERROR, OUTCOME_WAITING
 from ..thread_status import schedule_thread_outcome
 from .event_processor import EventProcessor
 from .run_config import RunConfig
+
+if TYPE_CHECKING:
+    from ..database.wait_repo import WaitRepository
 
 logger = logging.getLogger(__name__)
 
@@ -159,9 +163,16 @@ def _build_wait_section(config: RunConfig) -> str | None:
     """Tell the agent to end its turn while CI runs — only where a watcher will resume it."""
     from .. import waits
 
-    if not waits.watcher_active() or getattr(config.runner, "api_port", None) is None:
+    if not _waits_available(config):
         return None
     return waits.build_wait_section()
+
+
+def _waits_available(config: RunConfig) -> bool:
+    """A watcher runs and this turn's agent can reach the control plane to register."""
+    from .. import waits
+
+    return waits.watcher_active() and getattr(config.runner, "api_port", None) is not None
 
 
 def _waiting_marker_hint() -> str:
@@ -413,6 +424,16 @@ async def _get_pr_completion_prompt(
     ):
         return None
 
+    # A thread that registered a wait has done exactly what the gate asks for;
+    # continuing it now would only register the same wait again.
+    wait_repo = _waits_repo_if_available(config)
+    if wait_repo is not None:
+        try:
+            if config.surface.thread_key in await wait_repo.active_thread_ids():
+                return None
+        except Exception:
+            logger.warning("Could not read waits for the PR completion gate", exc_info=True)
+
     try:
         prs = await gate.find_for_thread(config.surface.thread_key)
     except Exception:
@@ -448,7 +469,13 @@ async def _get_pr_completion_prompt(
                 ),
             )
         )
-    return build_completion_prompt(prs)
+    return build_completion_prompt(prs, waits_available=_waits_available(config))
+
+
+def _waits_repo_if_available(config: RunConfig) -> WaitRepository | None:
+    from .. import waits
+
+    return waits.watcher_repo() if _waits_available(config) else None
 
 
 async def run_claude_with_config(config: RunConfig) -> str | None:

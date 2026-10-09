@@ -71,7 +71,7 @@ async def test_create_returns_201_with_the_wait(client: TestClient) -> None:
         _body(argv="gh pr checks 5"),
         _body(pending_exit_codes=None),
         _body(thread_id=None),
-        _body(done_pattern="(bad"),
+        _body(done_values="completed"),
     ],
 )
 async def test_create_rejects_bad_specs(client: TestClient, body: dict) -> None:
@@ -85,9 +85,19 @@ async def test_create_rejects_invalid_json(client: TestClient) -> None:
     assert resp.status == 400
 
 
+async def test_registering_the_same_probe_again_returns_200(client: TestClient) -> None:
+    first = await (await client.post("/api/waits", json=_body())).json()
+    resp = await client.post("/api/waits", json=_body())
+    assert resp.status == 200
+    data = await resp.json()
+    assert data["status"] == "already_waiting"
+    assert data["wait"]["id"] == first["wait"]["id"]
+
+
 async def test_create_reports_limit_with_429(client: TestClient) -> None:
-    for _ in range(MAX_WAITS_PER_THREAD):
-        assert (await client.post("/api/waits", json=_body())).status == 201
+    for i in range(MAX_WAITS_PER_THREAD):
+        body = _body(argv=["probe", str(i)])
+        assert (await client.post("/api/waits", json=body)).status == 201
     resp = await client.post("/api/waits", json=_body())
     assert resp.status == 429
 

@@ -90,11 +90,11 @@ async def test_wait_guidance_appears_only_while_a_watcher_runs() -> None:
     runner.api_port = 8099
     config = RunConfig(surface=MemorySurface(), runner=runner, prompt="push and wait for CI")
 
-    waits.set_watcher_active(False)
+    waits.register_watcher(None)
     assert "/api/waits" not in (await _build_system_context(config) or "")
 
-    waits.set_watcher_active(True)
+    waits.register_watcher(MagicMock())
     try:
         assert "/api/waits" in (await _build_system_context(config) or "")
     finally:
-        waits.set_watcher_active(False)
+        waits.register_watcher(None)

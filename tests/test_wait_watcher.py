@@ -63,7 +63,8 @@ async def _register(repo: WaitRepository, **overrides: object):
         "cwd": None,
     }
     body.update(overrides)
-    return await repo.create(parse_wait_spec(body), now=1000.0)
+    wait, _ = await repo.create(parse_wait_spec(body), now=1000.0)
+    return wait
 
 
 async def test_nothing_runs_before_the_first_interval(repo: WaitRepository) -> None:
@@ -155,12 +156,86 @@ async def test_a_success_resets_the_error_count(repo: WaitRepository) -> None:
     assert loaded is not None and loaded.consecutive_errors == 0
 
 
-async def test_failed_delivery_is_logged_not_raised(repo: WaitRepository, caplog) -> None:
-    await _register(repo)
-    cog = _cog(repo, FakeProbe(ProbeResult(0, "")), Delivered(ok=False), FakeClock(1060.0))
+async def test_failed_delivery_is_retried_not_lost(repo: WaitRepository) -> None:
+    wait = await _register(repo)
+    deliver = Delivered(ok=False)
+    clock = FakeClock(1060.0)
+    cog = _cog(repo, FakeProbe(ProbeResult(0, "green")), deliver, clock)
     await cog.tick()
     await cog.drain()
-    assert any("could not resume" in r.getMessage() for r in caplog.records)
+    loaded = await repo.get(wait.id)
+    assert loaded is not None
+    assert (loaded.status, loaded.delivery_failures) == ("active", 1)
+    # The next look re-probes and delivers again once the thread is reachable.
+    deliver.ok = True
+    clock.now = loaded.next_check_at
+    await cog.tick()
+    await cog.drain()
+    loaded = await repo.get(wait.id)
+    assert loaded is not None and loaded.status == "done"
+    assert len(deliver.calls) == 2
+
+
+async def test_delivery_that_raises_is_retried(repo: WaitRepository) -> None:
+    wait = await _register(repo)
+
+    async def boom(thread_id: int, prompt: str) -> bool:
+        raise RuntimeError("discord down")
+
+    cog = WaitWatcherCog(
+        MagicMock(),
+        repo,
+        probe=FakeProbe(ProbeResult(0, "")),
+        deliver=boom,
+        clock=FakeClock(1060.0),
+    )
+    await cog.tick()
+    await cog.drain()
+    loaded = await repo.get(wait.id)
+    assert loaded is not None and loaded.status == "active"
+
+
+async def test_undeliverable_after_repeated_failures(repo: WaitRepository) -> None:
+    from claude_discord.waits import MAX_DELIVERY_FAILURES
+
+    wait = await _register(repo)
+    clock = FakeClock(1060.0)
+    cog = _cog(repo, FakeProbe(ProbeResult(0, "")), Delivered(ok=False), clock)
+    for _ in range(MAX_DELIVERY_FAILURES):
+        await cog.tick()
+        await cog.drain()
+        loaded = await repo.get(wait.id)
+        assert loaded is not None
+        clock.now = loaded.next_check_at
+    loaded = await repo.get(wait.id)
+    assert loaded is not None and loaded.status == "undeliverable"
+
+
+async def test_resume_is_not_final_until_the_turn_ran(repo: WaitRepository) -> None:
+    import asyncio
+
+    wait = await _register(repo)
+    gate = asyncio.Event()
+
+    async def slow(thread_id: int, prompt: str) -> bool:
+        await gate.wait()
+        return True
+
+    cog = WaitWatcherCog(
+        MagicMock(),
+        repo,
+        probe=FakeProbe(ProbeResult(0, "")),
+        deliver=slow,
+        clock=FakeClock(1060.0),
+    )
+    await cog.tick()
+    await asyncio.sleep(0)
+    loaded = await repo.get(wait.id)
+    assert loaded is not None and loaded.status == "resuming"
+    gate.set()
+    await cog.drain()
+    loaded = await repo.get(wait.id)
+    assert loaded is not None and loaded.status == "done"
 
 
 async def test_probe_gets_the_registered_cwd(repo: WaitRepository, tmp_path) -> None:
@@ -170,10 +245,17 @@ async def test_probe_gets_the_registered_cwd(repo: WaitRepository, tmp_path) -> 
     assert probe.calls[0][1] == str(tmp_path)
 
 
-async def test_cog_load_announces_the_feature(repo: WaitRepository) -> None:
-    cog = _cog(repo, FakeProbe(ProbeResult(8, "")), Delivered(), FakeClock(0.0))
+async def test_cog_load_recovers_and_announces(repo: WaitRepository) -> None:
+    wait = await _register(repo)
+    await repo.claim(wait.id, "done")  # the bot died while this resume was queued
+    cog = _cog(repo, FakeProbe(ProbeResult(8, "")), Delivered(), FakeClock(5000.0))
     cog._loop = MagicMock()
     await cog.cog_load()
-    assert waits.watcher_active() is True
-    await cog.cog_unload()
+    try:
+        assert waits.watcher_active() is True
+        assert waits.watcher_repo() is repo
+        loaded = await repo.get(wait.id)
+        assert loaded is not None and loaded.status == "active"
+    finally:
+        await cog.cog_unload()
     assert waits.watcher_active() is False

@@ -2,7 +2,8 @@
 
 - ``POST /api/waits``: body is a wait spec. ``cwd`` defaults to the thread's
   session working directory when that still exists, so ``gh pr checks 12``
-  resolves the repository the session is working in. 201 / 400 / 429.
+  resolves the repository the session is working in. 201 when created, 200 with
+  the live wait when the same thread already waits on the same argv, 400 / 429.
 - ``GET /api/waits[?thread_id=N]``: active waits.
 - ``DELETE /api/waits/{id}[?thread_id=N]``: cancel; with ``thread_id`` only if
   that thread owns it. 200 / 404.
@@ -44,10 +45,13 @@ async def handle_create_wait(
     except WaitSpecError as exc:
         return web.json_response({"error": str(exc)}, status=400)
     try:
-        wait = await repo.create(spec, now=time.time())
+        wait, created = await repo.create(spec, now=time.time())
     except WaitLimitError as exc:
         return web.json_response({"error": str(exc)}, status=429)
-    return web.json_response({"status": "waiting", "wait": wait.to_dict()}, status=201)
+    return web.json_response(
+        {"status": "waiting" if created else "already_waiting", "wait": wait.to_dict()},
+        status=201 if created else 200,
+    )
 
 
 async def _session_dir(session_repo: SessionRepository, raw_thread_id: object) -> str | None:
