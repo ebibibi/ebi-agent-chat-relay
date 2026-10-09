@@ -31,6 +31,11 @@ from claude_discord.cogs.run_config import RunConfig
 from claude_discord.concurrency import SessionRegistry
 from claude_discord.discord_ui.streaming_manager import StreamingMessageManager
 from claude_discord.discord_ui.tool_timer import LiveToolTimer
+from claude_discord.session_slots import (
+    SessionSlotScheduler,
+    get_session_slots,
+    set_session_slots,
+)
 
 
 class TestTruncateResult:
@@ -1473,11 +1478,9 @@ class TestGlobalSessionSemaphore:
     @pytest.fixture(autouse=True)
     def _reset_semaphore(self):
         """Save and restore module-level semaphore state around each test."""
-        orig_sem = _rh_module._global_semaphore
-        orig_max = _rh_module._max_concurrent
+        orig = get_session_slots()
         yield
-        _rh_module._global_semaphore = orig_sem
-        _rh_module._max_concurrent = orig_max
+        set_session_slots(orig)
 
     @pytest.fixture
     def thread(self) -> MagicMock:
@@ -1507,8 +1510,9 @@ class TestGlobalSessionSemaphore:
 
     def test_configure_session_limit_sets_semaphore(self) -> None:
         configure_session_limit(5)
-        assert _rh_module._max_concurrent == 5
-        assert isinstance(_rh_module._global_semaphore, asyncio.Semaphore)
+        slots = get_session_slots()
+        assert isinstance(slots, SessionSlotScheduler)
+        assert slots.max_slots == 5
 
     @pytest.mark.asyncio
     async def test_semaphore_limits_concurrent_sessions(self, thread: MagicMock) -> None:
@@ -1606,13 +1610,14 @@ class TestGlobalSessionSemaphore:
         config = RunConfig(thread=thread, runner=runner, prompt="test")
         await run_claude_with_config(config)
 
-        sem = _rh_module._global_semaphore
-        assert not sem.locked(), "Semaphore should be released after error"
+        slots = get_session_slots()
+        assert slots is not None
+        assert slots.running_count == 0, "Slot should be released after error"
 
     @pytest.mark.asyncio
     async def test_no_semaphore_when_not_configured(self, thread: MagicMock) -> None:
         """When configure_session_limit was never called, no limiting occurs."""
-        _rh_module._global_semaphore = None
+        set_session_slots(None)
 
         runner = MagicMock()
         runner.working_dir = None
@@ -1622,6 +1627,74 @@ class TestGlobalSessionSemaphore:
         config = RunConfig(thread=thread, runner=runner, prompt="test")
         result = await run_claude_with_config(config)
         assert result == "sess-sem"
+
+    @pytest.mark.asyncio
+    async def test_paused_session_yields_its_slot_and_resumes_automatically(
+        self, thread: MagicMock
+    ) -> None:
+        """Pause frees the slot for the waiter, then the paused session continues."""
+        configure_session_limit(1)
+        slots = get_session_slots()
+        assert slots is not None
+
+        interrupted = asyncio.Event()
+        calls: list[tuple[str, str | None]] = []
+
+        def make_runner(thread_session: str, block_first: bool) -> MagicMock:
+            async def gen(prompt, session_id=None):
+                calls.append((prompt, session_id))
+                yield StreamEvent(message_type=MessageType.SYSTEM, session_id=thread_session)
+                # Only the original turn blocks; the resumed turn has another prompt.
+                if block_first and prompt == "long job":
+                    await interrupted.wait()
+                    return
+                yield StreamEvent(
+                    message_type=MessageType.RESULT,
+                    is_complete=True,
+                    session_id=thread_session,
+                    cost_usd=0.001,
+                    duration_ms=100,
+                )
+
+            runner = MagicMock()
+            runner.working_dir = None
+            runner.images = None
+            runner.run = gen
+            runner.interrupt = AsyncMock(side_effect=lambda: interrupted.set())
+            return runner
+
+        other_thread = MagicMock(spec=discord.Thread)
+        other_thread.id = 88888
+        other_thread.send = AsyncMock(return_value=MagicMock(spec=discord.Message))
+
+        long_task = asyncio.create_task(
+            run_claude_with_config(
+                RunConfig(thread=thread, runner=make_runner("sess-long", True), prompt="long job")
+            )
+        )
+        while not calls:
+            await asyncio.sleep(0.01)
+        urgent_task = asyncio.create_task(
+            run_claude_with_config(
+                RunConfig(
+                    thread=other_thread,
+                    runner=make_runner("sess-urgent", False),
+                    prompt="urgent",
+                )
+            )
+        )
+        while slots.position(88888) is None:
+            await asyncio.sleep(0.01)
+
+        await slots.pause(77777)
+        assert await asyncio.wait_for(urgent_task, 2) == "sess-urgent"
+        assert await asyncio.wait_for(long_task, 2) == "sess-long"
+
+        prompts = [c[0] for c in calls]
+        # The urgent run started before the paused one continued.
+        assert prompts.index("urgent") < prompts.index(_rh_module.PAUSE_RESUME_PROMPT)
+        assert (_rh_module.PAUSE_RESUME_PROMPT, "sess-long") in calls
+        assert slots.running_count == 0
 
     @pytest.mark.asyncio
     async def test_compact_rerun_does_not_deadlock(self, thread: MagicMock) -> None:

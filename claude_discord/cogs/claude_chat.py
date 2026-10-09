@@ -102,6 +102,7 @@ _HELP_CATEGORY: dict[str, str | None] = {
     "usage": "📌 Session",
     "attention": "📌 Session",
     "sessions": "📌 Session",
+    "queue": "📌 Session",  # reorder / pause sessions waiting for a slot
     "search": "📌 Session",
     "resume": "📌 Session",
     "resume-info": "📌 Session",

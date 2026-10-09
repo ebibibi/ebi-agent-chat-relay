@@ -95,6 +95,7 @@ _MAX_DISCORD_THREAD_NAME_LENGTH = MAX_THREAD_NAME_LENGTH
 # /api/sessions and /api/threads/{id}/messages — cross-session observability.
 # Bounded so one session peeking at another can never pull an unbounded amount
 # of history into its own context window.
+_SLOT_ACTIONS = ("prioritize", "defer", "pause")
 _DEFAULT_SESSION_LIMIT = 20
 # How long a mark request waits for the rename before answering "queued".
 _MARK_WAIT_SECONDS = 5.0
@@ -360,6 +361,8 @@ class ApiServer:
         self.app.router.add_delete("/api/claims", self.delete_claim)
         # Cross-session observability routes (requires session_repo)
         self.app.router.add_get("/api/sessions", self.list_sessions)
+        self.app.router.add_get("/api/slots", self.list_slots)
+        self.app.router.add_post("/api/slots/{thread_id}/{action}", self.slot_action)
         self.app.router.add_get("/api/attention", self.get_attention)
         self.app.router.add_get("/api/search", self.search_sessions)
         self.app.router.add_get("/api/threads/{thread_id}/messages", self.get_thread_messages)
@@ -1333,6 +1336,60 @@ class ApiServer:
             views = [v for v in views if v["thread_id"] != exclude_thread]
 
         return web.json_response({"sessions": views})
+
+    async def list_slots(self, request: web.Request) -> web.Response:
+        """GET /api/slots — who holds a session slot and who is queued for one.
+
+        Running entries come first, then the queue in the order it will start.
+        """
+        from ..session_slots import get_session_slots
+
+        slots = get_session_slots()
+        if slots is None:
+            return web.json_response({"max_slots": None, "running": [], "waiting": []})
+        snapshot = [info.as_dict() for info in slots.snapshot()]
+        return web.json_response(
+            {
+                "max_slots": slots.max_slots,
+                "running": [i for i in snapshot if i["state"] == "running"],
+                "waiting": [i for i in snapshot if i["state"] == "waiting"],
+            }
+        )
+
+    async def slot_action(self, request: web.Request) -> web.Response:
+        """POST /api/slots/{thread_id}/{prioritize|defer|pause} — steer the queue.
+
+        ``prioritize`` and ``defer`` reorder a waiting thread.  ``pause``
+        interrupts a running thread so a waiting one gets its slot; the paused
+        session resumes automatically once nobody is ahead of it.
+        """
+        from ..session_slots import SlotActionError, get_session_slots
+
+        action = request.match_info["action"]
+        if action not in _SLOT_ACTIONS:
+            return web.json_response(
+                {"error": f"action must be one of {', '.join(_SLOT_ACTIONS)}"}, status=400
+            )
+        try:
+            thread_id = int(request.match_info["thread_id"])
+        except ValueError:
+            return web.json_response({"error": "thread_id must be an integer"}, status=400)
+        slots = get_session_slots()
+        if slots is None:
+            return web.json_response({"error": "no session limit is configured"}, status=503)
+        try:
+            if action == "prioritize":
+                slots.prioritize(thread_id)
+            elif action == "defer":
+                slots.defer(thread_id)
+            else:
+                await slots.pause(thread_id)
+        except SlotActionError as exc:
+            status = 404 if exc.reason in ("not_queued", "not_running") else 409
+            return web.json_response({"error": str(exc), "reason": exc.reason}, status=status)
+        return web.json_response(
+            {"status": "ok", "action": action, "position": slots.position(thread_id)}
+        )
 
     async def search_sessions(self, request: web.Request) -> web.Response:
         """GET /api/search — find a past thread by keyword.
