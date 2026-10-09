@@ -533,6 +533,7 @@ config_dir = "/home/me/.claude-work"
 - **バックエンド間の会話引き継ぎ** — 実行中のスレッドを Claude と Codex の間で切り替えると、直前のバックエンドのローカル JSONL からサイズを制限したテキストのみの内容を読み取り、新しいネイティブセッションの初期文脈として渡します。手動での要約やコピペは不要
 - **Codex リジュームの自動復旧** — リジュームした Codex セッションで出力開始前に WebSocket 切断が繰り返された場合、ccdb は以前の会話からサイズを制限したテキストのみの会話履歴を引き継いで代替セッションを開始。画像やツールのデータは除外
 - **並行セッション** — 設定可能な上限での複数並行セッション
+- **操作できるセッションキュー** — `MAX_CONCURRENT_SESSIONS` の枠がすべて埋まっているとき、待機メッセージに **⏫ 次に実行** / **⏬ 他を先に** ボタンが付きます。`/queue` はどのチャンネルからでも実行中・待機中のスレッドを一覧でき、実行中のスレッドを **⏸ 一時停止** することもできます。一時停止したスレッドは枠を空け、譲った相手のスレッドが終わると自動で再開します（同じセッションを `--resume` で継続）。待機中のスレッドがないときは一時停止できません。同じ操作は `GET /api/slots` と `POST /api/slots/{thread_id}/{prioritize|defer|pause}` からも行えます。詳細は [docs/session-queue.md](../session-queue.md) を参照
 - **削除せず停止** — `/stop` でセッションを保持したまま停止し、リジューム可能
 - **セッション割り込み** — アクティブなスレッドに新しいメッセージを送ると実行中のセッションに SIGINT を送り、新しい指示で即座に再開。手動での `/stop` 不要
 - **スレッド自動リネーム** — `THREAD_AUTO_RENAME=true` のとき、最初のメッセージをもとに Claude が生成した短いタイトルでスレッドを自動リネーム（バックグラウンドタスクのためセッション開始を遅延させない）。その後も作業内容が明らかに別の話題へ移ったらタイトルを付け直す（15分に1回まで、ccdb が作ったスレッドのみ）
@@ -1303,6 +1304,8 @@ uv sync --extra api
 | GET | `/api/lounge` | AI Lounge の最近のメッセージを取得 |
 | POST | `/api/lounge` | AI Lounge にメッセージを投稿（`label` オプション）。200 文字を超えると `hint` フィールドを返す |
 | GET | `/api/sessions` | すべてのセッション（ライブ・保存済み）を状態・作業ディレクトリ・最新のラウンジメモ付きで一覧（`state=running`、`exclude_thread`、`limit`） |
+| GET | `/api/slots` | セッション枠のキュー: `max_slots`、枠を保持しているスレッド（`running`）、開始順に並んだ待機キュー（`waiting`） |
+| POST | `/api/slots/{thread_id}/{action}` | キューを操作 — 待機中のスレッドを `prioritize` / `defer`、実行中のスレッドを `pause`（状態が合わなければ 404、`nothing_waiting` などの競合は 409、上限未設定なら 503） |
 | GET | `/api/search` | キーワードから過去のスレッドを検索 — サマリーと作業ディレクトリへの `LIKE` クエリ。`body=1` を付けるとローカルの Claude トランスクリプトも grep（各ヒットに `snippet` と `source` が付く）。各ヒットを Discord `deep_link` 付きで返す（`q` 必須、任意の `origin`、`limit` は最大 50） |
 | GET | `/api/threads/{thread_id}/messages` | 他スレッドの会話を古い順に取得（`limit`） |
 | POST | `/api/claims` | 作業開始前にリソースを宣言 — 取得成功で 201、取得済みなら保持者情報付きで 409 |
@@ -1426,12 +1429,14 @@ claude_discord/
   lounge.py                # AI Lounge プロンプトビルダー
   session_view.py          # GET /api/sessions 用のクロスセッションビュー（純粋なマージロジック）
   relay.py                 # RelayGuard + リレープロンプトのラッパー（ホップ／クールダウン／レート制限）
+  session_slots.py         # 操作できるセッション枠キュー（優先 / 後回し / 一時停止 + 自動再開）
   session_sync.py          # CLI セッションの検出とインポート
   worktree.py              # WorktreeManager — git worktree の安全なライフサイクル管理
   cogs/
     claude_chat.py         # インタラクティブチャット（スレッド作成、メッセージ処理）
     skill_command.py       # /skill スラッシュコマンド（オートコンプリート付き）
     session_manage.py      # /sessions, /search, /sync-sessions, /resume, /resume-info, /sync-settings
+    session_queue.py       # /queue — セッション枠キューの確認と操作
     session_sync.py        # sync-sessions のスレッド作成・メッセージ投稿ロジック
     prompt_builder.py      # build_prompt_and_images() — 純粋関数、Cog/Bot 状態に非依存
     scheduler.py           # 定期 Claude Code タスク実行エンジン
@@ -1470,6 +1475,7 @@ claude_discord/
     streaming_manager.py   # StreamingMessageManager — デバウンス付きインプレース編集
     tool_timer.py          # LiveToolTimer — 長時間ツール実行の経過時間カウンター
     thread_dashboard.py    # スレッドのセッション状態を表示する live ピン embed
+    slot_views.py          # 待機メッセージと /queue 用のキュー操作ボタン・メニュー（⏫ / ⏬ / ⏸）
     file_sender.py         # .ccdb-attachments 経由のファイル配信
     inbox_classifier.py    # classify() — セッションにラベルを付ける軽量 claude -p 呼び出し
     thread_renamer.py      # suggest_title() — スレッド自動リネーム用バックグラウンド claude -p 呼び出し
