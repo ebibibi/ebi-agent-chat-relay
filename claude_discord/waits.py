@@ -286,8 +286,12 @@ def allowed_cwd(raw: object) -> str | None:
         return None
     resolved = os.path.realpath(raw)
     for root in _cwd_roots():
-        if resolved == root or resolved.startswith(root.rstrip(os.sep) + os.sep):
-            return resolved if os.path.isdir(resolved) else None
+        # Spelled exactly like ApiServer._contained_path: realpath + a negative
+        # prefix test against root + os.sep, in the function that touches the
+        # path — the form CodeQL recognises as a path sanitiser.
+        if resolved != root and not resolved.startswith(root + os.sep):
+            continue
+        return resolved if os.path.isdir(resolved) else None
     return None
 
 
