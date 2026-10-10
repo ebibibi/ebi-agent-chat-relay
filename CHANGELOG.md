@@ -61,6 +61,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and spawn lineage; only priority/due/snooze/project/parent live in the new `work_items` table.
   Always authenticated (Cloudflare Access JWT with an email allowlist, and/or a bearer token);
   refuses to start otherwise. See `docs/console.md` and ADR-0010.
+- **Relay Console: readable threads** — messages render as Markdown, the relay's own activity
+  (tool calls, status lines, automatic prompts) is hidden unless asked for, each column scrolls on
+  its own, the reply box is larger, and quick capture takes a note under the title.
 - **Waits** (#854) — `POST /api/waits` lets a session end its turn (freeing its concurrency slot)
   while CI/CD runs. ccdb re-runs the registered probe (`argv`, no shell, relay credentials
   stripped) every `interval_seconds` and resumes the thread with a fixed

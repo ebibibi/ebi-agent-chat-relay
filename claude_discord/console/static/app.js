@@ -1,15 +1,18 @@
 // Relay Console web client. No build step, no dependencies.
-// Every piece of server data reaches the page through textContent, never innerHTML.
+// Every piece of server data reaches the page through textContent, never innerHTML
+// (message Markdown included: markdown.js builds elements, it does not parse HTML).
 "use strict";
 
 const API = "/console/api";
 const POLL_MS = 8000;
+const HISTORY = 100;
 
 const I18N = {
   en: {
     me: "Inbox", ai: "Running", todo: "To do", idle: "Idle", tree: "Tree", snoozed: "Snoozed", done: "Done",
-    filter: "Filter…", capture: "+ Write down work, press Enter (c)", capture_ai: "+ Write down work, Enter hands it to AI (c)",
+    filter: "Filter…", capture: "+ Write down work, press Enter (c) — Shift+Enter for a note line", capture_ai: "+ Write down work, Enter hands it to AI (c) — Shift+Enter for a note line",
     autostart: "AI starts right away", empty: "Nothing here. 🎉",
+    activity: (n) => `Show relay activity (${n})`, no_messages: "No messages yet.",
     slots: (r, m, w) => `Slots ${r}/${m ?? "∞"}` + (w ? ` · ${w} queued` : ""),
     priority: "Priority", due: "Due", snooze: "Snooze", project: "Project", parent: "Under",
     none: "—", done_btn: "Done (e)", reopen: "Reopen", open_chat: "Open in chat", start: "Hand to AI",
@@ -25,8 +28,9 @@ const I18N = {
   },
   ja: {
     me: "受信箱", ai: "実行中", todo: "やること", idle: "止まっている", tree: "ツリー", snoozed: "スヌーズ中", done: "完了",
-    filter: "絞り込み…", capture: "＋ 思いついた仕事を書いて Enter（c）", capture_ai: "＋ 思いついた仕事を書いて Enter → AIが着手（c）",
+    filter: "絞り込み…", capture: "＋ 思いついた仕事を書いて Enter（c）。Shift+Enter で改行してメモ", capture_ai: "＋ 思いついた仕事を書いて Enter → AIが着手（c）。Shift+Enter で改行してメモ",
     autostart: "AIがすぐ着手", empty: "ここには何もありません 🎉",
+    activity: (n) => `内部の動きも表示（${n}件）`, no_messages: "まだメッセージはありません",
     slots: (r, m, w) => `枠 ${r}/${m ?? "∞"}` + (w ? `・待ち ${w}` : ""),
     priority: "優先度", due: "期限", snooze: "スヌーズ", project: "案件", parent: "親",
     none: "なし", done_btn: "完了（e）", reopen: "戻す", open_chat: "チャットで開く", start: "AIに頼む",
@@ -64,6 +68,8 @@ const state = {
   items: [], byId: new Map(), slots: {}, view: localStorage.getItem("view") || "me",
   selected: null, open: null, filter: "", collapsed: new Set(JSON.parse(localStorage.getItem("collapsed") || "[]")),
   messages: [], lastSync: null, pendingG: false, drafts: {},
+  // The relay's own tool calls, status lines and automatic prompts stay hidden unless asked for.
+  showActivity: localStorage.getItem("showActivity") === "1",
 };
 
 // ---------------------------------------------------------------- dom helpers
@@ -118,6 +124,8 @@ async function refresh() {
     $("sync").textContent = `${T.updated} ${state.lastSync.toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}`;
     if (state.open && !state.byId.has(state.open)) state.open = null;
     render();
+    const open = state.open && state.byId.get(state.open);
+    if (open && open.thread_id && (open.running || open.queued)) loadMessages(open.id);
   } catch (err) {
     $("sync").className = "sync bad";
     $("sync").textContent = `${T.offline}: ${err.message}`;
@@ -275,8 +283,9 @@ function renderDetail() {
   if (!item) { pane.replaceChildren(); return; }
   // Re-rendering while the human types would eat their input: keep the pane
   // and only refresh what the server owns.
-  if (pane.dataset.item === item.id && pane.contains(document.activeElement) &&
-      document.activeElement.matches("input, textarea, select")) return;
+  const sameItem = pane.dataset.item === item.id;
+  if (sameItem && pane.contains(document.activeElement) &&
+      document.activeElement.matches("input:not([type=checkbox]), textarea, select")) return;
   pane.dataset.item = item.id;
 
   const pri = h("select", { onchange: (e) => patch(item.id, { priority: Number(e.target.value) }) },
@@ -311,29 +320,84 @@ function renderDetail() {
     h("div", { class: "controls" }, h("label", {}, T.snooze), ...snooze),
     h("div", { class: "controls" }, ...actions));
 
-  const msgs = h("div", { class: "msgs", id: "msgs" });
+  if (item.thread_id) {
+    head.append(h("label", { class: "toggle" },
+      h("input", { type: "checkbox", id: "show-activity", checked: state.showActivity,
+        onchange: (e) => setShowActivity(e.target.checked) }),
+      h("span", { id: "activity-label", text: T.activity(activityCount()) })));
+  }
+  // Keep the message list across the poll so the reader's scroll position survives.
+  const msgs = (sameItem && $("msgs")) || h("div", { class: "msgs", id: "msgs" });
+  const scrollTop = msgs.scrollTop;
+  const followed = msgs.scrollHeight - scrollTop - msgs.clientHeight < 80;
   fillMessages(msgs);
   const nodes = [head, msgs];
   if (item.thread_id) {
     // Drafts survive the 8-second refresh and switching between items.
-    const box = h("textarea", { id: "reply", placeholder: T.reply_ph, rows: 2,
-      oninput: (e) => { state.drafts[item.id] = e.target.value; },
+    const box = h("textarea", { id: "reply", placeholder: T.reply_ph, rows: 5,
+      oninput: (e) => { state.drafts[item.id] = e.target.value; grow(e.target); },
       onkeydown: (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendReply(item.id, box); } } });
     nodes.push(h("form", { class: "reply", onsubmit: (e) => { e.preventDefault(); sendReply(item.id, box); } },
       box, h("button", { class: "btn primary", type: "submit", text: T.send })));
     box.value = state.drafts[item.id] || "";
+    requestAnimationFrame(() => grow(box));
   } else if (item.note) {
-    msgs.replaceChildren(h("div", { class: "msg" }, h("div", { class: "body", text: item.note })));
+    msgs.replaceChildren(h("div", { class: "msg" }, h("div", { class: "body md" }, MD.render(item.note))));
   }
   pane.replaceChildren(...nodes);
+  if (sameItem) msgs.scrollTop = followed ? msgs.scrollHeight : scrollTop;
 }
 
-function fillMessages(container) {
-  if (state.messagesFor !== state.open) { container.replaceChildren(h("div", { class: "empty", text: T.loading })); return; }
-  container.replaceChildren(...state.messages.map((m) => h("div", { class: "msg" + (m.is_bot ? "" : " human") },
+function activityCount() {
+  return state.messagesFor === state.open ? state.messages.filter((m) => m.kind === "activity").length : 0;
+}
+function setShowActivity(on) {
+  state.showActivity = on;
+  localStorage.setItem("showActivity", on ? "1" : "0");
+  const box = $("msgs");
+  if (box) fillMessages(box, { force: true, toBottom: true });
+}
+// Textareas grow with what is typed, up to the CSS max-height.
+function grow(box) {
+  box.style.height = "auto";
+  box.style.height = `${box.scrollHeight + 2}px`;
+}
+
+function messageNode(m) {
+  const kind = m.kind || (m.is_bot ? "agent" : "human");
+  const body = h("div", { class: "body md" });
+  if (m.content) body.append(MD.render(m.content + (m.truncated ? " …" : "")));
+  for (const e of m.embeds || []) {
+    const card = h("div", { class: "embed" });
+    if (e.color != null) card.style.borderLeftColor = `#${e.color.toString(16).padStart(6, "0")}`;
+    if (e.title) card.append(h("div", { class: "embed-title", text: e.title }));
+    if (e.description) card.append(h("div", { class: "md" }, MD.render(e.description)));
+    body.append(card);
+  }
+  for (const a of m.attachments || []) {
+    body.append(h("div", { class: "file" }, /^https:\/\//.test(a.url)
+      ? h("a", { href: a.url, target: "_blank", rel: "noopener noreferrer", text: `📎 ${a.filename}` })
+      : h("span", { text: `📎 ${a.filename}` })));
+  }
+  return h("div", { class: `msg ${kind}` },
     h("div", { class: "who" }, h("span", { text: m.author }), h("span", { text: m.created_at ? shortDate(m.created_at) : "" })),
-    h("div", { class: "body", text: m.content + (m.truncated ? " …" : "") }))));
-  container.scrollTop = container.scrollHeight;
+    body);
+}
+
+function fillMessages(container, { force = false, toBottom = false } = {}) {
+  if (state.messagesFor !== state.open) { container.replaceChildren(h("div", { class: "empty", text: T.loading })); return; }
+  const shown = state.showActivity ? state.messages : state.messages.filter((m) => m.kind !== "activity");
+  // Re-render only when something changed, so a poll does not drop a text selection.
+  const sig = `${state.showActivity}|${state.messages.length}|${state.messages.map((m) => m.id).slice(-1)[0]}|` +
+    state.messages.map((m) => (m.content || "").length).reduce((a, b) => a + b, 0);
+  if (!force && container.dataset.sig === sig && container.childElementCount) return;
+  const nearBottom = toBottom || !container.dataset.sig ||
+    container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+  container.dataset.sig = sig;
+  container.replaceChildren(...(shown.length ? shown.map(messageNode) : [h("div", { class: "empty", text: T.no_messages })]));
+  const label = $("activity-label");
+  if (label) label.textContent = T.activity(activityCount());
+  if (nearBottom) container.scrollTop = container.scrollHeight;
 }
 
 // ---------------------------------------------------------------- actions
@@ -370,7 +434,7 @@ async function openItem(id) {
 }
 async function loadMessages(id) {
   try {
-    const data = await api(`/items/${encodeURIComponent(id)}/messages?limit=50`);
+    const data = await api(`/items/${encodeURIComponent(id)}/messages?limit=${HISTORY}`);
     if (state.open !== id) return;
     state.messages = data.messages;
     state.messagesFor = id;
@@ -409,10 +473,15 @@ async function startItem(id) {
     openItem(data.item.id);
   } catch (err) { toast(err.message); }
 }
-async function capture(title) {
+async function capture(text) {
   const start = autostart();
+  // First line is the title; anything after it is the note.
+  const [first, ...rest] = text.split("\n");
+  const body = { title: first.trim().slice(0, 200), start };
+  const note = rest.join("\n").trim();
+  if (note) body.note = note;
   try {
-    const data = await api("/items", { method: "POST", body: { title, start } });
+    const data = await api("/items", { method: "POST", body });
     const started = Boolean(data.item.thread_id);
     await refresh();
     // Show where it landed: Running once an agent has it, otherwise To do.
@@ -472,11 +541,15 @@ function wire() {
     syncCapture();
   });
   $("filter").addEventListener("input", (e) => { state.filter = e.target.value; renderList(); });
-  $("capture").addEventListener("submit", (e) => {
-    e.preventDefault();
+  const submitCapture = () => {
     const input = $("capture-input");
-    const title = input.value.trim();
-    if (title) { capture(title); input.value = ""; }
+    const text = input.value.trim();
+    if (text) { capture(text); input.value = ""; grow(input); }
+  };
+  $("capture").addEventListener("submit", (e) => { e.preventDefault(); submitCapture(); });
+  $("capture-input").addEventListener("input", (e) => grow(e.target));
+  $("capture-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); submitCapture(); }
   });
   $("nav-toggle").addEventListener("click", () => $("nav").classList.toggle("open"));
   $("help").addEventListener("click", () => { if ($("help").dataset.mode !== "login") showHelp(false); });

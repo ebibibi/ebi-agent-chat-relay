@@ -33,6 +33,7 @@ from .auth import ConsoleAuthConfig, ConsoleAuthenticator, ConsoleAuthError
 from .board import SessionInfo, ThreadSnapshot, build_board
 from .conversations import ConversationRepository
 from .files import resolve_file
+from .messages import serialize_message, with_kind
 from .surface import apply_outcome
 from .usage import UsageReader
 from .work_repo import (
@@ -300,19 +301,17 @@ class ConsoleServer:
         key = await self._conversation_key(request.match_info["item_id"])
         if key is not None and self.conversations is not None:
             history = await self.conversations.history(key, limit)
-            return web.json_response({"messages": [m.as_dict() for m in history]})
+            return web.json_response({"messages": [with_kind(m.as_dict()) for m in history]})
         thread, err = await self._thread_for(request.match_info["item_id"])
         if err:
             return err
-        from ..ext.api_server import _serialize_thread_message
-
         try:
             history = [m async for m in thread.history(limit=limit)]
         except Exception as exc:
             logger.warning("console: history of %s failed: %s", thread.id, exc)
             return _error("could not read the thread", 502)
         history.reverse()
-        return web.json_response({"messages": [_serialize_thread_message(m) for m in history]})
+        return web.json_response({"messages": [serialize_message(m) for m in history]})
 
     async def live(self, request: web.Request) -> web.Response:
         """What a console conversation's running turn is doing right now."""

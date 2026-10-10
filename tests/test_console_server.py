@@ -45,6 +45,7 @@ async def test_the_shell_is_served_with_security_headers(client) -> None:
     assert "Relay Console" in await response.text()
     assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
     assert (await client.get("/static/app.js")).status == 200
+    assert (await client.get("/static/markdown.js")).status == 200
 
 
 async def test_static_files_cannot_escape_the_directory(client) -> None:
