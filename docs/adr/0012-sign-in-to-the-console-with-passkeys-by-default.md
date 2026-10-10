@@ -60,6 +60,9 @@ sign-in that any deployment gets without signing up for a third-party service.
   `Host` (https unless the host is loopback, or `X-Forwarded-Proto`). Trusting `Host` only picks
   which origin to expect: the browser signs the origin it is really on and a passkey is bound to
   its own site, so a forged header gets nothing a browser would sign.
+- OpenID Connect (Google, Entra ID, …) is available as an option (#894), with the same session
+  layer. A session is only as good as the method that opened it *now*: turning passkeys off, or
+  taking an email off the allowlist, ends the sessions they opened.
 - Cloudflare Access and the bearer token keep working unchanged. If the `webauthn` package is
   missing but another way in is configured, passkeys are switched off with a warning rather than
   taking a working deployment down.

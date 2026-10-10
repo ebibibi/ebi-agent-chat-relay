@@ -84,7 +84,7 @@ async def test_a_fresh_console_needs_setup_and_lets_nobody_in(console) -> None:
     status = await (await console.get("auth/status")).json()
     assert status == {
         "signed_in": False,
-        "methods": {"passkey": True, "access": False, "token": False},
+        "methods": {"oidc": None, "passkey": True, "access": False, "token": False},
         "needs_setup": True,
     }
     assert (await console.get("board")).status == 401

@@ -63,10 +63,19 @@ class ConsoleAuthConfig:
     #: "whatever origin the request arrived on" — see ``request_origin``.
     origins: tuple[str, ...] = ()
     session_days: int = DEFAULT_SESSION_DAYS
+    oidc_issuer: str | None = None
+    oidc_client_id: str | None = None
+    oidc_client_secret: str | None = None
+    oidc_name: str | None = None
+    oidc_trust_unverified_email: bool = False
 
     @property
     def access_enabled(self) -> bool:
         return bool(self.access_team_domain and self.access_audience)
+
+    @property
+    def oidc_enabled(self) -> bool:
+        return bool(self.oidc_issuer)
 
     @property
     def session_lifetime(self) -> timedelta:
@@ -86,12 +95,18 @@ class ConsoleAuthConfig:
     def problems(self) -> list[str]:
         """Why this configuration must not be served. Empty when it is safe."""
         issues: list[str] = []
-        if not self.passkeys and not self.access_enabled and not self.token:
+        if (
+            not self.passkeys
+            and not self.access_enabled
+            and not self.token
+            and not self.oidc_enabled
+        ):
             issues.append(
                 "CCDB_CONSOLE_PASSKEYS=0 leaves no way in: set CCDB_CONSOLE_ACCESS_TEAM_DOMAIN "
                 "+ CCDB_CONSOLE_ACCESS_AUD, or CCDB_CONSOLE_TOKEN — the console never runs "
                 "unauthenticated"
             )
+        issues.extend(self._oidc_problems())
         if self.passkeys and not passkeys_installed():
             issues.append("passkeys need the webauthn package: install the [console] extra")
         for origin in self.origins:
@@ -115,6 +130,32 @@ class ConsoleAuthConfig:
             issues.append("CCDB_CONSOLE_TOKEN must be at least 32 characters")
         return issues
 
+    def _oidc_problems(self) -> list[str]:
+        if not self.oidc_enabled:
+            return []
+        issues: list[str] = []
+        if not str(self.oidc_issuer).startswith("https://"):
+            issues.append("CCDB_CONSOLE_OIDC_ISSUER must be an https URL")
+        if not self.oidc_client_id:
+            issues.append("CCDB_CONSOLE_OIDC_CLIENT_ID is required with CCDB_CONSOLE_OIDC_ISSUER")
+        if not self.allowed_emails:
+            issues.append(
+                "CCDB_CONSOLE_ALLOWED_EMAILS is required with OIDC — without it, every "
+                "account at the provider could sign in"
+            )
+        if not self.origins:
+            issues.append(
+                "CCDB_CONSOLE_ORIGIN is required with OIDC: it is the redirect URI registered "
+                "with the provider"
+            )
+        return issues
+
+    @property
+    def oidc_redirect_uri(self) -> str:
+        from .oidc import CALLBACK_PATH
+
+        return f"{self.origins[0]}{CALLBACK_PATH}" if self.origins else ""
+
     @classmethod
     def from_env(cls) -> ConsoleAuthConfig:
         team = (os.getenv("CCDB_CONSOLE_ACCESS_TEAM_DOMAIN") or "").strip()
@@ -133,7 +174,17 @@ class ConsoleAuthConfig:
             passkeys=(os.getenv("CCDB_CONSOLE_PASSKEYS") or "1").strip() != "0",
             origins=tuple(o.strip().rstrip("/") for o in origins.split(",") if o.strip()),
             session_days=days,
+            # Verbatim: it must equal the token's ``iss`` (Auth0's ends in "/").
+            oidc_issuer=_env("CCDB_CONSOLE_OIDC_ISSUER") or None,
+            oidc_client_id=_env("CCDB_CONSOLE_OIDC_CLIENT_ID") or None,
+            oidc_client_secret=_env("CCDB_CONSOLE_OIDC_CLIENT_SECRET") or None,
+            oidc_name=_env("CCDB_CONSOLE_OIDC_NAME") or None,
+            oidc_trust_unverified_email=_env("CCDB_CONSOLE_OIDC_TRUST_UNVERIFIED_EMAIL") == "1",
         )
+
+
+def _env(name: str) -> str:
+    return (os.getenv(name) or "").strip()
 
 
 class ConsoleAuthenticator:
@@ -175,13 +226,23 @@ class ConsoleAuthenticator:
         session = cookies.get(SESSION_COOKIE)
         if session and self._sessions is not None:
             who = await self._sessions.session_identity(session)
-            if who:
+            if who and self._session_still_allowed(who):
                 return who
         if self._config.access_enabled:
             assertion = headers.get(ACCESS_HEADER) or cookies.get(ACCESS_COOKIE)
             if assertion:
                 return await self._verify_access(assertion)
         raise ConsoleAuthError("invalid token" if bad_token else "not authenticated")
+
+    def _session_still_allowed(self, who: str) -> bool:
+        """A session is only as good as the method that opened it, *now*:
+        turning a method off, or taking an email off the allowlist, ends the
+        sessions it created instead of letting them run out their 30 days."""
+        if who.startswith("passkey:"):
+            return self._config.passkeys
+        if who.startswith("oidc:"):
+            return self._config.oidc_enabled and who[5:] in self._config.allowed_emails
+        return False
 
     async def _verify_access(self, assertion: str) -> str:
         import jwt
