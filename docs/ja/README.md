@@ -452,14 +452,15 @@ ccdb attention-backfill --guild <id> --since 2026-09-01   # seed history (owner 
 
 ```bash
 uv add "claude-code-discord-bridge[console] @ git+https://github.com/ebibibi/ebi-agent-chat-relay.git"
-CCDB_CONSOLE_PORT=8100                                     # off unless set
-CCDB_CONSOLE_ACCESS_TEAM_DOMAIN=myteam.cloudflareaccess.com  # Cloudflare Access JWT…
-CCDB_CONSOLE_ACCESS_AUD=<aud tag>
-CCDB_CONSOLE_ALLOWED_EMAILS=me@example.com                 # …plus a required allowlist
-# CCDB_CONSOLE_TOKEN=...                                   # and/or a 32+ char bearer token
+CCDB_CONSOLE_PORT=8100                                     # off unless set; passkey sign-in by default
+# Optional extras on top of (or instead of) passkeys:
+# CCDB_CONSOLE_ACCESS_TEAM_DOMAIN=myteam.cloudflareaccess.com  # Cloudflare Access JWT…
+# CCDB_CONSOLE_ACCESS_AUD=<aud tag>
+# CCDB_CONSOLE_ALLOWED_EMAILS=me@example.com               # …plus a required allowlist
+# CCDB_CONSOLE_TOKEN=...                                   # a 32+ char bearer token for scripts
 ```
 
-**認証がなければ起動を拒否します**。契約は `/console/api` 配下の JSON API で、同梱の Web クライアントはその利用者の 1 つにすぎません。詳しくは [docs/console.md](../console.md)、[ADR-0010](../adr/0010-add-an-api-first-console-on-its-own-listener.md)、[ADR-0011](../adr/0011-let-the-console-own-its-conversations.md) を参照してください。
+**認証なしで動くことはありません**。既定では **パスキー**（WebAuthn、ユーザー検証必須）でサインインします。フィッシングに強い多要素サインインを、外部サービスのアカウントなしで使えます。最初のパスキーは、ccdb がログに書き出す使い捨てのセットアップコードで登録し、2 台目以降のデバイスはサインイン済みのデバイスから追加します。セッションはサーバー側で管理される `HttpOnly`・`SameSite=Strict` の Cookie で、保存されるのはハッシュだけです。パスキーには安全なオリジン（`https://…` または `http://localhost`。IP アドレスは不可）が必要です。契約は `/console/api` 配下の JSON API で、同梱の Web クライアントはその利用者の 1 つにすぎません。詳しくは [docs/console.md](../console.md)、[ADR-0010](../adr/0010-add-an-api-first-console-on-its-own-listener.md)、[ADR-0011](../adr/0011-let-the-console-own-its-conversations.md)、[ADR-0012](../adr/0012-sign-in-to-the-console-with-passkeys-by-default.md) を参照してください。
 
 ### スタートアップリジューム
 
@@ -1082,12 +1083,16 @@ CHAT_ONLY_CHANNEL_IDS=444,555
 | `CCDB_INGEST_TOKEN` | `POST /api/ingest` 用の Bearer トークン（`api_secret` とは独立）。未設定ならこのエンドポイントは `503` を返す | （オプション） |
 | `CCDB_INGEST_REQUIRE_COMPLETE` | `1` を設定すると、`attachments_manifest` によって添付ファイルの欠落が判明したインジェストを、部分的な証拠でセッションを開始せずに `409` で拒否する | `0` |
 | `CCDB_TEAMS_VAULT_ROOT` | `POST /api/teams/sync` が上流スレッドをミラーリングする先のディレクトリ（メッセージ 1 件につき 1 ファイル）。`CCDB_INGEST_TOKEN` で保護される | `{working_dir}/teams` |
-| `CCDB_CONSOLE_PORT` | [Relay Console](../console.md) のリスナーのポート（`console` extra が必要）。設定しない限り無効で、認証なしでは起動を拒否する | (optional) |
+| `CCDB_CONSOLE_PORT` | [Relay Console](../console.md) のリスナーのポート（`console` extra が必要）。設定しない限り無効で、認証なしでは動かない（既定はパスキーでのサインイン） | (optional) |
 | `CCDB_CONSOLE_HOST` | Relay Console のバインドアドレス。トンネルの背後でループバックのままにする | `127.0.0.1` |
 | `CCDB_CONSOLE_ACCESS_TEAM_DOMAIN` | コンソールが JWT を検証する Cloudflare Access のチームドメイン（`myteam.cloudflareaccess.com`） | (optional) |
 | `CCDB_CONSOLE_ACCESS_AUD` | コンソールの前段にある Cloudflare Access アプリケーションの AUD タグ | (optional) |
 | `CCDB_CONSOLE_ALLOWED_EMAILS` | Access 経由で許可するメールアドレス（カンマ区切り）。Access 使用時は必須で、Access ポリシーを誤って編集してもコンソールは閉じたまま | (optional) |
 | `CCDB_CONSOLE_TOKEN` | ローカルクライアント用の Bearer トークン（32 文字以上）。これ単独で使うのはプライベートなネットワーク（tailnet、SSH トンネル、ループバック）に限る | (optional) |
+| `CCDB_CONSOLE_PASSKEYS` | `0` でパスキーによるサインインを無効化する（その場合は Access かトークンが必須） | `1` |
+| `CCDB_CONSOLE_ORIGIN` | コンソールを利用できるオリジン（カンマ区切り。例: `https://console.example.com`）。プロキシが `Host` を書き換える場合に設定する | (リクエストから取得) |
+| `CCDB_CONSOLE_SESSION_DAYS` | コンソールのサインインの有効日数 | `30` |
+| `CCDB_CONSOLE_ENROLL` | `1` にすると、パスキーが登録済みでも起動時に新しい使い捨てセットアップコードをログに書き出す（パスキーをすべて失ったときの復旧用） | (optional) |
 
 ### パーミッションモード — `-p` モードで動作するもの
 

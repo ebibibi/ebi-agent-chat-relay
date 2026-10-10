@@ -449,14 +449,15 @@ An API-first triage screen on its own authenticated listener. Every thread is so
 
 ```bash
 uv add "claude-code-discord-bridge[console] @ git+https://github.com/ebibibi/ebi-agent-chat-relay.git"
-CCDB_CONSOLE_PORT=8100                                     # off unless set
-CCDB_CONSOLE_ACCESS_TEAM_DOMAIN=myteam.cloudflareaccess.com  # Cloudflare Access JWT…
-CCDB_CONSOLE_ACCESS_AUD=<aud tag>
-CCDB_CONSOLE_ALLOWED_EMAILS=me@example.com                 # …plus a required allowlist
-# CCDB_CONSOLE_TOKEN=...                                   # and/or a 32+ char bearer token
+CCDB_CONSOLE_PORT=8100                                     # off unless set; passkey sign-in by default
+# Optional extras on top of (or instead of) passkeys:
+# CCDB_CONSOLE_ACCESS_TEAM_DOMAIN=myteam.cloudflareaccess.com  # Cloudflare Access JWT…
+# CCDB_CONSOLE_ACCESS_AUD=<aud tag>
+# CCDB_CONSOLE_ALLOWED_EMAILS=me@example.com               # …plus a required allowlist
+# CCDB_CONSOLE_TOKEN=...                                   # a 32+ char bearer token for scripts
 ```
 
-It **refuses to start without authentication**. The JSON API under `/console/api` is the contract; the bundled web client is one consumer. See [docs/console.md](docs/console.md), [ADR-0010](docs/adr/0010-add-an-api-first-console-on-its-own-listener.md) and [ADR-0011](docs/adr/0011-let-the-console-own-its-conversations.md).
+It **never runs unauthenticated**. By default you sign in with a **passkey** (WebAuthn, user verification required) — phishing-resistant multi-factor sign-in with no third-party account. The first passkey is registered with a single-use setup code that ccdb writes to its log; further devices are added from a signed-in one. Sessions are server-side `HttpOnly`, `SameSite=Strict` cookies (only a hash is stored). Passkeys need a secure origin (`https://…` or `http://localhost`, not an IP address). The JSON API under `/console/api` is the contract; the bundled web client is one consumer. See [docs/console.md](docs/console.md), [ADR-0010](docs/adr/0010-add-an-api-first-console-on-its-own-listener.md), [ADR-0011](docs/adr/0011-let-the-console-own-its-conversations.md) and [ADR-0012](docs/adr/0012-sign-in-to-the-console-with-passkeys-by-default.md).
 
 ### Startup Resume
 
@@ -1097,12 +1098,16 @@ for idle deadlines, attachment retries, credentials and startup rollback.
 | `CCDB_INGEST_TOKEN` | Bearer token for `POST /api/ingest` (independent of `api_secret`); unset ⇒ the endpoint responds `503` | (optional) |
 | `CCDB_INGEST_REQUIRE_COMPLETE` | Set to `1` to reject an ingest with `409` when its `attachments_manifest` proves attachments went missing, instead of starting a session on partial evidence | `0` |
 | `CCDB_TEAMS_VAULT_ROOT` | Directory where `POST /api/teams/sync` mirrors upstream threads (one file per message). Gated by `CCDB_INGEST_TOKEN` | `{working_dir}/teams` |
-| `CCDB_CONSOLE_PORT` | Port for the [Relay Console](docs/console.md) listener (requires the `console` extra). The console is off unless set and refuses to start without authentication | (optional) |
+| `CCDB_CONSOLE_PORT` | Port for the [Relay Console](docs/console.md) listener (requires the `console` extra). The console is off unless set and never runs unauthenticated (passkey sign-in by default) | (optional) |
 | `CCDB_CONSOLE_HOST` | Relay Console bind address. Keep it on loopback behind a tunnel | `127.0.0.1` |
 | `CCDB_CONSOLE_ACCESS_TEAM_DOMAIN` | Cloudflare Access team domain (`myteam.cloudflareaccess.com`) whose JWTs the console verifies | (optional) |
 | `CCDB_CONSOLE_ACCESS_AUD` | AUD tag of the Cloudflare Access application in front of the console | (optional) |
 | `CCDB_CONSOLE_ALLOWED_EMAILS` | Comma-separated emails allowed in via Access. Required with Access, so a mistaken Access policy edit still leaves the console closed | (optional) |
 | `CCDB_CONSOLE_TOKEN` | Bearer token (32+ characters) for local clients; on its own, use only on a private network (tailnet, SSH tunnel, loopback) | (optional) |
+| `CCDB_CONSOLE_PASSKEYS` | `0` turns passkey sign-in off (then Access or a token is required) | `1` |
+| `CCDB_CONSOLE_ORIGIN` | Comma-separated origins the console may be used from (e.g. `https://console.example.com`). Set it when a proxy rewrites `Host` | (from the request) |
+| `CCDB_CONSOLE_SESSION_DAYS` | How long a console sign-in lasts, in days | `30` |
+| `CCDB_CONSOLE_ENROLL` | `1` logs a new single-use passkey setup code on start, even when passkeys exist (recovery after losing every passkey) | (optional) |
 
 ### Permission Modes — What Works in `-p` Mode
 
