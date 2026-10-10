@@ -329,7 +329,7 @@ class ConsoleServer:
         started = await self._start_guarded(item.id, {}, request[IDENTITY])
         if started.status == 201:
             return started
-        reason = json.loads(started.body).get("error", "could not start the conversation")
+        reason = json.loads(started.text or "{}").get("error", "could not start the conversation")
         return web.json_response({"item": item.as_dict(), "start_error": reason}, status=201)
 
     async def patch_item(self, request: web.Request) -> web.Response:
