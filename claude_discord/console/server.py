@@ -68,8 +68,10 @@ ARCHIVE_CACHE_SECONDS = 120.0
 ARCHIVE_LIMIT_PER_CHANNEL = 50
 #: Mutations per identity per minute.
 MUTATION_RATE_PER_MINUTE = 60
-#: Sign-in attempts per minute, across every caller (see ``auth_routes``).
-AUTH_RATE_PER_MINUTE = 30
+#: Setup-code checks per minute, across every caller (see ``auth_routes``).
+#: High enough that flooding it is a flood, low enough that guessing a ~50-bit
+#: code within its 15 minutes is hopeless.
+AUTH_RATE_PER_MINUTE = 120
 MAX_BODY_BYTES = 64 * 1024
 IDENTITY = web.RequestKey("console_identity", str)
 
@@ -744,7 +746,9 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
     console = ConsoleServer(
         api_server,
         work_repo,
-        ConsoleAuthenticator(config, sessions=store),
+        # Sessions are honoured only while a way of creating them is on: turning
+        # passkeys off must also turn off the sessions passkeys opened.
+        ConsoleAuthenticator(config, sessions=store if passkeys is not None else None),
         host=host,
         port=int(raw_port),
         usage=usage,

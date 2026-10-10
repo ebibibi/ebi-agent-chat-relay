@@ -7,9 +7,14 @@ from unittest.mock import MagicMock
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
-from claude_discord.console.auth import SESSION_COOKIE, ConsoleAuthConfig, ConsoleAuthenticator
+from claude_discord.console.auth import (
+    SESSION_COOKIE,
+    ConsoleAuthConfig,
+    ConsoleAuthenticator,
+    ConsoleAuthError,
+)
 from claude_discord.console.passkey_store import PasskeyStore
-from claude_discord.console.passkeys import MAX_CODE_ATTEMPTS, PasskeyError, PasskeyService
+from claude_discord.console.passkeys import PasskeyError, PasskeyService
 from claude_discord.console.server import CSRF_HEADER, ConsoleServer
 from claude_discord.console.work_repo import WorkItemRepository
 
@@ -214,15 +219,14 @@ async def test_a_new_setup_code_is_refused_once_a_passkey_exists(console) -> Non
     assert (await console.post("auth/setup-code")).status == 409
 
 
-async def test_wrong_guesses_burn_the_code(tmp_path) -> None:
+async def test_wrong_guesses_do_not_burn_the_owners_code(tmp_path) -> None:
     service = PasskeyService(PasskeyStore(str(tmp_path / "db")))
     await service.store.init_db()
     code = service.issue_code()
-    for _ in range(MAX_CODE_ATTEMPTS):
+    for _ in range(50):
         with pytest.raises(PasskeyError):
             await service.registration_options(ORIGIN, signed_in=False, code="AAAAA-AAAAA")
-    with pytest.raises(PasskeyError):
-        await service.registration_options(ORIGIN, signed_in=False, code=code)
+    await service.registration_options(ORIGIN, signed_in=False, code=code)
 
 
 async def test_codes_expire(tmp_path) -> None:
@@ -257,7 +261,7 @@ async def test_sign_in_cannot_be_locked_out_by_flooding(console) -> None:
 async def test_setup_code_guessing_is_rate_limited(console) -> None:
     statuses = [
         (await console.post("auth/passkey/register/options", {"code": "AAAAA-AAAAA"})).status
-        for _ in range(40)
+        for _ in range(130)
     ]
     assert 429 in statuses
 
@@ -290,3 +294,24 @@ async def test_the_last_passkey_can_go_when_another_way_in_exists(tmp_path) -> N
     assert await store.delete("nope", keep_one=False) == "missing"
     assert await store.delete(only.id, keep_one=False) == "deleted"
     assert await store.count() == 0
+
+
+async def test_turning_passkeys_off_ends_their_sessions(tmp_path, monkeypatch) -> None:
+    from claude_discord.console.server import maybe_start_console
+
+    db = str(tmp_path / "sessions.db")
+    store = PasskeyStore(db)
+    await store.init_db()
+    session = await store.create_session("passkey:laptop", ConsoleAuthConfig().session_lifetime)
+    api = MagicMock()
+    api.session_repo.db_path = db
+    monkeypatch.setenv("CCDB_CONSOLE_PORT", "0")
+    monkeypatch.setenv("CCDB_CONSOLE_PASSKEYS", "0")
+    monkeypatch.setenv("CCDB_CONSOLE_TOKEN", "t" * 40)
+    console = await maybe_start_console(api)
+    assert console is not None
+    try:
+        with pytest.raises(ConsoleAuthError):
+            await console.auth.identify({}, {SESSION_COOKIE: session})
+    finally:
+        await console.stop()

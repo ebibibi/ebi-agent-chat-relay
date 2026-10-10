@@ -44,8 +44,9 @@ sign-in that any deployment gets without signing up for a third-party service.
   WebAuthn structures itself.
 - **The first passkey needs a setup code** that ccdb writes to its own log while no passkey is
   registered. Reading the server's log is the trust the operator already has, so the bootstrap
-  adds no new secret to distribute. Codes are single use, expire after 15 minutes and burn after
-  10 wrong guesses. Further devices need a code created by someone already signed in.
+  adds no new secret to distribute. Codes are single use and expire after 15 minutes. Wrong guesses
+  do not burn them (that would let anyone break the owner's code); the ~50-bit code and the
+  rate limit bound guessing instead. Further devices need a code created by someone already signed in.
   `CCDB_CONSOLE_ENROLL=1` prints a fresh code on start for recovery.
 - A sign-in creates a **server-side session**: the cookie is `HttpOnly`, `SameSite=Strict`,
   `Secure` on https, and only its SHA-256 is stored. Removing a passkey ends every session it

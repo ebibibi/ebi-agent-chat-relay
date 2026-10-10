@@ -13,9 +13,12 @@ Who may register a passkey is the part that needs care:
   owner — the same trust the operator already has.
 * every **further** device needs a code created by someone already signed in.
 
-Codes are single use, expire after ``CODE_TTL`` and burn after
-``MAX_CODE_ATTEMPTS`` wrong guesses. Challenges live in memory: a ceremony
-interrupted by a restart is simply started again.
+Codes are single use and expire after ``CODE_TTL``. Wrong guesses do *not*
+burn them — that would let anyone break the owner's code on purpose. Guessing
+is bounded instead by the code's ~50 bits and the global rate limit on the
+routes that check it: even at that limit for a code's whole life, the odds of a
+hit are around 10^-12. Challenges live in memory: a ceremony interrupted by a
+restart is simply started again.
 """
 
 from __future__ import annotations
@@ -35,7 +38,6 @@ logger = logging.getLogger(__name__)
 
 CODE_TTL = 15 * 60.0
 CHALLENGE_TTL = 5 * 60.0
-MAX_CODE_ATTEMPTS = 10
 MAX_PENDING_CEREMONIES = 256
 RP_NAME = "Relay Console"
 #: Every passkey belongs to the one owner of this console. A stable handle lets
@@ -61,7 +63,6 @@ def _normalise_code(code: str) -> str:
 class _Code:
     value: str
     expires: float
-    attempts: int = 0
     logged: bool = False
 
 
@@ -125,11 +126,6 @@ class PasskeyService:
         for code in self._codes:
             if hmac.compare_digest(_normalise_code(code.value).encode(), wanted.encode()):
                 return code.value
-        # A wrong guess counts against every live code, so guessing is bounded
-        # no matter which code the guesser is aiming at.
-        for code in self._codes:
-            code.attempts += 1
-        self._codes = [c for c in self._codes if c.attempts < MAX_CODE_ATTEMPTS]
         raise PasskeyError("that setup code is not valid (or has expired)")
 
     def _consume_code(self, value: str) -> None:

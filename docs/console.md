@@ -178,7 +178,7 @@ reach (no console ports and no Teams).
 ## API
 
 Endpoints need authentication unless marked *(no sign-in)*. Every method except `GET` also needs
-`X-Console-Request: 1`. The routes that check a setup code share one rate limit (30 attempts a minute).
+`X-Console-Request: 1`. The routes that check a setup code share one rate limit (120 a minute).
 
 | Method | Path | Does |
 |---|---|---|
