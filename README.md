@@ -112,6 +112,16 @@ Claude calls POST /api/tasks    → registers a periodic task
 SchedulerCog (30s master loop)  → fires due tasks automatically
 ```
 
+### Waiting on CI Without Holding a Slot (WaitWatcherCog)
+
+A turn that watches a pipeline holds a concurrency slot while doing nothing. Instead, the session registers a **wait** — a probe command such as `gh pr checks 12` — and ends its turn. ccdb re-runs the probe (no shell, no model, no slot) and resumes the thread with the result when it says done, times out, or keeps failing. Works for GitHub, Azure Pipelines or anything with a status command; no webhook or public ingress needed. See [docs/waits.md](docs/waits.md).
+
+```
+Claude calls POST /api/waits    → registers the probe, ends its turn
+WaitWatcherCog (15s loop)       → runs due probes
+probe says done                 → "[WAIT FINISHED]" continuation in the same thread
+```
+
 ### CI/CD Automation
 
 Trigger Claude Code tasks from GitHub Actions via Discord webhooks. Claude runs autonomously — reads code, updates docs, creates PRs, enables auto-merge.
@@ -319,9 +329,9 @@ Then ask a thread to "split this across three worker threads and report back".
 
 When a thread's work is fully finished, the agent tells the user the thread can be closed and calls `POST /api/threads/{thread_id}/done`, which prefixes the title with **✅** — the channel list then shows at a glance which threads are safe to close. A new human reply removes the marker automatically. `CCDB_DONE_THREAD_MARKER` changes `✅` (empty disables the marker and the instruction).
 
-A thread that a scheduled task will post into later — a follow-up registered with `thread_id`, or a `ScheduleWakeup` — carries **⏰** at the front of its title for as long as the task is waiting, so a thread that will resume on its own no longer looks abandoned. The scheduler reconciles the marker from the task table every tick: it disappears when a one-shot fires or the task is disabled or deleted, sits behind `✅` when both apply, and survives an automatic retitle. `CCDB_SCHEDULED_THREAD_MARKER` changes `⏰` (empty disables it).
+A thread that a scheduled task will post into later — a follow-up registered with `thread_id`, or a `ScheduleWakeup` — carries **⏰** at the front of its title for as long as the task is waiting, so a thread that will resume on its own no longer looks abandoned. The scheduler reconciles the marker from the task table every tick: it disappears when a one-shot fires or the task is disabled or deleted, sits behind `✅` when both apply, and survives an automatic retitle. Threads with an active wait (`POST /api/waits`) carry the same **⏰** until the wait finishes or is cancelled. `CCDB_SCHEDULED_THREAD_MARKER` changes `⏰` (empty disables it).
 
-The same slot as `✅` tells you whose move it is when a turn stops: **❓** means the thread is waiting on you — an AskUserQuestion is open, or the agent called `POST /api/threads/{thread_id}/waiting` because it needs your decision — and **⚠️** means the turn ended in an error. Only one outcome marker (`✅` / `❓` / `👀` / `📋` / `⚠️`) shows at a time, always in front of `⏰`, and your next reply clears it. States that change on every message (such as "running") stay on the emoji reactions: Discord allows a thread two renames per ten minutes, so the title only carries states that outlast a turn. `CCDB_WAITING_THREAD_MARKER` and `CCDB_ERROR_THREAD_MARKER` change `❓` and `⚠️` (empty disables them).
+The same slot as `✅` tells you whose move it is when a turn stops: **❓** means the thread is waiting on you — an AskUserQuestion is open, or the agent called `POST /api/threads/{thread_id}/waiting` because it needs your decision — and **⚠️** means the turn ended in an error. Only one outcome marker (`✅` / `❓` / `👀` / `📋` / `⚠️`) shows at a time, always in front of `⏰`, and your next reply clears it. States that change on every message (such as "running") stay on the emoji reactions: Discord allows a thread two renames per ten minutes, so the title only carries states that outlast a turn. When a mark hits that limit, the endpoint answers within a few seconds with `202 {"status": "queued"}` and the rename lands on its own once the limit passes; marks requested meanwhile coalesce, so the thread is renamed once more to the latest state rather than replaying stale ones. `CCDB_WAITING_THREAD_MARKER` and `CCDB_ERROR_THREAD_MARKER` change `❓` and `⚠️` (empty disables them).
 
 "Your move" is split by what is expected of you, so the channel list doubles as a todo list: **❓** a reply is enough (a question, a choice, a go/no-go), **👀** a deliverable is waiting for you to look over (`POST /api/threads/{thread_id}/review`), and **📋** there is a task only you can do outside the chat — a manual step in a UI, sign-in/MFA, an approval, a payment (`POST /api/threads/{thread_id}/action`). The agent picks one when its turn ends; all of them share the single outcome slot with `✅` / `⚠️`. `CCDB_REVIEW_THREAD_MARKER` and `CCDB_ACTION_THREAD_MARKER` change `👀` and `📋` (empty disables them).
 
@@ -432,6 +442,21 @@ ccdb attention-backfill --guild <id> --since 2026-09-01   # seed history (owner 
 ```
 
 On by default (`CCDB_ATTENTION_ENABLED=false` stops recording); every number is labelled an estimate and reports its parameters. See [docs/attention.md](docs/attention.md).
+
+### Relay Console — Triage Agent Work from Desktop or Phone
+
+An API-first triage screen on its own authenticated listener. Every thread is sorted by whose move it is — **Inbox** (❓ / 👀 / 📋 / ⚠️: the ball is on you), **Running**, **To do**, **Idle**, a project/parent **Tree**, **Snoozed** and **Done** — with priority P0–P3, due dates and snooze. Reply, mark done, or write down new work and hand it to an agent (which opens a thread and starts a turn). Status is derived from what ccdb already knows (outcome markers, running turns, the slot queue, spawn lineage), so agents do nothing new; only priority/due/snooze/project/parent live in a new `work_items` table. Keyboard-driven on desktop, installable to a phone's home screen.
+
+```bash
+uv add "claude-code-discord-bridge[console] @ git+https://github.com/ebibibi/ebi-agent-chat-relay.git"
+CCDB_CONSOLE_PORT=8100                                     # off unless set
+CCDB_CONSOLE_ACCESS_TEAM_DOMAIN=myteam.cloudflareaccess.com  # Cloudflare Access JWT…
+CCDB_CONSOLE_ACCESS_AUD=<aud tag>
+CCDB_CONSOLE_ALLOWED_EMAILS=me@example.com                 # …plus a required allowlist
+# CCDB_CONSOLE_TOKEN=...                                   # and/or a 32+ char bearer token
+```
+
+It **refuses to start without authentication**. The JSON API under `/console/api` is the contract; the bundled web client is one consumer. See [docs/console.md](docs/console.md) and [ADR-0010](docs/adr/0010-add-an-api-first-console-on-its-own-listener.md).
 
 ### Startup Resume
 
@@ -545,6 +570,7 @@ The operator sets the default and an allowlist in the environment (`CCDB_EXECUTI
 - **Cross-backend conversation handoff** — Switching a live thread between Claude and Codex seeds the new native session from a bounded, text-only reading of the previous backend's local JSONL; no manual summary or copy/paste required
 - **Automatic Codex resume recovery** — If a resumed Codex session repeatedly loses its WebSocket before producing output, ccdb starts a replacement session with a bounded, text-only transcript of the prior conversation; image and tool payloads are excluded
 - **Concurrent sessions** — Multiple parallel sessions with configurable limit
+- **Steerable session queue** — When every `MAX_CONCURRENT_SESSIONS` slot is busy, the waiting message carries **⏫ Run this next** / **⏬ Let others go first** buttons; `/queue` lists running and waiting threads from any channel and can **⏸ pause** a running thread, which frees its slot and resumes automatically (same session, via `--resume`) once the threads it yielded to are through. Pause is refused when nothing is waiting. Same controls on `GET /api/slots` and `POST /api/slots/{thread_id}/{prioritize|defer|pause}`. See [docs/session-queue.md](docs/session-queue.md)
 - **Stop without clearing** — `/stop` halts a session while preserving it for resume
 - **Session interrupt** — Sending a new message to an active thread sends SIGINT to the running session and starts fresh with the new instruction; no manual `/stop` needed
 - **Auto-rename threads** — When `THREAD_AUTO_RENAME=true`, each new thread is automatically renamed with a Claude-generated title derived from the first message (background task, never delays session start). The title is kept honest as the thread goes on: once the work has clearly moved to a different subject, it is re-titled — at most once every 15 minutes, and only for threads ccdb opened
@@ -596,6 +622,7 @@ The operator sets the default and an allowlist in the environment (`CCDB_EXECUTI
 - **No code changes** — Add, remove, or modify tasks at runtime
 - **Enable/disable** — Pause tasks without deleting them (`PATCH /api/tasks/{id}`)
 - **Per-task backend and model** — pin a task to one backend (and optionally one model) with `backend` / `model`; unpinned tasks keep following the active `/backend` and `/model`
+- **Waits** — `POST /api/waits` lets a session end its turn while CI runs; ccdb polls the probe and resumes the thread when it is done (persistent across restarts, see `docs/waits.md`)
 
 ### CI/CD Automation
 - **Webhook triggers** — Trigger Claude Code tasks from GitHub Actions or any CI/CD system
@@ -1057,6 +1084,7 @@ for idle deadlines, attachment retries, credentials and startup rollback.
 | `CCDB_ACTION_THREAD_MARKER` | Marker prepended when a turn ends on a task the human must do outside the chat — a todo (`POST /api/threads/{id}/action`). Removed on the next human reply. Set to an empty string to disable | `📋` |
 | `CCDB_ERROR_THREAD_MARKER` | Marker prepended when a turn ends in an error. Removed on the next human reply. Set to an empty string to disable | `⚠️` |
 | `CCDB_SCHEDULED_THREAD_MARKER` | Marker prepended to a thread while a scheduled task is waiting to post into it (removed when it fires, or the task is disabled or deleted). Set to an empty string to disable | `⏰` |
+| `CCDB_WAIT_CWD_ROOTS` | Directories a wait probe's `cwd` must sit under (`os.pathsep`-separated, checked after `realpath`) | relay user's home |
 | `THREAD_INBOX_ENABLED` | Enable the persistent thread inbox (classifies sessions as `waiting`/`done`/`ambiguous` via `claude -p`; shown in thread dashboard) | `false` |
 | `THREAD_AUTO_RENAME` | Auto-rename new thread titles using Claude AI — generates a short, descriptive title from the first user message via a background `claude -p` call (never delays session start), and re-titles the thread later when its subject has clearly moved on (rate-limited to one rename per 15 minutes; lineage tags are preserved) | `false` |
 | `CCDB_ACCOUNT_POOLS_FILE` | Path to a TOML file listing pre-logged-in Claude Code / Codex profile directories per backend and the strategy that picks one per session or turn. Validated at startup; unset keeps one implicit login per backend. See [Account Pools](docs/account-pools.md) | (optional) |
@@ -1069,6 +1097,12 @@ for idle deadlines, attachment retries, credentials and startup rollback.
 | `CCDB_INGEST_TOKEN` | Bearer token for `POST /api/ingest` (independent of `api_secret`); unset ⇒ the endpoint responds `503` | (optional) |
 | `CCDB_INGEST_REQUIRE_COMPLETE` | Set to `1` to reject an ingest with `409` when its `attachments_manifest` proves attachments went missing, instead of starting a session on partial evidence | `0` |
 | `CCDB_TEAMS_VAULT_ROOT` | Directory where `POST /api/teams/sync` mirrors upstream threads (one file per message). Gated by `CCDB_INGEST_TOKEN` | `{working_dir}/teams` |
+| `CCDB_CONSOLE_PORT` | Port for the [Relay Console](docs/console.md) listener (requires the `console` extra). The console is off unless set and refuses to start without authentication | (optional) |
+| `CCDB_CONSOLE_HOST` | Relay Console bind address. Keep it on loopback behind a tunnel | `127.0.0.1` |
+| `CCDB_CONSOLE_ACCESS_TEAM_DOMAIN` | Cloudflare Access team domain (`myteam.cloudflareaccess.com`) whose JWTs the console verifies | (optional) |
+| `CCDB_CONSOLE_ACCESS_AUD` | AUD tag of the Cloudflare Access application in front of the console | (optional) |
+| `CCDB_CONSOLE_ALLOWED_EMAILS` | Comma-separated emails allowed in via Access. Required with Access, so a mistaken Access policy edit still leaves the console closed | (optional) |
+| `CCDB_CONSOLE_TOKEN` | Bearer token (32+ characters) for local clients; on its own, use only on a private network (tailnet, SSH tunnel, loopback) | (optional) |
 
 ### Permission Modes — What Works in `-p` Mode
 
@@ -1349,16 +1383,23 @@ uv sync --extra api
 | GET | `/api/lounge` | Read recent AI Lounge messages |
 | POST | `/api/lounge` | Post a message to the AI Lounge (with optional `label`); returns a `hint` field when the message exceeds 200 characters |
 | GET | `/api/sessions` | List every session — live and stored — with state, working dir and latest lounge note (`state=running`, `exclude_thread`, `limit`) |
+| GET | `/api/slots` | Session slot queue: `max_slots`, threads holding a slot (`running`) and the queue in start order (`waiting`) |
+| POST | `/api/slots/{thread_id}/{action}` | Steer the queue — `prioritize` / `defer` a waiting thread, `pause` a running one (404 wrong state, 409 conflict such as `nothing_waiting`, 503 no limit configured) |
 | GET | `/api/search` | Find a past thread by keyword — `LIKE` over summary and working dir; add `body=1` to also grep local Claude transcripts (each hit then carries a `snippet` and `source`); returns each hit with a Discord `deep_link` (`q` required, optional `origin`, `limit` max 50) |
 | GET | `/api/threads/{thread_id}/messages` | Read another thread's conversation, oldest first (`limit`) |
 | POST | `/api/claims` | Claim a resource before working on it — 201 when acquired, 409 with the holder when taken |
 | GET | `/api/claims` | List live claims (optional `resource` filter) |
 | DELETE | `/api/claims` | Release a claim (`resource`, `thread_id`, optional `force=true`) |
+| POST | `/api/waits` | End the turn while CI runs: register a probe (`thread_id`, `argv`, `pending_exit_codes` and/or `done_values`, optional `interval_seconds`, `timeout_seconds`, `label`, `note`, `cwd`); the thread is resumed when it says done, times out, or fails 5 times in a row. 201 created, 200 when the same probe is already waiting, 429 over the limit, 503 when waits are off. See [docs/waits.md](docs/waits.md) |
+| GET | `/api/waits` | Active waits with their last probe result (optional `thread_id`) |
+| DELETE | `/api/waits/{id}` | Cancel a wait (with `thread_id`, only if that thread owns it) |
 | POST | `/api/threads/{thread_id}/message` | Relay a message from one session to another (`text`, `from_thread`, `mode`, `hop`) |
 | POST | `/api/threads/{thread_id}/done` | Mark a thread as ready to close (prefixes the title with `✅`; idempotent) |
 | POST | `/api/threads/{thread_id}/waiting` | Mark a thread as waiting on the human (prefixes the title with `❓`, replacing `✅`/`⚠️`; removed on the next human reply; idempotent) |
 | POST | `/api/threads/{thread_id}/review` | Mark a thread as having a deliverable for the human to review (prefixes the title with `👀`, replacing any other outcome marker; removed on the next human reply; idempotent) |
 | POST | `/api/threads/{thread_id}/action` | Mark a thread as waiting on a task the human must do outside the chat — a todo (prefixes the title with `📋`, replacing any other outcome marker; removed on the next human reply; idempotent) |
+
+The four mark endpoints return `200` with `marked` or `unchanged`, or `202` with `queued` when the rename is waiting out Discord's rate limit (it is applied in the background — do not retry).
 
 ```bash
 # Send notification (embed format, default)
@@ -1472,6 +1513,7 @@ claude_discord/
   collision.py             # File-write tracking + collision rules (pure, clock-injected)
   lounge.py                # AI Lounge prompt builder
   session_view.py          # Cross-session views for GET /api/sessions (pure merge logic)
+  session_slots.py         # Steerable session slot queue (prioritize / defer / pause + auto-resume)
   relay.py                 # RelayGuard + relay prompt wrapper (hop/cooldown/rate limits)
   session_sync.py          # CLI session discovery and import
   worktree.py              # WorktreeManager — safe git worktree lifecycle
@@ -1479,6 +1521,7 @@ claude_discord/
     claude_chat.py         # Interactive chat (thread creation, message handling)
     skill_command.py       # /skill slash command with autocomplete
     session_manage.py      # /sessions, /search, /sync-sessions, /resume, /resume-info, /sync-settings
+    session_queue.py       # /queue — see and steer the session slot queue
     session_sync.py        # Thread-creation and message-posting logic for sync-sessions
     prompt_builder.py      # build_prompt_and_images() — pure function, no Cog/Bot state
     scheduler.py           # Periodic Claude Code task executor
@@ -1517,6 +1560,7 @@ claude_discord/
     streaming_manager.py   # StreamingMessageManager — debounced in-place message edits
     tool_timer.py          # LiveToolTimer — elapsed time counter for long-running tools
     thread_dashboard.py    # Live pinned embed showing session states
+    slot_views.py          # Queue buttons/menus (⏫ / ⏬ / ⏸) for the waiting message and /queue
     file_sender.py         # File delivery via .ccdb-attachments
     inbox_classifier.py    # classify() — lightweight claude -p call to label sessions
     thread_renamer.py      # suggest_title() — background claude -p call for auto thread naming

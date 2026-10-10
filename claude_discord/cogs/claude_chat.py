@@ -63,6 +63,7 @@ from ..thread_marker import (
     set_outcome_thread_name,
 )
 from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES, initial_thread_name
+from ..thread_status import schedule_thread_outcome
 from ._run_helper import run_claude_with_config
 from .prompt_builder import build_prompt_and_images, wants_file_attachment
 from .run_config import RunConfig
@@ -101,6 +102,7 @@ _HELP_CATEGORY: dict[str, str | None] = {
     "usage": "📌 Session",
     "attention": "📌 Session",
     "sessions": "📌 Session",
+    "queue": "📌 Session",  # reorder / pause sessions waiting for a slot
     "search": "📌 Session",
     "resume": "📌 Session",
     "resume-info": "📌 Session",
@@ -880,19 +882,13 @@ class ClaudeChatCog(commands.Cog):
 
         Backgrounded: discord.py sleeps through a rename rate limit (two per ten
         minutes per thread), and the human's reply must not wait on that.
+        Shares the per-thread queue with the outcome marks, so a clear still
+        waiting out the limit is overtaken by the turn's next outcome.
         """
         current = thread.name or ""
-        cleared = set_outcome_thread_name(current, None)
-        if cleared == current.strip():
+        if set_outcome_thread_name(current, None) == current.strip():
             return
-        asyncio.create_task(self._clear_done_marker(thread, current, cleared))
-
-    async def _clear_done_marker(self, thread: discord.Thread, current: str, cleared: str) -> None:
-        try:
-            await thread.edit(name=cleared)
-            logger.info("thread %d reopened %r -> %r", thread.id, current, cleared)
-        except Exception:
-            logger.warning("Failed to clear done marker on thread %d", thread.id, exc_info=True)
+        schedule_thread_outcome(thread, None)
 
     def _schedule_retitle(self, thread: discord.Thread, text: str) -> None:
         """Note a reply, and start a re-title when the thread has drifted enough.
@@ -1112,7 +1108,8 @@ class ClaudeChatCog(commands.Cog):
 
         Args:
             thread: The receiving thread.
-            text: Already-wrapped message (see ``relay.build_relay_prompt``).
+            text: Already-wrapped message (``relay.build_relay_prompt``, or a
+                finished wait's ``waits.build_wait_prompt``).
             interrupt: When True, SIGINT the turn in flight so a "stop, I have
                 this" reaches Claude within seconds. When False, wait for the
                 current turn to finish — the right default, because a message

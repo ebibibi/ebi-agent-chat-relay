@@ -27,6 +27,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `backend` and `model` columns (auto-migrated); an unpinned task behaves exactly as before, which
   is what every task created before this does.
 
+- **Relay Console** (#870) — an API-first triage screen on its own listener
+  (`CCDB_CONSOLE_PORT`, off by default). Inbox of threads waiting on the human, running work,
+  a project/parent tree, priority P0–P3, due dates, snooze, quick capture and "hand to an agent",
+  reply and done from desktop or phone. Status is derived from existing markers, running turns
+  and spawn lineage; only priority/due/snooze/project/parent live in the new `work_items` table.
+  Always authenticated (Cloudflare Access JWT with an email allowlist, and/or a bearer token);
+  refuses to start otherwise. See `docs/console.md` and ADR-0010.
+- **Waits** (#854) — `POST /api/waits` lets a session end its turn (freeing its concurrency slot)
+  while CI/CD runs. ccdb re-runs the registered probe (`argv`, no shell, relay credentials
+  stripped) every `interval_seconds` and resumes the thread with a fixed
+  `[WAIT FINISHED — automatic continuation]` prompt when the probe says done
+  (`pending_exit_codes` / `done_values`), the wait times out, or the probe fails 5 times in a
+  row. Waits are stored in the session database and survive restarts (a resume cut off by a
+  restart or a failed delivery is retried); threads with one carry ⏰. Re-registering the same
+  probe returns the live wait. Disabled when execution modes other than `host` are allowed.
+  `GET` / `DELETE /api/waits` list and cancel. The system instructions and the PR completion gate
+  tell agents to register a wait instead of watching pipelines in the turn (only where waits
+  work), and the gate stays quiet while the thread has an active wait. On by default
+  (`enable_waits=False` to turn off). See `docs/waits.md`.
+- **Steerable session queue** — when every `MAX_CONCURRENT_SESSIONS` slot is busy, the waiting
+  message now carries **⏫ Run this next** / **⏬ Let others go first** buttons. `/queue` shows
+  running and waiting threads from any channel and can also **pause** a running thread: it is
+  interrupted to free its slot and resumes automatically (same session, via `--resume`) once the
+  threads it yielded to are through. Pausing is refused when nothing is waiting. The same
+  controls are on the REST API: `GET /api/slots`, `POST /api/slots/{thread_id}/{prioritize|defer|pause}`.
+  No configuration needed. See `docs/session-queue.md`.
 - **Account pools** (#821) — `CCDB_ACCOUNT_POOLS_FILE` names a TOML file of pre-logged-in Claude
   Code / Codex profile directories per backend and a strategy (`priority`, `sticky`,
   `round_robin`, `most_headroom`). Each session or turn runs as the chosen profile; a thread that

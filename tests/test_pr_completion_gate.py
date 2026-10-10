@@ -169,3 +169,73 @@ async def test_run_helper_fails_open_with_visible_warning(monkeypatch) -> None:
     assert prompt is None
     notice = surface.send_notice.await_args.args[0]
     assert "unavailable" in notice.title.lower()
+
+
+def _pr(number: int = 7) -> PullRequestStatus:
+    return PullRequestStatus(
+        repository="ebibibi/example",
+        number=number,
+        title="Ready release",
+        url=f"https://github.com/ebibibi/example/pull/{number}",
+        head_ref="session/123",
+        mergeable="MERGEABLE",
+        review_decision=None,
+        checks_state="PENDING",
+    )
+
+
+def test_completion_prompt_only_offers_waits_when_they_work() -> None:
+    without = build_completion_prompt((_pr(),))
+    assert "wait for all checks" in without
+    assert "/api/waits" not in without
+    with_waits = build_completion_prompt((_pr(),), waits_available=True)
+    assert "/api/waits" in with_waits
+    assert "end the turn" in with_waits
+
+
+@pytest.mark.asyncio
+async def test_gate_mentions_waits_only_with_a_watcher_and_api(monkeypatch) -> None:
+    from claude_discord import waits
+
+    gate = SimpleNamespace(find_for_thread=AsyncMock(return_value=(_pr(),)))
+    monkeypatch.setattr(_run_helper, "_pr_completion_gate", gate)
+    surface = SimpleNamespace(thread_key=123, send_notice=AsyncMock())
+    config = SimpleNamespace(
+        pr_completion_gate_rerun=False, surface=surface, runner=SimpleNamespace(api_port=None)
+    )
+    repo = SimpleNamespace(active_thread_ids=AsyncMock(return_value=set()))
+    waits.register_watcher(repo)  # type: ignore[arg-type]
+    try:
+        prompt = await _run_helper._get_pr_completion_prompt(
+            config, session_id="s", final_error=None
+        )
+        assert prompt is not None and "/api/waits" not in prompt
+        config.runner.api_port = 8099
+        prompt = await _run_helper._get_pr_completion_prompt(
+            config, session_id="s", final_error=None
+        )
+        assert prompt is not None and "/api/waits" in prompt
+    finally:
+        waits.register_watcher(None)
+
+
+@pytest.mark.asyncio
+async def test_gate_stays_quiet_while_the_thread_waits(monkeypatch) -> None:
+    from claude_discord import waits
+
+    gate = SimpleNamespace(find_for_thread=AsyncMock(return_value=(_pr(),)))
+    monkeypatch.setattr(_run_helper, "_pr_completion_gate", gate)
+    surface = SimpleNamespace(thread_key=123, send_notice=AsyncMock())
+    config = SimpleNamespace(
+        pr_completion_gate_rerun=False, surface=surface, runner=SimpleNamespace(api_port=8099)
+    )
+    repo = SimpleNamespace(active_thread_ids=AsyncMock(return_value={123}))
+    waits.register_watcher(repo)  # type: ignore[arg-type]
+    try:
+        prompt = await _run_helper._get_pr_completion_prompt(
+            config, session_id="s", final_error=None
+        )
+    finally:
+        waits.register_watcher(None)
+    assert prompt is None
+    gate.find_for_thread.assert_not_awaited()

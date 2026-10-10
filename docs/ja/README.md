@@ -120,6 +120,16 @@ Claude が POST /api/tasks 呼び出し → 定期タスクを登録
 SchedulerCog（30 秒マスターループ）  → 期限のタスクを自動実行
 ```
 
+### 枠を占有せずに CI を待つ（WaitWatcherCog）
+
+パイプラインを見張るだけのターンは、何もしていないのに同時実行枠を 1 つ占有します。代わりにセッションは **wait** — `gh pr checks 12` のようなプローブコマンド — を登録してターンを終えます。ccdb がプローブを再実行し（シェルなし・モデルなし・枠なし）、完了・タイムアウト・失敗の連続のいずれかになった時点で、結果を添えてスレッドを再開します。GitHub、Azure Pipelines、その他ステータスを返すコマンドがあれば何でも使え、webhook や公開エンドポイントは不要です。詳細は [docs/waits.md](../waits.md) を参照。
+
+```
+Claude が POST /api/waits 呼び出し → プローブを登録してターンを終了
+WaitWatcherCog（15 秒ループ）     → 期限のプローブを実行
+プローブが完了を返す              → 同じスレッドで "[WAIT FINISHED]" の続きが始まる
+```
+
 ### CI/CD 自動化
 
 GitHub Actions から Discord webhook 経由で Claude Code タスクをトリガー。Claude が自律的に動作 — コードを読み、ドキュメントを更新し、PR を作成し、自動マージを有効化します。
@@ -313,9 +323,9 @@ curl -X POST "$CCDB_API_URL/api/spawn" \
 
 スレッドの作業が完全に終わると、エージェントは「このスレッドは終了できます」とユーザーに伝え、`POST /api/threads/{thread_id}/done` を呼びます。タイトル先頭に **✅** が付き、チャンネル一覧でどのスレッドを閉じてよいか一目で分かります。人間が再び返信するとマーカーは自動で外れます。`CCDB_DONE_THREAD_MARKER` で `✅` を変更できます（空文字でマーカーと指示の両方を無効化）。
 
-スケジュールされたタスクが後からスレッドに投稿する予定のとき（`thread_id` 付きで登録したフォローアップや `ScheduleWakeup`）、待っている間はタイトル先頭に **⏰** が付きます。自動で再開されるスレッドが放置されたように見えることはもうありません。スケジューラーは毎回タスクテーブルからマーカーを突き合わせるため、ワンショットが発火したときやタスクを無効化・削除したときに外れます。`✅` と両方付く場合は `✅` の後ろに並び、自動リタイトルでも消えません。`CCDB_SCHEDULED_THREAD_MARKER` で `⏰` を変更できます（空文字で無効化）。
+スケジュールされたタスクが後からスレッドに投稿する予定のとき（`thread_id` 付きで登録したフォローアップや `ScheduleWakeup`）、待っている間はタイトル先頭に **⏰** が付きます。自動で再開されるスレッドが放置されたように見えることはもうありません。スケジューラーは毎回タスクテーブルからマーカーを突き合わせるため、ワンショットが発火したときやタスクを無効化・削除したときに外れます。`✅` と両方付く場合は `✅` の後ろに並び、自動リタイトルでも消えません。有効な wait（`POST /api/waits`）があるスレッドにも、wait が終わるか取り消されるまで同じ **⏰** が付きます。`CCDB_SCHEDULED_THREAD_MARKER` で `⏰` を変更できます（空文字で無効化）。
 
-`✅` と同じ位置で、ターンが止まったときに「次は誰の番か」も示します。**❓** はあなたの返答待ち（AskUserQuestion が開いている、またはエージェントが判断を求めて `POST /api/threads/{thread_id}/waiting` を呼んだ）、**⚠️** はターンがエラーで終わったことを表します。結果マーカー（`✅` / `❓` / `👀` / `📋` / `⚠️`）は同時に 1 つだけで、常に `⏰` の前に付き、あなたが返信すると外れます。「実行中」のようにメッセージごとに変わる状態はリアクション絵文字のままです。Discord のリネーム制限（スレッドごとに 10 分で 2 回）があるため、タイトルにはターンをまたいで続く状態だけを載せます。`CCDB_WAITING_THREAD_MARKER` と `CCDB_ERROR_THREAD_MARKER` で `❓` と `⚠️` を変更できます（空文字で無効化）。
+`✅` と同じ位置で、ターンが止まったときに「次は誰の番か」も示します。**❓** はあなたの返答待ち（AskUserQuestion が開いている、またはエージェントが判断を求めて `POST /api/threads/{thread_id}/waiting` を呼んだ）、**⚠️** はターンがエラーで終わったことを表します。結果マーカー（`✅` / `❓` / `👀` / `📋` / `⚠️`）は同時に 1 つだけで、常に `⏰` の前に付き、あなたが返信すると外れます。「実行中」のようにメッセージごとに変わる状態はリアクション絵文字のままです。Discord のリネーム制限（スレッドごとに 10 分で 2 回）があるため、タイトルにはターンをまたいで続く状態だけを載せます。マーク要求がこの制限に当たった場合、エンドポイントは数秒以内に `202 {"status": "queued"}` を返し、リネームは制限が明けた時点で自動的に反映されます。待機中に届いたマーク要求はまとめられ、古い状態を順に再生するのではなく、最新の状態へ 1 回だけリネームされます。`CCDB_WAITING_THREAD_MARKER` と `CCDB_ERROR_THREAD_MARKER` で `❓` と `⚠️` を変更できます（空文字で無効化）。
 
 「あなたの番」は求められていることの種類で分かれるので、チャンネル一覧がそのまま Todo リストになります。**❓** は返信で済む（質問・選択・GO/NO-GO）、**👀** は成果物の確認待ち（`POST /api/threads/{thread_id}/review`）、**📋** はチャットの外であなたにしかできない作業（画面での手作業、サインイン・MFA、承認、支払いなど。`POST /api/threads/{thread_id}/action`）です。ターンの終わりにエージェントが 1 つ選び、`✅` / `⚠️` と同じ枠を共有します。`CCDB_REVIEW_THREAD_MARKER` と `CCDB_ACTION_THREAD_MARKER` で `👀` と `📋` を変更できます（空文字で無効化）。
 
@@ -436,6 +446,21 @@ ccdb attention-backfill --guild <id> --since 2026-09-01   # seed history (owner 
 
 デフォルトで有効です（`CCDB_ATTENTION_ENABLED=false` で記録を停止）。すべての数値には推定値であることが明記され、使用したパラメータも併せて報告されます。詳しくは [docs/attention.md](../attention.md) を参照してください。
 
+### Relay Console — デスクトップやスマホからエージェントの仕事を捌く
+
+専用の認証付きリスナーで動く、API ファーストのトリアージ画面です。すべてのスレッドを「次は誰の番か」で並べます — **Inbox**（❓ / 👀 / 📋 / ⚠️：ボールはあなたにある）、**Running**、**To do**、**Idle**、プロジェクト／親子の **Tree**、**Snoozed**、**Done** — 優先度 P0〜P3、期日、スヌーズ付きです。返信・完了マーク、あるいは新しい仕事を書き留めてエージェントに渡す（スレッドを開いてターンを開始する）こともできます。状態は ccdb がすでに知っている情報（結果マーカー、実行中のターン、スロットの待ち行列、スポーンの系譜）から導出されるため、エージェント側に新しい作業は不要です。新しい `work_items` テーブルに保存するのは優先度・期日・スヌーズ・プロジェクト・親だけです。デスクトップではキーボード操作でき、スマホではホーム画面に追加できます。
+
+```bash
+uv add "claude-code-discord-bridge[console] @ git+https://github.com/ebibibi/ebi-agent-chat-relay.git"
+CCDB_CONSOLE_PORT=8100                                     # off unless set
+CCDB_CONSOLE_ACCESS_TEAM_DOMAIN=myteam.cloudflareaccess.com  # Cloudflare Access JWT…
+CCDB_CONSOLE_ACCESS_AUD=<aud tag>
+CCDB_CONSOLE_ALLOWED_EMAILS=me@example.com                 # …plus a required allowlist
+# CCDB_CONSOLE_TOKEN=...                                   # and/or a 32+ char bearer token
+```
+
+**認証がなければ起動を拒否します**。契約は `/console/api` 配下の JSON API で、同梱の Web クライアントはその利用者の 1 つにすぎません。詳しくは [docs/console.md](../console.md) と [ADR-0010](../adr/0010-add-an-api-first-console-on-its-own-listener.md) を参照してください。
+
 ### スタートアップリジューム
 
 Bot の再起動中にセッションが中断された場合、Bot が再起動したときに自動的に再開されます。リジューム登録の方法は 3 つあります:
@@ -533,6 +558,7 @@ config_dir = "/home/me/.claude-work"
 - **バックエンド間の会話引き継ぎ** — 実行中のスレッドを Claude と Codex の間で切り替えると、直前のバックエンドのローカル JSONL からサイズを制限したテキストのみの内容を読み取り、新しいネイティブセッションの初期文脈として渡します。手動での要約やコピペは不要
 - **Codex リジュームの自動復旧** — リジュームした Codex セッションで出力開始前に WebSocket 切断が繰り返された場合、ccdb は以前の会話からサイズを制限したテキストのみの会話履歴を引き継いで代替セッションを開始。画像やツールのデータは除外
 - **並行セッション** — 設定可能な上限での複数並行セッション
+- **操作できるセッションキュー** — `MAX_CONCURRENT_SESSIONS` の枠がすべて埋まっているとき、待機メッセージに **⏫ 次に実行** / **⏬ 他を先に** ボタンが付きます。`/queue` はどのチャンネルからでも実行中・待機中のスレッドを一覧でき、実行中のスレッドを **⏸ 一時停止** することもできます。一時停止したスレッドは枠を空け、譲った相手のスレッドが終わると自動で再開します（同じセッションを `--resume` で継続）。待機中のスレッドがないときは一時停止できません。同じ操作は `GET /api/slots` と `POST /api/slots/{thread_id}/{prioritize|defer|pause}` からも行えます。詳細は [docs/session-queue.md](../session-queue.md) を参照
 - **削除せず停止** — `/stop` でセッションを保持したまま停止し、リジューム可能
 - **セッション割り込み** — アクティブなスレッドに新しいメッセージを送ると実行中のセッションに SIGINT を送り、新しい指示で即座に再開。手動での `/stop` 不要
 - **スレッド自動リネーム** — `THREAD_AUTO_RENAME=true` のとき、最初のメッセージをもとに Claude が生成した短いタイトルでスレッドを自動リネーム（バックグラウンドタスクのためセッション開始を遅延させない）。その後も作業内容が明らかに別の話題へ移ったらタイトルを付け直す（15分に1回まで、ccdb が作ったスレッドのみ）
@@ -582,6 +608,7 @@ config_dir = "/home/me/.claude-work"
 - **自己登録** — チャットセッション中に `POST /api/tasks` でタスクを登録
 - **コード変更不要** — ランタイムでタスクを追加・削除・変更
 - **有効/無効切り替え** — 削除せずにタスクを一時停止（`PATCH /api/tasks/{id}`）
+- **Waits** — `POST /api/waits` でセッションは CI 実行中にターンを終えられます。ccdb がプローブをポーリングし、完了したらスレッドを再開します（再起動をまたいで保持。`docs/waits.md` を参照）
 
 ### CI/CD 自動化
 - **Webhook トリガー** — GitHub Actions や任意の CI/CD システムから Claude Code タスクをトリガー
@@ -1041,6 +1068,7 @@ CHAT_ONLY_CHANNEL_IDS=444,555
 | `CCDB_ACTION_THREAD_MARKER` | ターンが人間の作業待ち（Todo）で終わったとき（`POST /api/threads/{id}/action`）にタイトル先頭に付けるマーカー。次に人間が返信すると外れる。空文字で無効化 | `📋` |
 | `CCDB_ERROR_THREAD_MARKER` | ターンがエラーで終わったときにタイトル先頭に付けるマーカー。次に人間が返信すると外れる。空文字で無効化 | `⚠️` |
 | `CCDB_SCHEDULED_THREAD_MARKER` | スケジュールされたタスクの投稿を待っているスレッドのタイトル先頭に付けるマーカー（発火・無効化・削除で外れる）。空文字で無効化 | `⏰` |
+| `CCDB_WAIT_CWD_ROOTS` | wait プローブの `cwd` が配下になければならないディレクトリ（`os.pathsep` 区切り、`realpath` 後に判定） | relay ユーザーのホーム |
 | `THREAD_INBOX_ENABLED` | 永続スレッドインボックスを有効化（`claude -p` でセッションを `waiting`/`done`/`ambiguous` に分類し、スレッドダッシュボードに表示） | `false` |
 | `THREAD_AUTO_RENAME` | 新しいスレッドのタイトルを Claude AI で自動リネーム — 最初のユーザーメッセージをもとにバックグラウンドの `claude -p` 呼び出しで短く分かりやすいタイトルを生成（セッション開始を遅延させない）。以降も話題が明確に変わったらタイトルを更新する（15分に1回まで・系譜タグは保持） | `false` |
 | `CCDB_ACCOUNT_POOLS_FILE` | バックエンドごとにログイン済みの Claude Code / Codex プロファイルディレクトリと、セッションまたはターンごとにどれを使うかの戦略を記述した TOML ファイルのパス。起動時に検証される。未設定ならバックエンドごとに暗黙のログイン1つのまま。[アカウントプール](../account-pools.md) を参照 | （オプション） |
@@ -1053,6 +1081,12 @@ CHAT_ONLY_CHANNEL_IDS=444,555
 | `CCDB_INGEST_TOKEN` | `POST /api/ingest` 用の Bearer トークン（`api_secret` とは独立）。未設定ならこのエンドポイントは `503` を返す | （オプション） |
 | `CCDB_INGEST_REQUIRE_COMPLETE` | `1` を設定すると、`attachments_manifest` によって添付ファイルの欠落が判明したインジェストを、部分的な証拠でセッションを開始せずに `409` で拒否する | `0` |
 | `CCDB_TEAMS_VAULT_ROOT` | `POST /api/teams/sync` が上流スレッドをミラーリングする先のディレクトリ（メッセージ 1 件につき 1 ファイル）。`CCDB_INGEST_TOKEN` で保護される | `{working_dir}/teams` |
+| `CCDB_CONSOLE_PORT` | [Relay Console](../console.md) のリスナーのポート（`console` extra が必要）。設定しない限り無効で、認証なしでは起動を拒否する | (optional) |
+| `CCDB_CONSOLE_HOST` | Relay Console のバインドアドレス。トンネルの背後でループバックのままにする | `127.0.0.1` |
+| `CCDB_CONSOLE_ACCESS_TEAM_DOMAIN` | コンソールが JWT を検証する Cloudflare Access のチームドメイン（`myteam.cloudflareaccess.com`） | (optional) |
+| `CCDB_CONSOLE_ACCESS_AUD` | コンソールの前段にある Cloudflare Access アプリケーションの AUD タグ | (optional) |
+| `CCDB_CONSOLE_ALLOWED_EMAILS` | Access 経由で許可するメールアドレス（カンマ区切り）。Access 使用時は必須で、Access ポリシーを誤って編集してもコンソールは閉じたまま | (optional) |
+| `CCDB_CONSOLE_TOKEN` | ローカルクライアント用の Bearer トークン（32 文字以上）。これ単独で使うのはプライベートなネットワーク（tailnet、SSH トンネル、ループバック）に限る | (optional) |
 
 ### パーミッションモード — `-p` モードで動作するもの
 
@@ -1303,16 +1337,23 @@ uv sync --extra api
 | GET | `/api/lounge` | AI Lounge の最近のメッセージを取得 |
 | POST | `/api/lounge` | AI Lounge にメッセージを投稿（`label` オプション）。200 文字を超えると `hint` フィールドを返す |
 | GET | `/api/sessions` | すべてのセッション（ライブ・保存済み）を状態・作業ディレクトリ・最新のラウンジメモ付きで一覧（`state=running`、`exclude_thread`、`limit`） |
+| GET | `/api/slots` | セッション枠のキュー: `max_slots`、枠を保持しているスレッド（`running`）、開始順に並んだ待機キュー（`waiting`） |
+| POST | `/api/slots/{thread_id}/{action}` | キューを操作 — 待機中のスレッドを `prioritize` / `defer`、実行中のスレッドを `pause`（状態が合わなければ 404、`nothing_waiting` などの競合は 409、上限未設定なら 503） |
 | GET | `/api/search` | キーワードから過去のスレッドを検索 — サマリーと作業ディレクトリへの `LIKE` クエリ。`body=1` を付けるとローカルの Claude トランスクリプトも grep（各ヒットに `snippet` と `source` が付く）。各ヒットを Discord `deep_link` 付きで返す（`q` 必須、任意の `origin`、`limit` は最大 50） |
 | GET | `/api/threads/{thread_id}/messages` | 他スレッドの会話を古い順に取得（`limit`） |
 | POST | `/api/claims` | 作業開始前にリソースを宣言 — 取得成功で 201、取得済みなら保持者情報付きで 409 |
 | GET | `/api/claims` | 有効なクレームの一覧（`resource` フィルター任意） |
 | DELETE | `/api/claims` | クレームの解放（`resource`、`thread_id`、任意で `force=true`） |
+| POST | `/api/waits` | CI 実行中にターンを終える: プローブを登録（`thread_id`、`argv`、`pending_exit_codes` と `done_values` の少なくとも一方、任意で `interval_seconds`・`timeout_seconds`・`label`・`note`・`cwd`）。完了・タイムアウト・5 回連続の失敗でスレッドを再開。作成時 201、同じプローブが既に待機中なら 200、上限超過は 429、無効時は 503。詳細は [docs/waits.md](../waits.md) |
+| GET | `/api/waits` | 有効な wait と直近のプローブ結果の一覧（任意で `thread_id`） |
+| DELETE | `/api/waits/{id}` | wait を取り消す（`thread_id` を付けると、そのスレッドが所有する場合のみ） |
 | POST | `/api/threads/{thread_id}/message` | あるセッションから別のセッションへメッセージをリレー（`text`、`from_thread`、`mode`、`hop`） |
 | POST | `/api/threads/{thread_id}/done` | スレッドを「終了してよい」状態にする（タイトル先頭に `✅`。冪等） |
 | POST | `/api/threads/{thread_id}/waiting` | スレッドを「人間の返答待ち」状態にする（タイトル先頭に `❓`。`✅`/`⚠️` を置き換え、次に人間が返信すると外れる。冪等） |
 | POST | `/api/threads/{thread_id}/review` | スレッドを「成果物の確認待ち」状態にする（タイトル先頭に `👀`。他の結果マーカーを置き換え、次に人間が返信すると外れる。冪等） |
 | POST | `/api/threads/{thread_id}/action` | スレッドを「チャット外での人間の作業待ち（Todo）」状態にする（タイトル先頭に `📋`。他の結果マーカーを置き換え、次に人間が返信すると外れる。冪等） |
+
+4 つのマーク用エンドポイントは `200`（`marked` または `unchanged`）を返します。Discord のレート制限でリネームが待機中の場合は `202`（`queued`）を返し、バックグラウンドで反映されます（再試行は不要です）。
 
 ```bash
 # 通知の送信（埋め込み形式、デフォルト）
@@ -1424,12 +1465,14 @@ claude_discord/
   lounge.py                # AI Lounge プロンプトビルダー
   session_view.py          # GET /api/sessions 用のクロスセッションビュー（純粋なマージロジック）
   relay.py                 # RelayGuard + リレープロンプトのラッパー（ホップ／クールダウン／レート制限）
+  session_slots.py         # 操作できるセッション枠キュー（優先 / 後回し / 一時停止 + 自動再開）
   session_sync.py          # CLI セッションの検出とインポート
   worktree.py              # WorktreeManager — git worktree の安全なライフサイクル管理
   cogs/
     claude_chat.py         # インタラクティブチャット（スレッド作成、メッセージ処理）
     skill_command.py       # /skill スラッシュコマンド（オートコンプリート付き）
     session_manage.py      # /sessions, /search, /sync-sessions, /resume, /resume-info, /sync-settings
+    session_queue.py       # /queue — セッション枠キューの確認と操作
     session_sync.py        # sync-sessions のスレッド作成・メッセージ投稿ロジック
     prompt_builder.py      # build_prompt_and_images() — 純粋関数、Cog/Bot 状態に非依存
     scheduler.py           # 定期 Claude Code タスク実行エンジン
@@ -1468,6 +1511,7 @@ claude_discord/
     streaming_manager.py   # StreamingMessageManager — デバウンス付きインプレース編集
     tool_timer.py          # LiveToolTimer — 長時間ツール実行の経過時間カウンター
     thread_dashboard.py    # スレッドのセッション状態を表示する live ピン embed
+    slot_views.py          # 待機メッセージと /queue 用のキュー操作ボタン・メニュー（⏫ / ⏬ / ⏸）
     file_sender.py         # .ccdb-attachments 経由のファイル配信
     inbox_classifier.py    # classify() — セッションにラベルを付ける軽量 claude -p 呼び出し
     thread_renamer.py      # suggest_title() — スレッド自動リネーム用バックグラウンド claude -p 呼び出し

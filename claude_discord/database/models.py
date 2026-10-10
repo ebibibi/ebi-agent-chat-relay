@@ -127,6 +127,35 @@ CREATE TABLE IF NOT EXISTS thread_lineage (
 );
 
 CREATE INDEX IF NOT EXISTS idx_thread_lineage_parent ON thread_lineage(parent_thread_id);
+
+-- Waits (claude_discord/waits.py): a probe ccdb re-runs until it says done,
+-- then resumes the thread. Lets a session end its turn while CI runs instead
+-- of holding a concurrency slot. Times are Unix seconds.
+CREATE TABLE IF NOT EXISTS pending_waits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    argv TEXT NOT NULL,
+    pending_exit_codes TEXT NOT NULL,
+    done_values TEXT NOT NULL,
+    interval_seconds INTEGER NOT NULL,
+    timeout_seconds INTEGER NOT NULL,
+    note TEXT,
+    cwd TEXT,
+    status TEXT NOT NULL,
+    outcome TEXT,
+    created_at REAL NOT NULL,
+    deadline REAL NOT NULL,
+    next_check_at REAL NOT NULL,
+    consecutive_errors INTEGER NOT NULL DEFAULT 0,
+    delivery_failures INTEGER NOT NULL DEFAULT 0,
+    last_exit_code INTEGER,
+    last_output TEXT,
+    last_error TEXT,
+    finished_at REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_waits_status ON pending_waits(status, next_check_at);
 """
 
 # Migrations for existing databases that lack new columns.

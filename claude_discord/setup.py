@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from .database.settings_repo import SettingsRepository
     from .database.summary_repo import ThreadSummaryRepository
     from .database.task_repo import TaskRepository
+    from .database.wait_repo import WaitRepository
     from .ext.api_server import ApiServer
 
 from .deployment import DEFAULT_DATA_ROOT, DataLayout
@@ -59,6 +60,8 @@ class BridgeComponents:
     task_repo: TaskRepository | None = None
     lounge_repo: LoungeRepository | None = None
     claims_repo: ClaimRepository | None = None
+    #: Waits (``/api/waits``): resume a thread when a probe says CI is done.
+    wait_repo: WaitRepository | None = None
     #: Which thread spawned which — read by /api/sessions so a manager session
     #: can see its own fan-out instead of inferring it from thread titles.
     lineage_repo: ThreadLineageRepository | None = None
@@ -100,6 +103,8 @@ class BridgeComponents:
             api_server.lounge_repo = self.lounge_repo
         if self.claims_repo is not None:
             api_server.claims_repo = self.claims_repo
+        if self.wait_repo is not None:
+            api_server.wait_repo = self.wait_repo
         if self.lineage_repo is not None:
             api_server.lineage_repo = self.lineage_repo
         if self.resume_repo is not None:
@@ -135,6 +140,7 @@ async def setup_bridge(
     max_concurrent: int | None = None,
     worktree_base_dir: str | None = None,
     enable_thread_inbox: bool = False,
+    enable_waits: bool = True,
     auto_rename_threads: bool | None = None,
     monitor_all_channels: bool | None = None,
     mention_anywhere: bool | None = None,
@@ -199,6 +205,9 @@ async def setup_bridge(
                                env var (comma-separated).
         cli_sessions_path: Path to ~/.claude/projects for session sync.
         enable_scheduler: Whether to enable SchedulerCog.
+        enable_waits: Whether to watch waits registered through ``/api/waits``
+                      and resume their threads (WaitWatcherCog). On by default:
+                      it is what lets a session end its turn while CI runs.
         task_db_path: Path for scheduled tasks SQLite DB. Overrides *data_root*.
         lounge_channel_id: Discord channel ID for AI Lounge messages.
                            Defaults to COORDINATION_CHANNEL_ID env var.
@@ -224,6 +233,7 @@ async def setup_bridge(
     from .cogs.context_links import ContextLinksCog
     from .cogs.scheduler import SchedulerCog
     from .cogs.session_manage import SessionManageCog
+    from .cogs.session_queue import SessionQueueCog
     from .cogs.skill_command import SkillCommandCog
     from .cross_backend_handoff import ConversationHistoryReader
     from .database.inbox_repo import ThreadInboxRepository
@@ -312,7 +322,7 @@ async def setup_bridge(
 
     from .cogs._run_helper import configure_pr_completion_gate, configure_session_limit
 
-    configure_session_limit(max_concurrent)
+    configure_session_limit(max_concurrent, allowed_user_ids=allowed_user_ids)
     pr_completion_owner = os.getenv("CCDB_PR_COMPLETION_OWNER", "").strip()
     configure_pr_completion_gate(pr_completion_owner or None)
     if pr_completion_owner:
@@ -478,6 +488,10 @@ async def setup_bridge(
     await bot.add_cog(session_manage_cog)
     logger.info("Registered SessionManageCog")
 
+    # --- SessionQueueCog (/queue: steer the session slot queue) ---
+    await bot.add_cog(SessionQueueCog(bot, allowed_user_ids=allowed_user_ids))
+    logger.info("Registered SessionQueueCog")
+
     # --- SkillCommandCog (requires at least one channel ID) ---
     if _all_channel_ids:
         # Primary channel: prefer the explicit claude_channel_id, else pick from set
@@ -493,6 +507,16 @@ async def setup_bridge(
         )
         await bot.add_cog(skill_cog)
         logger.info("Registered SkillCommandCog")
+
+    # --- Waits (on by default) ---
+    # Refused where an agent may run sandboxed: a probe runs on the host.
+    if enable_waits:
+        from .waits import waits_unavailable_reason
+
+        reason = waits_unavailable_reason()
+        if reason is not None:
+            enable_waits = False
+            logger.warning("Waits disabled: %s", reason)
 
     # --- SchedulerCog (optional) ---
     task_repo: TaskRepository | None = None
@@ -513,9 +537,19 @@ async def setup_bridge(
             backend_factory=backend_factory,
             backend_settings=backend_settings,
             frontend=frontend,
+            wait_repo=stores.waits if enable_waits else None,
         )
         await bot.add_cog(scheduler_cog)
         logger.info("Registered SchedulerCog")
+
+    # --- WaitWatcherCog ---
+    # Resumes a thread when a wait registered via /api/waits ends, so a session
+    # can end its turn (and free its slot) while CI runs.
+    if enable_waits:
+        from .cogs.wait_watcher import WaitWatcherCog
+
+        await bot.add_cog(WaitWatcherCog(bot, stores.waits))
+        logger.info("Registered WaitWatcherCog")
 
     # --- ContextLinksCog (optional — CONTEXT_LINKS_CONFIG or context_links.json) ---
     if context_links_config is None:
@@ -601,6 +635,7 @@ async def setup_bridge(
         task_repo=task_repo,
         lounge_repo=lounge_repo,
         claims_repo=claims_repo,
+        wait_repo=stores.waits if enable_waits else None,
         lineage_repo=lineage_repo,
         resume_repo=resume_repo,
         ingest_repo=ingest_repo,

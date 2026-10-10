@@ -1199,3 +1199,29 @@ class TestApprovalButton:
         await cog._wait_for_approval(MagicMock(), thread)
 
         thread.send.assert_any_call("👍 Restart approved!")
+
+
+class TestPipelineThreadDeleted:
+    """The upgrade thread can be deleted while the pipeline waits on approval."""
+
+    @pytest.mark.asyncio
+    async def test_deleted_thread_does_not_leak_notfound(self, bot: MagicMock) -> None:
+        config = UpgradeConfig(package_name="pkg", upgrade_approval=True)
+        cog = AutoUpgradeCog(bot, config)
+        thread = MagicMock(spec=discord.Thread)
+        gone = discord.NotFound(MagicMock(status=404, reason="Not Found"), "Unknown Channel")
+        thread.send = AsyncMock(side_effect=gone)
+        cog._wait_for_approval = AsyncMock(side_effect=TimeoutError)  # type: ignore[method-assign]
+
+        await cog._run_pipeline(thread, status_target=None)  # must not raise
+
+    @pytest.mark.asyncio
+    async def test_deleted_thread_on_unexpected_error_does_not_leak(self, bot: MagicMock) -> None:
+        config = UpgradeConfig(package_name="pkg", upgrade_approval=True)
+        cog = AutoUpgradeCog(bot, config)
+        thread = MagicMock(spec=discord.Thread)
+        gone = discord.NotFound(MagicMock(status=404, reason="Not Found"), "Unknown Channel")
+        thread.send = AsyncMock(side_effect=gone)
+        cog._wait_for_approval = AsyncMock(side_effect=gone)  # type: ignore[method-assign]
+
+        await cog._run_pipeline(thread, status_target=None)  # must not raise

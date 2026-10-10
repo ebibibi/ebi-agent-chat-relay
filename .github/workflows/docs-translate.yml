@@ -7,6 +7,9 @@ on:
 
 jobs:
   trigger-docs-translate:
+    # Full translation runs for minor/major releases (X.Y.0) only; every merge
+    # is published as a patch release and docs-sync already keeps ja current.
+    if: github.event_name == 'workflow_dispatch' || endsWith(github.event.release.tag_name, '.0')
     runs-on: [self-hosted, linux, x64]
     steps:
       - name: Trigger full translation via Discord webhook
