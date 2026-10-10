@@ -446,6 +446,21 @@ ccdb attention-backfill --guild <id> --since 2026-09-01   # seed history (owner 
 
 デフォルトで有効です（`CCDB_ATTENTION_ENABLED=false` で記録を停止）。すべての数値には推定値であることが明記され、使用したパラメータも併せて報告されます。詳しくは [docs/attention.md](../attention.md) を参照してください。
 
+### Relay Console — デスクトップやスマホからエージェントの仕事を捌く
+
+専用の認証付きリスナーで動く、API ファーストのトリアージ画面です。すべてのスレッドを「次は誰の番か」で並べます — **Inbox**（❓ / 👀 / 📋 / ⚠️：ボールはあなたにある）、**Running**、**To do**、**Idle**、プロジェクト／親子の **Tree**、**Snoozed**、**Done** — 優先度 P0〜P3、期日、スヌーズ付きです。返信・完了マーク、あるいは新しい仕事を書き留めてエージェントに渡す（スレッドを開いてターンを開始する）こともできます。状態は ccdb がすでに知っている情報（結果マーカー、実行中のターン、スロットの待ち行列、スポーンの系譜）から導出されるため、エージェント側に新しい作業は不要です。新しい `work_items` テーブルに保存するのは優先度・期日・スヌーズ・プロジェクト・親だけです。デスクトップではキーボード操作でき、スマホではホーム画面に追加できます。
+
+```bash
+uv add "claude-code-discord-bridge[console] @ git+https://github.com/ebibibi/ebi-agent-chat-relay.git"
+CCDB_CONSOLE_PORT=8100                                     # off unless set
+CCDB_CONSOLE_ACCESS_TEAM_DOMAIN=myteam.cloudflareaccess.com  # Cloudflare Access JWT…
+CCDB_CONSOLE_ACCESS_AUD=<aud tag>
+CCDB_CONSOLE_ALLOWED_EMAILS=me@example.com                 # …plus a required allowlist
+# CCDB_CONSOLE_TOKEN=...                                   # and/or a 32+ char bearer token
+```
+
+**認証がなければ起動を拒否します**。契約は `/console/api` 配下の JSON API で、同梱の Web クライアントはその利用者の 1 つにすぎません。詳しくは [docs/console.md](../console.md) と [ADR-0010](../adr/0010-add-an-api-first-console-on-its-own-listener.md) を参照してください。
+
 ### スタートアップリジューム
 
 Bot の再起動中にセッションが中断された場合、Bot が再起動したときに自動的に再開されます。リジューム登録の方法は 3 つあります:
@@ -1066,6 +1081,12 @@ CHAT_ONLY_CHANNEL_IDS=444,555
 | `CCDB_INGEST_TOKEN` | `POST /api/ingest` 用の Bearer トークン（`api_secret` とは独立）。未設定ならこのエンドポイントは `503` を返す | （オプション） |
 | `CCDB_INGEST_REQUIRE_COMPLETE` | `1` を設定すると、`attachments_manifest` によって添付ファイルの欠落が判明したインジェストを、部分的な証拠でセッションを開始せずに `409` で拒否する | `0` |
 | `CCDB_TEAMS_VAULT_ROOT` | `POST /api/teams/sync` が上流スレッドをミラーリングする先のディレクトリ（メッセージ 1 件につき 1 ファイル）。`CCDB_INGEST_TOKEN` で保護される | `{working_dir}/teams` |
+| `CCDB_CONSOLE_PORT` | [Relay Console](../console.md) のリスナーのポート（`console` extra が必要）。設定しない限り無効で、認証なしでは起動を拒否する | (optional) |
+| `CCDB_CONSOLE_HOST` | Relay Console のバインドアドレス。トンネルの背後でループバックのままにする | `127.0.0.1` |
+| `CCDB_CONSOLE_ACCESS_TEAM_DOMAIN` | コンソールが JWT を検証する Cloudflare Access のチームドメイン（`myteam.cloudflareaccess.com`） | (optional) |
+| `CCDB_CONSOLE_ACCESS_AUD` | コンソールの前段にある Cloudflare Access アプリケーションの AUD タグ | (optional) |
+| `CCDB_CONSOLE_ALLOWED_EMAILS` | Access 経由で許可するメールアドレス（カンマ区切り）。Access 使用時は必須で、Access ポリシーを誤って編集してもコンソールは閉じたまま | (optional) |
+| `CCDB_CONSOLE_TOKEN` | ローカルクライアント用の Bearer トークン（32 文字以上）。これ単独で使うのはプライベートなネットワーク（tailnet、SSH トンネル、ループバック）に限る | (optional) |
 
 ### パーミッションモード — `-p` モードで動作するもの
 
