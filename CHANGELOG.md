@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The Relay Console owns the conversations it starts** (#889) — starting written-down work from
+  the console used to open a Discord thread, so every console task also appeared in Discord and
+  the console could not start work without a chat platform. It now runs in a conversation the
+  console owns: a `ConsoleSurface` / `ConsoleFrontend` on the same frontend seam as Discord and
+  Teams, driven through the same session runner. The transcript is stored in the session database,
+  replies resume the same session (queued behind a running turn), and outcome markers — set by the
+  agent through `/api/threads/{id}/…` or by the runner on error and AskUserQuestion — show on the
+  board. Chat threads still appear and can be replied to as before. See ADR-0011.
+
 - **A scheduled task can pin its backend and model** — `POST /api/tasks` and
   `PATCH /api/tasks/{id}` take an optional `backend` (validated against the same list `/backend`
   accepts) and an optional `model`. Until now a task ran on whatever `/backend` resolved to when

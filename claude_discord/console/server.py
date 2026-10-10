@@ -30,6 +30,8 @@ from ..thread_marker import OUTCOME_DONE, thread_outcome
 from ..thread_status import request_thread_outcome, schedule_thread_outcome
 from .auth import ConsoleAuthConfig, ConsoleAuthenticator, ConsoleAuthError
 from .board import SessionInfo, ThreadSnapshot, build_board
+from .conversations import ConversationRepository
+from .surface import apply_outcome
 from .usage import UsageReader
 from .work_repo import (
     STATE_DONE,
@@ -41,6 +43,7 @@ from .work_repo import (
 
 if TYPE_CHECKING:
     from ..ext.api_server import ApiServer
+    from .host import ConsoleSessionHost
 
 logger = logging.getLogger(__name__)
 
@@ -121,9 +124,15 @@ class ConsoleServer:
         host: str = "127.0.0.1",
         port: int,
         usage: UsageReader | None = None,
+        conversations: ConversationRepository | None = None,
+        host_session: ConsoleSessionHost | None = None,
     ) -> None:
         self.api = api_server
         self.work_repo = work_repo
+        #: The console's own conversations. Work started here lives in them,
+        #: not in a chat thread; chat threads are still shown alongside.
+        self.conversations = conversations
+        self.sessions = host_session
         self.usage = usage
         self.auth = authenticator
         self.host = host
@@ -248,7 +257,7 @@ class ConsoleServer:
             return {}
 
     async def board(self, request: web.Request) -> web.Response:
-        threads = await self._thread_snapshots()
+        threads = await self._thread_snapshots() + await self._conversation_snapshots()
         overlays = await self.work_repo.list_all()
         lineage = await self._lineage()
         sessions = await self._sessions()
@@ -277,15 +286,19 @@ class ConsoleServer:
         return web.json_response(await self.usage.read())
 
     async def messages(self, request: web.Request) -> web.Response:
-        thread, err = await self._thread_for(request.match_info["item_id"])
-        if err:
-            return err
         try:
             limit = max(
                 1, min(MAX_HISTORY, int(request.rel_url.query.get("limit", DEFAULT_HISTORY)))
             )
         except ValueError:
             return _error("limit must be an integer", 400)
+        key = await self._conversation_key(request.match_info["item_id"])
+        if key is not None and self.conversations is not None:
+            history = await self.conversations.history(key, limit)
+            return web.json_response({"messages": [m.as_dict() for m in history]})
+        thread, err = await self._thread_for(request.match_info["item_id"])
+        if err:
+            return err
         from ..ext.api_server import _serialize_thread_message
 
         try:
@@ -331,7 +344,10 @@ class ConsoleServer:
             )
         except WorkItemError as exc:
             return _error(str(exc), 400)
-        if item.thread_id is not None:
+        key = await self._conversation_key(item_id)
+        if key is not None and self.conversations is not None:
+            await apply_outcome(self.conversations, key, OUTCOME_DONE)
+        elif item.thread_id is not None:
             thread, _ = await self._thread_for(item_id)
             if thread is not None:
                 # Same marker the agent would set, so the chat sidebar agrees.
@@ -344,7 +360,12 @@ class ConsoleServer:
             item = await self.work_repo.update(item_id, {"state": STATE_OPEN})
         except WorkItemError as exc:
             return _error(str(exc), 400)
-        if item.thread_id is not None:
+        key = await self._conversation_key(item_id)
+        if key is not None and self.conversations is not None:
+            conversation = await self.conversations.get(key)
+            if conversation is not None and thread_outcome(conversation.name) == OUTCOME_DONE:
+                await apply_outcome(self.conversations, key, None)
+        elif item.thread_id is not None:
             thread, _ = await self._thread_for(item_id)
             # The ✅ that done() put on the title would keep the item in Done.
             if thread is not None and thread_outcome(thread.name or "") == OUTCOME_DONE:
@@ -368,6 +389,10 @@ class ConsoleServer:
         if len(text) > MAX_REPLY_CHARS:
             return _error(f"text must be at most {MAX_REPLY_CHARS} characters", 400)
         item_id = request.match_info["item_id"]
+        who = request[IDENTITY]
+        key = await self._conversation_key(item_id)
+        if key is not None:
+            return await self._reply_in_console(item_id, key, text, who)
         thread, err = await self._thread_for(item_id)
         if err:
             return err
@@ -379,29 +404,32 @@ class ConsoleServer:
         except WorkItemError as exc:
             return _error(str(exc), 400)
         schedule_thread_outcome(thread, None)
-        who = request[IDENTITY]
         prompt = f"{text}\n\n-# 🖥️ via Relay Console ({who})"
         self._background(cog.deliver_relayed_message(thread, prompt, interrupt=False))
         logger.info("console: %s replied in thread %s", who, thread.id)
         return web.json_response({"status": "delivered"}, status=202)
 
     async def start_item(self, request: web.Request) -> web.Response:
-        """Hand a captured item to an agent: open a thread and start a turn."""
+        """Hand a captured item to an agent: open a console conversation and start a turn.
+
+        No chat thread is created. The conversation lives in the console and
+        runs through the same session runner the chat frontends use.
+        """
         body, err = await self._json(request)
         if err:
             return err
         item_id = request.match_info["item_id"]
-        # A double click must not open two threads for one item.
+        # A double click must not open two conversations for one item.
         lock = self._start_locks.setdefault(item_id, asyncio.Lock())
         if lock.locked():
             return _error("this item is already being started", 409)
         async with lock:
             try:
-                return await self._start_locked(item_id, body)
+                return await self._start_locked(item_id, body, request[IDENTITY])
             finally:
                 self._start_locks.pop(item_id, None)
 
-    async def _start_locked(self, item_id: str, body: dict[str, Any]) -> web.Response:
+    async def _start_locked(self, item_id: str, body: dict[str, Any], who: str) -> web.Response:
         item = await self.work_repo.get(item_id)
         if item is None or item.thread_id is not None:
             return _error("only a captured item without a thread can be started", 400)
@@ -409,43 +437,54 @@ class ConsoleServer:
         prompt = "\n\n".join(p for p in (item.title, item.note, extra) if p)
         if len(prompt) > MAX_REPLY_CHARS:
             return _error(f"the prompt must be at most {MAX_REPLY_CHARS} characters", 400)
-        cog = self._chat_cog()
-        if cog is None:
-            return _error("the chat cog is not loaded", 503)
-        channel = await self._default_channel()
-        if channel is None:
-            return _error("no default channel is configured", 503)
+        if self.sessions is None:
+            return _error("the console cannot run agents in this deployment", 503)
         parent_thread_id = None
         if item.parent_id and item.parent_id.startswith("t") and item.parent_id[1:].isdigit():
             parent_thread_id = int(item.parent_id[1:])
         try:
-            thread = await cog.spawn_session(
-                channel,
-                prompt,
-                thread_name=(item.title or "")[:100] or None,
-                invite_user_id=getattr(self.api.bot, "owner_id", None),
-                parent_thread_id=parent_thread_id,
+            thread_key = await self.sessions.start(
+                external_id=item_id,
+                title=item.title or prompt[:100],
+                prompt=prompt,
+                author=who,
             )
         except Exception:
             logger.exception("console: start of %s failed", item_id)
-            return _error("could not start the thread", 502)
+            return _error("could not start the conversation", 502)
         if parent_thread_id is not None and self.api.lineage_repo is not None:
             from ..thread_marker import family_code
 
             try:
                 await self.api.lineage_repo.record(
-                    thread.id, parent_thread_id, family_code(parent_thread_id)
+                    thread_key, parent_thread_id, family_code(parent_thread_id)
                 )
             except Exception:
-                logger.exception("console: lineage for %s not recorded", thread.id)
+                logger.exception("console: lineage for %s not recorded", thread_key)
         try:
-            overlay = await self.work_repo.attach_thread(item_id, thread.id)
+            overlay = await self.work_repo.attach_thread(item_id, thread_key)
         except WorkItemError:
             logger.exception(
-                "console: thread %s started but %s could not follow", thread.id, item_id
+                "console: conversation %s started but %s could not follow", thread_key, item_id
             )
-            return _error("the thread started, but the item could not be linked to it", 500)
+            return _error("the conversation started, but the item could not be linked to it", 500)
         return web.json_response({"item": overlay.as_dict()}, status=201)
+
+    async def _reply_in_console(
+        self, item_id: str, thread_key: int, text: str, who: str
+    ) -> web.Response:
+        if self.sessions is None:
+            return _error("the console cannot run agents in this deployment", 503)
+        try:
+            await self.work_repo.update(item_id, {"state": STATE_OPEN, "snoozed_until": None})
+        except WorkItemError as exc:
+            return _error(str(exc), 400)
+        try:
+            await self.sessions.reply(thread_key, text, who)
+        except LookupError:
+            return _error("unknown conversation", 404)
+        logger.info("console: %s replied in conversation %s", who, thread_key)
+        return web.json_response({"status": "delivered"}, status=202)
 
     # -- helpers -----------------------------------------------------------
     async def _json(self, request: web.Request) -> tuple[dict[str, Any], web.Response | None]:
@@ -460,15 +499,6 @@ class ConsoleServer:
     def _chat_cog(self) -> Any:
         cogs = getattr(self.api.bot, "cogs", None)
         return cogs.get("ClaudeChatCog") if cogs else None
-
-    async def _default_channel(self) -> Any:
-        import discord
-
-        channel_id = self.api.default_channel_id
-        if not channel_id:
-            return None
-        channel = self.api.bot.get_channel(int(channel_id))
-        return channel if isinstance(channel, discord.TextChannel) else None
 
     async def _thread_for(self, item_id: str) -> tuple[Any, web.Response | None]:
         import discord
@@ -489,6 +519,31 @@ class ConsoleServer:
         ):
             return None, _error("unknown thread", 404)
         return thread, None
+
+    async def _conversation_key(self, item_id: str) -> int | None:
+        """The key of the console conversation behind *item_id*, if it is one."""
+        if self.conversations is None or not item_id.startswith("t") or not item_id[1:].isdigit():
+            return None
+        key = int(item_id[1:])
+        return key if await self.conversations.get(key) is not None else None
+
+    async def _conversation_snapshots(self) -> list[ThreadSnapshot]:
+        if self.conversations is None:
+            return []
+        try:
+            conversations = await self.conversations.list_all()
+        except Exception:
+            logger.exception("console: could not read conversations")
+            return []
+        return [
+            ThreadSnapshot(
+                thread_id=c.thread_key,
+                name=c.name,
+                created_at=c.created_at,
+                last_activity_at=c.last_activity_at,
+            )
+            for c in conversations
+        ]
 
     def _watched_channel_ids(self) -> set[int]:
         ids: set[int] = set()
@@ -626,6 +681,8 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
         account_router=getattr(bot, "account_router", None),
         codex_command=(os.getenv("CCDB_CODEX_COMMAND") or "").strip() or None,
     )
+    conversations = ConversationRepository(api_server.session_repo.db_path)
+    await conversations.init_db()
     console = ConsoleServer(
         api_server,
         work_repo,
@@ -633,9 +690,57 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
         host=host,
         port=int(raw_port),
         usage=usage,
+        conversations=conversations,
+        host_session=await _build_session_host(api_server, conversations),
     )
     await console.start()
     return console
+
+
+async def _build_session_host(
+    api_server: ApiServer, conversations: ConversationRepository
+) -> ConsoleSessionHost | None:
+    """Wire the console to the session runner, if this deployment can run agents.
+
+    The console then owns the conversations it starts: no chat thread is
+    created. Without the session wiring (an embedded setup with no backend
+    factory) the console still triages and replies to chat threads, but
+    refuses to start new work.
+    """
+    from .host import ConsoleSessionHost
+    from .surface import ConsoleFrontend
+
+    components = api_server.components
+    factory = getattr(components, "backend_factory", None)
+    settings = getattr(components, "backend_settings", None)
+    ledger = getattr(components, "frontend_threads", None)
+    if factory is None or settings is None or ledger is None:
+        logger.warning("Relay Console: no session wiring; starting work from the console is off")
+        return None
+    bot = api_server.bot
+    frontend = ConsoleFrontend(
+        conversations, ledger, working_dir=getattr(factory, "working_dir", None)
+    )
+    router = getattr(components, "frontend", None)
+    if router is not None and hasattr(router, "add"):
+        # Scheduled tasks, waits and the REST API resolve a console
+        # conversation the same way they resolve a Discord or Teams one.
+        router.add(frontend)
+    api_server.console_conversations = conversations
+    host = ConsoleSessionHost(
+        frontend=frontend,
+        session_repo=api_server.session_repo,
+        backend_factory=factory,
+        backend_settings=settings,
+        lounge_repo=getattr(components, "lounge_repo", None),
+        ask_repo=getattr(components, "ask_repo", None),
+        usage_repo=getattr(components, "usage_repo", None),
+        registry=getattr(bot, "session_registry", None),
+        worktree_manager=getattr(bot, "worktree_manager", None),
+    )
+    # The wait watcher resumes a conversation after CI; it finds this one here.
+    bot.console_sessions = host  # type: ignore[attr-defined]
+    return host
 
 
 __all__ = ["ConsoleServer", "maybe_start_console", "thread_item_id"]

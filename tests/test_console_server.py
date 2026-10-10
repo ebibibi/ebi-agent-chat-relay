@@ -129,7 +129,7 @@ async def test_starting_twice_at_once_is_refused(client, monkeypatch) -> None:
     item_id = (await created.json())["item"]["id"]
     gate = asyncio.Event()
 
-    async def slow(self, item_id, body):
+    async def slow(self, item_id, body, who):
         await gate.wait()
         return srv.web.json_response({}, status=201)
 

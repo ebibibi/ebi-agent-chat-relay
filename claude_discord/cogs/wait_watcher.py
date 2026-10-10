@@ -196,6 +196,14 @@ class WaitWatcherCog(commands.Cog):
     async def _deliver_to_discord(self, thread_id: int, prompt: str) -> bool:
         import discord
 
+        # A Relay Console conversation has no Discord thread; looking one up
+        # would 404 and drop the resume as "deleted".
+        from ..console.host import ConsoleSessionHost
+
+        console = getattr(self.bot, "console_sessions", None)
+        if isinstance(console, ConsoleSessionHost) and await console.owns(thread_id):
+            await console.reply(thread_id, prompt, "wait")
+            return True
         cog = self.bot.cogs.get("ClaudeChatCog")
         if cog is None:
             return False

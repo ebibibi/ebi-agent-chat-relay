@@ -307,6 +307,14 @@ class ApiServer:
         self.attention_repo: HumanActivityRepository | None = None
         # Waits (POST /api/waits): wired by BridgeComponents; 503 until then.
         self.wait_repo: WaitRepository | None = None
+        # Everything setup_bridge built. The Relay Console reads its session
+        # wiring (backend factory, settings, ledger) from here to run agents
+        # in conversations of its own. None until apply_to_api_server.
+        self.components: Any = None
+        # The Relay Console's own conversations (set when the console starts).
+        # An agent running in one marks its outcome through the same
+        # /api/threads/{id}/done|waiting|review|action as a chat thread.
+        self.console_conversations: Any = None
         self.attention_params: AttentionParams | None = None
         # Where Claude Code transcripts live, for /api/search?body=1. Falls back
         # to the standard ~/.claude/projects location so body search is
@@ -1691,6 +1699,14 @@ class ApiServer:
             thread_id = int(request.match_info["thread_id"])
         except (ValueError, KeyError):
             return web.json_response({"error": "Invalid thread_id"}, status=400)
+
+        conversations = self.console_conversations
+        if conversations is not None and await conversations.get(thread_id) is not None:
+            from ..console.surface import apply_outcome
+
+            marked = await apply_outcome(conversations, thread_id, outcome)
+            logger.info("console conversation %d marked %s", thread_id, outcome)
+            return web.json_response({"status": "marked", "thread_name": marked})
 
         import discord as _discord
 
