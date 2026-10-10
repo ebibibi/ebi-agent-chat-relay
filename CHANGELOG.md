@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Relay Console: sign in with Google, Entra ID or any OIDC provider** (#894) — optional, next
+  to passkeys and without Cloudflare in front. Set `CCDB_CONSOLE_OIDC_ISSUER`, `_CLIENT_ID`,
+  `_CLIENT_SECRET`, `CCDB_CONSOLE_ORIGIN` and `CCDB_CONSOLE_ALLOWED_EMAILS`. Authorization code
+  flow with PKCE, browser-bound `state`, `nonce`, and ID-token verification against the issuer's
+  keys. The provider must assert `email_verified: true`; taking an email off the allowlist ends
+  its sessions at once.
+
 - **Passkey sign-in for the Relay Console** (#893) — the console now signs you in with a passkey
   (WebAuthn, user verification required) by default, so setting `CCDB_CONSOLE_PORT` alone gives
   phishing-resistant multi-factor sign-in with no third-party account. The first passkey is

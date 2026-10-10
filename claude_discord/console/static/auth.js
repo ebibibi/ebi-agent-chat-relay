@@ -17,7 +17,7 @@
       unsupported: "This browser cannot use passkeys here. Open the console over https or on localhost.",
       devices: "Passkeys", invite: "Add a device", invited: (c) => `On the new device, open the console and enter: ${c} (valid 15 minutes, single use)`,
       remove: "Remove", signout: "Sign out", lastused: "last used", never: "never used", close: "Close",
-      cancelled: "Cancelled",
+      cancelled: "Cancelled", sso: (n) => `Sign in with ${n}`, or: "or",
     },
     ja: {
       title: "Relay Console にサインイン", signin: "パスキーでサインイン",
@@ -28,7 +28,7 @@
       unsupported: "このブラウザーではここでパスキーを使えません。https か localhost で開いてください。",
       devices: "パスキー", invite: "端末を追加", invited: (c) => `新しい端末でコンソールを開いて、このコードを入れてください: ${c}（15分間・1回限り）`,
       remove: "削除", signout: "サインアウト", lastused: "最終利用", never: "未使用", close: "閉じる",
-      cancelled: "キャンセルしました",
+      cancelled: "キャンセルしました", sso: (n) => `${n} でサインイン`, or: "または",
     },
   }[lang === "ja" ? "ja" : "en"];
 
@@ -133,6 +133,17 @@
     const signedIn = () => { localStorage.removeItem("token"); done(); };
     const err = errorLine();
     const parts = [el("h2", { text: L.title })];
+    // The OIDC callback comes back here with ?signin_error=… when it refused.
+    const params = new URLSearchParams(location.search);
+    if (params.has("signin_error")) {
+      err.textContent = params.get("signin_error");
+      params.delete("signin_error");
+      history.replaceState(null, "", location.pathname + (params.size ? `?${params}` : "") + location.hash);
+    }
+    if (status.methods.oidc) {
+      parts.push(el("a", { class: "btn primary big", href: `${AUTH}/oidc/start`, text: L.sso(status.methods.oidc) }));
+      if (status.methods.passkey) parts.push(el("p", { class: "auth-or", text: L.or }));
+    }
 
     if (status.methods.passkey && !supported()) parts.push(el("p", { text: L.unsupported }));
     else if (status.methods.passkey) {
@@ -175,10 +186,13 @@
 
   // ------------------------------------------------------------ devices card
   async function showDevices() {
+    let passkeysOn = true;
+    try { passkeysOn = (await call(`${AUTH}/status`, null, "GET")).methods.passkey; } catch { /* assume on */ }
     const err = errorLine();
     const list = el("ul", { class: "auth-list" });
     const note = el("p", { class: "auth-note" });
     async function load() {
+      if (!passkeysOn) return;
       try {
         const { passkeys } = await call("/console/api/passkeys", null, "GET");
         list.replaceChildren(...passkeys.map((p) => el("li", {},
@@ -192,7 +206,7 @@
     open("devices", el("div", { class: "card auth", onclick: (e) => e.stopPropagation() },
       el("h2", { text: L.devices }), list, note,
       el("div", { class: "auth-actions" },
-        el("button", { class: "btn primary", type: "button", text: L.invite, onclick: async () => {
+        passkeysOn && el("button", { class: "btn primary", type: "button", text: L.invite, onclick: async () => {
           try { note.textContent = L.invited((await call("/console/api/passkeys/invite")).code); } catch (x) { fail(err, x); }
         } }),
         el("button", { class: "btn", type: "button", text: L.signout, onclick: async () => {
