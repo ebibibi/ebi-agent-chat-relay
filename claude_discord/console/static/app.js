@@ -8,7 +8,8 @@ const POLL_MS = 8000;
 const I18N = {
   en: {
     me: "Inbox", ai: "Running", todo: "To do", idle: "Idle", tree: "Tree", snoozed: "Snoozed", done: "Done",
-    filter: "Filter…", capture: "+ Write down work, press Enter (c)", empty: "Nothing here. 🎉",
+    filter: "Filter…", capture: "+ Write down work, press Enter (c)", capture_ai: "+ Write down work, Enter hands it to AI (c)",
+    autostart: "AI starts right away", empty: "Nothing here. 🎉",
     slots: (r, m, w) => `Slots ${r}/${m ?? "∞"}` + (w ? ` · ${w} queued` : ""),
     priority: "Priority", due: "Due", snooze: "Snooze", project: "Project", parent: "Under",
     none: "—", done_btn: "Done (e)", reopen: "Reopen", open_chat: "Open in chat", start: "Hand to AI",
@@ -24,7 +25,8 @@ const I18N = {
   },
   ja: {
     me: "受信箱", ai: "実行中", todo: "やること", idle: "止まっている", tree: "ツリー", snoozed: "スヌーズ中", done: "完了",
-    filter: "絞り込み…", capture: "＋ 思いついた仕事を書いて Enter（c）", empty: "ここには何もありません 🎉",
+    filter: "絞り込み…", capture: "＋ 思いついた仕事を書いて Enter（c）", capture_ai: "＋ 思いついた仕事を書いて Enter → AIが着手（c）",
+    autostart: "AIがすぐ着手", empty: "ここには何もありません 🎉",
     slots: (r, m, w) => `枠 ${r}/${m ?? "∞"}` + (w ? `・待ち ${w}` : ""),
     priority: "優先度", due: "期限", snooze: "スヌーズ", project: "案件", parent: "親",
     none: "なし", done_btn: "完了（e）", reopen: "戻す", open_chat: "チャットで開く", start: "AIに頼む",
@@ -408,8 +410,11 @@ async function startItem(id) {
   } catch (err) { toast(err.message); }
 }
 async function capture(title) {
+  const start = autostart();
   try {
-    const data = await api("/items", { method: "POST", body: { title } });
+    const data = await api("/items", { method: "POST", body: { title, start } });
+    if (data.start_error) toast(data.start_error);
+    else if (start) toast(T.started);
     await refresh();
     // A capture lands in To do; leave Inbox and the like so it is not invisible.
     if (state.view !== "todo" && state.view !== "tree") setView("todo");
@@ -417,6 +422,12 @@ async function capture(title) {
     renderList();
     toast(T.captured);
   } catch (err) { toast(err.message); }
+}
+// Captured work goes straight to an agent unless the user turned that off.
+function autostart() { return localStorage.getItem("autostart") !== "0"; }
+function syncCapture() {
+  $("capture-start").checked = autostart();
+  $("capture-input").placeholder = autostart() ? T.capture_ai : T.capture;
 }
 
 function move(delta) {
@@ -454,7 +465,12 @@ function showHelp(show) {
 // ---------------------------------------------------------------- wiring
 function wire() {
   $("filter").placeholder = T.filter;
-  $("capture-input").placeholder = T.capture;
+  $("capture-start-label").textContent = T.autostart;
+  syncCapture();
+  $("capture-start").addEventListener("change", (e) => {
+    localStorage.setItem("autostart", e.target.checked ? "1" : "0");
+    syncCapture();
+  });
   $("filter").addEventListener("input", (e) => { state.filter = e.target.value; renderList(); });
   $("capture").addEventListener("submit", (e) => {
     e.preventDefault();

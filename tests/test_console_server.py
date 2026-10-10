@@ -142,3 +142,53 @@ async def test_starting_twice_at_once_is_refused(client, monkeypatch) -> None:
     gate.set()
     assert second.status == 409
     assert (await first).status == 201
+
+
+async def test_capture_with_start_hands_the_item_to_an_agent(client, monkeypatch) -> None:
+    from claude_discord.console import server as srv
+
+    seen: list[str] = []
+
+    async def started(self, item_id, body):
+        seen.append(item_id)
+        return srv.web.json_response({"item": {"id": "t42", "thread_id": "42"}}, status=201)
+
+    monkeypatch.setattr(srv.ConsoleServer, "_start_locked", started)
+    response = await client.post(
+        "/console/api/items", json={"title": "Fix the build", "start": True}, headers=WRITE
+    )
+    assert response.status == 201
+    assert (await response.json())["item"]["id"] == "t42"
+    assert len(seen) == 1 and seen[0].startswith("c")
+
+
+async def test_a_failed_start_keeps_the_capture(client) -> None:
+    # The fixture has no chat cog, so the start cannot happen.
+    response = await client.post(
+        "/console/api/items", json={"title": "Fix the build", "start": True}, headers=WRITE
+    )
+    assert response.status == 201
+    data = await response.json()
+    assert data["start_error"] == "the chat cog is not loaded"
+    board = await (await client.get("/console/api/board", headers=AUTH)).json()
+    [item] = board["items"]
+    assert (item["id"], item["bucket"]) == (data["item"]["id"], "todo")
+
+
+async def test_capture_without_start_only_writes_it_down(client, monkeypatch) -> None:
+    from claude_discord.console import server as srv
+
+    async def boom(self, item_id, body):
+        raise AssertionError("must not start")
+
+    monkeypatch.setattr(srv.ConsoleServer, "_start_locked", boom)
+    response = await client.post("/console/api/items", json={"title": "x"}, headers=WRITE)
+    assert response.status == 201
+    assert "start_error" not in await response.json()
+
+
+async def test_start_must_be_a_boolean(client) -> None:
+    response = await client.post(
+        "/console/api/items", json={"title": "x", "start": "yes"}, headers=WRITE
+    )
+    assert response.status == 400

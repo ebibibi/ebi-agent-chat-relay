@@ -314,11 +314,23 @@ class ConsoleServer:
         body, err = await self._json(request)
         if err:
             return err
+        start = body.pop("start", False)
+        if not isinstance(start, bool):
+            return _error("start must be a boolean", 400)
         try:
             item = await self.work_repo.create_capture(body)
         except WorkItemError as exc:
             return _error(str(exc), 400)
-        return web.json_response({"item": item.as_dict()}, status=201)
+        if not start:
+            return web.json_response({"item": item.as_dict()}, status=201)
+        # Hand it to an agent in the same request. A failed start keeps the
+        # capture: the words are never lost, and the "Hand to AI" button can
+        # retry once the cause is fixed.
+        started = await self._start_guarded(item.id, {}, request[IDENTITY])
+        if started.status == 201:
+            return started
+        reason = json.loads(started.body).get("error", "could not start the conversation")
+        return web.json_response({"item": item.as_dict(), "start_error": reason}, status=201)
 
     async def patch_item(self, request: web.Request) -> web.Response:
         body, err = await self._json(request)
@@ -418,14 +430,18 @@ class ConsoleServer:
         body, err = await self._json(request)
         if err:
             return err
-        item_id = request.match_info["item_id"]
+        return await self._start_guarded(request.match_info["item_id"], body, request[IDENTITY])
+
+    async def _start_guarded(
+        self, item_id: str, body: dict[str, Any], who: str
+    ) -> web.Response:
         # A double click must not open two conversations for one item.
         lock = self._start_locks.setdefault(item_id, asyncio.Lock())
         if lock.locked():
             return _error("this item is already being started", 409)
         async with lock:
             try:
-                return await self._start_locked(item_id, body, request[IDENTITY])
+                return await self._start_locked(item_id, body, who)
             finally:
                 self._start_locks.pop(item_id, None)
 
