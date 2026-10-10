@@ -448,7 +448,7 @@ ccdb attention-backfill --guild <id> --since 2026-09-01   # seed history (owner 
 
 ### Relay Console — デスクトップやスマホからエージェントの仕事を捌く
 
-専用の認証付きリスナーで動く、API ファーストのトリアージ画面です。すべてのスレッドを「次は誰の番か」で並べます — **Inbox**（❓ / 👀 / 📋 / ⚠️：ボールはあなたにある）、**Running**、**To do**、**Idle**、プロジェクト／親子の **Tree**、**Snoozed**、**Done** — 優先度 P0〜P3、期日、スヌーズ付きです。返信・完了マーク、あるいは新しい仕事を書き留めてエージェントに渡す（スレッドを開いてターンを開始する）こともできます。状態は ccdb がすでに知っている情報（結果マーカー、実行中のターン、スロットの待ち行列、スポーンの系譜）から導出されるため、エージェント側に新しい作業は不要です。新しい `work_items` テーブルに保存するのは優先度・期日・スヌーズ・プロジェクト・親だけです。デスクトップではキーボード操作でき、スマホではホーム画面に追加できます。
+専用の認証付きリスナーで動く、API ファーストのトリアージ画面です。すべてのスレッドを「次は誰の番か」で並べます — **Inbox**（❓ / 👀 / 📋 / ⚠️：ボールはあなたにある）、**Running**、**To do**、**Idle**、プロジェクト／親子の **Tree**、**Snoozed**、**Done** — 優先度 P0〜P3、期日、スヌーズ付きです。返信・完了マーク、あるいは新しい仕事を書き留めてエージェントに渡すこともできます。渡した仕事はチャットのスレッドを開かず、コンソール自身が持つ会話の中で同じセッションランナーにより実行されます。やり取りはセッションデータベースに保存され、返信すると同じセッションが再開されます。状態は ccdb がすでに知っている情報（結果マーカー、実行中のターン、スロットの待ち行列、スポーンの系譜）から導出されるため、エージェント側に新しい作業は不要です。新しい `work_items` テーブルに保存するのは優先度・期日・スヌーズ・プロジェクト・親だけです。デスクトップではキーボード操作でき、スマホではホーム画面に追加できます。
 
 ```bash
 uv add "claude-code-discord-bridge[console] @ git+https://github.com/ebibibi/ebi-agent-chat-relay.git"
@@ -459,7 +459,7 @@ CCDB_CONSOLE_ALLOWED_EMAILS=me@example.com                 # …plus a required 
 # CCDB_CONSOLE_TOKEN=...                                   # and/or a 32+ char bearer token
 ```
 
-**認証がなければ起動を拒否します**。契約は `/console/api` 配下の JSON API で、同梱の Web クライアントはその利用者の 1 つにすぎません。詳しくは [docs/console.md](../console.md) と [ADR-0010](../adr/0010-add-an-api-first-console-on-its-own-listener.md) を参照してください。
+**認証がなければ起動を拒否します**。契約は `/console/api` 配下の JSON API で、同梱の Web クライアントはその利用者の 1 つにすぎません。詳しくは [docs/console.md](../console.md)、[ADR-0010](../adr/0010-add-an-api-first-console-on-its-own-listener.md)、[ADR-0011](../adr/0011-let-the-console-own-its-conversations.md) を参照してください。
 
 ### スタートアップリジューム
 
