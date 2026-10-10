@@ -24,7 +24,7 @@
       <span id="sync" class="sync" aria-live="polite"></span>
     </header>
     <form id="capture" class="capture">
-      <input id="capture-input" autocomplete="off" maxlength="200">
+      <textarea id="capture-input" rows="1" autocomplete="off" maxlength="4200"></textarea>
       <label class="autostart"><input id="capture-start" type="checkbox"> <span id="capture-start-label"></span></label>
     </form>
     <ul id="list" class="list" role="listbox"></ul>
@@ -33,6 +33,7 @@
   <section id="detail" class="detail" hidden aria-label="Detail"></section>
 </div>
 <div id="help" class="help" hidden></div>
+<script src="/static/markdown.js"></script>
 <script src="/static/app.js"></script>
 <script src="/static/usage.js"></script>
 <script src="/static/live.js"></script>

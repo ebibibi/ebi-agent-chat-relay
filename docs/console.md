@@ -19,6 +19,23 @@ See [ADR-0010](adr/0010-add-an-api-first-console-on-its-own-listener.md).
 | **Tree** | Everything open, grouped by project, children under their parent |
 | **Snoozed / Done** | Hidden until the snooze ends / finished |
 
+## Reading a thread
+
+Messages are rendered as Markdown (Discord flavour: headings, lists, tables, code blocks, quotes,
+links, spoilers). The renderer builds DOM nodes and never parses HTML, so a message can format
+itself but cannot inject markup.
+
+Each message carries a `kind`:
+
+| Kind | What it is | Shown |
+|---|---|---|
+| `human` | What a person wrote, including replies sent from the console | Always |
+| `agent` | Answers, questions, errors and files from the agent | Always |
+| `activity` | The relay's own bookkeeping: tool calls, thinking, session start/finish embeds, `-#` status notes, the usage footer, notification pings, rename notices and automatic continuation prompts | Only with "Show relay activity" |
+
+The open thread reloads with the board while a turn is running, and the list keeps your scroll
+position unless you were already at the bottom.
+
 Within a view items sort by priority (P0 first), then overdue, then due date, then whoever has
 waited longest.
 
@@ -43,7 +60,7 @@ remaining. On a phone the strip wraps, so every backend stays visible.
 
 
 `j`/`k` move, `Enter` opens, `Esc` closes, `e` done, `1`–`4` priority P0–P3, `s` snooze until
-tomorrow 09:00, `c` write down work, `r` reply, `/` filter, `g` then `i`/`a`/`t`/`w`/`d` switches
+tomorrow 09:00, `c` write down work (the first line is the title; `Shift+Enter` adds note lines), `r` reply, `/` filter, `g` then `i`/`a`/`t`/`w`/`d` switches
 view, `?` help. URLs carry the view and the open item (`/#me/t1234`), so a link can point at a
 single item.
 
@@ -120,7 +137,7 @@ All endpoints need authentication. Every method except `GET` also needs `X-Conso
 | GET | `/console/api/me` | Who you are authenticated as |
 | GET | `/console/api/board` | Every item, sorted for triage, plus slot usage |
 | GET | `/console/api/usage` | Per backend (or pool profile): `available`, `unavailable_until`, and `windows[]` of `{type, utilization, resets_at, status, reset}` |
-| GET | `/console/api/items/{id}/messages?limit=50` | The conversation's recent messages |
+| GET | `/console/api/items/{id}/messages?limit=50` | The conversation's recent messages (max 100), each with `kind`, `embeds` and `attachments` |
 | POST | `/console/api/items` | Write down work: `{title, note?, priority?, due_at?, parent_id?, project?, start?}`. With `start: true` it is handed to an agent in the same request; if that fails the item is kept and the response carries `start_error` |
 | PATCH | `/console/api/items/{id}` | Change `title`, `note`, `priority` (0–3), `due_at`, `snoozed_until`, `project`, `parent_id`, `state` |
 | POST | `/console/api/items/{id}/reply` | `{text}` — continues the session, queued behind a running turn |
