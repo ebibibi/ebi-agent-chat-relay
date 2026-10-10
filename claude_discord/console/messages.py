@@ -2,8 +2,9 @@
 
 A thread holds three kinds of message, and the console treats them differently:
 
-- ``human``: what a person wrote, including replies sent from the console
-  (the bot posts those on the person's behalf, tagged with a footer).
+- ``human``: what a person wrote. Replies sent from the console are posted by
+  the bot and stay ``agent``: their "via Relay Console" footer is plain text
+  the agent could also write, so it must not decide who the author is.
 - ``agent``: what the agent says to the person — answers, questions, errors.
 - ``activity``: the relay's own bookkeeping — tool calls, thinking, session
   start/finish embeds, status lines, notification pings, rename notices and
@@ -37,8 +38,6 @@ _AUTOMATIC_PROMPT = re.compile(r"^\[[A-Z][A-Z0-9 _/#-]*(?:—[^\]\n]*)?\]")
 _PING = re.compile(r"^\S{1,2} <@!?\d+> ")
 # The footer after each turn: a single code block with the API / usage lines.
 _FOOTER = re.compile(r"^```\n(?:\U0001f517 API:|[^\n]*\U0001f9e0)[\s\S]*```$")
-# Console replies end with "-# 🖥️ via Relay Console (who)".
-_CONSOLE_REPLY = re.compile(r"\n*-# \U0001f5a5️? via Relay Console \(([^)\n]*)\)\s*$")
 # Message types that are a message, not a system notice (rename, pin, …).
 _CONVERSATION_TYPES = frozenset({"default", "reply"})
 
@@ -100,8 +99,6 @@ def classify(
         if any(e.get("color") in _AGENT_EMBED_COLORS for e in embeds or []):
             return KIND_AGENT
         return KIND_ACTIVITY
-    if _CONSOLE_REPLY.search(text):
-        return KIND_HUMAN
     if _SUBTEXT.match(text) or _AUTOMATIC_PROMPT.match(text) or _PING.match(text):
         return KIND_ACTIVITY
     if _FOOTER.match(text):
@@ -124,11 +121,6 @@ def serialize_message(message: Any) -> dict[str, object]:
         embeds=embeds,
         attachments=attachments,
     )
-    via_console = _CONSOLE_REPLY.search(content) if is_bot else None
-    if via_console:
-        # Show who wrote it, and the text without the relay footer.
-        author_name = via_console.group(1) or author_name
-        content = content[: via_console.start()]
     created_at: Any = getattr(message, "created_at", None)
     return {
         "id": getattr(message, "id", None),

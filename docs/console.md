@@ -29,7 +29,7 @@ Each message carries a `kind`:
 
 | Kind | What it is | Shown |
 |---|---|---|
-| `human` | What a person wrote, including replies sent from the console | Always |
+| `human` | What a person wrote in the chat (console replies are posted by the bot, so they show as `agent` with their footer) | Always |
 | `agent` | Answers, questions, errors and files from the agent | Always |
 | `activity` | The relay's own bookkeeping: tool calls, thinking, session start/finish embeds, `-#` status notes, the usage footer, notification pings, rename notices and automatic continuation prompts | Only with "Show relay activity" |
 
