@@ -105,7 +105,7 @@ All endpoints need authentication. Every method except `GET` also needs `X-Conso
 | GET | `/console/api/board` | Every item, sorted for triage, plus slot usage |
 | GET | `/console/api/usage` | Per backend (or pool profile): `available`, `unavailable_until`, and `windows[]` of `{type, utilization, resets_at, status, reset}` |
 | GET | `/console/api/items/{id}/messages?limit=50` | The conversation's recent messages |
-| POST | `/console/api/items` | Write down work: `{title, note?, priority?, due_at?, parent_id?, project?}` |
+| POST | `/console/api/items` | Write down work: `{title, note?, priority?, due_at?, parent_id?, project?, start?}`. With `start: true` it is handed to an agent in the same request; if that fails the item is kept and the response carries `start_error` |
 | PATCH | `/console/api/items/{id}` | Change `title`, `note`, `priority` (0–3), `due_at`, `snoozed_until`, `project`, `parent_id`, `state` |
 | POST | `/console/api/items/{id}/reply` | `{text}` — continues the session, queued behind a running turn |
 | POST | `/console/api/items/{id}/done` | Mark done (also sets the ✅ marker on the thread) |
