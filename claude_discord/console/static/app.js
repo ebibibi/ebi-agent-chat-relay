@@ -14,7 +14,7 @@ const I18N = {
     none: "—", done_btn: "Done (e)", reopen: "Reopen", open_chat: "Open in chat", start: "Hand to AI",
     reply_ph: "Reply… (Ctrl+Enter to send)", send: "Send", hour: "1h", tomorrow: "Tomorrow", week: "Next week",
     clear: "Clear", loading: "Loading…", token: "Console token",
-    login: "Sign in with the console token (CCDB_CONSOLE_TOKEN).", sent: "Sent — the agent will pick it up", started: "Started",
+    login: "Sign in with the console token (CCDB_CONSOLE_TOKEN).", sent: "Sent — the agent will pick it up", started: "Started", captured: "Added to To do",
     saved: "Saved", offline: "offline", updated: "updated", no_project: "No project", queued: "queued",
     st: { running: "running", waiting: "waiting for you", review: "to review", action: "your task",
           error: "failed", done: "done", someday: "someday", todo: "to do", idle: "idle" },
@@ -30,7 +30,7 @@ const I18N = {
     none: "なし", done_btn: "完了（e）", reopen: "戻す", open_chat: "チャットで開く", start: "AIに頼む",
     reply_ph: "返信…（Ctrl+Enter で送信）", send: "送信", hour: "1時間", tomorrow: "明日", week: "来週",
     clear: "解除", loading: "読み込み中…", token: "コンソールのトークン",
-    login: "コンソールのトークン（CCDB_CONSOLE_TOKEN）でサインインします。", sent: "送りました。エージェントが拾います", started: "スレッドを開始しました",
+    login: "コンソールのトークン（CCDB_CONSOLE_TOKEN）でサインインします。", sent: "送りました。エージェントが拾います", started: "スレッドを開始しました", captured: "「やること」に追加しました",
     saved: "保存しました", offline: "接続できません", updated: "更新", no_project: "案件なし", queued: "待ち",
     st: { running: "実行中", waiting: "あなたの返事待ち", review: "確認待ち", action: "あなたの作業",
           error: "失敗", done: "完了", someday: "いつか", todo: "やること", idle: "止まっている" },
@@ -411,8 +411,11 @@ async function capture(title) {
   try {
     const data = await api("/items", { method: "POST", body: { title } });
     await refresh();
+    // A capture lands in To do; leave Inbox and the like so it is not invisible.
+    if (state.view !== "todo" && state.view !== "tree") setView("todo");
     state.selected = data.item.id;
     renderList();
+    toast(T.captured);
   } catch (err) { toast(err.message); }
 }
 
