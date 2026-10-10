@@ -103,7 +103,9 @@ so open `http://localhost:8100`, not `http://127.0.0.1:8100`. A passkey belongs 
 | `CCDB_CONSOLE_ENROLL` | — | `1` logs a new setup code on start, even when passkeys exist |
 
 Sessions are `HttpOnly`, `SameSite=Strict` cookies, and only their hash is stored. Removing a
-passkey signs out every session it opened.
+passkey signs out every session it opened. Only a passkey session (or the token) can add, list or remove
+passkeys. Someone let in by Cloudflare Access or an identity provider cannot give themselves a
+passkey that would outlive their place on the allowlist.
 
 ### Reach it from your phone
 

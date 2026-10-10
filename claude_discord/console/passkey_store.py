@@ -123,7 +123,8 @@ class PasskeyStore:
     async def add(
         self, *, credential_id: bytes, public_key: bytes, sign_count: int, rp_id: str, name: str
     ) -> Passkey:
-        clean = " ".join(name.split())[:MAX_PASSKEY_NAME_CHARS] or "passkey"
+        printable = "".join(c for c in name if c.isprintable())
+        clean = " ".join(printable.split())[:MAX_PASSKEY_NAME_CHARS] or "passkey"
         passkey = Passkey(
             id=f"pk{uuid.uuid4().hex[:12]}",
             credential_id=credential_id,

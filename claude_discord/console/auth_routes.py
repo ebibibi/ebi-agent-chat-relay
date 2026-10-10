@@ -107,6 +107,17 @@ class AuthRoutes:
         except PasskeyError as exc:
             return _error(str(exc), 400)
 
+    async def _manager(self, request: web.Request) -> str | None:
+        """Who may add or remove passkeys: a passkey session, or the token.
+
+        Being let in is not enough. An Access or OIDC identity is only as
+        durable as the allowlist that admits it; if it could register a
+        passkey, it would keep a way in after its email was taken off the
+        list.
+        """
+        who = await self._signed_in(request)
+        return who if who is not None and _manages_passkeys(who) else None
+
     async def _signed_in(self, request: web.Request) -> str | None:
         try:
             return await self.auth.identify(request.headers, request.cookies)
@@ -155,10 +166,9 @@ class AuthRoutes:
         if not self._config.passkeys:
             return _error("passkeys are disabled", 404)
         body = await _json(request)
-        signed_in = await self._signed_in(request) is not None
         result = await self.passkeys.registration_options(
             request_origin(request, self._config),
-            signed_in=signed_in,
+            signed_in=await self._manager(request) is not None,
             code=str(body.get("code") or ""),
         )
         return web.json_response(result)
@@ -169,7 +179,7 @@ class AuthRoutes:
         passkey = await self.passkeys.finish_registration(
             str(body.get("ticket") or ""), _credential(body), str(body.get("name") or "")
         )
-        if await self._signed_in(request) is not None:
+        if await self._manager(request) is not None:
             return web.json_response({"passkey": passkey.to_public()})
         token = await self.store.create_session(
             f"passkey:{passkey.name}", self._config.session_lifetime, passkey.id
@@ -200,14 +210,21 @@ class AuthRoutes:
 
     # -- signed in (the console middleware has authenticated these) ----------
     async def list_passkeys(self, request: web.Request) -> web.Response:
+        if await self._manager(request) is None:
+            return _MANAGERS_ONLY()
         return web.json_response({"passkeys": [p.to_public() for p in await self.store.list_all()]})
 
     async def invite(self, request: web.Request) -> web.Response:
         if not self._config.passkeys:
             return _error("passkeys are disabled", 404)
+        if await self._manager(request) is None:
+            return _MANAGERS_ONLY()
         return web.json_response({"code": self.passkeys.issue_code()})
 
     async def delete_passkey(self, request: web.Request) -> web.Response:
+        who = await self._manager(request)
+        if who is None:
+            return _MANAGERS_ONLY()
         target = request.match_info["passkey_id"]
         other_way_in = self._config.access_enabled or bool(self._config.token)
         outcome = await self.store.delete(target, keep_one=not other_way_in)
@@ -215,8 +232,16 @@ class AuthRoutes:
             return _error("no such passkey", 404)
         if outcome == "last":
             return _error("this is the last passkey; add another before removing it", 409)
-        logger.info("console: passkey %s removed by %s", target, await self._signed_in(request))
+        logger.info("console: passkey %s removed by %s", target, who)
         return web.json_response({"ok": True})
+
+
+def _manages_passkeys(identity: str) -> bool:
+    return identity == "token" or identity.startswith("passkey:")
+
+
+def _MANAGERS_ONLY() -> web.Response:  # noqa: N802 - reads as a constant at call sites
+    return _error("sign in with a passkey (or the token) to manage passkeys", 403)
 
 
 async def _json(request: web.Request) -> dict[str, Any]:

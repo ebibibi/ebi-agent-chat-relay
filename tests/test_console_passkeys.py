@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
@@ -315,3 +315,39 @@ async def test_turning_passkeys_off_ends_their_sessions(tmp_path, monkeypatch) -
             await console.auth.identify({}, {SESSION_COOKIE: session})
     finally:
         await console.stop()
+
+
+async def test_only_a_passkey_or_the_token_manages_passkeys(tmp_path) -> None:
+    """An Access (or OIDC) identity must not mint itself a way in that outlives
+    its place on the allowlist."""
+    db = str(tmp_path / "sessions.db")
+    repo = WorkItemRepository(db)
+    await repo.init_db()
+    store = PasskeyStore(db)
+    await store.init_db()
+    await store.add(credential_id=b"x", public_key=b"k", sign_count=0, rp_id="localhost", name="n")
+    api = MagicMock()
+    service = PasskeyService(store)
+    authenticator = ConsoleAuthenticator(ConsoleAuthConfig(), sessions=store)
+    authenticator.identify = AsyncMock(return_value="owner@example.com")  # an Access identity
+    server = ConsoleServer(api, repo, authenticator, port=0, passkeys=service)
+    async with TestClient(TestServer(server.app)) as client:
+        headers = {"Host": HOST, CSRF_HEADER: "1"}
+        assert (await client.post("/console/api/passkeys/invite", headers=headers)).status == 403
+        assert (await client.get("/console/api/passkeys", headers=headers)).status == 403
+        listed = await store.list_all()
+        gone = await client.delete(f"/console/api/passkeys/{listed[0].id}", headers=headers)
+        assert gone.status == 403
+        options = await client.post(
+            "/console/api/auth/passkey/register/options", json={}, headers=headers
+        )
+        assert options.status == 400  # treated as not signed in: a code is required
+
+
+async def test_passkey_names_drop_control_characters(tmp_path) -> None:
+    store = PasskeyStore(str(tmp_path / "db"))
+    await store.init_db()
+    added = await store.add(
+        credential_id=b"x", public_key=b"k", sign_count=0, rp_id="h", name="pho\x1bne\n 2"
+    )
+    assert added.name == "phone 2"
