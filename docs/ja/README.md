@@ -608,6 +608,7 @@ config_dir = "/home/me/.claude-work"
 - **自己登録** — チャットセッション中に `POST /api/tasks` でタスクを登録
 - **コード変更不要** — ランタイムでタスクを追加・削除・変更
 - **有効/無効切り替え** — 削除せずにタスクを一時停止（`PATCH /api/tasks/{id}`）
+- **タスクごとのバックエンドとモデル** — `backend` / `model` でタスクを特定のバックエンド（必要ならモデルも）に固定できます。固定していないタスクは、現在の `/backend` と `/model` に従い続けます
 - **Waits** — `POST /api/waits` でセッションは CI 実行中にターンを終えられます。ccdb がプローブをポーリングし、完了したらスレッドを再開します（再起動をまたいで保持。`docs/waits.md` を参照）
 
 ### CI/CD 自動化
@@ -1257,6 +1258,26 @@ curl -X POST http://localhost:8080/api/tasks \
 
 30 秒マスターループが期限のタスクを検出し、Claude Code セッションを自動起動します。
 
+### タスクをバックエンドとモデルに固定する
+
+タスクは、発火した時点で `/backend` が解決したバックエンドで実行されます。普段はそれで構いません。デプロイを Codex に切り替えれば夜間ジョブも一緒に移ります。ただし、いつもそうとは限りません。安価なダイジェストは人間が何を使っていようと小さなモデルで回すべきですし、あるエージェントのツール語彙を前提に書いたタスクが、黙って別のエージェントへ移るべきではありません。
+
+`backend` はバックエンドを、`model` はそのバックエンド内のモデルを固定します。
+
+```bash
+curl -X POST http://localhost:8080/api/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"name": "nightly-digest", "prompt": "Summarise today'"'"'s commits",
+       "interval_seconds": 86400, "channel_id": 123,
+       "backend": "codex", "model": "gpt-5.6-sol"}'
+```
+
+- `backend` は `claude`、`codex`、`local`、`agui`、`pi` のいずれかです。
+- `model` は自由記述（`/model set` が受け付けるのと同じ ID）ですが、**バックエンドと一緒に指定したときだけ**有効です。モデル ID は 1 つのバックエンドに属するためです。モデルだけを送ると、その時たまたま有効だったバックエンドで毎晩失敗するタスクを作るのではなく、`400` を返します。
+- 両方を省略すれば何も変わりません。既存のタスクと同じく、スレッド／グローバルの設定に従います。
+- `PATCH /api/tasks/{id}` で固定を設定・変更でき、`null` で解除できます。モデルを固定したままバックエンドだけを解除する操作も、同じ理由で拒否されます。
+- `/effort` は固定**されません**。タスクが最終的に実行されるバックエンドの設定から解決されるため、effort の変更は固定されたタスクにも反映されます。
+
 ---
 
 ## 自動アップグレード
@@ -1324,7 +1345,7 @@ uv sync --extra api
 | POST | `/api/tasks` | 定期的な Claude Code タスクを登録 |
 | GET | `/api/tasks` | 登録済みタスクの一覧 |
 | DELETE | `/api/tasks/{id}` | タスクの削除 |
-| PATCH | `/api/tasks/{id}` | タスクの更新（有効/無効、スケジュール変更） |
+| PATCH | `/api/tasks/{id}` | タスクの更新（有効/無効、スケジュール変更、バックエンド/モデルの固定） |
 | POST | `/api/spawn` | 新しい Discord スレッドを作成し Claude Code セッションを起動（非ブロッキング）。`auto_start: false` を指定するとユーザーの最初の返信まで Claude の起動を延期でき、`user_id` を指定するとリクエスト元をスレッドに追加できる |
 | POST | `/api/ingest` | 認証済み外部スポーン（ブラウザ拡張機能 / webhook）。base64 添付ファイル対応。結果取得が設定されている場合 `result_id` を返す |
 | GET | `/api/ingest/{result_id}` | スポーンされたセッションの最終返信をポーリング（`status`/`result`/`error`/`thread_id`） |
