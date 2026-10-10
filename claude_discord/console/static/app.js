@@ -413,14 +413,14 @@ async function capture(title) {
   const start = autostart();
   try {
     const data = await api("/items", { method: "POST", body: { title, start } });
-    if (data.start_error) toast(data.start_error);
-    else if (start) toast(T.started);
+    const started = Boolean(data.item.thread_id);
     await refresh();
-    // A capture lands in To do; leave Inbox and the like so it is not invisible.
-    if (state.view !== "todo" && state.view !== "tree") setView("todo");
+    // Show where it landed: Running once an agent has it, otherwise To do.
+    if (started) { if (state.view !== "ai" && state.view !== "tree") setView("ai"); }
+    else if (state.view !== "todo" && state.view !== "tree") setView("todo");
     state.selected = data.item.id;
     renderList();
-    toast(T.captured);
+    toast(data.start_error || (started ? T.started : T.captured));
   } catch (err) { toast(err.message); }
 }
 // Captured work goes straight to an agent unless the user turned that off.
