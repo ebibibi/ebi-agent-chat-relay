@@ -4,8 +4,11 @@ The operator registers a web client with their provider, points
 ``CCDB_CONSOLE_OIDC_ISSUER`` at it and lists who may come in. The flow is the
 authorization code flow with PKCE, ``state`` and ``nonce``:
 
-* ``state`` is bound to the browser by a short-lived cookie, so a callback URL
-  that someone else started cannot be completed in your browser (login CSRF).
+* the sign-in in progress (``state``, ``nonce``, PKCE verifier) lives in a
+  short-lived cookie signed with a per-process key — not in a server-side table
+  that anyone could flood until a real sign-in is evicted. A callback URL that
+  someone else started cannot be completed in your browser (login CSRF), and a
+  completed ``state`` is remembered until it expires, so it cannot be replayed.
 * ``nonce`` is checked inside the ID token, so a token minted for another
   sign-in cannot be replayed into this one.
 * the ID token's signature, issuer, audience (and ``azp`` when there are
@@ -26,6 +29,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import hmac
+import json
 import logging
 import secrets
 import time
@@ -39,8 +44,13 @@ logger = logging.getLogger(__name__)
 CALLBACK_PATH = "/console/api/auth/oidc/callback"
 STATE_COOKIE = "ccdb_console_oidc"
 FLOW_TTL = 10 * 60.0
-MAX_PENDING_FLOWS = 256
+#: Completed states kept to refuse a replay. Evicting one only re-opens a replay
+#: that the provider refuses anyway (a code is single use), never a lockout.
+MAX_USED_STATES = 4096
 DISCOVERY_TTL = 3600.0
+#: After a failed discovery, answer from memory for this long instead of asking
+#: the provider again on every unauthenticated request.
+DISCOVERY_RETRY = 30.0
 #: Accepted ID-token signature algorithms. ``none`` and HMAC are never accepted.
 ALGORITHMS = ["RS256", "RS384", "RS512", "ES256", "ES384", "PS256"]
 
@@ -73,12 +83,12 @@ class OidcConfig:
     trust_unverified_email: bool = False
 
 
-@dataclass(frozen=True)
-class _Flow:
-    nonce: str
-    verifier: str
-    browser: str
-    expires: float
+def _b64(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def _unb64(text: str) -> bytes:
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
 
 
 async def _aiohttp_get_json(url: str) -> dict[str, Any]:
@@ -116,7 +126,7 @@ class OidcClient:
         get_json: GetJson = _aiohttp_get_json,
         post_form: PostForm = _aiohttp_post_form,
         jwk_client: Any | None = None,
-        clock: Callable[[], float] = time.monotonic,
+        clock: Callable[[], float] = time.time,
     ) -> None:
         self.config = config
         self._get_json = get_json
@@ -124,43 +134,66 @@ class OidcClient:
         self._jwk_client = jwk_client
         self._clock = clock
         self._discovery: tuple[float, dict[str, Any]] | None = None
-        self._flows: dict[str, _Flow] = {}
+        self._discovery_failed_at: float | None = None
+        self._key = secrets.token_bytes(32)
+        self._used: dict[str, float] = {}
 
     async def _metadata(self) -> dict[str, Any]:
         now = self._clock()
         if self._discovery and now - self._discovery[0] < DISCOVERY_TTL:
             return self._discovery[1]
+        unreachable = OidcError("the identity provider could not be reached")
+        if self._discovery_failed_at is not None and now - self._discovery_failed_at < (
+            DISCOVERY_RETRY
+        ):
+            raise unreachable
         url = self.config.issuer.rstrip("/") + "/.well-known/openid-configuration"
         try:
             meta = await self._get_json(url)
         except Exception as exc:
+            self._discovery_failed_at = now
             logger.warning("console: OIDC discovery failed for %s: %s", url, exc)
-            raise OidcError("the identity provider could not be reached") from exc
+            raise unreachable from exc
+        self._discovery_failed_at = None
         if meta.get("issuer") != self.config.issuer:
             raise OidcError("the identity provider's issuer does not match the configuration")
         self._discovery = (now, meta)
         return meta
 
-    def _prune(self) -> None:
+    def _seal(self, flow: dict[str, Any]) -> str:
+        body = _b64(json.dumps(flow, separators=(",", ":")).encode())
+        mac = hmac.new(self._key, body.encode(), hashlib.sha256).digest()
+        return f"{body}.{_b64(mac)}"
+
+    def _open(self, sealed: str | None) -> dict[str, Any]:
+        """The flow in *sealed*, or an error when it was not made here, now."""
+        body, _, mac = (sealed or "").partition(".")
+        want = hmac.new(self._key, body.encode(), hashlib.sha256).digest()
+        try:
+            genuine = hmac.compare_digest(_unb64(mac), want)
+            flow = json.loads(_unb64(body)) if genuine else None
+        except (ValueError, TypeError):
+            flow = None
+        if not isinstance(flow, dict) or float(flow.get("exp", 0)) <= self._clock():
+            raise OidcError("this sign-in expired or was started in another browser")
+        return flow
+
+    def _remember_used(self, state: str) -> None:
         now = self._clock()
-        self._flows = {k: v for k, v in self._flows.items() if v.expires > now}
-        while len(self._flows) >= MAX_PENDING_FLOWS:
-            del self._flows[next(iter(self._flows))]
+        self._used = {k: v for k, v in self._used.items() if v > now}
+        while len(self._used) >= MAX_USED_STATES:
+            del self._used[next(iter(self._used))]
+        self._used[state] = now + FLOW_TTL
 
     async def start(self) -> tuple[str, str]:
-        """Begin a sign-in: ``(authorization URL, browser-binding cookie value)``."""
+        """Begin a sign-in: ``(authorization URL, signed flow cookie value)``."""
         meta = await self._metadata()
-        self._prune()
         state = secrets.token_urlsafe(24)
-        browser = secrets.token_urlsafe(24)
+        nonce = secrets.token_urlsafe(24)
         verifier = secrets.token_urlsafe(48)
-        flow = _Flow(
-            nonce=secrets.token_urlsafe(24),
-            verifier=verifier,
-            browser=browser,
-            expires=self._clock() + FLOW_TTL,
+        sealed = self._seal(
+            {"s": state, "n": nonce, "v": verifier, "exp": self._clock() + FLOW_TTL}
         )
-        self._flows[state] = flow
         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
         query = urlencode(
             {
@@ -169,21 +202,21 @@ class OidcClient:
                 "redirect_uri": self.config.redirect_uri,
                 "scope": self.config.scopes,
                 "state": state,
-                "nonce": flow.nonce,
+                "nonce": nonce,
                 "code_challenge": challenge.rstrip(b"=").decode(),
                 "code_challenge_method": "S256",
             }
         )
-        return f"{meta['authorization_endpoint']}?{query}", browser
+        return f"{meta['authorization_endpoint']}?{query}", sealed
 
     async def finish(self, *, state: str, code: str, browser: str | None) -> str:
         """Complete a sign-in and return the allowed, verified email."""
-        self._prune()
-        flow = self._flows.pop(state, None)
-        if flow is None:
-            raise OidcError("this sign-in expired, start again")
-        if not browser or not secrets.compare_digest(browser, flow.browser):
+        flow = self._open(browser)
+        if not state or not hmac.compare_digest(str(flow.get("s", "")), state):
             raise OidcError("this sign-in was started in another browser")
+        if state in self._used:
+            raise OidcError("this sign-in was already completed")
+        self._remember_used(state)
         if not code:
             raise OidcError("the identity provider returned no code")
         meta = await self._metadata()
@@ -192,7 +225,7 @@ class OidcClient:
             "code": code,
             "redirect_uri": self.config.redirect_uri,
             "client_id": self.config.client_id,
-            "code_verifier": flow.verifier,
+            "code_verifier": str(flow["v"]),
         }
         if self.config.client_secret:
             form["client_secret"] = self.config.client_secret
@@ -210,7 +243,7 @@ class OidcClient:
         audiences = claims["aud"] if isinstance(claims["aud"], list) else [claims["aud"]]
         if len(audiences) > 1 and claims.get("azp") != self.config.client_id:
             raise OidcError("the ID token was issued to another application")
-        if claims.get("nonce") != flow.nonce:
+        if claims.get("nonce") != flow["n"]:
             raise OidcError("the ID token was not issued for this sign-in")
         return self._email(claims)
 

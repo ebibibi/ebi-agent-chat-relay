@@ -167,7 +167,8 @@ Entra ID, where your admins control every address, you can waive it with
 `CCDB_CONSOLE_OIDC_TRUST_UNVERIFIED_EMAIL=1`. Never waive it for a provider where users choose
 their own email.
 
-Taking an email off the allowlist ends its sessions at once. Whether you are asked for a second
+Taking an email off the allowlist, or switching to another issuer, ends its sessions at once.
+A Google or Entra ID session cannot add or remove passkeys; sign in with a passkey for that. Whether you are asked for a second
 factor is the provider's policy: turn on 2-step verification or passkeys for the accounts on the
 allowlist.
 

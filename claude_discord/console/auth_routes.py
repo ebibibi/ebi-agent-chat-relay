@@ -17,7 +17,13 @@ from urllib.parse import urlencode
 
 from aiohttp import web
 
-from .auth import SESSION_COOKIE, ConsoleAuthConfig, ConsoleAuthenticator, ConsoleAuthError
+from .auth import (
+    SESSION_COOKIE,
+    ConsoleAuthConfig,
+    ConsoleAuthenticator,
+    ConsoleAuthError,
+    oidc_session_identity,
+)
 from .oidc import STATE_COOKIE, OidcClient, OidcError
 from .passkey_store import PasskeyStore
 from .passkeys import PasskeyError, PasskeyService
@@ -258,7 +264,9 @@ class AuthRoutes:
             )
         except OidcError as exc:
             return _signin_error(str(exc))
-        token = await self.store.create_session(f"oidc:{email}", self._config.session_lifetime)
+        token = await self.store.create_session(
+            oidc_session_identity(self.oidc.config.issuer, email), self._config.session_lifetime
+        )
         response = _redirect("/")
         response.del_cookie(STATE_COOKIE, path=f"{AUTH_PREFIX}oidc/")
         logger.info("console: %s signed in with %s", email, self.oidc.config.name)

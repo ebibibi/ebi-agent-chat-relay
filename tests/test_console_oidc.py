@@ -17,6 +17,7 @@ from claude_discord.console.auth import (
     ConsoleAuthConfig,
     ConsoleAuthenticator,
     ConsoleAuthError,
+    oidc_session_identity,
 )
 from claude_discord.console.oidc import (
     STATE_COOKIE,
@@ -218,22 +219,74 @@ def test_oidc_configuration_problems() -> None:
     assert good.oidc_redirect_uri == f"{ORIGIN}/console/api/auth/oidc/callback"
 
 
-async def test_removing_an_email_from_the_allowlist_ends_its_sessions(tmp_path) -> None:
+async def test_sessions_end_when_the_email_or_the_issuer_changes(tmp_path) -> None:
     store = PasskeyStore(str(tmp_path / "db"))
     await store.init_db()
-    session = await store.create_session(f"oidc:{OWNER}", ConsoleAuthConfig().session_lifetime)
-    allowed = ConsoleAuthConfig(
-        oidc_issuer=ISSUER, oidc_client_id=CLIENT, allowed_emails=frozenset({OWNER})
+    session = await store.create_session(
+        oidc_session_identity(ISSUER, OWNER), ConsoleAuthConfig().session_lifetime
     )
-    assert (
-        await ConsoleAuthenticator(allowed, sessions=store).identify({}, {SESSION_COOKIE: session})
-        == f"oidc:{OWNER}"
-    )
-    removed = ConsoleAuthConfig(
-        oidc_issuer=ISSUER, oidc_client_id=CLIENT, allowed_emails=frozenset({"other@x.com"})
-    )
+    cookies = {SESSION_COOKIE: session}
+
+    def auth(issuer: str = ISSUER, emails: frozenset[str] = frozenset({OWNER})):
+        config = ConsoleAuthConfig(oidc_issuer=issuer, oidc_client_id=CLIENT, allowed_emails=emails)
+        return ConsoleAuthenticator(config, sessions=store)
+
+    assert await auth().identify({}, cookies) == f"oidc:{OWNER}"
     with pytest.raises(ConsoleAuthError):
-        await ConsoleAuthenticator(removed, sessions=store).identify({}, {SESSION_COOKIE: session})
+        await auth(emails=frozenset({"other@example.com"})).identify({}, cookies)
+    with pytest.raises(ConsoleAuthError):
+        await auth(issuer="https://login.microsoftonline.com/tid/v2.0").identify({}, cookies)
+
+
+async def test_a_flooded_start_does_not_evict_a_real_sign_in(key) -> None:
+    provider = FakeProvider(key)
+    client = make_client(provider)
+    state, browser = await begin(client, provider)
+    for _ in range(1000):
+        await client.start()
+    provider.nonce = client._open(browser)["n"]  # the provider answers the real sign-in
+    assert await client.finish(state=state, code="c", browser=browser) == OWNER
+
+
+async def test_a_tampered_flow_cookie_is_refused(key) -> None:
+    provider = FakeProvider(key)
+    client = make_client(provider)
+    state, browser = await begin(client, provider)
+    body, _, mac = browser.partition(".")
+    for forged in (f"{body}x.{mac}", f"{body}.{mac[:-2]}AA", "garbage", ""):
+        with pytest.raises(OidcError):
+            await client.finish(state=state, code="c", browser=forged)
+
+
+async def test_a_flow_cookie_expires(key) -> None:
+    provider = FakeProvider(key)
+    now = [1_000_000.0]
+    client = OidcClient(
+        make_client(provider).config,
+        get_json=provider.get_json,
+        post_form=provider.post_form,
+        jwk_client=provider.jwks(),
+        clock=lambda: now[0],
+    )
+    state, browser = await begin(client, provider)
+    now[0] += 11 * 60
+    with pytest.raises(OidcError):
+        await client.finish(state=state, code="c", browser=browser)
+
+
+async def test_a_failed_discovery_is_not_retried_on_every_request(key) -> None:
+    calls = []
+
+    async def down(url: str) -> dict:
+        calls.append(url)
+        raise OSError("unreachable")
+
+    provider = FakeProvider(key)
+    client = OidcClient(make_client(provider).config, get_json=down, post_form=provider.post_form)
+    for _ in range(20):
+        with pytest.raises(OidcError):
+            await client.start()
+    assert len(calls) == 1
 
 
 async def test_the_http_flow_ends_in_a_session(tmp_path, key) -> None:

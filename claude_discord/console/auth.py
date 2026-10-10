@@ -20,6 +20,7 @@ surface that can start agent turns is not a degraded mode, it is a hole.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import logging
 import os
@@ -183,6 +184,15 @@ class ConsoleAuthConfig:
         )
 
 
+def issuer_fingerprint(issuer: str) -> str:
+    """A short, stable tag for an OIDC issuer, stored with each session it opens."""
+    return hashlib.sha256(issuer.encode()).hexdigest()[:16]
+
+
+def oidc_session_identity(issuer: str, email: str) -> str:
+    return f"oidc:{issuer_fingerprint(issuer)}:{email}"
+
+
 def _env(name: str) -> str:
     return (os.getenv(name) or "").strip()
 
@@ -226,23 +236,31 @@ class ConsoleAuthenticator:
         session = cookies.get(SESSION_COOKIE)
         if session and self._sessions is not None:
             who = await self._sessions.session_identity(session)
-            if who and self._session_still_allowed(who):
-                return who
+            identity = self._session_identity(who) if who else None
+            if identity:
+                return identity
         if self._config.access_enabled:
             assertion = headers.get(ACCESS_HEADER) or cookies.get(ACCESS_COOKIE)
             if assertion:
                 return await self._verify_access(assertion)
         raise ConsoleAuthError("invalid token" if bad_token else "not authenticated")
 
-    def _session_still_allowed(self, who: str) -> bool:
-        """A session is only as good as the method that opened it, *now*:
-        turning a method off, or taking an email off the allowlist, ends the
-        sessions it created instead of letting them run out their 30 days."""
+    def _session_identity(self, who: str) -> str | None:
+        """The identity a stored session stands for *now*, or ``None``.
+
+        A session is only as good as the method that opened it: turning a
+        method off, switching to another OIDC issuer, or taking an email off
+        the allowlist ends the sessions it created instead of letting them run
+        out their 30 days.
+        """
         if who.startswith("passkey:"):
-            return self._config.passkeys
-        if who.startswith("oidc:"):
-            return self._config.oidc_enabled and who[5:] in self._config.allowed_emails
-        return False
+            return who if self._config.passkeys else None
+        if who.startswith("oidc:") and self._config.oidc_enabled:
+            fingerprint, _, email = who[5:].partition(":")
+            current = issuer_fingerprint(str(self._config.oidc_issuer))
+            if hmac.compare_digest(fingerprint, current) and email in self._config.allowed_emails:
+                return f"oidc:{email}"
+        return None
 
     async def _verify_access(self, assertion: str) -> str:
         import jwt
