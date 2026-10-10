@@ -53,8 +53,10 @@ console.
 ## Consequences
 
 - Starting work from the console no longer depends on Discord or Teams.
-- The bot process itself still starts the Discord client; running ccdb with the console as the
-  only frontend is a separate step.
+- With `CCDB_FRONTENDS` omitting `discord`, the process does not log in to Discord at all
+  (#891): the bot object only hosts the Cogs, `wait_until_ready()` does not block, and the console
+  replaces Discord as the router's primary frontend, so scheduled tasks open console
+  conversations.
 - No live progress in the console yet; the board shows that a turn is running, and the answer
   appears when it is written.
 - Files the agent delivers are listed by name and path; there is no download endpoint yet.

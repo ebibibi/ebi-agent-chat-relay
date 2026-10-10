@@ -736,7 +736,11 @@ async def _build_session_host(
         conversations, ledger, working_dir=getattr(factory, "working_dir", None)
     )
     router = getattr(components, "frontend", None)
-    if router is not None and hasattr(router, "add"):
+    if getattr(bot, "headless", False) is True and hasattr(router, "replace_primary"):
+        # No Discord login: the console is where new conversations open,
+        # scheduled tasks included.
+        router.replace_primary(frontend)  # type: ignore[union-attr]
+    elif router is not None and hasattr(router, "add"):
         # Scheduled tasks, waits and the REST API resolve a console
         # conversation the same way they resolve a Discord or Teams one.
         router.add(frontend)

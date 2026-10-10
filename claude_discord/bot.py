@@ -35,6 +35,8 @@ class ClaudeDiscordBot(commands.Bot):
         lounge_repo: LoungeRepository | None = None,
         lounge_channel_id: int | None = None,
         worktree_manager: WorktreeManager | None = None,
+        *,
+        headless: bool = False,
     ) -> None:
         intents = discord.Intents.default()
         intents.message_content = True
@@ -46,6 +48,9 @@ class ClaudeDiscordBot(commands.Bot):
         )
         self.channel_id = channel_id
         self.owner_id = owner_id
+        #: True when no Discord frontend is enabled: the bot object still
+        #: hosts the Cogs (scheduler, waits, …) but never logs in.
+        self.headless = headless
         self.session_registry = SessionRegistry()
         # Which files each live session writes — CollisionWatchCog compares
         # these to spot two sessions editing the same file.
@@ -61,6 +66,12 @@ class ClaudeDiscordBot(commands.Bot):
         self.worktree_manager: WorktreeManager | None = worktree_manager
         # Thread inbox repository — None until THREAD_INBOX_ENABLED=true and setup_bridge runs
         self.inbox_repo: ThreadInboxRepository | None = None
+
+    async def wait_until_ready(self) -> None:
+        """Do not block a headless bot's loops on a login that never happens."""
+        if self.headless:
+            return
+        await super().wait_until_ready()
 
     async def on_ready(self) -> None:
         logger.info("Logged in as %s (ID: %s)", self.user, self.user.id if self.user else "?")
