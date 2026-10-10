@@ -1,0 +1,31 @@
+/* Usage strip: always on screen above the board. */
+body { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+body > .app { flex: 1 1 0; min-height: 0; height: auto; }
+
+.usage { display: flex; flex: none; align-items: center; gap: 8px; padding: 5px 10px; background: var(--panel);
+  border-bottom: 1px solid var(--line); overflow-x: auto; white-space: nowrap; font-size: 12px; scrollbar-width: none; }
+.usage::-webkit-scrollbar { display: none; }
+.u-be { display: inline-flex; align-items: center; gap: 8px; padding: 2px 9px; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--bg); }
+.u-be.warn { border-color: color-mix(in srgb, var(--me) 55%, var(--line)); }
+.u-be.hot, .u-be.out { border-color: var(--err); background: color-mix(in srgb, var(--err) 12%, var(--bg)); }
+.u-name { font-weight: 700; display: inline-flex; gap: 4px; align-items: baseline; }
+.u-prof { color: var(--dim); font-weight: 400; }
+.u-win { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+.u-k, .u-rs, .u-note { color: var(--dim); }
+.u-bar { width: 44px; height: 6px; border-radius: 3px; background: var(--raise); overflow: hidden; }
+.u-bar i { display: block; height: 100%; background: var(--ai); }
+.u-win.warn .u-bar i { background: var(--me); }
+.u-win.hot .u-bar i { background: var(--err); }
+.u-pct { min-width: 30px; text-align: right; font-weight: 600; }
+.u-win.warn .u-pct { color: var(--me); }
+.u-win.hot .u-pct { color: var(--err); }
+.u-out { color: var(--err); font-weight: 700; }
+
+@media (max-width: 900px) {
+  .nav, .detail { top: var(--usage-h, 0px); }
+  /* Every backend visible without scrolling: one row each if need be. */
+  .usage { flex-wrap: wrap; gap: 4px 6px; padding: 4px 8px; }
+  .u-be { gap: 2px 6px; padding: 1px 7px; flex-wrap: wrap; max-width: 100%; }
+  .u-bar { width: 28px; }
+}
