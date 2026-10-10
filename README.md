@@ -443,6 +443,21 @@ ccdb attention-backfill --guild <id> --since 2026-09-01   # seed history (owner 
 
 On by default (`CCDB_ATTENTION_ENABLED=false` stops recording); every number is labelled an estimate and reports its parameters. See [docs/attention.md](docs/attention.md).
 
+### Relay Console — Triage Agent Work from Desktop or Phone
+
+An API-first triage screen on its own authenticated listener. Every thread is sorted by whose move it is — **Inbox** (❓ / 👀 / 📋 / ⚠️: the ball is on you), **Running**, **To do**, **Idle**, a project/parent **Tree**, **Snoozed** and **Done** — with priority P0–P3, due dates and snooze. Reply, mark done, or write down new work and hand it to an agent (which opens a thread and starts a turn). Status is derived from what ccdb already knows (outcome markers, running turns, the slot queue, spawn lineage), so agents do nothing new; only priority/due/snooze/project/parent live in a new `work_items` table. Keyboard-driven on desktop, installable to a phone's home screen.
+
+```bash
+uv add "claude-code-discord-bridge[console] @ git+https://github.com/ebibibi/ebi-agent-chat-relay.git"
+CCDB_CONSOLE_PORT=8100                                     # off unless set
+CCDB_CONSOLE_ACCESS_TEAM_DOMAIN=myteam.cloudflareaccess.com  # Cloudflare Access JWT…
+CCDB_CONSOLE_ACCESS_AUD=<aud tag>
+CCDB_CONSOLE_ALLOWED_EMAILS=me@example.com                 # …plus a required allowlist
+# CCDB_CONSOLE_TOKEN=...                                   # and/or a 32+ char bearer token
+```
+
+It **refuses to start without authentication**. The JSON API under `/console/api` is the contract; the bundled web client is one consumer. See [docs/console.md](docs/console.md) and [ADR-0010](docs/adr/0010-add-an-api-first-console-on-its-own-listener.md).
+
 ### Startup Resume
 
 If the bot restarts mid-session, interrupted Claude sessions are automatically resumed when the bot comes back online. Sessions are marked for resume in three ways:
@@ -1081,6 +1096,12 @@ for idle deadlines, attachment retries, credentials and startup rollback.
 | `CCDB_INGEST_TOKEN` | Bearer token for `POST /api/ingest` (independent of `api_secret`); unset ⇒ the endpoint responds `503` | (optional) |
 | `CCDB_INGEST_REQUIRE_COMPLETE` | Set to `1` to reject an ingest with `409` when its `attachments_manifest` proves attachments went missing, instead of starting a session on partial evidence | `0` |
 | `CCDB_TEAMS_VAULT_ROOT` | Directory where `POST /api/teams/sync` mirrors upstream threads (one file per message). Gated by `CCDB_INGEST_TOKEN` | `{working_dir}/teams` |
+| `CCDB_CONSOLE_PORT` | Port for the [Relay Console](docs/console.md) listener (requires the `console` extra). The console is off unless set and refuses to start without authentication | (optional) |
+| `CCDB_CONSOLE_HOST` | Relay Console bind address. Keep it on loopback behind a tunnel | `127.0.0.1` |
+| `CCDB_CONSOLE_ACCESS_TEAM_DOMAIN` | Cloudflare Access team domain (`myteam.cloudflareaccess.com`) whose JWTs the console verifies | (optional) |
+| `CCDB_CONSOLE_ACCESS_AUD` | AUD tag of the Cloudflare Access application in front of the console | (optional) |
+| `CCDB_CONSOLE_ALLOWED_EMAILS` | Comma-separated emails allowed in via Access. Required with Access, so a mistaken Access policy edit still leaves the console closed | (optional) |
+| `CCDB_CONSOLE_TOKEN` | Bearer token (32+ characters) for local clients; on its own, use only on a private network (tailnet, SSH tunnel, loopback) | (optional) |
 
 ### Permission Modes — What Works in `-p` Mode
 
