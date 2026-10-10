@@ -61,6 +61,16 @@ class ConsoleSessionHost:
     async def owns(self, thread_key: int) -> bool:
         return await self.frontend.owns(thread_key)
 
+    async def stop(self, thread_key: int, who: str) -> bool:
+        """Press Stop on the conversation's running turn. False if nothing runs."""
+        if not await self.frontend.live.stop(thread_key):
+            return False
+        # The CLI's own interruption output is a diagnostic; say plainly what happened.
+        await self.frontend.repo.append(
+            thread_key, author=who, is_bot=False, content=f"⏹ Stopped by {who}"
+        )
+        return True
+
     async def start(self, *, external_id: str, title: str, prompt: str, author: str) -> int:
         """Open a conversation for *external_id* and start its first turn.
 
@@ -102,6 +112,9 @@ class ConsoleSessionHost:
                 logger.exception("console: turn for %d failed", surface.thread_key)
                 await surface.send_text("⚠️ The turn could not run. See the bot log.")
                 await surface.set_outcome(OUTCOME_ERROR)
+            finally:
+                # What was live is in the transcript now.
+                self.frontend.live.clear(surface.thread_key)
 
     async def _run(self, surface: ConsoleSurface, prompt: str) -> None:
         thread_key = surface.thread_key

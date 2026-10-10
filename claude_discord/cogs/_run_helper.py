@@ -276,15 +276,16 @@ async def _build_system_context(config: RunConfig) -> str | None:
 
     wd = config.runner.working_dir or "your current working directory"
     marker = _attachment_marker_name(config.surface.thread_key)
+    where = _platform_label(config.surface.frontend)
     parts.append(
         "## File Delivery\n"
-        "Discord cannot open local filesystem paths. Never describe a local path as a clickable "
-        "link, and never use a local path or file:// URI as a user-facing Markdown link. "
-        "For every file the user asks to view, open, download, or receive, deliver it as a real "
-        "Discord attachment using the marker below and refer to it as an attached file in the "
-        "final response. This Discord-specific rule overrides general instructions to prefer "
-        "clickable local-file links.\n"
-        "When you need to send files to Discord, use your Bash tool to append "
+        f"{where} cannot open local filesystem paths. Never describe a local path as a "
+        "clickable link, and never use a local path or file:// URI as a user-facing Markdown "
+        "link. For every file the user asks to view, open, download, or receive, deliver it as "
+        f"a real {where} attachment using the marker below and refer to it as an attached file "
+        f"in the final response. This {where}-specific rule overrides general instructions to "
+        "prefer clickable local-file links.\n"
+        f"When you need to send files to {where}, use your Bash tool to append "
         "each file's ABSOLUTE path (one path per line, UTF-8) to:\n"
         f"  {wd}/{marker}\n"
         f"Example: `echo /absolute/path/to/file >> {wd}/{marker}`\n"
@@ -646,6 +647,14 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
         await _show_outcome(config, OUTCOME_ERROR)
     await _emit_result_sink(config, processor.final_assistant_text, processor.final_error)
     return processor.session_id
+
+
+_PLATFORM_LABELS = {"discord": "Discord", "teams": "Teams", "console": "Relay Console"}
+
+
+def _platform_label(frontend: str) -> str:
+    """How the agent should name where the human reads its answer."""
+    return _PLATFORM_LABELS.get(frontend, "Discord")
 
 
 async def _show_outcome(config: RunConfig, outcome: str | None) -> None:

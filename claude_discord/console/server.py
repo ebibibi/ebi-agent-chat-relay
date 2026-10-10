@@ -23,6 +23,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 from aiohttp import web
 
@@ -31,6 +32,7 @@ from ..thread_status import request_thread_outcome, schedule_thread_outcome
 from .auth import ConsoleAuthConfig, ConsoleAuthenticator, ConsoleAuthError
 from .board import SessionInfo, ThreadSnapshot, build_board
 from .conversations import ConversationRepository
+from .files import resolve_file
 from .surface import apply_outcome
 from .usage import UsageReader
 from .work_repo import (
@@ -172,6 +174,9 @@ class ConsoleServer:
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/done", self.done)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/reopen", self.reopen)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/start", self.start_item)
+        r.add_get(f"{API_PREFIX}/items/{{item_id}}/live", self.live)
+        r.add_post(f"{API_PREFIX}/items/{{item_id}}/stop", self.stop_item)
+        r.add_get(f"{API_PREFIX}/files/{{key}}/{{token}}/{{name}}", self.file)
         return app
 
     @web.middleware
@@ -309,7 +314,46 @@ class ConsoleServer:
         history.reverse()
         return web.json_response({"messages": [_serialize_thread_message(m) for m in history]})
 
+    async def live(self, request: web.Request) -> web.Response:
+        """What a console conversation's running turn is doing right now."""
+        key = await self._conversation_key(request.match_info["item_id"])
+        if key is None or self.sessions is None:
+            return _error("this item has no console conversation", 404)
+        state = self.sessions.frontend.live.get(key)
+        running = key in self.api._running_thread_ids()
+        body = state.as_dict() if state is not None else None
+        return web.json_response({"running": running, "live": body})
+
+    async def file(self, request: web.Request) -> web.StreamResponse:
+        """A file an agent delivered in a console conversation."""
+        files_dir = self.sessions.frontend.files_dir if self.sessions is not None else None
+        path = resolve_file(
+            files_dir,
+            request.match_info["key"],
+            request.match_info["token"],
+            request.match_info["name"],
+        )
+        if path is None:
+            return _error("unknown file", 404)
+        return web.FileResponse(
+            path,
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{quote(path.name)}",
+                "Content-Type": "application/octet-stream",
+            },
+        )
+
     # -- writes ------------------------------------------------------------
+    async def stop_item(self, request: web.Request) -> web.Response:
+        """Stop the running turn of a console conversation, like the chat Stop button."""
+        key = await self._conversation_key(request.match_info["item_id"])
+        if key is None or self.sessions is None:
+            return _error("this item has no console conversation", 404)
+        if not await self.sessions.stop(key, request[IDENTITY]):
+            return _error("nothing is running", 409)
+        logger.info("console: %s stopped conversation %s", request[IDENTITY], key)
+        return web.json_response({"status": "stopping"}, status=202)
+
     async def create_item(self, request: web.Request) -> web.Response:
         body, err = await self._json(request)
         if err:
@@ -733,7 +777,10 @@ async def _build_session_host(
         return None
     bot = api_server.bot
     frontend = ConsoleFrontend(
-        conversations, ledger, working_dir=getattr(factory, "working_dir", None)
+        conversations,
+        ledger,
+        working_dir=getattr(factory, "working_dir", None),
+        files_dir=Path(conversations.db_path).parent / "console_files",
     )
     router = getattr(components, "frontend", None)
     if getattr(bot, "headless", False) is True and hasattr(router, "replace_primary"):

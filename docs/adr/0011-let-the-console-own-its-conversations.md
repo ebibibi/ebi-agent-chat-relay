@@ -57,6 +57,11 @@ console.
   (#891): the bot object only hosts the Cogs, `wait_until_ready()` does not block, and the console
   replaces Discord as the router's primary frontend, so scheduled tasks open console
   conversations.
-- No live progress in the console yet; the board shows that a turn is running, and the answer
-  appears when it is written.
-- Files the agent delivers are listed by name and path; there is no download endpoint yet.
+- Live progress is kept in memory only (`LiveBoard`): tool activity, the streaming answer and the
+  Stop callback, polled through `/items/{id}/live`. A restart loses it, which is harmless because
+  a restart also ends the turn.
+- Delivered files are copied under `console_files/<key>/<random token>/<name>` and served only to
+  authenticated callers, with every URL part validated and the resolved path checked to stay
+  inside that directory.
+- The agent is told its files go to the Relay Console, not to Discord: the file-delivery guidance
+  names the frontend the conversation is on.

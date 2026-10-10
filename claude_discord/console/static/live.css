@@ -1,0 +1,8 @@
+.live { margin: 0 16px 10px; padding: 8px 10px; border: 1px dashed var(--ai); border-radius: var(--radius); background: var(--panel); }
+.live-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.live-status { color: var(--ai); }
+.live-acts { list-style: none; margin: 6px 0 0; padding: 0; color: var(--dim); font-size: 12px; }
+.live-acts li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-acts li.done { opacity: 0.7; }
+.live-draft { margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30vh; overflow-y: auto; }
+.live-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }

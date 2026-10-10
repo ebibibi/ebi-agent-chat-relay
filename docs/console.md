@@ -126,6 +126,9 @@ All endpoints need authentication. Every method except `GET` also needs `X-Conso
 | POST | `/console/api/items/{id}/reply` | `{text}` — continues the session, queued behind a running turn |
 | POST | `/console/api/items/{id}/done` | Mark done (also sets the ✅ marker on the thread) |
 | POST | `/console/api/items/{id}/reopen` | Clear the done/someday verdict |
+| GET | `/console/api/items/{id}/live` | A console conversation's running turn: status, tool activity, the answer so far, whether it can be stopped |
+| POST | `/console/api/items/{id}/stop` | Stop the running turn of a console conversation (409 when nothing runs) |
+| GET | `/console/api/files/{key}/{token}/{name}` | A file an agent delivered in a console conversation |
 | POST | `/console/api/items/{id}/start` | Hand a written-down item to an agent in a console conversation (no chat thread) |
 
 Item ids are `t<thread_id>` for threads and conversations and `c<hex>` for written-down work.
@@ -142,8 +145,12 @@ session database (`console_conversations`, `console_messages`).
   `waiting`, `review`, `action`); the board shows it like a thread's marker.
 - When the agent asks a question (AskUserQuestion), the question appears in the conversation and
   the item moves to the Inbox. Answer it with a reply.
-- Only answers, questions, warnings and errors are kept. Tool activity is not shown live; the
-  board shows the item under Running while a turn is in flight.
+- While a turn runs, the detail view shows it live: the tool calls, the answer as it is written,
+  and a **Stop** button. None of that is stored; when the turn ends the transcript has the answer.
+  Only answers, questions, warnings, errors and file links are kept.
+- Files the agent delivers (the usual `.ccdb-attachments-<id>` marker) are copied next to the
+  session database (`console_files/`) and linked in the conversation. Downloading needs the same
+  authentication as the API.
 
 Threads that live in a chat platform still appear and can be replied to as before. Timestamps are ISO
 8601 and are stored in UTC.
@@ -152,7 +159,6 @@ Threads that live in a chat platform still appear and can be replied to as befor
 
 - Chat threads (work not started from the console) still live in the chat platform; the console
   reads and posts there.
-- Files an agent delivers in a console conversation are listed by name; there is no download yet.
 - A console reply is posted by the bot, so it does not yet count in attention metering.
 - The board polls every 8 seconds; there is no push channel yet.
 - Archived threads come from the last 50 per watched channel, refreshed every two minutes.

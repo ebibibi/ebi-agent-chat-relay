@@ -314,3 +314,33 @@ async def test_a_wait_resumes_a_console_conversation(env) -> None:
     await _settle(env.host)
     assert env.runs[-1].prompt == "CI finished: success"
     bot.get_channel.assert_not_called()
+
+
+async def test_live_and_stop_endpoints(env) -> None:
+    item_id = await _start(env)
+    live = await env.client.get(f"/console/api/items/{item_id}/live", headers=AUTH)
+    assert live.status == 200
+    assert (await live.json()) == {"running": False, "live": None}
+
+    stop = await env.client.post(f"/console/api/items/{item_id}/stop", json={}, headers=WRITE)
+    assert stop.status == 409
+
+    pressed: list[bool] = []
+
+    async def on_stop() -> None:
+        pressed.append(True)
+
+    surface = await env.host.frontend.resolve_surface(int(item_id[1:]))
+    await surface.offer_interrupt(on_stop)
+    stop = await env.client.post(f"/console/api/items/{item_id}/stop", json={}, headers=WRITE)
+    assert stop.status == 202 and pressed == [True]
+    history = await env.conversations.history(int(item_id[1:]), 10)
+    assert history[-1].content == "⏹ Stopped by token"
+
+    assert (await env.client.get("/console/api/items/t1/live", headers=AUTH)).status == 404
+
+
+async def test_files_need_authentication_and_a_real_path(env) -> None:
+    path = "/console/api/files/1/" + "0" * 32 + "/a.txt"
+    assert (await env.client.get(path)).status == 401
+    assert (await env.client.get(path, headers=AUTH)).status == 404
