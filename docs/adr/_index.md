@@ -17,3 +17,4 @@ earlier ADR instead of rewriting its history.
 - [ADR-0009: Route turns across operator-configured account pools](0009-route-turns-across-account-pools.md)
 - [ADR-0010: Add an API-first console on its own listener](0010-add-an-api-first-console-on-its-own-listener.md)
 - [ADR-0011: Let the Relay Console own its conversations](0011-let-the-console-own-its-conversations.md)
+- [ADR-0012: Sign in to the console with passkeys by default](0012-sign-in-to-the-console-with-passkeys-by-default.md)

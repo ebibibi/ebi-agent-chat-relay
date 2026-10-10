@@ -1,7 +1,9 @@
 """Who may use the console, and how a request proves it.
 
-Two independent ways in, either of which may be configured:
+Three independent ways in:
 
+* **Passkeys** (default, see ``passkeys.py``) — a WebAuthn sign-in that ends in
+  a server-side session cookie. On unless ``CCDB_CONSOLE_PASSKEYS=0``.
 * **Cloudflare Access** — the console sits behind a Cloudflare Tunnel with an
   Access application in front. Access signs a JWT per request
   (``Cf-Access-Jwt-Assertion``). The *signature, audience and issuer* are
@@ -11,7 +13,7 @@ Two independent ways in, either of which may be configured:
 * **A static bearer token** — for a local client (a terminal UI on the same
   machine, a script) that does not come through Access.
 
-With neither configured the console refuses to start: an unauthenticated
+With none of them available the console refuses to start: an unauthenticated
 surface that can start agent turns is not a degraded mode, it is a hole.
 """
 
@@ -21,13 +23,27 @@ import asyncio
 import hmac
 import logging
 import os
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass, field, replace
+from datetime import timedelta
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .passkey_store import PasskeyStore
 
 logger = logging.getLogger(__name__)
 
 ACCESS_HEADER = "Cf-Access-Jwt-Assertion"
 ACCESS_COOKIE = "CF_Authorization"
+SESSION_COOKIE = "ccdb_console"
+DEFAULT_SESSION_DAYS = 30
+
+
+def passkeys_installed() -> bool:
+    try:
+        import webauthn  # noqa: F401
+    except ImportError:
+        return False
+    return True
 
 
 class ConsoleAuthError(Exception):
@@ -42,19 +58,47 @@ class ConsoleAuthConfig:
     access_audience: str | None = None  # the Access application's AUD tag
     allowed_emails: frozenset[str] = field(default_factory=frozenset)
     token: str | None = None
+    passkeys: bool = True
+    #: Origins the browser may sign in from (``https://host:port``). Empty means
+    #: "whatever origin the request arrived on" — see ``request_origin``.
+    origins: tuple[str, ...] = ()
+    session_days: int = DEFAULT_SESSION_DAYS
 
     @property
     def access_enabled(self) -> bool:
         return bool(self.access_team_domain and self.access_audience)
 
+    @property
+    def session_lifetime(self) -> timedelta:
+        return timedelta(days=self.session_days)
+
+    def effective(self) -> ConsoleAuthConfig:
+        """This config with passkeys off when their library is missing but
+        another way in exists — an upgrade without the extra must not take a
+        working token or Access setup down."""
+        if self.passkeys and not passkeys_installed() and (self.access_enabled or self.token):
+            logger.warning(
+                "console: passkeys disabled — install the [console] extra to enable them"
+            )
+            return replace(self, passkeys=False)
+        return self
+
     def problems(self) -> list[str]:
         """Why this configuration must not be served. Empty when it is safe."""
         issues: list[str] = []
-        if not self.access_enabled and not self.token:
+        if not self.passkeys and not self.access_enabled and not self.token:
             issues.append(
-                "set CCDB_CONSOLE_ACCESS_TEAM_DOMAIN + CCDB_CONSOLE_ACCESS_AUD, "
-                "or CCDB_CONSOLE_TOKEN — the console never runs unauthenticated"
+                "CCDB_CONSOLE_PASSKEYS=0 leaves no way in: set CCDB_CONSOLE_ACCESS_TEAM_DOMAIN "
+                "+ CCDB_CONSOLE_ACCESS_AUD, or CCDB_CONSOLE_TOKEN — the console never runs "
+                "unauthenticated"
             )
+        if self.passkeys and not passkeys_installed():
+            issues.append("passkeys need the webauthn package: install the [console] extra")
+        for origin in self.origins:
+            if not origin.startswith(("https://", "http://localhost", "http://127.0.0.1")):
+                issues.append(f"CCDB_CONSOLE_ORIGIN {origin!r}: passkeys need https (or localhost)")
+        if self.session_days < 1:
+            issues.append("CCDB_CONSOLE_SESSION_DAYS must be at least 1")
         if bool(self.access_team_domain) != bool(self.access_audience):
             issues.append("CCDB_CONSOLE_ACCESS_TEAM_DOMAIN and CCDB_CONSOLE_ACCESS_AUD go together")
         if self.access_enabled and not self.allowed_emails:
@@ -76,20 +120,34 @@ class ConsoleAuthConfig:
         team = (os.getenv("CCDB_CONSOLE_ACCESS_TEAM_DOMAIN") or "").strip()
         team = team.removeprefix("https://").rstrip("/")
         emails = os.getenv("CCDB_CONSOLE_ALLOWED_EMAILS") or ""
+        origins = os.getenv("CCDB_CONSOLE_ORIGIN") or ""
+        try:
+            days = int(os.getenv("CCDB_CONSOLE_SESSION_DAYS") or DEFAULT_SESSION_DAYS)
+        except ValueError:
+            days = 0  # reported by problems()
         return cls(
             access_team_domain=team or None,
             access_audience=(os.getenv("CCDB_CONSOLE_ACCESS_AUD") or "").strip() or None,
             allowed_emails=frozenset(e.strip().lower() for e in emails.split(",") if e.strip()),
             token=(os.getenv("CCDB_CONSOLE_TOKEN") or "").strip() or None,
+            passkeys=(os.getenv("CCDB_CONSOLE_PASSKEYS") or "1").strip() != "0",
+            origins=tuple(o.strip().rstrip("/") for o in origins.split(",") if o.strip()),
+            session_days=days,
         )
 
 
 class ConsoleAuthenticator:
     """Turns a request's headers into an identity, or refuses."""
 
-    def __init__(self, config: ConsoleAuthConfig, jwk_client: Any | None = None) -> None:
+    def __init__(
+        self,
+        config: ConsoleAuthConfig,
+        jwk_client: Any | None = None,
+        sessions: PasskeyStore | None = None,
+    ) -> None:
         self._config = config
         self._jwk_client = jwk_client
+        self._sessions = sessions
         if config.access_enabled and jwk_client is None:
             import jwt
 
@@ -99,19 +157,31 @@ class ConsoleAuthenticator:
                 lifespan=3600,
             )
 
+    @property
+    def config(self) -> ConsoleAuthConfig:
+        return self._config
+
     async def identify(self, headers: Any, cookies: Any) -> str:
-        """Return who is calling (an email, or ``"token"``)."""
+        """Return who is calling (``passkey:<name>``, an email, or ``"token"``)."""
         auth = headers.get("Authorization", "")
+        bad_token = False
         if self._config.token and auth.startswith("Bearer "):
             # Bytes, not str: compare_digest raises on non-ASCII str input.
             if hmac.compare_digest(auth[7:].encode(), self._config.token.encode()):
                 return "token"
-            raise ConsoleAuthError("invalid token")
+            # Keep looking: a stale token left in a browser must not hide the
+            # passkey session sent alongside it.
+            bad_token = True
+        session = cookies.get(SESSION_COOKIE)
+        if session and self._sessions is not None:
+            who = await self._sessions.session_identity(session)
+            if who:
+                return who
         if self._config.access_enabled:
             assertion = headers.get(ACCESS_HEADER) or cookies.get(ACCESS_COOKIE)
             if assertion:
                 return await self._verify_access(assertion)
-        raise ConsoleAuthError("not authenticated")
+        raise ConsoleAuthError("invalid token" if bad_token else "not authenticated")
 
     async def _verify_access(self, assertion: str) -> str:
         import jwt

@@ -104,6 +104,7 @@ async def test_console_is_not_started_without_a_port(monkeypatch) -> None:
 
 async def test_console_refuses_to_start_unauthenticated(monkeypatch) -> None:
     monkeypatch.setenv("CCDB_CONSOLE_PORT", "0")
+    monkeypatch.setenv("CCDB_CONSOLE_PASSKEYS", "0")
     for name in (
         "CCDB_CONSOLE_TOKEN",
         "CCDB_CONSOLE_ACCESS_TEAM_DOMAIN",

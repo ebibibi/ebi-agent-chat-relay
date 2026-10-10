@@ -18,8 +18,8 @@ dependencies = [
 [project.optional-dependencies]
 api = ["aiohttp>=3.14.3"]
 agui = ["aiohttp>=3.14.3"]
-# The Relay Console verifies Cloudflare Access JWTs (RS256).
-console = ["aiohttp>=3.14.3", "pyjwt[crypto]>=2.13.0,<3.0"]
+# The Relay Console verifies passkeys (WebAuthn) and Cloudflare Access JWTs (RS256).
+console = ["aiohttp>=3.14.3", "pyjwt[crypto]>=2.13.0,<3.0", "webauthn>=3.0.1,<4.0"]
 images = ["pillow>=12.3.0"]
 # The Teams frontend needs an inbound HTTPS listener and asymmetric JWT
 # verification. Discord deployments never call either, so they are not made to
@@ -43,6 +43,7 @@ dev = [
     "pillow>=12.3.0",
     "pyjwt[crypto]>=2.13.0,<3.0",
     "defusedxml>=0.7,<1.0",
+    "webauthn>=3.0.1,<4.0",
 ]
 
 [tool.pytest.ini_options]

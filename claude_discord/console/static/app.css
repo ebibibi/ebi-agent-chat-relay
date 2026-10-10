@@ -150,3 +150,17 @@ a.btn { text-decoration: none; display: inline-block; }
   .row { padding: 11px 14px; }
   .reply textarea { min-height: 88px; max-height: 40vh; }
 }
+.nav .nav-auth { margin-top: 10px; color: var(--dim); }
+.card.auth { display: grid; gap: 10px; min-width: min(360px, 86vw); }
+.card.auth h2 { margin: 0 0 4px; font-size: 17px; }
+.card.auth form { display: grid; gap: 8px; }
+.card.auth label { display: grid; gap: 4px; color: var(--dim); font-size: 13px; }
+.card.auth input { background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; color: inherit; }
+.btn.big { padding: 10px 14px; font-size: 15px; }
+.btn.link { background: none; border: none; color: var(--accent); padding: 0; text-align: left; }
+.auth-error { color: var(--me); min-height: 1em; margin: 0; }
+.auth-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.auth-list li { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+.auth-list .dim { color: var(--dim); font-size: 12px; }
+.auth-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.auth-note { margin: 0; word-break: break-word; }

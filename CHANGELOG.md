@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Passkey sign-in for the Relay Console** (#893) — the console now signs you in with a passkey
+  (WebAuthn, user verification required) by default, so setting `CCDB_CONSOLE_PORT` alone gives
+  phishing-resistant multi-factor sign-in with no third-party account. The first passkey is
+  registered with a single-use setup code that ccdb writes to its log; more devices are added
+  from a signed-in one. Sessions are server-side (`HttpOnly`, `SameSite=Strict`, only a hash is
+  stored). Cloudflare Access and `CCDB_CONSOLE_TOKEN` keep working unchanged. Requires the
+  `[console]` extra, which now includes `webauthn`. See ADR-0012.
+
 - **Live view, Stop and file downloads for Relay Console conversations** — while a console
   conversation runs, the detail view shows the tool calls, the answer as it streams and a Stop
   button (`GET /console/api/items/{id}/live`, `POST …/stop`). Files the agent delivers are kept

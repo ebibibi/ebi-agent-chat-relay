@@ -6,7 +6,8 @@ lets you reply, mark things done, or write down new work and hand it to an agent
 desktop and phone (add it to the home screen).
 
 The JSON API under `/console/api` is the contract. The bundled web client is one consumer of it.
-See [ADR-0010](adr/0010-add-an-api-first-console-on-its-own-listener.md).
+See [ADR-0010](adr/0010-add-an-api-first-console-on-its-own-listener.md) and, for sign-in,
+[ADR-0012](adr/0012-sign-in-to-the-console-with-passkeys-by-default.md).
 
 ## Views
 
@@ -66,38 +67,56 @@ single item.
 
 ## Enable it
 
-The console is off unless `CCDB_CONSOLE_PORT` is set, and it **refuses to start without
-authentication**.
+The console is off unless `CCDB_CONSOLE_PORT` is set. It **never runs unauthenticated**: by
+default you sign in with a passkey, and nothing else has to be configured.
 
 ```dotenv
 CCDB_CONSOLE_PORT=8100
 # CCDB_CONSOLE_HOST=127.0.0.1           # default; keep it on loopback behind a tunnel
-
-# Browser access through Cloudflare Access (recommended)
-CCDB_CONSOLE_ACCESS_TEAM_DOMAIN=myteam.cloudflareaccess.com
-CCDB_CONSOLE_ACCESS_AUD=<the Access application's AUD tag>
-CCDB_CONSOLE_ALLOWED_EMAILS=me@example.com
-
-# And/or a bearer token for local clients (scripts, a terminal UI); 32+ characters
-# CCDB_CONSOLE_TOKEN=...
 ```
 
-With Access, the Access JWT's signature is checked against the team's published keys, along
-with its audience, issuer, expiry and the email allowlist. The allowlist is required even though
-the Access policy already restricts who gets in: if someone edits the policy by mistake, the
-console still stays closed.
+Install the extra (`pip install "claude-code-discord-bridge[console]"` or
+`uv add "claude-code-discord-bridge[console]"`) and restart ccdb.
 
-### Token mode (tailnet, SSH tunnel, local)
+### Sign in with a passkey (default)
 
-With only `CCDB_CONSOLE_TOKEN` set, the web client asks for the token once and keeps it in the
-browser's local storage. Use this only where the network itself is private (a tailnet, an SSH
-tunnel, loopback). For example, inside a Tailscale tailnet:
+A passkey is the device you hold plus your fingerprint, face or PIN, checked in one gesture.
+It cannot be phished, and it needs no account with anyone.
+
+1. Start ccdb. While no passkey is registered, the log shows a line like
+   `Relay Console setup code: K7QPM-3XW9D` (single use, valid 15 minutes).
+2. Open the console and enter the code. The browser creates a passkey and you are signed in.
+3. To add a phone or another computer, open **🔑 Passkeys → Add a device** on a signed-in
+   device. Enter the code it shows on the new device.
+
+Code expired? Press **Write a new setup code to the log** on the sign-in screen. Lost every
+passkey? Start ccdb with `CCDB_CONSOLE_ENROLL=1` once and use the code it logs.
+
+Passkeys need a secure origin: `https://…`, or `http://localhost`. Browsers refuse IP addresses,
+so open `http://localhost:8100`, not `http://127.0.0.1:8100`. A passkey belongs to one host name.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `CCDB_CONSOLE_PASSKEYS` | `1` | `0` turns passkeys off (then Access or a token is required) |
+| `CCDB_CONSOLE_ORIGIN` | *(from the request)* | Comma-separated origins the console may be used from, e.g. `https://console.example.com`. Set it when a proxy rewrites `Host` |
+| `CCDB_CONSOLE_SESSION_DAYS` | `30` | How long a sign-in lasts |
+| `CCDB_CONSOLE_ENROLL` | — | `1` logs a new setup code on start, even when passkeys exist |
+
+Sessions are `HttpOnly`, `SameSite=Strict` cookies, and only their hash is stored. Removing a
+passkey signs out every session it opened.
+
+### Reach it from your phone
+
+The console listens on loopback. Put something that terminates HTTPS in front of it:
+
+**Tailscale** (private to your tailnet):
 
 ```bash
 tailscale serve --bg --https=8443 http://127.0.0.1:8100
+# open https://<machine>.<tailnet>.ts.net:8443
 ```
 
-### Cloudflare Tunnel
+**Cloudflare Tunnel** (on the internet):
 
 ```bash
 cloudflared tunnel create relay-console
@@ -109,8 +128,36 @@ cloudflared tunnel route dns relay-console console.example.com
 #     - service: http_status:404
 ```
 
-Then add a self-hosted Access application for `console.example.com` with a policy for your
-email, and copy its AUD tag into `CCDB_CONSOLE_ACCESS_AUD`.
+Passkeys alone are enough to put the console on the internet. You can add Cloudflare Access in
+front as well (below).
+
+### Optional: Cloudflare Access (Google, GitHub, Entra ID, one-time PIN, …)
+
+Access signs in at Cloudflare's edge before a request reaches your machine. Any identity
+provider Access supports works, Google included. Add a self-hosted Access application for
+`console.example.com` with a policy for your email, then:
+
+```dotenv
+CCDB_CONSOLE_ACCESS_TEAM_DOMAIN=myteam.cloudflareaccess.com
+CCDB_CONSOLE_ACCESS_AUD=<the Access application's AUD tag>
+CCDB_CONSOLE_ALLOWED_EMAILS=me@example.com
+```
+
+The Access JWT's signature is checked against the team's published keys, along with its
+audience, issuer, expiry and the email allowlist. The allowlist is required even though the
+Access policy already restricts who gets in: if someone edits the policy by mistake, the console
+still stays closed. Multi-factor sign-in then depends on the identity provider (turn on 2-step
+verification or passkeys on that account).
+
+### Optional: a bearer token for scripts
+
+```dotenv
+CCDB_CONSOLE_TOKEN=...   # 32+ characters
+```
+
+For a terminal UI or a script: `Authorization: Bearer <token>`. It is one shared secret, not
+multi-factor, so leave it unset unless something needs it. With a token set, the sign-in screen
+also offers **Use a token instead**.
 
 ## Run without Discord
 
@@ -130,11 +177,22 @@ reach (no console ports and no Teams).
 
 ## API
 
-All endpoints need authentication. Every method except `GET` also needs `X-Console-Request: 1`.
+Endpoints need authentication unless marked *(no sign-in)*. Every method except `GET` also needs
+`X-Console-Request: 1`. The routes that check a setup code share one rate limit (30 attempts a minute).
 
 | Method | Path | Does |
 |---|---|---|
 | GET | `/console/api/me` | Who you are authenticated as |
+| GET | `/console/api/auth/status` | *(no sign-in)* Which methods are on, whether setup is pending, whether you are signed in |
+| POST | `/console/api/auth/passkey/register/options` | *(no sign-in)* `{code?}` — start registering a passkey; a code is needed unless signed in |
+| POST | `/console/api/auth/passkey/register/verify` | *(no sign-in)* `{ticket, credential, name}` — finish registering; signs in |
+| POST | `/console/api/auth/passkey/login/options` | *(no sign-in)* Start a passkey sign-in |
+| POST | `/console/api/auth/passkey/login/verify` | *(no sign-in)* `{ticket, credential}` — finish signing in |
+| POST | `/console/api/auth/setup-code` | *(no sign-in)* Log a new setup code; only while no passkey exists |
+| POST | `/console/api/auth/logout` | End this session |
+| GET | `/console/api/passkeys` | Registered passkeys (names and dates, never key material) |
+| POST | `/console/api/passkeys/invite` | A single-use code for adding another device |
+| DELETE | `/console/api/passkeys/{id}` | Remove a passkey and its sessions |
 | GET | `/console/api/board` | Every item, sorted for triage, plus slot usage |
 | GET | `/console/api/usage` | Per backend (or pool profile): `available`, `unavailable_until`, and `windows[]` of `{type, utilization, resets_at, status, reset}` |
 | GET | `/console/api/items/{id}/messages?limit=50` | The conversation's recent messages (max 100), each with `kind`, `embeds` and `attachments` |

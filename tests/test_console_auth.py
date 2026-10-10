@@ -57,7 +57,16 @@ def access_auth(key) -> ConsoleAuthenticator:
 
 
 def test_an_unauthenticated_configuration_is_refused() -> None:
-    assert ConsoleAuthConfig().problems()
+    assert ConsoleAuthConfig(passkeys=False).problems()
+
+
+def test_passkeys_alone_are_enough() -> None:
+    assert ConsoleAuthConfig().problems() == []
+
+
+def test_a_plain_http_origin_is_refused() -> None:
+    assert ConsoleAuthConfig(origins=("http://console.example.com",)).problems()
+    assert ConsoleAuthConfig(origins=("http://localhost:8100",)).problems() == []
 
 
 def test_access_without_an_email_allowlist_is_refused() -> None:
