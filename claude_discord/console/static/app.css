@@ -43,9 +43,10 @@ button { cursor: pointer; }
 .filter { flex: 1; min-width: 60px; background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; }
 .sync { color: var(--dim); font-size: 12px; white-space: nowrap; }
 .sync.bad { color: var(--err); }
-.capture { padding: 8px 14px; border-bottom: 1px solid var(--line); }
-.capture input { width: 100%; background: transparent; border: 1px dashed var(--line); border-radius: 6px; padding: 7px 10px; }
-.capture input:focus { outline: none; border-color: var(--accent); border-style: solid; }
+.capture { padding: 8px 14px; border-bottom: 1px solid var(--line); display: flex; gap: 10px; align-items: center; }
+.capture #capture-input { flex: 1; min-width: 0; background: transparent; border: 1px dashed var(--line); border-radius: 6px; padding: 7px 10px; }
+.capture .autostart { flex: none; font-size: 12px; color: var(--dim); cursor: pointer; white-space: nowrap; }
+.capture #capture-input:focus { outline: none; border-color: var(--accent); border-style: solid; }
 
 .list { list-style: none; margin: 0; padding: 4px 0; overflow-y: auto; flex: 1; }
 .row { display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; align-items: start;

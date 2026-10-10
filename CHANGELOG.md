@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Relay Console: captured work starts right away** (#879) — quick capture hands the item
+  to an agent by default (`POST /console/api/items` with `start: true`). A checkbox next to
+  the input, remembered per browser, turns it back into "just write it down".
 - **The Relay Console owns the conversations it starts** (#889) — starting written-down work from
   the console used to open a Discord thread, so every console task also appeared in Discord and
   the console could not start work without a chat platform. It now runs in a conversation the
