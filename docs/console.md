@@ -133,6 +133,45 @@ cloudflared tunnel route dns relay-console console.example.com
 Passkeys alone are enough to put the console on the internet. You can add Cloudflare Access in
 front as well (below).
 
+### Optional: sign in with Google, Entra ID or any OpenID Connect provider
+
+The console can send you to your identity provider and back, with no Cloudflare in front.
+Register a **web** client with the provider and use this redirect URI:
+`<your origin>/console/api/auth/oidc/callback`.
+
+```dotenv
+CCDB_CONSOLE_ORIGIN=https://console.example.com      # required: the redirect URI is built from it
+CCDB_CONSOLE_OIDC_ISSUER=https://accounts.google.com
+CCDB_CONSOLE_OIDC_CLIENT_ID=1234-abc.apps.googleusercontent.com
+CCDB_CONSOLE_OIDC_CLIENT_SECRET=...
+CCDB_CONSOLE_ALLOWED_EMAILS=me@example.com           # required: who may come in
+# CCDB_CONSOLE_OIDC_NAME=Google                       # button label (guessed for Google/Microsoft)
+```
+
+| Provider | Issuer | Where to create the client |
+|---|---|---|
+| Google | `https://accounts.google.com` | Google Cloud console → APIs & Services → Credentials → OAuth client ID → *Web application* |
+| Microsoft Entra ID | `https://login.microsoftonline.com/<tenant-id>/v2.0` | Entra admin center → App registrations → *Web* platform, plus a client secret. Add the optional ID-token claim `email` |
+| Okta, Auth0, Keycloak, … | the issuer shown in the provider's discovery document (copy it exactly, including any trailing `/`) | the provider's admin console |
+
+The sign-in screen then shows **Sign in with Google** (or your label) next to the passkey
+button. Set `CCDB_CONSOLE_PASSKEYS=0` if you want the provider to be the only way in.
+
+What is checked: the authorization code flow with PKCE; `state` bound to the browser by a
+short-lived cookie (a sign-in started elsewhere cannot be completed in your browser); the ID
+token's signature against the issuer's published keys, its issuer, audience (and `azp` when
+there are several), expiry and `nonce`; and the email against the allowlist. The provider must
+also say `email_verified: true`. An email claim alone proves nothing, because on some providers
+a user can set it to any address. Entra ID does not send that claim. For a **single-tenant**
+Entra ID, where your admins control every address, you can waive it with
+`CCDB_CONSOLE_OIDC_TRUST_UNVERIFIED_EMAIL=1`. Never waive it for a provider where users choose
+their own email.
+
+Taking an email off the allowlist, or switching to another issuer, ends its sessions at once.
+A Google or Entra ID session cannot add or remove passkeys; sign in with a passkey for that. Whether you are asked for a second
+factor is the provider's policy: turn on 2-step verification or passkeys for the accounts on the
+allowlist.
+
 ### Optional: Cloudflare Access (Google, GitHub, Entra ID, one-time PIN, …)
 
 Access signs in at Cloudflare's edge before a request reaches your machine. Any identity
@@ -190,6 +229,8 @@ Endpoints need authentication unless marked *(no sign-in)*. Every method except 
 | POST | `/console/api/auth/passkey/register/verify` | *(no sign-in)* `{ticket, credential, name}` — finish registering; signs in |
 | POST | `/console/api/auth/passkey/login/options` | *(no sign-in)* Start a passkey sign-in |
 | POST | `/console/api/auth/passkey/login/verify` | *(no sign-in)* `{ticket, credential}` — finish signing in |
+| GET | `/console/api/auth/oidc/start` | *(no sign-in)* Redirect to the OIDC provider (only when configured) |
+| GET | `/console/api/auth/oidc/callback` | *(no sign-in)* Where the provider sends you back; signs in and redirects to `/` |
 | POST | `/console/api/auth/setup-code` | *(no sign-in)* Log a new setup code; only while no passkey exists |
 | POST | `/console/api/auth/logout` | End this session |
 | GET | `/console/api/passkeys` | Registered passkeys (names and dates, never key material) |

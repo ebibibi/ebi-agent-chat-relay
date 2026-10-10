@@ -1,4 +1,4 @@
-"""HTTP endpoints for signing in to the console with a passkey.
+"""HTTP endpoints for signing in to the console: passkeys, and optionally OIDC.
 
 The ``/console/api/auth/*`` routes are the only API routes reachable before
 sign-in. They still need the CSRF header on every POST. The routes that check a
@@ -13,10 +13,18 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
+from urllib.parse import urlencode
 
 from aiohttp import web
 
-from .auth import SESSION_COOKIE, ConsoleAuthConfig, ConsoleAuthenticator, ConsoleAuthError
+from .auth import (
+    SESSION_COOKIE,
+    ConsoleAuthConfig,
+    ConsoleAuthenticator,
+    ConsoleAuthError,
+    oidc_session_identity,
+)
+from .oidc import STATE_COOKIE, OidcClient, OidcError
 from .passkey_store import PasskeyStore
 from .passkeys import PasskeyError, PasskeyService
 
@@ -60,19 +68,27 @@ def request_origin(request: web.Request, config: ConsoleAuthConfig) -> str:
 
 
 class AuthRoutes:
-    """Passkey sign-in, sign-out and passkey management."""
+    """Sign-in (passkey and OIDC), sign-out and passkey management."""
 
     def __init__(
         self,
         authenticator: ConsoleAuthenticator,
         store: PasskeyStore,
-        service: PasskeyService,
+        service: PasskeyService | None,
         allow: Callable[[str], bool],
+        oidc: OidcClient | None = None,
     ) -> None:
         self.auth = authenticator
         self.store = store
-        self.passkeys = service
+        self._passkeys = service
         self._allow = allow
+        self.oidc = oidc
+
+    @property
+    def passkeys(self) -> PasskeyService:
+        # Passkey routes are only registered when the service exists.
+        assert self._passkeys is not None
+        return self._passkeys
 
     @property
     def _config(self) -> ConsoleAuthConfig:
@@ -81,15 +97,19 @@ class AuthRoutes:
     def register(self, router: web.UrlDispatcher, api_prefix: str) -> None:
         a = AUTH_PREFIX
         router.add_get(f"{a}status", self.status)
-        router.add_post(f"{a}setup-code", self.setup_code)
-        router.add_post(f"{a}passkey/register/options", self.register_options)
-        router.add_post(f"{a}passkey/register/verify", self.register_verify)
-        router.add_post(f"{a}passkey/login/options", self.login_options)
-        router.add_post(f"{a}passkey/login/verify", self.login_verify)
         router.add_post(f"{a}logout", self.logout)
-        router.add_get(f"{api_prefix}/passkeys", self.list_passkeys)
-        router.add_post(f"{api_prefix}/passkeys/invite", self.invite)
-        router.add_delete(f"{api_prefix}/passkeys/{{passkey_id}}", self.delete_passkey)
+        if self._passkeys is not None:
+            router.add_post(f"{a}setup-code", self.setup_code)
+            router.add_post(f"{a}passkey/register/options", self.register_options)
+            router.add_post(f"{a}passkey/register/verify", self.register_verify)
+            router.add_post(f"{a}passkey/login/options", self.login_options)
+            router.add_post(f"{a}passkey/login/verify", self.login_verify)
+            router.add_get(f"{api_prefix}/passkeys", self.list_passkeys)
+            router.add_post(f"{api_prefix}/passkeys/invite", self.invite)
+            router.add_delete(f"{api_prefix}/passkeys/{{passkey_id}}", self.delete_passkey)
+        if self.oidc is not None:
+            router.add_get(f"{a}oidc/start", self.oidc_start)
+            router.add_get(f"{a}oidc/callback", self.oidc_callback)
 
     async def guard(
         self,
@@ -128,7 +148,9 @@ class AuthRoutes:
         return request_origin(request, self._config).startswith("https://")
 
     def _with_session(self, payload: Any, token: str, *, secure: bool) -> web.Response:
-        response = web.json_response(payload)
+        return self._set_session(web.json_response(payload), token, secure=secure)
+
+    def _set_session(self, response: web.Response, token: str, *, secure: bool) -> web.Response:
         response.set_cookie(
             SESSION_COOKIE,
             token,
@@ -148,6 +170,7 @@ class AuthRoutes:
             {
                 "signed_in": await self._signed_in(request) is not None,
                 "methods": {
+                    "oidc": self.oidc.config.name if self.oidc is not None else None,
                     "passkey": config.passkeys,
                     "access": config.access_enabled,
                     "token": bool(config.token),
@@ -208,6 +231,49 @@ class AuthRoutes:
         response.del_cookie(SESSION_COOKIE, path="/")
         return response
 
+    # -- OIDC ----------------------------------------------------------------
+    async def oidc_start(self, request: web.Request) -> web.StreamResponse:
+        assert self.oidc is not None
+        try:
+            url, browser = await self.oidc.start()
+        except OidcError as exc:
+            return _signin_error(str(exc))
+        response = _redirect(url)
+        # Lax, not Strict: the provider sends the browser back with a top-level
+        # cross-site navigation, and a Strict cookie would not come with it.
+        response.set_cookie(
+            STATE_COOKIE,
+            browser,
+            max_age=600,
+            path=f"{AUTH_PREFIX}oidc/",
+            httponly=True,
+            samesite="Lax",
+            secure=self.oidc.config.redirect_uri.startswith("https://"),
+        )
+        return response
+
+    async def oidc_callback(self, request: web.Request) -> web.StreamResponse:
+        assert self.oidc is not None
+        if request.query.get("error"):
+            return _signin_error(f"the identity provider said: {request.query['error'][:80]}")
+        try:
+            email = await self.oidc.finish(
+                state=request.query.get("state", ""),
+                code=request.query.get("code", ""),
+                browser=request.cookies.get(STATE_COOKIE),
+            )
+        except OidcError as exc:
+            return _signin_error(str(exc))
+        token = await self.store.create_session(
+            oidc_session_identity(self.oidc.config.issuer, email), self._config.session_lifetime
+        )
+        response = _redirect("/")
+        response.del_cookie(STATE_COOKIE, path=f"{AUTH_PREFIX}oidc/")
+        logger.info("console: %s signed in with %s", email, self.oidc.config.name)
+        return self._set_session(
+            response, token, secure=self.oidc.config.redirect_uri.startswith("https://")
+        )
+
     # -- signed in (the console middleware has authenticated these) ----------
     async def list_passkeys(self, request: web.Request) -> web.Response:
         if await self._manager(request) is None:
@@ -242,6 +308,15 @@ def _manages_passkeys(identity: str) -> bool:
 
 def _MANAGERS_ONLY() -> web.Response:  # noqa: N802 - reads as a constant at call sites
     return _error("sign in with a passkey (or the token) to manage passkeys", 403)
+
+
+def _redirect(location: str) -> web.Response:
+    return web.Response(status=302, headers={"Location": location})
+
+
+def _signin_error(message: str) -> web.Response:
+    """Back to the console's sign-in screen, which shows *message*."""
+    return _redirect("/?" + urlencode({"signin_error": message}))
 
 
 async def _json(request: web.Request) -> dict[str, Any]:

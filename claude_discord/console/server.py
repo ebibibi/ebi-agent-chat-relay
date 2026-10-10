@@ -34,6 +34,7 @@ from .board import SessionInfo, ThreadSnapshot, build_board
 from .conversations import ConversationRepository
 from .files import resolve_file
 from .messages import serialize_message, with_kind
+from .oidc import OidcClient, OidcConfig, provider_name
 from .passkey_store import PasskeyStore
 from .passkeys import PasskeyService
 from .ratelimit import RateLimiter
@@ -119,6 +120,8 @@ class ConsoleServer:
         conversations: ConversationRepository | None = None,
         host_session: ConsoleSessionHost | None = None,
         passkeys: PasskeyService | None = None,
+        oidc: OidcClient | None = None,
+        store: PasskeyStore | None = None,
     ) -> None:
         self.api = api_server
         self.work_repo = work_repo
@@ -132,9 +135,10 @@ class ConsoleServer:
         self.port = port
         self._limiter = RateLimiter(MUTATION_RATE_PER_MINUTE)
         auth_limiter = RateLimiter(AUTH_RATE_PER_MINUTE)
+        store = store or (passkeys.store if passkeys is not None else None)
         self.auth_routes = (
-            AuthRoutes(authenticator, passkeys.store, passkeys, auth_limiter.allow)
-            if passkeys is not None
+            AuthRoutes(authenticator, store, passkeys, auth_limiter.allow, oidc=oidc)
+            if store is not None and (passkeys is not None or oidc is not None)
             else None
         )
         self._archive_cache: tuple[float, list[Any]] | None = None
@@ -743,18 +747,19 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
     store = PasskeyStore(api_server.session_repo.db_path)
     await store.init_db()
     passkeys = PasskeyService(store) if config.passkeys else None
+    oidc = _oidc_client(config)
     console = ConsoleServer(
         api_server,
         work_repo,
-        # Sessions are honoured only while a way of creating them is on: turning
-        # passkeys off must also turn off the sessions passkeys opened.
-        ConsoleAuthenticator(config, sessions=store if passkeys is not None else None),
+        ConsoleAuthenticator(config, sessions=store),
         host=host,
         port=int(raw_port),
         usage=usage,
         conversations=conversations,
         host_session=await _build_session_host(api_server, conversations),
         passkeys=passkeys,
+        oidc=oidc,
+        store=store,
     )
     await console.start()
     if passkeys is not None:
@@ -813,6 +818,23 @@ async def _build_session_host(
     # The wait watcher resumes a conversation after CI; it finds this one here.
     bot.console_sessions = host  # type: ignore[attr-defined]
     return host
+
+
+def _oidc_client(config: ConsoleAuthConfig) -> OidcClient | None:
+    if not config.oidc_enabled:
+        return None
+    issuer = str(config.oidc_issuer)
+    return OidcClient(
+        OidcConfig(
+            issuer=issuer,
+            client_id=str(config.oidc_client_id),
+            client_secret=config.oidc_client_secret,
+            redirect_uri=config.oidc_redirect_uri,
+            allowed_emails=config.allowed_emails,
+            name=config.oidc_name or provider_name(issuer),
+            trust_unverified_email=config.oidc_trust_unverified_email,
+        )
+    )
 
 
 __all__ = ["ConsoleServer", "maybe_start_console", "thread_item_id"]

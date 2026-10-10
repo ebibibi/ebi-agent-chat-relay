@@ -164,3 +164,6 @@ a.btn { text-decoration: none; display: inline-block; }
 .auth-list .dim { color: var(--dim); font-size: 12px; }
 .auth-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .auth-note { margin: 0; word-break: break-word; }
+a.btn { display: block; text-align: center; text-decoration: none; color: inherit; }
+a.btn.primary { color: #0d1020; }
+.auth-or { text-align: center; color: var(--dim); margin: 0; font-size: 12px; }
