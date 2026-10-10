@@ -18,7 +18,6 @@ import json
 import logging
 import os
 import time
-from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,10 +29,14 @@ from aiohttp import web
 from ..thread_marker import OUTCOME_DONE, thread_outcome
 from ..thread_status import request_thread_outcome, schedule_thread_outcome
 from .auth import ConsoleAuthConfig, ConsoleAuthenticator, ConsoleAuthError
+from .auth_routes import AUTH_PREFIX, AuthRoutes
 from .board import SessionInfo, ThreadSnapshot, build_board
 from .conversations import ConversationRepository
 from .files import resolve_file
 from .messages import serialize_message, with_kind
+from .passkey_store import PasskeyStore
+from .passkeys import PasskeyService
+from .ratelimit import RateLimiter
 from .surface import apply_outcome
 from .usage import UsageReader
 from .work_repo import (
@@ -65,6 +68,10 @@ ARCHIVE_CACHE_SECONDS = 120.0
 ARCHIVE_LIMIT_PER_CHANNEL = 50
 #: Mutations per identity per minute.
 MUTATION_RATE_PER_MINUTE = 60
+#: Setup-code checks per minute, across every caller (see ``auth_routes``).
+#: High enough that flooding it is a flood, low enough that guessing a ~50-bit
+#: code within its 15 minutes is hopeless.
+AUTH_RATE_PER_MINUTE = 120
 MAX_BODY_BYTES = 64 * 1024
 IDENTITY = web.RequestKey("console_identity", str)
 
@@ -85,24 +92,6 @@ _SECURITY_HEADERS = {
     "X-Frame-Options": "DENY",
     "Cache-Control": "no-store",
 }
-
-
-class _RateLimiter:
-    """Sliding one-minute window per identity."""
-
-    def __init__(self, per_minute: int) -> None:
-        self._per_minute = per_minute
-        self._hits: dict[str, deque[float]] = defaultdict(deque)
-
-    def allow(self, who: str, now: float | None = None) -> bool:
-        now = time.monotonic() if now is None else now
-        hits = self._hits[who]
-        while hits and now - hits[0] > 60.0:
-            hits.popleft()
-        if len(hits) >= self._per_minute:
-            return False
-        hits.append(now)
-        return True
 
 
 def _error(message: str, status: int) -> web.Response:
@@ -129,6 +118,7 @@ class ConsoleServer:
         usage: UsageReader | None = None,
         conversations: ConversationRepository | None = None,
         host_session: ConsoleSessionHost | None = None,
+        passkeys: PasskeyService | None = None,
     ) -> None:
         self.api = api_server
         self.work_repo = work_repo
@@ -140,7 +130,13 @@ class ConsoleServer:
         self.auth = authenticator
         self.host = host
         self.port = port
-        self._limiter = _RateLimiter(MUTATION_RATE_PER_MINUTE)
+        self._limiter = RateLimiter(MUTATION_RATE_PER_MINUTE)
+        auth_limiter = RateLimiter(AUTH_RATE_PER_MINUTE)
+        self.auth_routes = (
+            AuthRoutes(authenticator, passkeys.store, passkeys, auth_limiter.allow)
+            if passkeys is not None
+            else None
+        )
         self._archive_cache: tuple[float, list[Any]] | None = None
         self._archive_lock = asyncio.Lock()
         self._runner: web.AppRunner | None = None
@@ -178,6 +174,8 @@ class ConsoleServer:
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/live", self.live)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/stop", self.stop_item)
         r.add_get(f"{API_PREFIX}/files/{{key}}/{{token}}/{{name}}", self.file)
+        if self.auth_routes is not None:
+            self.auth_routes.register(r, API_PREFIX)
         return app
 
     @web.middleware
@@ -201,6 +199,8 @@ class ConsoleServer:
         # protected anyway.
         if not request.path.startswith(API_PREFIX):
             return await handler(request)
+        if self.auth_routes is not None and request.path.startswith(AUTH_PREFIX):
+            return await self.auth_routes.guard(request, handler)
         try:
             who = await self.auth.identify(request.headers, request.cookies)
         except ConsoleAuthError as exc:
@@ -721,7 +721,7 @@ async def maybe_start_console(api_server: ApiServer) -> ConsoleServer | None:
 
 
 async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer | None:
-    config = ConsoleAuthConfig.from_env()
+    config = ConsoleAuthConfig.from_env().effective()
     problems = config.problems()
     if problems:
         logger.error("Relay Console NOT started: %s", "; ".join(problems))
@@ -740,17 +740,25 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
     )
     conversations = ConversationRepository(api_server.session_repo.db_path)
     await conversations.init_db()
+    store = PasskeyStore(api_server.session_repo.db_path)
+    await store.init_db()
+    passkeys = PasskeyService(store) if config.passkeys else None
     console = ConsoleServer(
         api_server,
         work_repo,
-        ConsoleAuthenticator(config),
+        # Sessions are honoured only while a way of creating them is on: turning
+        # passkeys off must also turn off the sessions passkeys opened.
+        ConsoleAuthenticator(config, sessions=store if passkeys is not None else None),
         host=host,
         port=int(raw_port),
         usage=usage,
         conversations=conversations,
         host_session=await _build_session_host(api_server, conversations),
+        passkeys=passkeys,
     )
     await console.start()
+    if passkeys is not None:
+        await passkeys.open_enrollment(force=os.getenv("CCDB_CONSOLE_ENROLL") == "1")
     return console
 
 

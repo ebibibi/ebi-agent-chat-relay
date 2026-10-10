@@ -17,8 +17,7 @@ const I18N = {
     priority: "Priority", due: "Due", snooze: "Snooze", project: "Project", parent: "Under",
     none: "—", done_btn: "Done (e)", reopen: "Reopen", open_chat: "Open in chat", start: "Hand to AI",
     reply_ph: "Reply… (Ctrl+Enter to send)", send: "Send", hour: "1h", tomorrow: "Tomorrow", week: "Next week",
-    clear: "Clear", loading: "Loading…", token: "Console token",
-    login: "Sign in with the console token (CCDB_CONSOLE_TOKEN).", sent: "Sent — the agent will pick it up", started: "Started", captured: "Added to To do",
+    clear: "Clear", loading: "Loading…", sent: "Sent — the agent will pick it up", started: "Started", captured: "Added to To do",
     saved: "Saved", offline: "offline", updated: "updated", no_project: "No project", queued: "queued",
     st: { running: "running", waiting: "waiting for you", review: "to review", action: "your task",
           error: "failed", done: "done", someday: "someday", todo: "to do", idle: "idle" },
@@ -35,8 +34,7 @@ const I18N = {
     priority: "優先度", due: "期限", snooze: "スヌーズ", project: "案件", parent: "親",
     none: "なし", done_btn: "完了（e）", reopen: "戻す", open_chat: "チャットで開く", start: "AIに頼む",
     reply_ph: "返信…（Ctrl+Enter で送信）", send: "送信", hour: "1時間", tomorrow: "明日", week: "来週",
-    clear: "解除", loading: "読み込み中…", token: "コンソールのトークン",
-    login: "コンソールのトークン（CCDB_CONSOLE_TOKEN）でサインインします。", sent: "送りました。エージェントが拾います", started: "スレッドを開始しました", captured: "「やること」に追加しました",
+    clear: "解除", loading: "読み込み中…", sent: "送りました。エージェントが拾います", started: "スレッドを開始しました", captured: "「やること」に追加しました",
     saved: "保存しました", offline: "接続できません", updated: "更新", no_project: "案件なし", queued: "待ち",
     st: { running: "実行中", waiting: "あなたの返事待ち", review: "確認待ち", action: "あなたの作業",
           error: "失敗", done: "完了", someday: "いつか", todo: "やること", idle: "止まっている" },
@@ -100,7 +98,7 @@ function toast(msg) {
 // ---------------------------------------------------------------- api
 async function api(path, { method = "GET", body } = {}) {
   const headers = { Accept: "application/json" };
-  // Token mode (no Cloudflare Access in front): the token the human entered once.
+  // Token mode: the token the human entered once (passkey and Access sign-ins use cookies).
   const token = localStorage.getItem("token");
   if (token) headers.Authorization = `Bearer ${token}`;
   if (method !== "GET") { headers["X-Console-Request"] = "1"; headers["Content-Type"] = "application/json"; }
@@ -227,6 +225,8 @@ function renderNav() {
       class: "count" + (v.hot && counts[v.key] ? " hot" : ""), text: counts[v.key] || "",
     }))),
     h("div", { class: "slots", text: T.slots(state.slots.running ?? 0, state.slots.max, state.slots.waiting) }),
+    h("button", { class: "nav-auth", onclick: () => window.ConsoleAuth.showDevices() },
+      h("span", { text: `🔑 ${window.ConsoleAuth.label}` })),
   );
   $("view-title").textContent = T[state.view];
   const hot = counts.me || 0;
@@ -508,20 +508,7 @@ function move(delta) {
   if (state.open) openItem(state.selected); else renderList();
 }
 function showLogin() {
-  const help = $("help");
-  if (!help.hidden && help.dataset.mode === "login") return;
-  help.dataset.mode = "login";
-  help.hidden = false;
-  const input = h("input", { type: "password", autocomplete: "current-password", placeholder: T.token });
-  help.replaceChildren(h("form", { class: "card", onclick: (e) => e.stopPropagation(), onsubmit: (e) => {
-    e.preventDefault();
-    if (!input.value.trim()) return;
-    localStorage.setItem("token", input.value.trim());
-    help.hidden = true;
-    help.dataset.mode = "";
-    refresh();
-  } }, h("p", { text: T.login }), input, " ", h("button", { class: "btn primary", type: "submit", text: "OK" })));
-  input.focus();
+  window.ConsoleAuth.showLogin(refresh);
 }
 function showHelp(show) {
   $("help").dataset.mode = "help";
