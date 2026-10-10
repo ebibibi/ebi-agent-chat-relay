@@ -87,6 +87,10 @@ class ConversationRepository:
     def __init__(self, db_path: str) -> None:
         self._db_path = db_path
 
+    @property
+    def db_path(self) -> str:
+        return self._db_path
+
     async def init_db(self) -> None:
         async with aiosqlite.connect(self._db_path) as db:
             await db.executescript(_SCHEMA)

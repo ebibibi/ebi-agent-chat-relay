@@ -98,3 +98,14 @@ async def test_wait_guidance_appears_only_while_a_watcher_runs() -> None:
         assert "/api/waits" in (await _build_system_context(config) or "")
     finally:
         waits.register_watcher(None)
+
+
+async def test_file_delivery_guidance_names_the_console() -> None:
+    """A console conversation must not be told its files go to Discord."""
+    surface = MemorySurface(frontend="console")
+    config = RunConfig(surface=surface, runner=_runner(), prompt="send me the report")
+
+    context = await _build_system_context(config)
+
+    assert "Relay Console cannot open local filesystem paths" in context
+    assert "send files to Discord" not in context

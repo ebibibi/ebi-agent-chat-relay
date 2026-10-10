@@ -5,17 +5,20 @@ same ``ConversationSurface`` / ``SessionFrontend`` seam Discord and Teams do,
 so a console conversation runs through the shared session runner with no chat
 platform involved, and its transcript lives in ``console_messages``.
 
-What a chat platform renders live — tool activity, status reactions, the Stop
-button — has no console equivalent yet; the board already shows a running
-turn from the session registry. Only what a human reads afterwards is stored:
-the model's answers, questions it asks, and warnings or errors.
+What a chat platform renders live — tool activity, the streaming answer, the
+Stop button — goes to the in-memory ``LiveBoard`` while the turn runs. Only
+what a human reads afterwards is stored: the model's answers, questions it
+asks, warnings or errors, and links to delivered files.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import shutil
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from claude_code_core.frontend import (
@@ -33,6 +36,7 @@ from claude_code_core.frontend import (
 
 from ..thread_marker import set_outcome_thread_name
 from .conversations import CONSOLE_FRONTEND, ConversationRepository
+from .live import LiveActivity, LiveBoard, LiveState
 
 if TYPE_CHECKING:
     from ..database.frontend_thread_repo import FrontendThreadRepository
@@ -51,7 +55,12 @@ CONSOLE_CAPABILITIES = SurfaceCapabilities(
     # The outcome marker lives in the stored name, so it can always be set.
     supports_thread_rename=True,
     file_delivery="link",
+    max_files_per_message=10,
+    max_file_bytes=50 * 1024 * 1024,
 )
+
+#: Where a delivered file can be fetched. ``files.py`` serves it.
+FILES_ROUTE = "/console/api/files"
 
 #: Notices worth keeping in the transcript. Session start/finish cards and
 #: "thinking" asides are live-progress chatter a reader does not need later.
@@ -90,8 +99,9 @@ def _prompt_text(prompt: ChoicePrompt) -> str:
 
 
 class _TextStream:
-    def __init__(self, surface: ConsoleSurface) -> None:
+    def __init__(self, surface: ConsoleSurface, live: LiveState) -> None:
         self._surface = surface
+        self._live = live
         self._buffer = ""
         self._done = False
         self._result = ""
@@ -103,11 +113,14 @@ class _TextStream:
     async def append(self, delta: str) -> None:
         if not self._done:
             self._buffer += delta
+            self._live.draft = self._buffer
+            self._live.touch()
 
     async def finalize(self, transform: Callable[[str], str] | None = None) -> str:
         if self._done:
             return self._result
         self._done = True
+        self._live.draft = ""
         text = transform(self._buffer) if transform and self._buffer else self._buffer
         if text:
             await self._surface.send_text(text)
@@ -116,27 +129,40 @@ class _TextStream:
 
 
 class _Activity:
-    """Tool activity is live progress; nothing is stored."""
+    """Tool activity is live progress: shown while the turn runs, never stored."""
+
+    def __init__(self, entry: LiveActivity, live: LiveState) -> None:
+        self._entry = entry
+        self._live = live
 
     async def update(self, detail: str) -> None:
-        return None
+        if not self._entry.done:
+            self._entry.detail = detail
+            self._live.touch()
 
     async def complete(self, result: str | None, *, ok: bool = True) -> None:
-        return None
+        self._entry.done = True
+        self._entry.ok = ok
+        self._live.touch()
 
     async def cancel(self) -> None:
-        return None
+        await self.complete(None, ok=False)
 
 
 class _Interrupt:
-    def __init__(self, on_stop: Callable[[], Awaitable[None]]) -> None:
+    """The Stop button: the console's live view calls ``on_stop`` through the board."""
+
+    def __init__(self, on_stop: Callable[[], Awaitable[None]], live: LiveState) -> None:
         self.on_stop = on_stop
+        self._live = live
+        live.stop = on_stop
 
     async def bump(self) -> None:
         return None
 
     async def disable(self) -> None:
-        return None
+        if self._live.stop is self.on_stop:
+            self._live.stop = None
 
 
 class ConsoleSurface:
@@ -149,11 +175,19 @@ class ConsoleSurface:
         external_id: str,
         *,
         working_dir: str | None = None,
+        live: LiveBoard | None = None,
+        files_dir: Path | None = None,
     ) -> None:
         self._repo = repo
         self._thread_key = thread_key
         self._external_id = external_id
         self.working_dir = working_dir
+        self._live = live or LiveBoard()
+        self._files_dir = files_dir
+
+    @property
+    def live(self) -> LiveState:
+        return self._live.state(self._thread_key)
 
     @property
     def thread_key(self) -> ThreadKey:
@@ -188,23 +222,48 @@ class ConsoleSurface:
         return await self._store(_notice_text(notice))
 
     async def deliver_files(self, files: Sequence[OutboundFile]) -> None:
-        # No download endpoint yet: name what was produced and where, so the
-        # human can still find it.
-        lines = [f"- `{f.display_name}`" + (f" ({f.path})" if f.path else "") for f in files]
+        lines = []
+        for f in files:
+            link = await self._keep_file(f)
+            if link is not None:
+                lines.append(f"- [{f.display_name}]({link})")
+            else:
+                lines.append(f"- `{f.display_name}`" + (f" ({f.path})" if f.path else ""))
         if lines:
             await self._store("📎 Files:\n" + "\n".join(lines))
 
+    async def _keep_file(self, file: OutboundFile) -> str | None:
+        """Copy a delivered file where the console serves it; its link, or None."""
+        if self._files_dir is None:
+            return None
+        token = uuid.uuid4().hex
+        target = self._files_dir / str(self._thread_key) / token / file.display_name
+        try:
+            await asyncio.to_thread(_write_file, file, target, CONSOLE_CAPABILITIES.max_file_bytes)
+        except (OSError, ValueError) as exc:
+            logger.warning("console: could not keep %s: %s", file.display_name, exc)
+            return None
+        return f"{FILES_ROUTE}/{self._thread_key}/{token}/{file.display_name}"
+
     def open_stream(self) -> _TextStream:
-        return _TextStream(self)
+        return _TextStream(self, self.live)
 
     async def open_activity(self, spec: ActivitySpec) -> _Activity:
-        return _Activity()
+        live = self.live
+        entry = LiveActivity(title=spec.title, detail=spec.detail)
+        live.activities.append(entry)
+        live.touch()
+        return _Activity(entry, live)
 
     async def set_status(self, status: StatusKind) -> None:
-        return None
+        live = self.live
+        live.status = str(status)
+        live.touch()
 
     async def clear_status(self) -> None:
-        return None
+        live = self.live
+        live.status = None
+        live.touch()
 
     async def prompt_choice(self, prompt: ChoicePrompt) -> tuple[str, ...] | None:
         # The console has no live buttons. The question goes into the
@@ -223,7 +282,7 @@ class ConsoleSurface:
         return True
 
     async def offer_interrupt(self, on_stop: Callable[[], Awaitable[None]]) -> _Interrupt:
-        return _Interrupt(on_stop)
+        return _Interrupt(on_stop, self.live)
 
     async def rename(self, title: str) -> None:
         await self._repo.set_name(self._thread_key, title)
@@ -234,6 +293,19 @@ class ConsoleSurface:
 
     async def recent_transcript(self, days: int) -> str | None:
         return None
+
+
+def _write_file(file: OutboundFile, target: Path, limit: int) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if file.blob is not None:
+        if len(file.blob) > limit:
+            raise ValueError("file too large")
+        target.write_bytes(file.blob)
+        return
+    source = Path(file.path or "")
+    if source.stat().st_size > limit:
+        raise ValueError("file too large")
+    shutil.copyfile(source, target)
 
 
 class ConsoleFrontend:
@@ -247,10 +319,24 @@ class ConsoleFrontend:
         ledger: FrontendThreadRepository,
         *,
         working_dir: str | None = None,
+        files_dir: Path | None = None,
     ) -> None:
         self.repo = repo
         self._ledger = ledger
         self._working_dir = working_dir
+        #: Delivered files, served by ``files.py``. None: files are only named.
+        self.files_dir = files_dir
+        self.live = LiveBoard()
+
+    def _surface(self, thread_key: ThreadKey, external_id: str) -> ConsoleSurface:
+        return ConsoleSurface(
+            self.repo,
+            thread_key,
+            external_id,
+            working_dir=self._working_dir,
+            live=self.live,
+            files_dir=self.files_dir,
+        )
 
     async def start(self) -> None:
         await self.repo.init_db()
@@ -265,7 +351,7 @@ class ConsoleFrontend:
         """Create (or reopen) the conversation for *external_id*."""
         key = await self._ledger.register(CONSOLE_FRONTEND, external_id)
         await self.repo.create(key, title)
-        return ConsoleSurface(self.repo, key, external_id, working_dir=self._working_dir)
+        return self._surface(key, external_id)
 
     async def resolve_surface(self, thread_key: ThreadKey) -> ConsoleSurface | None:
         record = await self._ledger.resolve(thread_key)
@@ -273,9 +359,7 @@ class ConsoleFrontend:
             return None
         if not await self.owns(thread_key):
             return None
-        return ConsoleSurface(
-            self.repo, thread_key, record.external_id, working_dir=self._working_dir
-        )
+        return self._surface(thread_key, record.external_id)
 
     async def create_surface(self, *, parent_id: str, title: str) -> ConsoleSurface:
         return await self.open(external_id=f"{parent_id}:{uuid.uuid4().hex[:12]}", title=title)

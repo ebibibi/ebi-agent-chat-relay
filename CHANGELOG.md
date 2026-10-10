@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Live view, Stop and file downloads for Relay Console conversations** — while a console
+  conversation runs, the detail view shows the tool calls, the answer as it streams and a Stop
+  button (`GET /console/api/items/{id}/live`, `POST …/stop`). Files the agent delivers are kept
+  next to the session database and downloadable from the conversation
+  (`GET /console/api/files/…`, authenticated, path-checked). The file-delivery guidance in the
+  system prompt now names the frontend the conversation is on instead of always saying Discord.
+
 - **Relay Console: captured work starts right away** (#879) — quick capture hands the item
   to an agent by default (`POST /console/api/items` with `start: true`). A checkbox next to
   the input, remembered per browser, turns it back into "just write it down".
