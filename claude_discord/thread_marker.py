@@ -182,6 +182,12 @@ def set_outcome_thread_name(name: str, outcome: str | None) -> str:
     return _join_status(outcome, scheduled, rest)
 
 
+def thread_outcome(name: str) -> str | None:
+    """Return the outcome *name* currently shows (``OUTCOME_*``), or ``None``."""
+    outcome, _, _ = _split_status(name)
+    return outcome
+
+
 def mark_done_thread_name(name: str) -> str:
     """Return *name* tagged as ready to close, Discord-safe and idempotent.
 

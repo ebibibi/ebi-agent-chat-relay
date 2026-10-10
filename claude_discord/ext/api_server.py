@@ -343,6 +343,7 @@ class ApiServer:
         self.external_app = self._build_external_app()
         self._runner: web.AppRunner | None = None
         self._ext_runner: web.AppRunner | None = None
+        self._console: Any = None
 
     def _setup_routes(self) -> None:
         self.app.router.add_get("/api/health", self.health)
@@ -503,6 +504,10 @@ class ApiServer:
         await site.start()
         logger.info("REST API started: http://%s:%d", self.host, self.port)
         await self._start_external_listener()
+        # Relay Console: its own listener, off unless CCDB_CONSOLE_PORT is set.
+        from ..console.server import maybe_start_console
+
+        self._console = await maybe_start_console(self)
 
     async def _start_external_listener(self) -> None:
         """Start the ingest-only listener on a non-localhost interface.
@@ -541,6 +546,8 @@ class ApiServer:
             await self._runner.cleanup()
         if self._ext_runner:
             await self._ext_runner.cleanup()
+        if self._console is not None:
+            await self._console.stop()
 
     async def health(self, request: web.Request) -> web.Response:
         """GET /api/health — health check, including delivery backlog.

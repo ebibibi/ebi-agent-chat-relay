@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Relay Console** (#870) — an API-first triage screen on its own listener
+  (`CCDB_CONSOLE_PORT`, off by default). Inbox of threads waiting on the human, running work,
+  a project/parent tree, priority P0–P3, due dates, snooze, quick capture and "hand to an agent",
+  reply and done from desktop or phone. Status is derived from existing markers, running turns
+  and spawn lineage; only priority/due/snooze/project/parent live in the new `work_items` table.
+  Always authenticated (Cloudflare Access JWT with an email allowlist, and/or a bearer token);
+  refuses to start otherwise. See `docs/console.md` and ADR-0010.
 - **Waits** (#854) — `POST /api/waits` lets a session end its turn (freeing its concurrency slot)
   while CI/CD runs. ccdb re-runs the registered probe (`argv`, no shell, relay credentials
   stripped) every `interval_seconds` and resumes the thread with a fixed
