@@ -27,7 +27,20 @@ turns, the slot queue and the spawn lineage. Agents do not have to do anything n
 console stores itself (`work_items` in the session database) is only what nothing else knows:
 priority, due date, snooze, project, a parent override, a title override, and captures.
 
-## Keyboard
+## Backend usage strip
+
+A strip across the top of every screen shows how much each backend has left: per rate-limit
+window (5-hour, weekly, …) a bar, the percentage used and the time until it resets. Colours turn
+amber at 70% and red at 90%. A backend that is at its limit shows **⛔ back HH:MM** with the time
+remaining. On a phone the strip wraps, so every backend stays visible.
+
+- **Claude**: the windows the CLI reports after every turn. A window whose reset time has passed
+  reads as reset until the next turn refreshes it.
+- **Codex**: read through the read-only `codex app-server` probe, cached for two minutes. Shown
+  when `CCDB_CODEX_COMMAND` is set. Available rate-limit reset credits are shown too.
+- **Account pools** (`CCDB_ACCOUNT_POOLS_FILE`): one entry per profile, using the router's own
+  view of whether the profile is blocked.
+
 
 `j`/`k` move, `Enter` opens, `Esc` closes, `e` done, `1`–`4` priority P0–P3, `s` snooze until
 tomorrow 09:00, `c` write down work, `r` reply, `/` filter, `g` then `i`/`a`/`t`/`w`/`d` switches
@@ -90,6 +103,7 @@ All endpoints need authentication. Every method except `GET` also needs `X-Conso
 |---|---|---|
 | GET | `/console/api/me` | Who you are authenticated as |
 | GET | `/console/api/board` | Every item, sorted for triage, plus slot usage |
+| GET | `/console/api/usage` | Per backend (or pool profile): `available`, `unavailable_until`, and `windows[]` of `{type, utilization, resets_at, status, reset}` |
 | GET | `/console/api/items/{id}/messages?limit=50` | The thread's recent messages |
 | POST | `/console/api/items` | Write down work: `{title, note?, priority?, due_at?, parent_id?, project?}` |
 | PATCH | `/console/api/items/{id}` | Change `title`, `note`, `priority` (0–3), `due_at`, `snoozed_until`, `project`, `parent_id`, `state` |

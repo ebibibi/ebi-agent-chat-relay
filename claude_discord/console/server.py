@@ -30,6 +30,7 @@ from ..thread_marker import OUTCOME_DONE, thread_outcome
 from ..thread_status import request_thread_outcome, schedule_thread_outcome
 from .auth import ConsoleAuthConfig, ConsoleAuthenticator, ConsoleAuthError
 from .board import SessionInfo, ThreadSnapshot, build_board
+from .usage import UsageReader
 from .work_repo import (
     STATE_DONE,
     STATE_OPEN,
@@ -119,9 +120,11 @@ class ConsoleServer:
         *,
         host: str = "127.0.0.1",
         port: int,
+        usage: UsageReader | None = None,
     ) -> None:
         self.api = api_server
         self.work_repo = work_repo
+        self.usage = usage
         self.auth = authenticator
         self.host = host
         self.port = port
@@ -152,6 +155,7 @@ class ConsoleServer:
         r.add_get("/static/{name}", self.static)
         r.add_get(f"{API_PREFIX}/me", self.me)
         r.add_get(f"{API_PREFIX}/board", self.board)
+        r.add_get(f"{API_PREFIX}/usage", self.usage_read)
         r.add_post(f"{API_PREFIX}/items", self.create_item)
         r.add_patch(f"{API_PREFIX}/items/{{item_id}}", self.patch_item)
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/messages", self.messages)
@@ -266,6 +270,11 @@ class ConsoleServer:
                 "slots": self._slots(),
             }
         )
+
+    async def usage_read(self, request: web.Request) -> web.Response:
+        if self.usage is None:
+            return web.json_response({"now": int(time.time()), "backends": []})
+        return web.json_response(await self.usage.read())
 
     async def messages(self, request: web.Request) -> web.Response:
         thread, err = await self._thread_for(request.match_info["item_id"])
@@ -611,8 +620,19 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
     host = (os.getenv("CCDB_CONSOLE_HOST") or "127.0.0.1").strip()
     work_repo = WorkItemRepository(api_server.session_repo.db_path)
     await work_repo.init_db()
+    bot = api_server.bot
+    usage = UsageReader(
+        usage_repo=getattr(bot, "usage_repo", None),
+        account_router=getattr(bot, "account_router", None),
+        codex_command=(os.getenv("CCDB_CODEX_COMMAND") or "").strip() or None,
+    )
     console = ConsoleServer(
-        api_server, work_repo, ConsoleAuthenticator(config), host=host, port=int(raw_port)
+        api_server,
+        work_repo,
+        ConsoleAuthenticator(config),
+        host=host,
+        port=int(raw_port),
+        usage=usage,
     )
     await console.start()
     return console

@@ -408,6 +408,9 @@ async def setup_bridge(
     # without a hard import dependency on ccdb internals.
     bot.session_repo = session_repo  # type: ignore[attr-defined]
     bot.resume_repo = resume_repo  # type: ignore[attr-defined]
+    # The Relay Console reads these for its usage strip.
+    bot.usage_repo = usage_repo  # type: ignore[attr-defined]
+    bot.account_router = account_router  # type: ignore[attr-defined]
 
     # --- Thread inbox (optional — THREAD_INBOX_ENABLED=true) ---
     if enable_thread_inbox:
