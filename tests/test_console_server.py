@@ -149,7 +149,7 @@ async def test_capture_with_start_hands_the_item_to_an_agent(client, monkeypatch
 
     seen: list[str] = []
 
-    async def started(self, item_id, body):
+    async def started(self, item_id, body, who):
         seen.append(item_id)
         return srv.web.json_response({"item": {"id": "t42", "thread_id": "42"}}, status=201)
 
@@ -163,13 +163,13 @@ async def test_capture_with_start_hands_the_item_to_an_agent(client, monkeypatch
 
 
 async def test_a_failed_start_keeps_the_capture(client) -> None:
-    # The fixture has no chat cog, so the start cannot happen.
+    # The fixture has no session host, so the start cannot happen.
     response = await client.post(
         "/console/api/items", json={"title": "Fix the build", "start": True}, headers=WRITE
     )
     assert response.status == 201
     data = await response.json()
-    assert data["start_error"] == "the chat cog is not loaded"
+    assert data["start_error"] == "the console cannot run agents in this deployment"
     board = await (await client.get("/console/api/board", headers=AUTH)).json()
     [item] = board["items"]
     assert (item["id"], item["bucket"]) == (data["item"]["id"], "todo")
@@ -178,7 +178,7 @@ async def test_a_failed_start_keeps_the_capture(client) -> None:
 async def test_capture_without_start_only_writes_it_down(client, monkeypatch) -> None:
     from claude_discord.console import server as srv
 
-    async def boom(self, item_id, body):
+    async def boom(self, item_id, body, who):
         raise AssertionError("must not start")
 
     monkeypatch.setattr(srv.ConsoleServer, "_start_locked", boom)

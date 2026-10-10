@@ -432,9 +432,7 @@ class ConsoleServer:
             return err
         return await self._start_guarded(request.match_info["item_id"], body, request[IDENTITY])
 
-    async def _start_guarded(
-        self, item_id: str, body: dict[str, Any], who: str
-    ) -> web.Response:
+    async def _start_guarded(self, item_id: str, body: dict[str, Any], who: str) -> web.Response:
         # A double click must not open two conversations for one item.
         lock = self._start_locks.setdefault(item_id, asyncio.Lock())
         if lock.locked():
