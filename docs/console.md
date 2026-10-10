@@ -104,20 +104,40 @@ All endpoints need authentication. Every method except `GET` also needs `X-Conso
 | GET | `/console/api/me` | Who you are authenticated as |
 | GET | `/console/api/board` | Every item, sorted for triage, plus slot usage |
 | GET | `/console/api/usage` | Per backend (or pool profile): `available`, `unavailable_until`, and `windows[]` of `{type, utilization, resets_at, status, reset}` |
-| GET | `/console/api/items/{id}/messages?limit=50` | The thread's recent messages |
+| GET | `/console/api/items/{id}/messages?limit=50` | The conversation's recent messages |
 | POST | `/console/api/items` | Write down work: `{title, note?, priority?, due_at?, parent_id?, project?}` |
 | PATCH | `/console/api/items/{id}` | Change `title`, `note`, `priority` (0–3), `due_at`, `snoozed_until`, `project`, `parent_id`, `state` |
-| POST | `/console/api/items/{id}/reply` | `{text}` — posted into the thread and queued like a human reply |
+| POST | `/console/api/items/{id}/reply` | `{text}` — continues the session, queued behind a running turn |
 | POST | `/console/api/items/{id}/done` | Mark done (also sets the ✅ marker on the thread) |
 | POST | `/console/api/items/{id}/reopen` | Clear the done/someday verdict |
-| POST | `/console/api/items/{id}/start` | Hand a written-down item to an agent: opens a thread and starts a turn |
+| POST | `/console/api/items/{id}/start` | Hand a written-down item to an agent in a console conversation (no chat thread) |
 
-Item ids are `t<thread_id>` for threads and `c<hex>` for written-down work. Timestamps are ISO
+Item ids are `t<thread_id>` for threads and conversations and `c<hex>` for written-down work.
+
+## Conversations the console owns
+
+Work started from the console does not open a chat thread. It runs in a conversation the console
+owns, through the same session runner, backends, slots and resume logic as Discord and Teams
+([ADR-0011](adr/0011-let-the-console-own-its-conversations.md)). The transcript is stored in the
+session database (`console_conversations`, `console_messages`).
+
+- A reply continues the same session. If a turn is running, the reply waits for it.
+- The agent marks the outcome with the usual `/api/threads/$DISCORD_THREAD_ID/done` (and
+  `waiting`, `review`, `action`); the board shows it like a thread's marker.
+- When the agent asks a question (AskUserQuestion), the question appears in the conversation and
+  the item moves to the Inbox. Answer it with a reply.
+- Only answers, questions, warnings and errors are kept. Tool activity is not shown live; the
+  board shows the item under Running while a turn is in flight.
+
+Threads that live in a chat platform still appear and can be replied to as before. Timestamps are ISO
 8601 and are stored in UTC.
 
 ## Limits of this version
 
-- Conversations still live in the chat platform; the console reads and posts there.
+- Chat threads (work not started from the console) still live in the chat platform; the console
+  reads and posts there.
+- The bot process still starts its Discord client; a console-only deployment is not supported yet.
+- Files an agent delivers in a console conversation are listed by name; there is no download yet.
 - A console reply is posted by the bot, so it does not yet count in attention metering.
 - The board polls every 8 seconds; there is no push channel yet.
 - Archived threads come from the last 50 per watched channel, refreshed every two minutes.

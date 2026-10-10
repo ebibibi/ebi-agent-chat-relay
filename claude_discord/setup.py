@@ -118,6 +118,7 @@ class BridgeComponents:
         if self.attention_params is not None:
             api_server.attention_params = self.attention_params
         api_server.session_repo = self.session_repo
+        api_server.components = self
 
 
 async def setup_bridge(

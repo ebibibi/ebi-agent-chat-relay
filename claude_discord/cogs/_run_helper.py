@@ -44,6 +44,8 @@ from .event_processor import EventProcessor
 from .run_config import RunConfig
 
 if TYPE_CHECKING:
+    from claude_code_core.types import AskQuestion
+
     from ..database.wait_repo import WaitRepository
 
 logger = logging.getLogger(__name__)
@@ -558,7 +560,7 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
         if config.status:
             with contextlib.suppress(Exception):
                 await config.status.set_error()
-        schedule_thread_outcome(config.thread, OUTCOME_ERROR)
+        await _show_outcome(config, OUTCOME_ERROR)
         await _emit_result_sink(config, None, f"{type(exc).__name__}: {exc}")
         return processor.session_id
     finally:
@@ -595,7 +597,13 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
     # After the stream ends, handle pending AskUserQuestion by showing Discord
     # UI and resuming the session with the user's answer.
     if processor.pending_ask and processor.session_id:
-        schedule_thread_outcome(config.thread, OUTCOME_WAITING)
+        await _show_outcome(config, OUTCOME_WAITING)
+        if config.thread is None:
+            # No Discord UI to collect the answer on. The questions go into the
+            # conversation, and the human's next message resumes the session.
+            await _post_questions(config, processor.pending_ask)
+            await _emit_result_sink(config, processor.final_assistant_text, processor.final_error)
+            return processor.session_id
         answer_prompt = await collect_ask_answers(
             config.thread,
             processor.pending_ask,
@@ -604,7 +612,7 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
             notify_user_id=config.notify_user_id,
         )
         if answer_prompt:
-            schedule_thread_outcome(config.thread, None)
+            await _show_outcome(config, None)
             logger.info(
                 "Resuming session %s after AskUserQuestion answer",
                 processor.session_id,
@@ -635,9 +643,44 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
     # RESULT error (e.g. API 400/429) is reported as an error, not an empty
     # "done", so the caller can tell a failure from an empty answer.
     if processor.final_error:
-        schedule_thread_outcome(config.thread, OUTCOME_ERROR)
+        await _show_outcome(config, OUTCOME_ERROR)
     await _emit_result_sink(config, processor.final_assistant_text, processor.final_error)
     return processor.session_id
+
+
+async def _show_outcome(config: RunConfig, outcome: str | None) -> None:
+    """Show how the turn ended on whatever the conversation lives in.
+
+    A Discord thread gets the marker in its title. A surface that keeps its
+    own title (the Relay Console) exposes ``set_outcome``; any other surface
+    has nowhere to show it.
+    """
+    if config.thread is not None:
+        schedule_thread_outcome(config.thread, outcome)
+        return
+    set_outcome = getattr(config.surface, "set_outcome", None)
+    if set_outcome is None:
+        return
+    try:
+        await set_outcome(outcome)
+    except Exception:
+        logger.warning(
+            "Could not show outcome %r on %d", outcome, config.surface.thread_key, exc_info=True
+        )
+
+
+async def _post_questions(config: RunConfig, questions: list[AskQuestion]) -> None:
+    """Write AskUserQuestion's questions into a conversation that has no buttons."""
+    blocks = []
+    for q in questions:
+        lines = [f"**{q.header}**"] if q.header else []
+        lines.append(q.question)
+        lines.extend(
+            f"- {o.label}" + (f" — {o.description}" if o.description else "") for o in q.options
+        )
+        blocks.append("\n".join(lines))
+    with contextlib.suppress(Exception):
+        await config.surface.send_text("\n\n".join(blocks) + "\n\n_Reply with your answer._")
 
 
 def _slot_label(config: RunConfig) -> str:

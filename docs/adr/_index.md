@@ -16,3 +16,4 @@ earlier ADR instead of rewriting its history.
 - [ADR-0008: Let the operator choose the execution environment](0008-let-the-operator-choose-the-execution-environment.md)
 - [ADR-0009: Route turns across operator-configured account pools](0009-route-turns-across-account-pools.md)
 - [ADR-0010: Add an API-first console on its own listener](0010-add-an-api-first-console-on-its-own-listener.md)
+- [ADR-0011: Let the Relay Console own its conversations](0011-let-the-console-own-its-conversations.md)
