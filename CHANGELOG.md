@@ -11,6 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A scheduled task can pin its backend and model** — `POST /api/tasks` and
+  `PATCH /api/tasks/{id}` take an optional `backend` (validated against the same list `/backend`
+  accepts) and an optional `model`. Until now a task ran on whatever `/backend` resolved to when
+  the master loop fired it, which is the right default — switch the deployment to Codex and the
+  nightly jobs follow — but it makes the agent a task runs on an ambient property of the
+  deployment: a digest that belongs on a cheap model, or a task written against one agent's tool
+  vocabulary, moved silently with the humans. `model` is accepted **only together with**
+  `backend`, because a model id belongs to one backend; alone it would be handed to whichever
+  backend happened to be active and fail there every night rather than be refused once, at
+  registration. The pair is validated against the state the task ends up in, not the fields one
+  request carries, so clearing the backend out from under a stored model is refused too.
+  `/effort` is deliberately not pinned — it still resolves from the settings of the backend the
+  task runs on, so an effort change still reaches pinned tasks. `scheduled_tasks` gains nullable
+  `backend` and `model` columns (auto-migrated); an unpinned task behaves exactly as before, which
+  is what every task created before this does.
+
 - **Relay Console** (#870) — an API-first triage screen on its own listener
   (`CCDB_CONSOLE_PORT`, off by default). Inbox of threads waiting on the human, running work,
   a project/parent tree, priority P0–P3, due dates, snooze, quick capture and "hand to an agent",

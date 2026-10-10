@@ -285,3 +285,178 @@ class TestTasksFollowUp:
         task = data["tasks"][0]
         assert task["thread_id"] == 7777
         assert task["one_shot"] is True
+
+
+class TestTasksBackendAndModel:
+    """A scheduled task may pin the backend and model it runs on."""
+
+    async def test_create_with_backend_and_model(
+        self, client: TestClient, task_repo: TaskRepository
+    ) -> None:
+        resp = await client.post(
+            "/api/tasks",
+            json={
+                "name": "pinned-task",
+                "prompt": "p",
+                "interval_seconds": 60,
+                "channel_id": 1,
+                "backend": "codex",
+                "model": "gpt-6-astra",
+            },
+        )
+        assert resp.status == 201
+        task = await task_repo.get((await resp.json())["id"])
+        assert task is not None
+        assert task["backend"] == "codex"
+        assert task["model"] == "gpt-6-astra"
+
+    async def test_create_without_pin_stores_nulls(
+        self, client: TestClient, task_repo: TaskRepository
+    ) -> None:
+        resp = await client.post(
+            "/api/tasks",
+            json={"name": "no-pin", "prompt": "p", "interval_seconds": 60, "channel_id": 1},
+        )
+        task = await task_repo.get((await resp.json())["id"])
+        assert task is not None
+        assert task["backend"] is None
+        assert task["model"] is None
+
+    async def test_create_with_unknown_backend_is_rejected(self, client: TestClient) -> None:
+        resp = await client.post(
+            "/api/tasks",
+            json={
+                "name": "bad-backend",
+                "prompt": "p",
+                "interval_seconds": 60,
+                "channel_id": 1,
+                "backend": "not-a-real-backend",
+            },
+        )
+        assert resp.status == 400
+        assert "Unknown backend" in (await resp.json())["error"]
+
+    async def test_create_with_model_but_no_backend_is_rejected(self, client: TestClient) -> None:
+        """A model id belongs to one backend; alone it would land on whichever
+        backend happened to be active and fail there instead."""
+        resp = await client.post(
+            "/api/tasks",
+            json={
+                "name": "model-only",
+                "prompt": "p",
+                "interval_seconds": 60,
+                "channel_id": 1,
+                "model": "gpt-6-astra",
+            },
+        )
+        assert resp.status == 400
+        assert "model requires backend" in (await resp.json())["error"]
+
+    async def test_patch_sets_the_pin(self, client: TestClient, task_repo: TaskRepository) -> None:
+        resp = await client.post(
+            "/api/tasks",
+            json={"name": "to-pin", "prompt": "p", "interval_seconds": 60, "channel_id": 1},
+        )
+        task_id = (await resp.json())["id"]
+        patch = await client.patch(
+            f"/api/tasks/{task_id}", json={"backend": "local", "model": "qwen3.5:35b"}
+        )
+        assert patch.status == 200
+        task = await task_repo.get(task_id)
+        assert task is not None
+        assert task["backend"] == "local"
+        assert task["model"] == "qwen3.5:35b"
+
+    async def test_patch_model_alone_uses_the_stored_backend(
+        self, client: TestClient, task_repo: TaskRepository
+    ) -> None:
+        """Pairing is judged on the task's resulting state, not on this request."""
+        resp = await client.post(
+            "/api/tasks",
+            json={
+                "name": "already-pinned",
+                "prompt": "p",
+                "interval_seconds": 60,
+                "channel_id": 1,
+                "backend": "codex",
+            },
+        )
+        task_id = (await resp.json())["id"]
+        patch = await client.patch(f"/api/tasks/{task_id}", json={"model": "gpt-5.6-sol"})
+        assert patch.status == 200
+        task = await task_repo.get(task_id)
+        assert task is not None
+        assert task["backend"] == "codex"
+        assert task["model"] == "gpt-5.6-sol"
+
+    async def test_patch_clearing_the_backend_under_a_pinned_model_is_rejected(
+        self, client: TestClient, task_repo: TaskRepository
+    ) -> None:
+        resp = await client.post(
+            "/api/tasks",
+            json={
+                "name": "strand-me",
+                "prompt": "p",
+                "interval_seconds": 60,
+                "channel_id": 1,
+                "backend": "codex",
+                "model": "gpt-6-astra",
+            },
+        )
+        task_id = (await resp.json())["id"]
+        patch = await client.patch(f"/api/tasks/{task_id}", json={"backend": None})
+        assert patch.status == 400
+        task = await task_repo.get(task_id)
+        assert task is not None
+        assert task["backend"] == "codex"
+        assert task["model"] == "gpt-6-astra"
+
+    async def test_patch_clears_both(self, client: TestClient, task_repo: TaskRepository) -> None:
+        resp = await client.post(
+            "/api/tasks",
+            json={
+                "name": "to-unpin",
+                "prompt": "p",
+                "interval_seconds": 60,
+                "channel_id": 1,
+                "backend": "codex",
+                "model": "gpt-6-astra",
+            },
+        )
+        task_id = (await resp.json())["id"]
+        patch = await client.patch(f"/api/tasks/{task_id}", json={"backend": None, "model": None})
+        assert patch.status == 200
+        task = await task_repo.get(task_id)
+        assert task is not None
+        assert task["backend"] is None
+        assert task["model"] is None
+
+    async def test_patch_with_unknown_backend_is_rejected(self, client: TestClient) -> None:
+        resp = await client.post(
+            "/api/tasks",
+            json={"name": "to-pin-bad", "prompt": "p", "interval_seconds": 60, "channel_id": 1},
+        )
+        task_id = (await resp.json())["id"]
+        patch = await client.patch(f"/api/tasks/{task_id}", json={"backend": "nope"})
+        assert patch.status == 400
+
+    async def test_patch_pin_on_a_missing_task_is_404(self, client: TestClient) -> None:
+        patch = await client.patch("/api/tasks/987654", json={"backend": "codex"})
+        assert patch.status == 404
+
+    async def test_list_shows_the_pin(self, client: TestClient) -> None:
+        await client.post(
+            "/api/tasks",
+            json={
+                "name": "listed",
+                "prompt": "p",
+                "interval_seconds": 60,
+                "channel_id": 1,
+                "backend": "pi",
+                "model": "anthropic/claude-opus-5",
+            },
+        )
+        data = await (await client.get("/api/tasks")).json()
+        task = data["tasks"][0]
+        assert task["backend"] == "pi"
+        assert task["model"] == "anthropic/claude-opus-5"

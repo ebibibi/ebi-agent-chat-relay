@@ -261,6 +261,55 @@ class TestSchedulerCogMasterLoop:
         assert run_config.runner is codex_runner
         assert run_config.backend_settings is settings
 
+    async def test_run_task_pin_wins_over_the_current_setting(self, repo: TaskRepository) -> None:
+        """A pinned task runs on its own backend/model, not the active ones."""
+        import discord
+
+        base_runner = _make_runner()
+        pinned_runner = MagicMock()
+        factory = MagicMock()
+        factory.build.return_value = pinned_runner
+        settings = MagicMock()
+        settings.current_backend = AsyncMock(return_value="claude")
+        settings.current_model = AsyncMock(return_value="sonnet")
+        settings.current_effort = AsyncMock(return_value="high")
+        cog = SchedulerCog(
+            _make_bot(),
+            base_runner,
+            repo=repo,
+            backend_factory=factory,
+            backend_settings=settings,
+        )
+
+        task_id = await repo.create(
+            name="pinned-task",
+            prompt="p",
+            interval_seconds=60,
+            channel_id=99,
+            backend="codex",
+            model="gpt-6-astra",
+        )
+        task = await repo.get(task_id)
+
+        mock_thread = AsyncMock(spec=discord.Thread)
+        mock_thread.id = 1234
+        mock_starter_msg = AsyncMock()
+        mock_starter_msg.create_thread = AsyncMock(return_value=mock_thread)
+        mock_channel = AsyncMock(spec=discord.TextChannel)
+        mock_channel.send = AsyncMock(return_value=mock_starter_msg)
+        cog.bot.get_channel = MagicMock(return_value=mock_channel)
+
+        with patch("claude_discord.cogs.scheduler.run_claude_with_config", new_callable=AsyncMock):
+            await cog._run_task(task)
+
+        factory.build.assert_called_once_with(backend="codex", model="gpt-6-astra", thread_id=1234)
+        # The pin replaces both lookups rather than being merged with them.
+        settings.current_backend.assert_not_called()
+        settings.current_model.assert_not_called()
+        # Effort still follows the setting for the pinned backend.
+        settings.current_effort.assert_awaited_once_with("codex", 1234)
+        assert pinned_runner.effort == "high"
+
     async def test_disabled_task_not_run(self, cog: SchedulerCog, repo: TaskRepository) -> None:
         """Disabled tasks should not fire even if overdue."""
         task_id = await repo.create(name="dis", prompt="p", interval_seconds=60, channel_id=1)
