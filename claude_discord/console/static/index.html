@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14161a">
+<title>Relay Console</title>
+<link rel="manifest" href="/static/manifest.webmanifest">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/icon.svg">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div id="app" class="app">
+  <nav id="nav" class="nav" aria-label="Views"></nav>
+  <main class="list-pane">
+    <header class="list-head">
+      <button id="nav-toggle" class="icon-btn only-narrow" aria-label="Menu">☰</button>
+      <h1 id="view-title"></h1>
+      <input id="filter" class="filter" type="search" autocomplete="off">
+      <span id="sync" class="sync" aria-live="polite"></span>
+    </header>
+    <form id="capture" class="capture">
+      <input id="capture-input" autocomplete="off" maxlength="200">
+    </form>
+    <ul id="list" class="list" role="listbox"></ul>
+    <p id="empty" class="empty" hidden></p>
+  </main>
+  <section id="detail" class="detail" hidden aria-label="Detail"></section>
+</div>
+<div id="help" class="help" hidden></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
