@@ -95,6 +95,22 @@ cloudflared tunnel route dns relay-console console.example.com
 Then add a self-hosted Access application for `console.example.com` with a policy for your
 email, and copy its AUD tag into `CCDB_CONSOLE_ACCESS_AUD`.
 
+## Run without Discord
+
+The console can be the only frontend. With `CCDB_FRONTENDS` set and `discord` left out, ccdb
+never logs in to Discord and does not need `DISCORD_BOT_TOKEN` or `DISCORD_CHANNEL_ID`:
+
+```dotenv
+CCDB_FRONTENDS=console          # or console,teams
+API_PORT=8099                   # the console starts beside the control plane
+CCDB_CONSOLE_PORT=8100
+CCDB_CONSOLE_TOKEN=...          # or the Cloudflare Access settings above
+```
+
+The scheduler, waits and the control-plane API keep running. New conversations, scheduled tasks
+included, open in the console. Startup refuses a configuration without Discord that nobody could
+reach (no console ports and no Teams).
+
 ## API
 
 All endpoints need authentication. Every method except `GET` also needs `X-Console-Request: 1`.
@@ -136,7 +152,6 @@ Threads that live in a chat platform still appear and can be replied to as befor
 
 - Chat threads (work not started from the console) still live in the chat platform; the console
   reads and posts there.
-- The bot process still starts its Discord client; a console-only deployment is not supported yet.
 - Files an agent delivers in a console conversation are listed by name; there is no download yet.
 - A console reply is posted by the bot, so it does not yet count in attention metering.
 - The board polls every 8 seconds; there is no push channel yet.

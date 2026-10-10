@@ -164,8 +164,11 @@ At startup, one process keeps the Discord gateway connection open and starts the
 machine. `CCDB_FRONTENDS` defaults to `discord`, so omitting the setting preserves a Discord-only
 deployment.
 
-If Teams is the only frontend, `CCDB_FRONTENDS=teams` selects it, but the current normal launcher
-still requires its existing Discord bot configuration. Running both is the tested production path.
+If Teams is the only frontend, `CCDB_FRONTENDS=teams` runs without logging in to Discord and
+without Discord credentials. Scheduled tasks that open a *new* conversation need a frontend that
+can create one; add the Relay Console (`CCDB_FRONTENDS=console,teams`, see
+[console.md](console.md#run-without-discord)) for that. Running Discord and Teams together is the
+most exercised production path.
 
 ## 6. Generate the Teams app package
 

@@ -12,6 +12,7 @@ import logging
 import os
 import signal
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
@@ -30,22 +31,27 @@ def load_config() -> dict[str, str]:
     """Load and validate configuration from environment."""
     load_dotenv(find_dotenv(usecwd=True))
 
+    frontends = parse_frontends(os.getenv("CCDB_FRONTENDS", ""))
     token = os.getenv("DISCORD_BOT_TOKEN", "")
-    if not token:
-        logger.error("DISCORD_BOT_TOKEN is required")
-        sys.exit(1)
-
     channel_id = os.getenv("DISCORD_CHANNEL_ID", "")
-    if not channel_id:
-        logger.error("DISCORD_CHANNEL_ID is required")
-        sys.exit(1)
+    if "discord" in frontends:
+        if not token:
+            logger.error("DISCORD_BOT_TOKEN is required")
+            sys.exit(1)
+        if not channel_id:
+            logger.error("DISCORD_CHANNEL_ID is required")
+            sys.exit(1)
+    else:
+        problems = headless_problems(frontends, os.environ)
+        if problems:
+            logger.error("Cannot run without Discord: %s", "; ".join(problems))
+            sys.exit(1)
 
     def _env(new: str, old: str, default: str = "") -> str:
         """Read CCDB_* env var with CLAUDE_* fallback."""
         return os.getenv(new) or os.getenv(old, default)
 
     backend = os.getenv("CCDB_BACKEND", "claude")
-    frontends = parse_frontends(os.getenv("CCDB_FRONTENDS", ""))
     # Default model is backend-specific: Claude needs an explicit alias
     # ("sonnet"), but Codex defers to its own config.toml default when left
     # empty (so we never pin a stale Codex model version).
@@ -89,13 +95,39 @@ def load_config() -> dict[str, str]:
     }
 
 
+def headless_problems(frontends: tuple[str, ...], env: Mapping[str, str]) -> list[str]:
+    """Why a deployment without Discord could not be reached, if it could not.
+
+    Without Discord the only ways in are the Relay Console (which needs the
+    control plane's port, since it starts beside it) and Teams. A headless
+    process with neither would run, schedule and answer no one.
+    """
+    problems: list[str] = []
+    if "console" in frontends:
+        if not env.get("API_PORT", "").strip():
+            problems.append("the console frontend needs API_PORT")
+        if not env.get("CCDB_CONSOLE_PORT", "").strip():
+            problems.append("the console frontend needs CCDB_CONSOLE_PORT")
+    if "console" not in frontends and "teams" not in frontends:
+        problems.append("CCDB_FRONTENDS must include console or teams when it omits discord")
+    return problems
+
+
+async def _run_headless(stop: asyncio.Event) -> None:
+    """Keep the process alive without a Discord login until a signal arrives."""
+    logger.info("Running without Discord (CCDB_FRONTENDS has no 'discord')")
+    await stop.wait()
+
+
 async def main() -> None:
     """Start the bot."""
     setup_logging()
     config = load_config()
     enabled_frontends = parse_frontends(config["frontends"])
 
-    channel_id = int(config["channel_id"])
+    headless = "discord" not in enabled_frontends
+    # 0 matches no channel: a headless bot has none and never looks one up.
+    channel_id = int(config["channel_id"]) if config["channel_id"] else 0
 
     # Parse optional multi-channel IDs
     claude_channel_ids: set[int] | None = None
@@ -144,6 +176,7 @@ async def main() -> None:
     bot = ClaudeDiscordBot(
         channel_id=channel_id,
         owner_id=owner_id,
+        headless=headless,
     )
 
     # Optional API server
@@ -160,7 +193,7 @@ async def main() -> None:
         api_server = ApiServer(
             repo=notification_repo,
             bot=bot,
-            default_channel_id=channel_id,
+            default_channel_id=channel_id or None,
             host=config["api_host"],
             port=int(config["api_port"]),
             api_secret=config["api_secret"] or None,
@@ -185,7 +218,7 @@ async def main() -> None:
             api_server=api_server,
             backend_factory=factory,
             allowed_user_ids=allowed_user_ids,
-            claude_channel_id=channel_id,
+            claude_channel_id=channel_id or None,
             claude_channel_ids=claude_channel_ids,
             data_root=os.getenv("CCDB_DATA_ROOT") or None,
             cli_sessions_path=config["cli_sessions_path"] or None,
@@ -227,13 +260,20 @@ async def main() -> None:
                 await teams_runtime.start()
                 logger.info("Teams activity puller started beside Discord")
 
+            stop = asyncio.Event()
             # Handle signals (add_signal_handler is not supported on Windows)
             if sys.platform != "win32":
                 loop = asyncio.get_running_loop()
                 for sig in (signal.SIGINT, signal.SIGTERM):
-                    loop.add_signal_handler(sig, lambda: asyncio.create_task(bot.close()))
+                    if headless:
+                        loop.add_signal_handler(sig, stop.set)
+                    else:
+                        loop.add_signal_handler(sig, lambda: asyncio.create_task(bot.close()))
 
-            await bot.start(config["token"])
+            if headless:
+                await _run_headless(stop)
+            else:
+                await bot.start(config["token"])
         finally:
             if teams_runtime is not None:
                 await teams_runtime.close()

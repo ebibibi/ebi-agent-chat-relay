@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Relay Console: captured work starts right away** (#879) — quick capture hands the item
   to an agent by default (`POST /console/api/items` with `start: true`). A checkbox next to
   the input, remembered per browser, turns it back into "just write it down".
+
+- **Run ccdb without Discord** (#891) — `CCDB_FRONTENDS` accepts `console`, and a list without
+  `discord` (`console`, `console,teams`, `teams`) runs headless: no Discord login, no
+  `DISCORD_BOT_TOKEN` or `DISCORD_CHANNEL_ID`. The scheduler and the wait watcher still run (a
+  headless bot's `wait_until_ready()` returns at once), and the Relay Console becomes the primary
+  frontend, so scheduled tasks open console conversations. A headless configuration nobody could
+  reach is refused at startup.
+
 - **The Relay Console owns the conversations it starts** (#889) — starting written-down work from
   the console used to open a Discord thread, so every console task also appeared in Discord and
   the console could not start work without a chat platform. It now runs in a conversation the

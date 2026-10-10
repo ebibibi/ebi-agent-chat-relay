@@ -40,7 +40,7 @@ __all__ = [
     "teams_activity",
 ]
 
-_KNOWN_FRONTENDS = frozenset({"discord", "teams"})
+_KNOWN_FRONTENDS = frozenset({"discord", "teams", "console"})
 
 
 def parse_frontends(value: str) -> tuple[str, ...]:
@@ -90,6 +90,21 @@ class FrontendRouter:
 
     async def create_surface(self, *, parent_id: str, title: str) -> ConversationSurface:
         return await self._primary.create_surface(parent_id=parent_id, title=title)
+
+    @property
+    def primary(self) -> str:
+        return self._primary.name
+
+    def replace_primary(self, frontend: SessionFrontend) -> None:
+        """Make *frontend* the one new conversations open on, dropping the old primary.
+
+        A headless deployment builds the router around Discord (setup_bridge
+        always does) and then hands it to the console: Discord cannot resolve
+        or create anything without a login, so it must not stay in the chain.
+        """
+        self._frontends.pop(self._primary.name, None)
+        self._frontends[frontend.name] = frontend
+        self._primary = frontend
 
 
 class TeamsSessionHost:
