@@ -57,6 +57,16 @@ with its audience, issuer, expiry and the email allowlist. The allowlist is requ
 the Access policy already restricts who gets in: if someone edits the policy by mistake, the
 console still stays closed.
 
+### Token mode (tailnet, SSH tunnel, local)
+
+With only `CCDB_CONSOLE_TOKEN` set, the web client asks for the token once and keeps it in the
+browser's local storage. Use this only where the network itself is private (a tailnet, an SSH
+tunnel, loopback). For example, inside a Tailscale tailnet:
+
+```bash
+tailscale serve --bg --https=8443 http://127.0.0.1:8100
+```
+
 ### Cloudflare Tunnel
 
 ```bash

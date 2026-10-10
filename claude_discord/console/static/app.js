@@ -13,7 +13,8 @@ const I18N = {
     priority: "Priority", due: "Due", snooze: "Snooze", project: "Project", parent: "Under",
     none: "—", done_btn: "Done (e)", reopen: "Reopen", open_chat: "Open in chat", start: "Hand to AI",
     reply_ph: "Reply… (Ctrl+Enter to send)", send: "Send", hour: "1h", tomorrow: "Tomorrow", week: "Next week",
-    clear: "Clear", loading: "Loading…", sent: "Sent — the agent will pick it up", started: "Started",
+    clear: "Clear", loading: "Loading…", token: "Console token",
+    login: "Sign in with the console token (CCDB_CONSOLE_TOKEN).", sent: "Sent — the agent will pick it up", started: "Started",
     saved: "Saved", offline: "offline", updated: "updated", no_project: "No project", queued: "queued",
     st: { running: "running", waiting: "waiting for you", review: "to review", action: "your task",
           error: "failed", done: "done", someday: "someday", todo: "to do", idle: "idle" },
@@ -28,7 +29,8 @@ const I18N = {
     priority: "優先度", due: "期限", snooze: "スヌーズ", project: "案件", parent: "親",
     none: "なし", done_btn: "完了（e）", reopen: "戻す", open_chat: "チャットで開く", start: "AIに頼む",
     reply_ph: "返信…（Ctrl+Enter で送信）", send: "送信", hour: "1時間", tomorrow: "明日", week: "来週",
-    clear: "解除", loading: "読み込み中…", sent: "送りました。エージェントが拾います", started: "スレッドを開始しました",
+    clear: "解除", loading: "読み込み中…", token: "コンソールのトークン",
+    login: "コンソールのトークン（CCDB_CONSOLE_TOKEN）でサインインします。", sent: "送りました。エージェントが拾います", started: "スレッドを開始しました",
     saved: "保存しました", offline: "接続できません", updated: "更新", no_project: "案件なし", queued: "待ち",
     st: { running: "実行中", waiting: "あなたの返事待ち", review: "確認待ち", action: "あなたの作業",
           error: "失敗", done: "完了", someday: "いつか", todo: "やること", idle: "止まっている" },
@@ -90,11 +92,15 @@ function toast(msg) {
 // ---------------------------------------------------------------- api
 async function api(path, { method = "GET", body } = {}) {
   const headers = { Accept: "application/json" };
+  // Token mode (no Cloudflare Access in front): the token the human entered once.
+  const token = localStorage.getItem("token");
+  if (token) headers.Authorization = `Bearer ${token}`;
   if (method !== "GET") { headers["X-Console-Request"] = "1"; headers["Content-Type"] = "application/json"; }
   const res = await fetch(API + path, { method, headers, credentials: "same-origin",
     body: body === undefined ? undefined : JSON.stringify(body) });
   let data = null;
   try { data = await res.json(); } catch { /* empty body */ }
+  if (res.status === 401) { showLogin(); throw new Error((data && data.error) || "HTTP 401"); }
   if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);
   return data;
 }
@@ -418,7 +424,24 @@ function move(delta) {
   state.selected = rows[i].item.id;
   if (state.open) openItem(state.selected); else renderList();
 }
+function showLogin() {
+  const help = $("help");
+  if (!help.hidden && help.dataset.mode === "login") return;
+  help.dataset.mode = "login";
+  help.hidden = false;
+  const input = h("input", { type: "password", autocomplete: "current-password", placeholder: T.token });
+  help.replaceChildren(h("form", { class: "card", onclick: (e) => e.stopPropagation(), onsubmit: (e) => {
+    e.preventDefault();
+    if (!input.value.trim()) return;
+    localStorage.setItem("token", input.value.trim());
+    help.hidden = true;
+    help.dataset.mode = "";
+    refresh();
+  } }, h("p", { text: T.login }), input, " ", h("button", { class: "btn primary", type: "submit", text: "OK" })));
+  input.focus();
+}
 function showHelp(show) {
+  $("help").dataset.mode = "help";
   const help = $("help");
   help.hidden = !show;
   if (show) help.replaceChildren(h("div", { class: "card" }, h("table", {},
@@ -437,7 +460,7 @@ function wire() {
     if (title) { capture(title); input.value = ""; }
   });
   $("nav-toggle").addEventListener("click", () => $("nav").classList.toggle("open"));
-  $("help").addEventListener("click", () => showHelp(false));
+  $("help").addEventListener("click", () => { if ($("help").dataset.mode !== "login") showHelp(false); });
 
   document.addEventListener("keydown", (e) => {
     const typing = e.target.matches("input, textarea, select");
