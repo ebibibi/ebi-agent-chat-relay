@@ -21,7 +21,9 @@ const I18N = {
     none: "—", done_btn: "Done (e)", reopen: "Reopen", open_chat: "Open in chat", start: "Hand to AI",
     reply_ph: "Reply… (Ctrl+Enter to send, paste or drop images)",
     paste_type: "Only PNG, JPEG, GIF and WebP images can be attached", paste_failed: "Could not attach the image",
-    paste_wait: "An image is still uploading", send: "Send", hour: "1h", tomorrow: "Tomorrow", week: "Next week",
+    paste_wait: "An image is still uploading",
+    slash_hint: "Type / for commands", slash_desc: { backend: "Switch the AI backend for this conversation",
+      model: "Choose the model for the current backend", effort: "Set the reasoning effort" }, send: "Send", hour: "1h", tomorrow: "Tomorrow", week: "Next week",
     clear: "Clear", loading: "Loading…", sent: "Sent — the agent will pick it up", started: "Started", captured: "Added to To do",
     saved: "Saved", offline: "offline", updated: "updated", no_project: "No project", queued: "queued",
     st: { running: "running", waiting: "waiting for you", review: "to review", action: "your task",
@@ -42,7 +44,9 @@ const I18N = {
     none: "なし", done_btn: "完了（e）", reopen: "戻す", open_chat: "チャットで開く", start: "AIに頼む",
     reply_ph: "返信…（Ctrl+Enter で送信。画像は貼り付け・ドロップで添付）",
     paste_type: "添付できるのは PNG・JPEG・GIF・WebP の画像だけです", paste_failed: "画像を添付できませんでした",
-    paste_wait: "画像をアップロード中です", send: "送信", hour: "1時間", tomorrow: "明日", week: "来週",
+    paste_wait: "画像をアップロード中です",
+    slash_hint: "/ でコマンド", slash_desc: { backend: "この会話のAIバックエンドを切り替える",
+      model: "今のバックエンドのモデルを選ぶ", effort: "推論の強さ（effort）を設定する" }, send: "送信", hour: "1時間", tomorrow: "明日", week: "来週",
     clear: "解除", loading: "読み込み中…", sent: "送りました。エージェントが拾います", started: "スレッドを開始しました", captured: "「やること」に追加しました",
     saved: "保存しました", offline: "接続できません", updated: "更新", no_project: "案件なし", queued: "待ち",
     st: { running: "実行中", waiting: "あなたの返事待ち", review: "確認待ち", action: "あなたの作業",
@@ -341,11 +345,13 @@ function buildDetail(pane, item, key) {
       oninput: (e) => { state.drafts[item.id] = e.target.value; grow(e.target); },
       onkeydown: (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendReply(item.id, box); } } });
     const tray = h("div", { class: "paste-tray", hidden: true });
+    const meta = h("div", { class: "reply-meta", hidden: true });
     const form = h("form", { class: "reply", onsubmit: (e) => { e.preventDefault(); sendReply(item.id, box); } },
-      h("div", { class: "reply-main" }, tray, box), h("button", { class: "btn primary", type: "submit", text: T.send }));
+      h("div", { class: "reply-main" }, meta, tray, box), h("button", { class: "btn primary", type: "submit", text: T.send }));
     nodes.push(form);
     box.value = state.drafts[item.id] || "";
     window.ConsolePaste.attach(box, item.id, tray);
+    window.ConsoleSlash.attach(box, item.id, meta);
     requestAnimationFrame(() => grow(box));
   }
   pane.replaceChildren(...nodes);
@@ -592,6 +598,14 @@ async function sendReply(id, box) {
   if (!text && !images.length) return;
   box.disabled = true;
   try {
+    // "/backend codex", "/model opus", "/kb-save …": a command, not a reply.
+    if (!images.length && await window.ConsoleSlash.run(id, text)) {
+      box.value = "";
+      delete state.drafts[id];
+      grow(box);
+      if (!/^\/(backend|model|effort)\b/.test(text)) { await refresh(); setTimeout(() => loadMessages(id), 1500); }
+      return;
+    }
     await api(`/items/${encodeURIComponent(id)}/reply`, { method: "POST", body: { text, images } });
     box.value = "";
     delete state.drafts[id];
@@ -600,7 +614,7 @@ async function sendReply(id, box) {
     await refresh();
     setTimeout(() => loadMessages(id), 1500);
   } catch (err) { toast(err.message); }
-  finally { box.disabled = false; }
+  finally { box.disabled = false; box.focus(); }
 }
 async function startItem(id) {
   try {

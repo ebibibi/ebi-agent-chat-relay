@@ -31,6 +31,15 @@ from ..thread_status import request_thread_outcome, schedule_thread_outcome
 from .auth import ConsoleAuthConfig, ConsoleAuthenticator, ConsoleAuthError
 from .auth_routes import AUTH_PREFIX, AuthRoutes
 from .board import SessionInfo, ThreadSnapshot, build_board
+from .commands import (
+    CONTROL_COMMANDS,
+    CommandError,
+    SkillLoader,
+    catalog,
+    default_skill_loader,
+    run_command,
+    skill_prompt,
+)
 from .conversations import ConversationRepository
 from .files import resolve_file
 from .messages import serialize_message, with_kind
@@ -133,8 +142,11 @@ class ConsoleServer:
         passkeys: PasskeyService | None = None,
         oidc: OidcClient | None = None,
         store: PasskeyStore | None = None,
+        skills: SkillLoader | None = None,
     ) -> None:
         self.api = api_server
+        #: Lists skills per backend for slash-command autocomplete; None reads the disk.
+        self._skills = skills
         self.work_repo = work_repo
         #: The console's own conversations. Work started here lives in them,
         #: not in a chat thread; chat threads are still shown alongside.
@@ -184,6 +196,8 @@ class ConsoleServer:
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/messages", self.messages)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/reply", self.reply)
         r.add_post(f"{API_PREFIX}/uploads", self.upload)
+        r.add_get(f"{API_PREFIX}/items/{{item_id}}/commands", self.commands)
+        r.add_post(f"{API_PREFIX}/items/{{item_id}}/command", self.run_command)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/done", self.done)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/reopen", self.reopen)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/start", self.start_item)
@@ -463,8 +477,10 @@ class ConsoleServer:
         if len(text) > MAX_REPLY_CHARS:
             return _error(f"text must be at most {MAX_REPLY_CHARS} characters", 400)
         text = with_images(text, images)
-        item_id = request.match_info["item_id"]
-        who = request[IDENTITY]
+        return await self._deliver(request.match_info["item_id"], text, request[IDENTITY])
+
+    async def _deliver(self, item_id: str, text: str, who: str) -> web.Response:
+        """Queue *text* as the human's next message in the item's conversation."""
         key = await self._conversation_key(item_id)
         if key is not None:
             return await self._reply_in_console(item_id, key, text, who)
@@ -483,6 +499,77 @@ class ConsoleServer:
         self._background(cog.deliver_relayed_message(thread, prompt, interrupt=False))
         logger.info("console: %s replied in thread %s", who, thread.id)
         return web.json_response({"status": "delivered"}, status=202)
+
+    # -- slash commands ----------------------------------------------------
+    def _backend_settings(self) -> Any:
+        return getattr(getattr(self.api, "components", None), "backend_settings", None)
+
+    async def _command_key(self, item_id: str) -> tuple[int | None, web.Response | None]:
+        """The thread key commands apply to: a console conversation or a watched chat thread."""
+        key = await self._conversation_key(item_id)
+        if key is not None:
+            return key, None
+        thread, err = await self._thread_for(item_id)
+        if err:
+            return None, err
+        return int(thread.id), None
+
+    def _skill_loader(self) -> SkillLoader:
+        cogs = getattr(self.api.bot, "cogs", None)
+        skill_cog = cogs.get("SkillCommandCog") if isinstance(cogs, dict) else None
+        return self._skills or default_skill_loader(skill_cog)
+
+    async def commands(self, request: web.Request) -> web.Response:
+        """What the reply box autocompletes for this item: commands, models, efforts, skills."""
+        settings = self._backend_settings()
+        if settings is None:
+            return _error("this deployment has no backend settings", 503)
+        key, err = await self._command_key(request.match_info["item_id"])
+        if err:
+            return err
+        assert key is not None
+        return web.json_response(await catalog(settings, key, self._skill_loader()))
+
+    async def run_command(self, request: web.Request) -> web.Response:
+        """Run a slash command typed into the reply box.
+
+        ``backend``/``model``/``effort`` change this conversation's settings and
+        answer at once; any other name is a skill of the current backend and is
+        sent to the agent as the next message.
+        """
+        body, err = await self._json(request)
+        if err:
+            return err
+        settings = self._backend_settings()
+        if settings is None:
+            return _error("this deployment has no backend settings", 503)
+        item_id = request.match_info["item_id"]
+        key, err = await self._command_key(item_id)
+        if err:
+            return err
+        assert key is not None
+        name = str(body.get("name") or "").strip().lstrip("/")
+        arg = str(body.get("arg") or "")
+        if len(arg) > MAX_REPLY_CHARS:
+            return _error(f"arguments must be at most {MAX_REPLY_CHARS} characters", 400)
+        who = request[IDENTITY]
+        if name in {n for n, _ in CONTROL_COMMANDS}:
+            try:
+                result = await run_command(settings, key, name, arg)
+            except CommandError as exc:
+                return _error(str(exc), 400)
+            logger.info("console: %s ran /%s %s on %s", who, name, arg.strip()[:60], item_id)
+            return web.json_response(
+                {
+                    "message": result.message,
+                    "catalog": await catalog(settings, key, self._skill_loader()),
+                }
+            )
+        backend = await settings.current_backend(key)
+        if name not in {s["name"] for s in self._skill_loader()(backend)}:
+            return _error(f"Unknown command `/{name}` for `{backend}`.", 400)
+        logger.info("console: %s ran skill /%s on %s", who, name, item_id)
+        return await self._deliver(item_id, skill_prompt(backend, name, arg), who)
 
     def _files_dir(self) -> Path | None:
         return self.sessions.frontend.files_dir if self.sessions is not None else None

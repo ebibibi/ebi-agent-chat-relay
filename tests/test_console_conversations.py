@@ -108,6 +108,7 @@ async def env(tmp_path):
             runs=runs,
             conversations=conversations,
             chat_cog=chat_cog,
+            console=console,
         )
 
 
@@ -419,3 +420,115 @@ async def test_a_reply_may_be_only_an_image_but_not_a_forged_link(env) -> None:
 async def test_a_screenshot_larger_than_the_json_limit_is_accepted(env) -> None:
     screenshot = PNG + b"\x00" * (2 * 1024 * 1024)
     assert (await _upload(env, screenshot)).status == 201
+
+
+class FakeSettings:
+    """BackendSettings, in memory: a thread override per key, defaulting to claude."""
+
+    def __init__(self) -> None:
+        self.backend: dict[int, str] = {}
+        self.model: dict[tuple[int, str], str] = {}
+        self.effort: dict[tuple[int, str], str] = {}
+
+    async def current_backend(self, thread_id=None):
+        return self.backend.get(thread_id, "claude")
+
+    async def current_model(self, backend, thread_id=None):
+        return self.model.get((thread_id, backend))
+
+    async def current_effort(self, backend, thread_id=None):
+        return self.effort.get((thread_id, backend))
+
+    async def set_backend(self, backend, *, thread_id=None):
+        self.backend[thread_id] = backend
+
+    async def set_model(self, backend, model, *, thread_id=None):
+        self.model[(thread_id, backend)] = model
+
+    async def set_effort(self, backend, effort, *, thread_id=None):
+        self.effort[(thread_id, backend)] = effort
+
+
+SKILLS = {
+    "claude": [{"name": "kb-save", "description": "save a KB entry"}],
+    "codex": [
+        {"name": "kb-save", "description": "save a KB entry"},
+        {"name": "codex-only", "description": "a Codex skill"},
+    ],
+}
+
+
+async def test_slash_command_catalog_follows_the_backend(env) -> None:
+    settings = FakeSettings()
+    env.console.api.components.backend_settings = settings
+    env.console._skills = lambda backend: SKILLS.get(backend, [])
+    item_id = await _start(env)
+    key = int(item_id[1:])
+
+    got = await (
+        await env.client.get(f"/console/api/items/{item_id}/commands", headers=AUTH)
+    ).json()
+    assert got["backend"] == "claude"
+    assert [c["name"] for c in got["commands"]] == ["backend", "model", "effort"]
+    assert got["efforts"] == ["low", "medium", "high", "max"]
+    assert [s["name"] for s in got["skills"]] == ["kb-save"]
+
+    switched = await env.client.post(
+        f"/console/api/items/{item_id}/command",
+        json={"name": "backend", "arg": "codex"},
+        headers=WRITE,
+    )
+    assert switched.status == 200
+    body = await switched.json()
+    assert settings.backend[key] == "codex"
+    # What is offered next is the new backend's.
+    assert body["catalog"]["backend"] == "codex"
+    assert "xhigh" in body["catalog"]["efforts"]
+    assert "codex-only" in [s["name"] for s in body["catalog"]["skills"]]
+
+
+async def test_model_and_effort_are_set_for_this_conversation_only(env) -> None:
+    settings = FakeSettings()
+    env.console.api.components.backend_settings = settings
+    env.console._skills = lambda backend: []
+    item_id = await _start(env)
+    key = int(item_id[1:])
+
+    async def run(name, arg):
+        return await env.client.post(
+            f"/console/api/items/{item_id}/command", json={"name": name, "arg": arg}, headers=WRITE
+        )
+
+    assert (await run("model", "opus")).status == 200
+    assert settings.model[(key, "claude")] == "opus"
+    assert (await run("effort", "HIGH")).status == 200
+    assert settings.effort[(key, "claude")] == "high"
+    assert (await run("effort", "ultra")).status == 400  # not a Claude level
+    assert (await run("backend", "gpt")).status == 400
+    assert (await run("model", "two words")).status == 400
+    assert (await run("nope", "")).status == 400
+    assert None not in settings.backend  # never the global default
+
+
+async def test_a_skill_is_sent_to_the_agent_in_the_backends_own_form(env) -> None:
+    settings = FakeSettings()
+    env.console.api.components.backend_settings = settings
+    env.console._skills = lambda backend: SKILLS.get(backend, [])
+    item_id = await _start(env)
+    key = int(item_id[1:])
+
+    ran = await env.client.post(
+        f"/console/api/items/{item_id}/command",
+        json={"name": "kb-save", "arg": "the CSP fix"},
+        headers=WRITE,
+    )
+    assert ran.status == 202
+    await _settle(env.host)
+    assert env.runs[-1].prompt == "/kb-save the CSP fix"
+
+    settings.backend[key] = "codex"
+    await env.client.post(
+        f"/console/api/items/{item_id}/command", json={"name": "codex-only"}, headers=WRITE
+    )
+    await _settle(env.host)
+    assert env.runs[-1].prompt == 'Use the "codex-only" skill.'
