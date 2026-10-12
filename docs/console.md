@@ -85,6 +85,20 @@ turns, the slot queue and the spawn lineage. Agents do not have to do anything n
 console stores itself (`work_items` in the session database) is only what nothing else knows:
 priority, due date, snooze, project, a parent override, a title override, and captures.
 
+### Buttons
+
+A bot cannot click a Discord button, so the console does not read Discord's components. Flows
+that wait on a button also register the same answer in an in-process registry
+(`claude_discord/message_actions.py`), and the console shows those as buttons under the message:
+
+- restart / upgrade approval (`✅ Approve`, also offered on every "still waiting" reminder)
+- choice prompts: tool permission, plan approval and other single-choice questions
+- AskUserQuestion with a single answer
+
+Multi-select questions and "Other" free text are still answered by replying. Whichever side
+answers first wins; the buttons disappear on both. Registrations live in memory, so after a
+restart there is nothing to press — exactly as nothing is waiting any more.
+
 ## Backend usage strip
 
 A strip across the top of every screen shows how much each backend has left: per rate-limit
@@ -286,6 +300,7 @@ Endpoints need authentication unless marked *(no sign-in)*. Every method except 
 | POST | `/console/api/items/{id}/reopen` | Clear the done/someday verdict |
 | GET / POST / PATCH / DELETE | `/console/api/places` | The managed list of places with open-item counts; add `{name}`, rename `{from, name}` (every item follows), delete `{name}` (items become doable anywhere) |
 | GET | `/console/api/items/{id}/live` | A console conversation's running turn: status, tool activity, the answer so far, whether it can be stopped |
+| POST | `/console/api/items/{id}/messages/{message_id}/actions/{action_id}` | Press a button listed in a message's `actions` (404 once it is answered) |
 | POST | `/console/api/items/{id}/stop` | Stop the running turn of a console conversation (409 when nothing runs) |
 | GET | `/console/api/files/{key}/{token}/{name}` | A file an agent delivered in a console conversation |
 | POST | `/console/api/items/{id}/start` | Hand a written-down item to an agent in a console conversation (no chat thread) |

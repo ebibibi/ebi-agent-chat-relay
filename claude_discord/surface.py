@@ -75,6 +75,7 @@ from .discord_ui.status import StatusManager
 from .discord_ui.streaming_manager import StreamingMessageManager
 from .discord_ui.tool_timer import TOOL_TIMER_INTERVAL
 from .discord_ui.views import StopView, ToolResultView
+from .message_actions import message_actions
 
 logger = logging.getLogger(__name__)
 
@@ -379,14 +380,20 @@ class DiscordSurface:
             color=COLOR_INFO,
         )
         try:
-            await self._thread.send(content=_mention_text(prompt.notify), embed=embed, view=view)
+            message = await self._thread.send(
+                content=_mention_text(prompt.notify), embed=embed, view=view
+            )
         except discord.HTTPException:
             logger.warning("Failed to post choice prompt", exc_info=True)
             # The prompt never reached the user, so fall back the same way a
             # timeout would — a permission request must still fail closed.
             default = prompt.default_on_timeout
             return (default,) if default is not None else None
-        return await view.wait_for_answer()
+        message_actions.register(self._thread.id, message.id, view.console_actions(message))
+        try:
+            return await view.wait_for_answer()
+        finally:
+            message_actions.clear(message.id)
 
     async def prompt_form(self, prompt: FormPrompt) -> dict[str, str] | None:
         """Discord modals can only open from an interaction, so the form is

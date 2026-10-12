@@ -1225,3 +1225,62 @@ class TestPipelineThreadDeleted:
         cog._wait_for_approval = AsyncMock(side_effect=gone)  # type: ignore[method-assign]
 
         await cog._run_pipeline(thread, status_target=None)  # must not raise
+
+
+class TestConsoleApproval:
+    """The approval gate offers an approve action the Relay Console can press."""
+
+    def _make(self, bot: MagicMock) -> tuple[AutoUpgradeCog, MagicMock]:
+        config = UpgradeConfig(
+            package_name="pkg",
+            restart_command=["true"],
+            working_dir="/tmp",
+            restart_approval=True,
+        )
+        cog = AutoUpgradeCog(bot=bot, config=config)
+        thread = MagicMock(spec=discord.Thread)
+        thread.id = 555
+        thread.parent = None
+        approval_msg = MagicMock()
+        approval_msg.id = 777
+        approval_msg.add_reaction = AsyncMock()
+        thread.send = AsyncMock(return_value=approval_msg)
+        bot.user = MagicMock()
+        bot.user.id = 1
+        return cog, thread
+
+    @pytest.mark.asyncio
+    async def test_console_action_grants_approval(self, bot: MagicMock) -> None:
+        from claude_discord.message_actions import message_actions
+
+        cog, thread = self._make(bot)
+
+        async def hang(*args, **kwargs):
+            await asyncio.sleep(60)
+
+        bot.wait_for = AsyncMock(side_effect=hang)
+
+        async def press() -> None:
+            for _ in range(5):
+                await asyncio.sleep(0)
+            offered = message_actions.for_message(555, 777)
+            assert [a["label"] for a in offered] == ["✅ Approve"]
+            assert await message_actions.invoke(555, 777, offered[0]["id"], "ebi")
+
+        task = asyncio.create_task(press())
+        await asyncio.wait_for(cog._wait_for_approval(MagicMock(), thread), 5)
+        await task
+
+        thread.send.assert_any_call("👍 Restart approved!")
+
+    @pytest.mark.asyncio
+    async def test_action_withdrawn_after_reaction_approval(self, bot: MagicMock) -> None:
+        from claude_discord.message_actions import message_actions
+
+        cog, thread = self._make(bot)
+        event = MagicMock(message_id=777, emoji="✅", user_id=42)
+        bot.wait_for = AsyncMock(return_value=event)
+
+        await cog._wait_for_approval(MagicMock(), thread)
+
+        assert message_actions.for_message(555, 777) == []

@@ -29,6 +29,7 @@ const I18N = {
     slash_hint: "Type / for commands", compacting: "Compacting the conversation… (up to a few minutes)", slash_desc: { backend: "Switch the AI backend for this conversation",
       model: "Choose the model for the current backend", effort: "Set the reasoning effort",
       compact: "Summarize the conversation to free up context", context: "Show context window usage", cost: "Show token usage and cost" }, send: "Send", hour: "1h", tomorrow: "Tomorrow", week: "Next week",
+    pressed: (l) => `Pressed: ${l}`,
     clear: "Clear", loading: "Loading…", sent: "Sent — the agent will pick it up", started: "Started", captured: "Added to To do",
     today: "Today", yesterday: "Yesterday",
     saved: "Saved", offline: "offline", updated: "updated", no_project: "No project", queued: "queued",
@@ -58,6 +59,7 @@ const I18N = {
     slash_hint: "/ でコマンド", compacting: "会話を圧縮しています…（数分かかることがあります）", slash_desc: { backend: "この会話のAIバックエンドを切り替える",
       model: "今のバックエンドのモデルを選ぶ", effort: "推論の強さ（effort）を設定する",
       compact: "ここまでの会話を要約してコンテキストを空ける", context: "コンテキストの使用量を見る", cost: "トークン使用量と料金を見る" }, send: "送信", hour: "1時間", tomorrow: "明日", week: "来週",
+    pressed: (l) => `押しました: ${l}`,
     clear: "解除", loading: "読み込み中…", sent: "送りました。エージェントが拾います", started: "スレッドを開始しました", captured: "「やること」に追加しました",
     today: "今日", yesterday: "昨日",
     saved: "保存しました", offline: "接続できません", updated: "更新", no_project: "案件なし", queued: "待ち",
@@ -514,9 +516,27 @@ function messageNode(m) {
       ? h("a", { href: a.url, target: "_blank", rel: "noopener noreferrer", text: `📎 ${a.filename}` })
       : h("span", { text: `📎 ${a.filename}` })));
   }
+  if ((m.actions || []).length) body.append(actionRow(m));
   return h("div", { class: `msg ${kind}` },
     h("div", { class: "who" }, h("span", { text: m.author }), h("span", { text: m.created_at ? shortDate(m.created_at) : "" })),
     body);
+}
+
+// Buttons a Discord message is waiting on (restart approval, choices, questions).
+function actionRow(m) {
+  const id = state.open;
+  const row = h("div", { class: "msg-actions" });
+  for (const a of m.actions) {
+    row.append(h("button", { class: `btn act-${a.style}`, type: "button", text: a.label, onclick: async () => {
+      for (const b of row.querySelectorAll("button")) b.disabled = true;
+      try {
+        await api(`/items/${encodeURIComponent(id)}/messages/${m.id}/actions/${encodeURIComponent(a.id)}`, { method: "POST" });
+        toast(T.pressed(a.label));
+      } catch (err) { toast(err.message); }
+      await loadMessages(id);
+    } }));
+  }
+  return row;
 }
 
 // Images attached in a chat thread load straight from Discord's CDN (allowed by the CSP for img only).
@@ -546,7 +566,8 @@ function fillMessages(container, { force = false, toBottom = false } = {}) {
   const shown = state.showActivity ? state.messages : state.messages.filter((m) => m.kind !== "activity");
   // Re-render only when something changed, so a poll does not drop a text selection.
   const sig = `${state.open}|${state.showActivity}|${state.messages.length}|${state.messages.map((m) => m.id).slice(-1)[0]}|` +
-    state.messages.map((m) => (m.content || "").length).reduce((a, b) => a + b, 0);
+    state.messages.map((m) => (m.content || "").length).reduce((a, b) => a + b, 0) + "|" +
+    state.messages.map((m) => (m.actions || []).length).join("");
   if (!force && container.dataset.sig === sig && container.childElementCount) return;
   const first = !container.dataset.sig || !container.dataset.sig.startsWith(`${state.open}|`);
   const follow = toBottom || first || nearBottom(container);

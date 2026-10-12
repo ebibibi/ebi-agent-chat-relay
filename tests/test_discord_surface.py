@@ -278,6 +278,46 @@ class TestChoicePrompt:
         assert all(isinstance(c, _ChoiceButton) for c in view.children)
         assert len(view.children) == 2
 
+    async def test_choices_can_be_answered_from_the_console(self) -> None:
+        import asyncio
+
+        from claude_discord.message_actions import message_actions
+
+        surface = _make_surface()
+        sent = MagicMock(id=4242)
+        sent.edit = AsyncMock()
+        surface.thread.send = AsyncMock(return_value=sent)
+        prompt = ChoicePrompt(
+            question="Run it?",
+            choices=(
+                Choice(value="allow", label="Allow", style="positive"),
+                Choice(value="deny", label="Deny", style="destructive"),
+            ),
+            timeout_seconds=5,
+        )
+        task = asyncio.create_task(surface.prompt_choice(prompt))
+        for _ in range(5):
+            await asyncio.sleep(0)
+        offered = message_actions.for_message(surface.thread.id, 4242)
+        assert [(a["label"], a["style"]) for a in offered] == [
+            ("Allow", "success"),
+            ("Deny", "danger"),
+        ]
+        assert await message_actions.invoke(surface.thread.id, 4242, "1", "ebi")
+        assert await task == ("deny",)
+        sent.edit.assert_awaited()
+        assert message_actions.for_message(surface.thread.id, 4242) == []
+
+    async def test_multi_select_is_not_offered_to_the_console(self) -> None:
+        from claude_discord.discord_ui.prompt_views import ChoiceView
+
+        prompt = ChoicePrompt(
+            question="Pick",
+            choices=(Choice(value="a", label="A"), Choice(value="b", label="B")),
+            multi_select=True,
+        )
+        assert ChoiceView(prompt).console_actions(MagicMock()) == []
+
 
 class TestFileDelivery:
     async def test_paths_and_blobs_both_reach_discord(self, tmp_path) -> None:  # type: ignore[no-untyped-def]

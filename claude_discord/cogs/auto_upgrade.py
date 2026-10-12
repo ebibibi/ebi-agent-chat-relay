@@ -22,6 +22,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from ..message_actions import STYLE_SUCCESS, MessageAction, message_actions
 from ..protocols import DrainAware
 from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
 
@@ -489,6 +490,24 @@ class AutoUpgradeCog(commands.Cog):
         # Shared event — set by either the reaction loop or the button callback.
         approved = asyncio.Event()
 
+        # The Relay Console reads the thread but cannot react or click, so the
+        # approval message (and every reminder) also offers an approve action.
+        async def _approve_from_console(who: str) -> None:
+            logger.info("Restart approved from the console by %s", who)
+            approved.set()
+
+        offered: list[int] = []
+
+        def _offer(message: discord.Message) -> None:
+            message_actions.register(
+                thread.id,
+                message.id,
+                [MessageAction("✅ Approve", _approve_from_console, STYLE_SUCCESS)],
+            )
+            offered.append(message.id)
+
+        _offer(approval_msg)
+
         # Post a button in the parent channel so approval is always one click
         # away at the bottom of the channel (no need to scroll up to the thread).
         channel_msg: discord.Message | None = None
@@ -525,10 +544,11 @@ class AutoUpgradeCog(commands.Cog):
                     approved.set()
                 except TimeoutError:
                     if not approved.is_set():
-                        await thread.send(
+                        reminder = await thread.send(
                             "⏳ Still waiting for restart approval... "
                             "React ✅ above or click the button in the channel."
                         )
+                        _offer(reminder)
                         # Re-post the button at the bottom so it stays visible.
                         if view is not None and parent is not None:
                             await view.bump(parent)
@@ -540,10 +560,13 @@ class AutoUpgradeCog(commands.Cog):
         reaction_task = asyncio.create_task(_watch_reaction())
         button_task = asyncio.create_task(_watch_button())
 
-        done, pending = await asyncio.wait(
-            {reaction_task, button_task},
-            return_when=asyncio.FIRST_COMPLETED,
-        )
+        try:
+            done, pending = await asyncio.wait(
+                {reaction_task, button_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            message_actions.clear(*offered)
 
         for task in pending:
             task.cancel()
