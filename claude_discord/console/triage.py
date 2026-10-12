@@ -72,9 +72,14 @@ CREATE TABLE IF NOT EXISTS ai_triage (
     pinned_due INTEGER NOT NULL DEFAULT 0
 );
 """
+#: Columns added after the first release of the table: (name, SQL type).
+_ADDED_COLUMNS = (("ready", "INTEGER"), ("ready_at", "TEXT"), ("waiting_for", "TEXT"))
+#: Part of every basis: a new prompt re-triages everything once.
+PROMPT_VERSION = "2"
 
 _PROMPT = """\
-You triage a person's work queue. Read one item and judge how urgent it is for that person.
+You triage a person's work queue. Read one item and judge two separate things:
+how important it is, and whether the person can act on it right now or must wait.
 
 Now: {now} (the person's local time)
 Item title: {title}
@@ -83,14 +88,21 @@ Conversation, oldest first (the person and their AI agent):
 {messages}
 
 Answer with one JSON object and nothing else:
-{{"priority": 0-3, "due": "YYYY-MM-DD" | "YYYY-MM-DDTHH:MM" | null, "reason": "…", "next": "…"}}
+{{"priority": 0-3, "due": "YYYY-MM-DD" | "YYYY-MM-DDTHH:MM" | null, "reason": "…", "next": "…",
+ "ready": true | false, "ready_at": "YYYY-MM-DDTHH:MM" | null, "waiting_for": "…"}}
 
 priority: 0 = must happen today, blocks others, a customer or a hard deadline is waiting;
 1 = this week, or someone is waiting; 2 = normal; 3 = low, someday, or just information.
 due: only a deadline the conversation states or clearly implies, in local time; otherwise null.
 reason: why this priority, at most 60 characters.
 next: the single next thing the person (not the agent) should do, at most 60 characters.
-Write reason and next in the conversation's language.
+ready: true only if the person can do "next" right now, at their desk, without waiting.
+false if "next" has to wait: for a time or date ("tomorrow at 20:00", "after the meeting"),
+for another person's reply or work, for an agent or a job to finish, or for an event.
+Importance does not make an item ready: an urgent item that must wait is ready: false.
+ready_at: when "next" becomes possible, if the conversation says or implies it; otherwise null.
+waiting_for: when ready is false, what the person waits for, at most 40 characters; else "".
+Write reason, next and waiting_for in the conversation's language.
 """
 
 _JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
@@ -108,6 +120,9 @@ class TriageResult:
     due_at: str | None
     reason: str
     next_step: str
+    ready: bool = True
+    ready_at: str | None = None
+    waiting_for: str = ""
 
 
 @dataclass(frozen=True)
@@ -123,6 +138,9 @@ class Triage:
     updated_at: str | None
     pinned_priority: bool
     pinned_due: bool
+    ready: bool | None = None
+    ready_at: str | None = None
+    waiting_for: str | None = None
 
 
 class TriageRepository:
@@ -134,6 +152,10 @@ class TriageRepository:
     async def init_db(self) -> None:
         async with aiosqlite.connect(self._db_path) as db:
             await db.executescript(_SCHEMA)
+            have = {row[1] for row in await db.execute_fetchall("PRAGMA table_info(ai_triage)")}
+            for name, kind in _ADDED_COLUMNS:
+                if name not in have:
+                    await db.execute(f"ALTER TABLE ai_triage ADD COLUMN {name} {kind}")
             await db.commit()
 
     async def all(self) -> dict[str, Triage]:
@@ -145,18 +167,23 @@ class TriageRepository:
     async def save(self, item_id: str, result: TriageResult, *, basis: str, model: str) -> None:
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(
-                "INSERT INTO ai_triage (item_id, priority, due_at, reason, next_step, basis,"
-                " model, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+                "INSERT INTO ai_triage (item_id, priority, due_at, reason, next_step, ready,"
+                " ready_at, waiting_for, basis, model, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 " ON CONFLICT(item_id) DO UPDATE SET priority = excluded.priority,"
                 " due_at = excluded.due_at, reason = excluded.reason,"
-                " next_step = excluded.next_step, basis = excluded.basis,"
-                " model = excluded.model, updated_at = excluded.updated_at",
+                " next_step = excluded.next_step, ready = excluded.ready,"
+                " ready_at = excluded.ready_at, waiting_for = excluded.waiting_for,"
+                " basis = excluded.basis, model = excluded.model, updated_at = excluded.updated_at",
                 (
                     item_id,
                     result.priority,
                     result.due_at,
                     result.reason,
                     result.next_step,
+                    int(result.ready),
+                    result.ready_at,
+                    result.waiting_for,
                     basis,
                     model,
                     _now(),
@@ -190,6 +217,9 @@ def _to_triage(row: aiosqlite.Row) -> Triage:
         updated_at=row["updated_at"],
         pinned_priority=bool(row["pinned_priority"]),
         pinned_due=bool(row["pinned_due"]),
+        ready=None if row["ready"] is None else bool(row["ready"]),
+        ready_at=row["ready_at"],
+        waiting_for=row["waiting_for"],
     )
 
 
@@ -258,6 +288,9 @@ def parse_reply(raw: str, *, now: datetime) -> TriageResult | None:
         due_at=_parse_due(data.get("due"), now),
         reason=_short(data.get("reason")),
         next_step=_short(data.get("next")),
+        ready=data.get("ready") is not False,
+        ready_at=_parse_due(data.get("ready_at"), now),
+        waiting_for=_short(data.get("waiting_for"))[:60],
     )
 
 
@@ -346,6 +379,9 @@ def apply_triage(
                 "due_at": row.due_at,
                 "reason": row.reason,
                 "next_step": row.next_step,
+                "ready": row.ready,
+                "ready_at": row.ready_at,
+                "waiting_for": row.waiting_for,
                 "updated_at": row.updated_at,
             }
             human_priority = row.pinned_priority or item.get("priority") != DEFAULT_PRIORITY
@@ -360,15 +396,29 @@ def apply_triage(
                     due is not None and due < now and item.get("status") not in _SKIP_STATUSES
                 )
         new["focus"] = focus_score(new, now=now)
+        new["actionable"] = actionable(row, now=now) if new["focus"] is not None else None
         out.append(new)
     return out
 
 
+def actionable(row: Triage | None, *, now: datetime) -> bool:
+    """Whether the human can act on the item now: a second axis, apart from importance.
+
+    Waiting (for a time, a person, a job) is not actionable until the time it
+    named has come. With no guess yet, an item counts as actionable.
+    """
+    if row is None or row.ready is None or row.ready:
+        return True
+    ready_at = _parse_ts(row.ready_at)
+    return ready_at is not None and ready_at <= now
+
+
 def focus_score(item: dict[str, Any], *, now: datetime) -> int | None:
-    """How much this item needs the human now; None when it is not theirs to act on.
+    """How important this item is to the human; None when it is not theirs at all.
 
     Whose move it is counts first, then priority, then how close the deadline is.
     Work an agent is doing, finished or parked work, and snoozed items are out.
+    Whether it can be done now is a separate axis: see ``actionable``.
     """
     if item.get("bucket") in ("done", "snoozed", "ai") or item.get("status") in _SKIP_STATUSES:
         return None
@@ -396,7 +446,8 @@ Ask = Callable[[str], Awaitable[str | None]]
 
 def _basis(item: dict[str, Any]) -> str:
     """What the triage was based on: it is redone when this changes."""
-    return f"{item.get('last_activity_at') or item.get('created_at') or ''}|{item.get('status')}"
+    stamp = item.get("last_activity_at") or item.get("created_at") or ""
+    return f"{PROMPT_VERSION}|{stamp}|{item.get('status')}"
 
 
 class Triager:

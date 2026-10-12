@@ -13,7 +13,7 @@ See [ADR-0010](adr/0010-add-an-api-first-console-on-its-own-listener.md) and, fo
 
 | View | Shows |
 |---|---|
-| **Focus** (default) | One ranking of what needs you now, across every list: whose move it is, then priority, then how close the deadline is. The top item stands alone under "Do this first"; each row shows the next step and why it ranks there. Work an agent is doing, finished, parked and snoozed items are left out. Reachable with `g f` |
+| **Focus** (default) | What you can do now, across every list. Importance (whose move it is, then priority, then how close the deadline is) and readiness are separate axes: only work you can act on right now ranks under "Do this first" and "Then"; anything waiting for a time, a person or a job goes under "⏳ Waiting", soonest first, and moves up once the time it named has come. Each row shows the next step and why it ranks there. Work an agent is doing, finished, parked and snoozed items are left out. Reachable with `g f` |
 | **Inbox** | The ball is on you: ❓ waiting for an answer, 👀 something to review, 📋 a task only you can do, ⚠️ a failed turn |
 | **Running** | A turn is in flight (or queued for a slot) |
 | **To do** | Work you wrote down that no agent has yet |
@@ -27,8 +27,8 @@ See [ADR-0010](adr/0010-add-an-api-first-console-on-its-own-listener.md) and, fo
 Nobody fills in priority and due date for every thread, so the console asks a fast model
 (Haiku by default) to. A background pass every minute picks up to six open items with new
 activity, gives the model the title and the latest human and agent messages, and stores its
-answer: a priority (P0–P3), a deadline if the conversation names one, the reason, and your next
-step. The model runs as a one-shot `claude -p` with tools, hooks and settings off, in a scratch
+answer: a priority (P0–P3), a deadline if the conversation names one, the reason, your next
+step, and whether you can take that step now or must wait (and for what, and until when). The model runs as a one-shot `claude -p` with tools, hooks and settings off, in a scratch
 directory, without relay or console credentials in its environment.
 
 A guess never overrides a person:

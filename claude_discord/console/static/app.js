@@ -10,7 +10,7 @@ const HISTORY = 100;
 
 const I18N = {
   en: {
-    focus: "🎯 Focus", focus_first: "Do this first", focus_next: "Then", ai_guess: "AI guess", ai_set: "set by AI",
+    focus: "🎯 Focus", focus_first: "Do this first", focus_next: "Then", focus_waiting: "⏳ Waiting", focus_ready: "can do now", focus_from: (d) => `from ${d}`, ai_guess: "AI guess", ai_set: "set by AI",
     me: "Inbox", ai: "Running", todo: "To do", idle: "Idle", recent: "Recent", tree: "Tree", snoozed: "Snoozed", done: "Done",
     filter: "Filter…", capture: "+ Write down work, press Enter (c) — Shift+Enter for a note line", capture_ai: "+ Write down work, Enter hands it to AI (c) — Shift+Enter for a note line",
     autostart: "AI starts right away", empty: "Nothing here. 🎉",
@@ -39,7 +39,7 @@ const I18N = {
            ["r", "reply"], ["/", "filter"], ["g then f/i/a/u/t/w/d", "go to a view"], ["?", "this help"]],
   },
   ja: {
-    focus: "🎯 今やること", focus_first: "まずこれ", focus_next: "次に", ai_guess: "AIの見立て", ai_set: "AIが推定",
+    focus: "🎯 今やること", focus_first: "まずこれ", focus_next: "次に", focus_waiting: "⏳ 待ち", focus_ready: "今すぐできる", focus_from: (d) => `${d}〜`, ai_guess: "AIの見立て", ai_set: "AIが推定",
     me: "受信箱", ai: "実行中", todo: "やること", idle: "止まっている", recent: "更新順", tree: "ツリー", snoozed: "スヌーズ中", done: "完了",
     filter: "絞り込み…", capture: "＋ 思いついた仕事を書いて Enter（c）。Shift+Enter で改行してメモ", capture_ai: "＋ 思いついた仕事を書いて Enter → AIが着手（c）。Shift+Enter で改行してメモ",
     autostart: "AIがすぐ着手", empty: "ここには何もありません 🎉",

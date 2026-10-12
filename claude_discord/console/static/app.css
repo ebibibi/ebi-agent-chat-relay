@@ -102,6 +102,8 @@ button { cursor: pointer; }
 .ai-note { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; margin-top: 2px; }
 .ai-note .next { color: var(--text); }
 .ai-note .why { color: var(--dim); }
+.ai-note .wait { color: var(--p1); }
+.ai-note.waiting .next { color: var(--dim); }
 .ai-line { font-size: 12px; }
 .due.over { color: var(--err); font-weight: 600; }
 .tag { border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }

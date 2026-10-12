@@ -239,3 +239,68 @@ async def test_board_shows_guesses_and_a_human_edit_pins_them(tmp_path) -> None:
         [item] = (await (await client.get("/console/api/board", headers=auth)).json())["items"]
         assert (item["priority"], "priority_by" in item) == (2, False)
         assert item["ai"]["reason"] == "期限が近い"
+
+
+# -- the second axis: can it be done now? -----------------------------------
+
+
+def test_waiting_is_parsed_apart_from_importance() -> None:
+    raw = (
+        '{"priority": 0, "next": "②④を設定する", "ready": false,'
+        ' "ready_at": "2026-10-13T20:00", "waiting_for": "明日20時のリマインド"}'
+    )
+    reply = parse_reply(raw, now=NOW)
+    assert reply is not None
+    assert (reply.priority, reply.ready, reply.waiting_for) == (0, False, "明日20時のリマインド")
+    expected = datetime.fromisoformat("2026-10-13T20:00").astimezone().astimezone(UTC)
+    assert reply.ready_at == expected.strftime("%Y-%m-%dT%H:%M:%SZ")
+    # An answer without the field (an older prompt) counts as doable now.
+    plain = parse_reply('{"priority": 2}', now=NOW)
+    assert plain is not None and plain.ready is True
+
+
+async def test_an_urgent_wait_is_not_actionable_until_its_time(repo) -> None:
+    later = (NOW + timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    await repo.save(
+        "t1",
+        TriageResult(0, None, "r", "設定する", ready=False, ready_at=later, waiting_for="20時"),
+        basis="b",
+        model="haiku",
+    )
+    await repo.save("t2", TriageResult(3, None, "r", "読む"), basis="b", model="haiku")
+    await repo.save(
+        "t3", TriageResult(1, None, "r", "n", ready=False, waiting_for="先方"), basis="b", model="m"
+    )
+    rows = await repo.all()
+    wait, now_, open_wait = apply_triage([_item("t1"), _item("t2"), _item("t3")], rows, now=NOW)
+    assert wait["focus"] > now_["focus"]  # more important…
+    assert (wait["actionable"], now_["actionable"], open_wait["actionable"]) == (False, True, False)
+    assert wait["ai"]["waiting_for"] == "20時"
+    [due] = apply_triage([_item("t1")], rows, now=NOW + timedelta(hours=4))
+    assert due["actionable"] is True  # …and doable once its time has come
+    [untriaged] = apply_triage([_item("t9")], rows, now=NOW)
+    assert untriaged["actionable"] is True
+
+
+async def test_a_table_from_the_first_version_gains_the_new_columns(tmp_path) -> None:
+    import aiosqlite
+
+    db = str(tmp_path / "old.db")
+    async with aiosqlite.connect(db) as conn:
+        await conn.execute(
+            "CREATE TABLE ai_triage (item_id TEXT PRIMARY KEY, priority INTEGER, due_at TEXT,"
+            " reason TEXT, next_step TEXT, basis TEXT, model TEXT, updated_at TEXT,"
+            " pinned_priority INTEGER NOT NULL DEFAULT 0, pinned_due INTEGER NOT NULL DEFAULT 0)"
+        )
+        await conn.execute("INSERT INTO ai_triage (item_id, priority, basis) VALUES ('t1', 1, 'x')")
+        await conn.commit()
+    repo = TriageRepository(db)
+    await repo.init_db()
+    await repo.init_db()  # twice is harmless
+    assert (await repo.all())["t1"].ready is None
+
+
+def test_a_new_prompt_version_retriages_everything() -> None:
+    from claude_discord.console.triage import PROMPT_VERSION, _basis
+
+    assert _basis(_item()).startswith(f"{PROMPT_VERSION}|")
