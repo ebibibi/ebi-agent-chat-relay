@@ -28,12 +28,18 @@ def waiting_embed(
 ) -> discord.Embed:
     """The message a queued run shows while it waits."""
     position = scheduler.position(thread_key)
-    head = (
-        "⏸️ Paused — resumes automatically when a slot is free"
-        if resumed
-        else "⏳ Waiting for a free session slot…"
-    )
-    lines = [f"{head} ({scheduler.max_slots} max sessions running)"]
+    if scheduler.held:
+        lines = [
+            "🔄 A bot restart is reserved — this run starts right after the restart "
+            "(or sooner, if the restart is cancelled)"
+        ]
+    else:
+        head = (
+            "⏸️ Paused — resumes automatically when a slot is free"
+            if resumed
+            else "⏳ Waiting for a free session slot…"
+        )
+        lines = [f"{head} ({scheduler.max_slots} max sessions running)"]
     if position is not None:
         lines.append(f"-# Queue position: {position}")
     return discord.Embed(description="\n".join(lines), color=COLOR_INFO)

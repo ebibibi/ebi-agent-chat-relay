@@ -54,6 +54,8 @@ from ..discord_ui.thread_renamer import suggest_retitle, suggest_title
 from ..discord_ui.thread_retitle import RetitleTracker
 from ..discord_ui.views import RewindSelectView, StopView
 from ..execution_settings import apply_thread_execution_mode
+from ..restart_reservation import QUEUED_RESTART_REASON, persist_queued_runs
+from ..session_slots import get_session_slots
 from ..thread_marker import (
     MAX_THREAD_NAME_LENGTH,
     family_code,
@@ -1167,16 +1169,26 @@ class ClaudeChatCog(commands.Cog):
         marked — they resume naturally via message-triggered resume when the user
         sends their next message.
 
+        Runs still *queued* for a session slot are saved with the prompt they
+        were about to send (``persist_queued_runs``), so the user's message
+        runs after the restart instead of a generic "bot restarted" turn.
+
         No-op when ``_resume_repo`` is not configured.
         """
-        if not self._active_runners or self._resume_repo is None:
+        if self._resume_repo is None:
+            return
+        slots = get_session_slots()
+        if slots is not None:
+            await persist_queued_runs(slots, self._resume_repo)
+        running = [t for t in self._active_runners if slots is None or not slots.is_waiting(t)]
+        if not running:
             return
 
         logger.info(
             "Shutdown detected: marking %d active session(s) for restart-resume",
-            len(self._active_runners),
+            len(running),
         )
-        for thread_id in list(self._active_runners):
+        for thread_id in running:
             try:
                 session_id: str | None = None
                 record = await self.repo.get(thread_id)
@@ -1233,6 +1245,10 @@ class ClaudeChatCog(commands.Cog):
             # Delete FIRST — prevents double-resume even if spawn fails
             await self._resume_repo.delete(entry.id)
 
+            if entry.reason == QUEUED_RESTART_REASON and entry.resume_prompt:
+                await self._replay_queued_run(entry.thread_id, entry.resume_prompt)
+                continue
+
             thread_id = entry.thread_id
             try:
                 raw = self.bot.get_channel(thread_id)
@@ -1284,6 +1300,46 @@ class ClaudeChatCog(commands.Cog):
                 )
             except Exception:
                 logger.error("Failed to resume session in thread %d", thread_id, exc_info=True)
+
+    async def _replay_queued_run(self, thread_id: int, prompt: str) -> None:
+        """Run a turn that was queued when the bot restarted.
+
+        The prompt is the one the run was about to send, so it is not posted
+        again: a short notice says why the turn is starting now.
+        """
+        console = getattr(self.bot, "console_sessions", None)
+        try:
+            if console is not None and await console.owns(thread_id):
+                await console.resume_queued(thread_id, prompt)
+                return
+            raw = self.bot.get_channel(thread_id) or await self.bot.fetch_channel(thread_id)
+        except Exception:
+            logger.warning("Queued run: thread %d not found, skipping", thread_id, exc_info=True)
+            return
+        if not isinstance(raw, discord.Thread):
+            logger.warning("Queued run: channel %d is not a Thread, skipping", thread_id)
+            return
+        thread = raw
+        try:
+            notice = await thread.send(
+                "🔄 **Bot restarted.** Running the message that was queued before the restart."
+            )
+            record = await self.repo.get(thread.id)
+            session_id = record.session_id if record else None
+            if record is not None and session_id:
+                session_id = await self._session_id_for_current_backend(thread, record)
+            logger.info("Replaying queued run in thread %d", thread.id)
+            asyncio.create_task(
+                self._run_claude(
+                    notice,
+                    thread,
+                    prompt,
+                    session_id=session_id,
+                    working_dir_override=record.working_dir if record else None,
+                )
+            )
+        except Exception:
+            logger.error("Failed to replay queued run in thread %d", thread.id, exc_info=True)
 
     async def _handle_thread_reply(self, message: discord.Message) -> None:
         """Continue a Claude Code session in an existing thread.

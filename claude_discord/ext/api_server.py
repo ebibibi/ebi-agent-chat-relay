@@ -55,6 +55,7 @@ from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
 from ..thread_status import request_thread_outcome
 from . import ingest_manifest, teams_sync
 from .attention_api import handle_attention
+from .restart_api import handle_cancel_restart, handle_get_restart, handle_reserve_restart
 from .teams_store import TeamsVaultStore
 from .teams_sync import ThreadRef
 from .wait_api import handle_cancel_wait, handle_create_wait, handle_list_waits
@@ -395,6 +396,9 @@ class ApiServer:
         self.app.router.add_get("/api/sessions", self.list_sessions)
         self.app.router.add_get("/api/slots", self.list_slots)
         self.app.router.add_post("/api/slots/{thread_id}/{action}", self.slot_action)
+        self.app.router.add_get("/api/restart", self.get_restart)
+        self.app.router.add_post("/api/restart", self.reserve_restart)
+        self.app.router.add_delete("/api/restart", self.cancel_restart)
         self.app.router.add_get("/api/attention", self.get_attention)
         self.app.router.add_get("/api/search", self.search_sessions)
         self.app.router.add_get("/api/threads/{thread_id}/messages", self.get_thread_messages)
@@ -995,6 +999,18 @@ class ApiServer:
             return err
         return await handle_cancel_wait(request, self.wait_repo)  # type: ignore[arg-type]
 
+    async def reserve_restart(self, request: web.Request) -> web.Response:
+        """POST /api/restart — hold the queue and restart once idle (see restart_api)."""
+        return await handle_reserve_restart(request, self.bot, self.resume_repo)
+
+    async def get_restart(self, request: web.Request) -> web.Response:
+        """GET /api/restart — the reserved restart's state."""
+        return await handle_get_restart(request)
+
+    async def cancel_restart(self, request: web.Request) -> web.Response:
+        """DELETE /api/restart — cancel the reservation; the queue resumes."""
+        return await handle_cancel_restart(request)
+
     async def get_attention(self, request: web.Request) -> web.Response:
         """GET /api/attention — estimated operator attention (see attention_api)."""
         return await handle_attention(request, self.attention_repo, self.attention_params)
@@ -1461,6 +1477,7 @@ class ApiServer:
         return web.json_response(
             {
                 "max_slots": slots.max_slots,
+                "held": slots.held,
                 "running": [i for i in snapshot if i["state"] == "running"],
                 "waiting": [i for i in snapshot if i["state"] == "waiting"],
             }

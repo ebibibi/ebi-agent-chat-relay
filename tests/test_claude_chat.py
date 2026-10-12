@@ -2383,3 +2383,112 @@ class TestGoalCommand:
 
         send_args = interaction.followup.send.call_args
         assert "◎" in send_args.args[0] or "goal" in send_args.args[0].lower()
+
+
+class TestQueuedRunsAcrossRestart:
+    """A run still queued at shutdown is replayed with the prompt it was about to send."""
+
+    @pytest.fixture
+    def slots(self):
+        from claude_discord.session_slots import (
+            SessionSlotScheduler,
+            get_session_slots,
+            set_session_slots,
+        )
+
+        original = get_session_slots()
+        scheduler = SessionSlotScheduler(1)
+        set_session_slots(scheduler)
+        yield scheduler
+        set_session_slots(original)
+
+    @pytest.mark.asyncio
+    async def test_cog_unload_saves_queued_prompt_instead_of_generic_resume(self, slots) -> None:
+        from claude_discord.restart_reservation import QUEUED_RESTART_REASON
+
+        await slots.acquire(111)
+        waiter = asyncio.ensure_future(slots.acquire(222, resume_prompt="the user's message"))
+        await asyncio.sleep(0)
+
+        repo = MagicMock()
+        repo.get = AsyncMock(return_value=None)
+        resume_repo = MagicMock()
+        resume_repo.mark = AsyncMock(return_value=1)
+        cog = ClaudeChatCog(bot=MagicMock(), repo=repo, runner=MagicMock(), resume_repo=resume_repo)
+        cog._active_runners[111] = MagicMock()
+        cog._active_runners[222] = MagicMock()
+
+        await cog.cog_unload()
+
+        marks = {c.args[0]: c.kwargs for c in resume_repo.mark.call_args_list}
+        assert marks[222] == {
+            "reason": QUEUED_RESTART_REASON,
+            "resume_prompt": "the user's message",
+        }
+        assert marks[111]["reason"] == "bot_shutdown"
+        assert resume_repo.mark.call_count == 2
+        waiter.cancel()
+
+    @pytest.mark.asyncio
+    async def test_on_ready_replays_queued_prompt_in_discord_thread(self) -> None:
+        from claude_discord.database.resume_repo import PendingResume
+        from claude_discord.restart_reservation import QUEUED_RESTART_REASON
+
+        entry = PendingResume(
+            id=3,
+            thread_id=555,
+            session_id=None,
+            reason=QUEUED_RESTART_REASON,
+            resume_prompt="please deploy",
+            created_at="2026-10-12 11:00:00",
+        )
+        resume_repo = MagicMock()
+        resume_repo.get_pending = AsyncMock(return_value=[entry])
+        resume_repo.delete = AsyncMock()
+        thread = MagicMock(spec=discord.Thread)
+        thread.id = 555
+        notice = MagicMock()
+        thread.send = AsyncMock(return_value=notice)
+        bot = MagicMock(spec=["get_channel", "fetch_channel"])
+        bot.get_channel.return_value = thread
+        record = MagicMock(session_id=None, working_dir="/w")
+        repo = MagicMock()
+        repo.get = AsyncMock(return_value=record)
+        cog = ClaudeChatCog(bot=bot, repo=repo, runner=MagicMock(), resume_repo=resume_repo)
+
+        run = AsyncMock()
+        with patch.object(cog, "_run_claude", new=run):
+            await cog.on_ready()
+            await asyncio.sleep(0)
+
+        resume_repo.delete.assert_awaited_once_with(3)
+        assert "queued" in thread.send.call_args.args[0]
+        run.assert_awaited_once()
+        assert run.call_args.args == (notice, thread, "please deploy")
+        assert run.call_args.kwargs["working_dir_override"] == "/w"
+
+    @pytest.mark.asyncio
+    async def test_on_ready_routes_console_conversations_to_the_console(self) -> None:
+        from claude_discord.database.resume_repo import PendingResume
+        from claude_discord.restart_reservation import QUEUED_RESTART_REASON
+
+        entry = PendingResume(
+            id=4,
+            thread_id=777,
+            session_id=None,
+            reason=QUEUED_RESTART_REASON,
+            resume_prompt="console ask",
+            created_at="2026-10-12 11:00:00",
+        )
+        resume_repo = MagicMock()
+        resume_repo.get_pending = AsyncMock(return_value=[entry])
+        resume_repo.delete = AsyncMock()
+        bot = MagicMock()
+        bot.console_sessions.owns = AsyncMock(return_value=True)
+        bot.console_sessions.resume_queued = AsyncMock()
+        cog = ClaudeChatCog(bot=bot, repo=MagicMock(), runner=MagicMock(), resume_repo=resume_repo)
+
+        await cog.on_ready()
+
+        bot.console_sessions.resume_queued.assert_awaited_once_with(777, "console ask")
+        bot.get_channel.assert_not_called()

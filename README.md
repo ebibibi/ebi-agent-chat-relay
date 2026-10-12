@@ -1389,6 +1389,9 @@ uv sync --extra api
 | POST | `/api/lounge` | Post a message to the AI Lounge (with optional `label`); returns a `hint` field when the message exceeds 200 characters |
 | GET | `/api/sessions` | List every session — live and stored — with state, working dir and latest lounge note (`state=running`, `exclude_thread`, `limit`) |
 | GET | `/api/slots` | Session slot queue: `max_slots`, threads holding a slot (`running`) and the queue in start order (`waiting`) |
+| GET | `/api/restart` | Reserved restart state: `reserved`, `phase` (`idle` / `draining` / `restarting`), running and waiting counts, `last_error` |
+| POST | `/api/restart` | Reserve a restart: hold the queue, restart once nothing runs, then replay everything queued (202; 200 if already reserved) |
+| DELETE | `/api/restart` | Cancel the reservation; the queue resumes (404 none, 409 already restarting) |
 | POST | `/api/slots/{thread_id}/{action}` | Steer the queue — `prioritize` / `defer` a waiting thread, `pause` a running one (404 wrong state, 409 conflict such as `nothing_waiting`, 503 no limit configured) |
 | GET | `/api/search` | Find a past thread by keyword — `LIKE` over summary and working dir; add `body=1` to also grep local Claude transcripts (each hit then carries a `snippet` and `source`); returns each hit with a Discord `deep_link` (`q` required, optional `origin`, `limit` max 50) |
 | GET | `/api/threads/{thread_id}/messages` | Read another thread's conversation, oldest first (`limit`) |
