@@ -24,6 +24,7 @@ from .auth import (
     ConsoleAuthError,
     oidc_session_identity,
 )
+from .logsafe import q
 from .oidc import STATE_COOKIE, OidcClient, OidcError
 from .passkey_store import PasskeyStore
 from .passkeys import PasskeyError, PasskeyService
@@ -269,7 +270,7 @@ class AuthRoutes:
         )
         response = _redirect("/")
         response.del_cookie(STATE_COOKIE, path=f"{AUTH_PREFIX}oidc/")
-        logger.info("console: %s signed in with %s", email, self.oidc.config.name)
+        logger.info("console: %s signed in with %s", q(email), q(self.oidc.config.name))
         return self._set_session(
             response, token, secure=self.oidc.config.redirect_uri.startswith("https://")
         )
@@ -298,7 +299,7 @@ class AuthRoutes:
             return _error("no such passkey", 404)
         if outcome == "last":
             return _error("this is the last passkey; add another before removing it", 409)
-        logger.info("console: passkey %s removed by %s", target, who)
+        logger.info("console: passkey %s removed by %s", q(target), q(who))
         return web.json_response({"ok": True})
 
 

@@ -17,7 +17,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -46,6 +45,7 @@ from .commands import (
 )
 from .conversations import ConversationRepository
 from .files import resolve_file
+from .logsafe import q as _q
 from .messages import serialize_message, with_kind
 from .oidc import OidcClient, OidcConfig, provider_name
 from .passkey_store import PasskeyStore
@@ -126,16 +126,6 @@ _SECURITY_HEADERS = {
     "X-Frame-Options": "DENY",
     "Cache-Control": "no-store",
 }
-
-
-_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
-
-
-def _q(value: object) -> str:
-    """A client-supplied value made safe for a log line: no line breaks or control characters."""
-    # str.replace first: it is the form static analysers recognise as a log sanitiser.
-    text = str(value).replace("\r", " ").replace("\n", " ")
-    return _CONTROL.sub(" ", text)[:200]
 
 
 def _listed(value: object) -> list[object]:

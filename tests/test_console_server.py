@@ -211,7 +211,7 @@ async def test_the_recent_view_is_in_the_nav_and_on_g_u(client) -> None:
 
 
 def test_log_values_cannot_forge_lines() -> None:
-    from claude_discord.console.server import _q
+    from claude_discord.console.logsafe import q
 
-    assert _q("t1\nINFO forged\r\x1b[2J") == "t1 INFO forged  [2J"
-    assert len(_q("x" * 500)) == 200
+    assert q("t1\nINFO forged\r\x1b[2J") == "t1 INFO forged  [2J"
+    assert len(q("x" * 500)) == 200
