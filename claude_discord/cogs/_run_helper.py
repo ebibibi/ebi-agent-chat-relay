@@ -706,6 +706,7 @@ async def _acquire_slot(config: RunConfig, slots: SessionSlotScheduler) -> SlotE
         label=_slot_label(config),
         priority=priority,
         resumed_from_pause=config.resumed_from_pause,
+        resume_prompt=config.prompt,
     )
     if not slots.would_wait(priority):
         return await acquire_coro
@@ -729,7 +730,10 @@ async def _acquire_slot(config: RunConfig, slots: SessionSlotScheduler) -> SlotE
                 Notice(
                     level=NoticeLevel.SUBTLE,
                     body=(
-                        f"\u23f3 Waiting for a free session slot\u2026 "
+                        "\U0001f504 A bot restart is reserved \u2014 this run starts "
+                        "right after the restart."
+                        if slots.held
+                        else f"\u23f3 Waiting for a free session slot\u2026 "
                         f"({slots.max_slots} max sessions running)"
                     ),
                 )

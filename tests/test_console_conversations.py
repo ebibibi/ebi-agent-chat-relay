@@ -344,3 +344,23 @@ async def test_files_need_authentication_and_a_real_path(env) -> None:
     path = "/console/api/files/1/" + "0" * 32 + "/a.txt"
     assert (await env.client.get(path)).status == 401
     assert (await env.client.get(path, headers=AUTH)).status == 404
+
+
+async def test_a_queued_turn_replays_after_restart_without_a_second_human_message(env) -> None:
+    item_id = await _start(env)
+    key = int(item_id[1:])
+
+    await env.host.resume_queued(key, "and Tuesday?")
+    await _settle(env.host)
+
+    _, replayed = env.runs
+    assert replayed.prompt == "and Tuesday?"
+    assert replayed.session_id == "s1"
+    response = await env.client.get(f"/console/api/items/{item_id}/messages", headers=AUTH)
+    human = [m["content"] for m in (await response.json())["messages"] if not m["is_bot"]]
+    assert human == ["Plan Sunday"]
+
+
+async def test_replaying_an_unknown_conversation_raises(env) -> None:
+    with pytest.raises(LookupError):
+        await env.host.resume_queued(424242, "hello")
