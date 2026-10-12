@@ -11,6 +11,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from claude_discord.ext.api_server import ApiServer
 from claude_discord.restart_reservation import (
     QUEUED_RESTART_REASON,
+    RESERVED_RESTART_REASON,
     RestartReservation,
     build_restart_action,
     get_restart_reservation,
@@ -103,7 +104,7 @@ async def test_persist_writes_each_queued_prompt_in_queue_order() -> None:
     repo = MagicMock()
     repo.mark = AsyncMock(return_value=1)
 
-    assert await persist_queued_runs(slots, repo) == 2
+    assert await persist_queued_runs(slots, repo) == [10, 30]
     assert [(c.args[0], c.kwargs) for c in repo.mark.call_args_list] == [
         (10, {"reason": QUEUED_RESTART_REASON, "resume_prompt": "a"}),
         (30, {"reason": QUEUED_RESTART_REASON, "resume_prompt": "c"}),
@@ -117,26 +118,31 @@ async def test_persist_survives_a_failing_row_and_no_repo() -> None:
     await _queued(slots, 2, resume_prompt="b")
     repo = MagicMock()
     repo.mark = AsyncMock(side_effect=[RuntimeError("disk"), 1])
-    assert await persist_queued_runs(slots, repo) == 1
-    assert await persist_queued_runs(slots, None) == 0
+    assert await persist_queued_runs(slots, repo) == [2]
+    assert await persist_queued_runs(slots, None) == []
 
 
 # --- the reservation ----------------------------------------------------------
+
+
+def _resume_repo() -> MagicMock:
+    repo = MagicMock()
+    repo.mark = AsyncMock(return_value=1)
+    repo.delete_by_thread = AsyncMock()
+    return repo
 
 
 async def test_restarts_only_after_running_sessions_finish_and_saves_queue_first() -> None:
     slots = SessionSlotScheduler(2)
     running = await slots.acquire(1)
     order: list[str] = []
-
-    async def persist() -> int:
-        order.append("persist")
-        return 0
+    repo = _resume_repo()
+    repo.mark.side_effect = lambda *a, **k: order.append(f"save {a[0]}")
 
     async def restart() -> None:
         order.append("restart")
 
-    reservation = RestartReservation(slots, restart, persist=persist, poll_interval=0.005)
+    reservation = RestartReservation(slots, restart, resume_repo=repo, poll_interval=0.005)
     assert reservation.reserve(requested_by="tester", reason="deploy")
     assert slots.held
 
@@ -147,8 +153,31 @@ async def test_restarts_only_after_running_sessions_finish_and_saves_queue_first
     assert reservation.status()["phase"] == "draining"
 
     slots.release(running)
-    await _until(lambda: order == ["persist", "restart"])
+    await _until(lambda: order == ["save 2", "restart"])
     assert not late.done()
+
+
+async def test_the_requesting_thread_is_resumed_unless_it_has_a_queued_message() -> None:
+    slots = SessionSlotScheduler(1)
+    slots.hold()
+    await _queued(slots, 5, resume_prompt="the user's follow-up")
+    repo = _resume_repo()
+    reservation = RestartReservation(slots, AsyncMock(), resume_repo=repo, poll_interval=0.005)
+
+    reservation.reserve(resume_thread_id=5, resume_prompt="verify")
+    await _until(lambda: not reservation.reserved)
+    # One row per thread: the queued message wins, the verify prompt is not written over it.
+    assert [(c.args[0], c.kwargs["reason"]) for c in repo.mark.call_args_list] == [
+        (5, QUEUED_RESTART_REASON)
+    ]
+
+    repo.mark.reset_mock()
+    reservation.reserve(resume_thread_id=6, resume_prompt="verify")
+    await _until(lambda: not reservation.reserved)
+    assert [(c.args[0], c.kwargs["reason"]) for c in repo.mark.call_args_list] == [
+        (5, QUEUED_RESTART_REASON),
+        (6, RESERVED_RESTART_REASON),
+    ]
 
 
 async def test_a_second_reserve_is_reported_not_repeated() -> None:
@@ -177,16 +206,39 @@ async def test_cancel_releases_the_queue() -> None:
     assert not reservation.cancel()
 
 
-async def test_a_failed_restart_releases_the_queue_and_reports_why() -> None:
+async def test_a_failed_restart_releases_the_queue_and_drops_saved_rows() -> None:
     slots = SessionSlotScheduler(1)
+    slots.hold()
+    waiter = await _queued(slots, 4, resume_prompt="queued")
+
+    repo = _resume_repo()
     restart = AsyncMock(side_effect=RuntimeError("no sudo"))
-    reservation = RestartReservation(slots, restart, poll_interval=0.005)
-    reservation.reserve()
+    reservation = RestartReservation(slots, restart, resume_repo=repo, poll_interval=0.005)
+    reservation.reserve(resume_thread_id=8)
     await _until(lambda: not reservation.reserved)
+
     assert not slots.held
     status = reservation.status()
     assert status["phase"] == "idle"
     assert "no sudo" in str(status["last_error"])
+    # The queue runs in this process now; a later restart must not replay it again.
+    dropped = sorted(c.args[0] for c in repo.delete_by_thread.call_args_list)
+    saved = sorted(c.args[0] for c in repo.mark.call_args_list)
+    assert dropped == saved == [4, 8]
+    await asyncio.sleep(0)
+    assert waiter.done()
+
+
+async def test_gives_up_after_max_wait_and_releases_the_queue() -> None:
+    slots = SessionSlotScheduler(1)
+    await slots.acquire(1)
+    restart = AsyncMock()
+    reservation = RestartReservation(slots, restart, poll_interval=0.005)
+    reservation.reserve(max_wait_seconds=0.02)
+    await _until(lambda: not reservation.reserved)
+    assert not slots.held
+    assert "timed out" in str(reservation.status()["last_error"])
+    restart.assert_not_called()
 
 
 # --- restart action -------------------------------------------------------------
@@ -199,12 +251,15 @@ async def test_without_a_command_the_bot_closes_for_its_supervisor() -> None:
     bot.close.assert_awaited_once()
 
 
-async def test_a_configured_command_runs_and_its_failure_is_raised() -> None:
+async def test_a_command_that_does_not_end_this_process_is_a_failure() -> None:
     bot = MagicMock()
     bot.close = AsyncMock()
-    await build_restart_action(bot, command="true")()
-    with pytest.raises(RuntimeError):
-        await build_restart_action(bot, command="false")()
+    with pytest.raises(RuntimeError, match="exited with 1"):
+        await build_restart_action(bot, command="false", grace_seconds=1)()
+    with pytest.raises(RuntimeError, match="not restarted"):
+        await build_restart_action(bot, command="true", grace_seconds=0.01)()
+    with pytest.raises(RuntimeError, match="still running"):
+        await build_restart_action(bot, command="sleep 5", grace_seconds=0.05)()
     bot.close.assert_not_called()
 
 
@@ -260,8 +315,6 @@ async def test_api_rejects_a_non_object_body(slots) -> None:
 
 
 async def test_api_resumes_the_requesting_thread_after_restart(slots) -> None:
-    from claude_discord.restart_reservation import RESERVED_RESTART_REASON
-
     resume_repo = MagicMock()
     resume_repo.mark = AsyncMock(return_value=1)
     bot = MagicMock()
@@ -287,3 +340,11 @@ async def test_api_rejects_a_bad_resume_thread_id(slots) -> None:
     async with TestClient(TestServer(api.app)) as client:
         response = await client.post("/api/restart", json={"resume_thread_id": "abc"})
         assert response.status == 400
+
+
+async def test_api_rejects_a_bad_max_wait(slots) -> None:
+    api = ApiServer(repo=MagicMock(), bot=MagicMock())
+    async with TestClient(TestServer(api.app)) as client:
+        for bad in (0, -5, "soon"):
+            response = await client.post("/api/restart", json={"max_wait_seconds": bad})
+            assert response.status == 400

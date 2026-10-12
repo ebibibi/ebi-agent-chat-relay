@@ -23,7 +23,6 @@ is worse than one that did not restart.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import os
 import shlex
@@ -52,15 +51,15 @@ _COMMAND_GRACE_SECONDS = 30.0
 RestartAction = Callable[[], Awaitable[None]]
 
 
-async def persist_queued_runs(slots: SessionSlotScheduler, resume_repo: Any) -> int:
+async def persist_queued_runs(slots: SessionSlotScheduler, resume_repo: Any) -> list[int]:
     """Write every queued run to ``pending_resumes`` so it survives a restart.
 
-    Returns how many were written.  Safe to call more than once: the table
+    Returns the thread ids written.  Safe to call more than once: the table
     keeps one row per thread, and every call writes the same prompt.
     """
     if resume_repo is None:
-        return 0
-    written = 0
+        return []
+    written: list[int] = []
     for entry in slots.waiting_entries():
         if not entry.resume_prompt:
             continue
@@ -70,7 +69,7 @@ async def persist_queued_runs(slots: SessionSlotScheduler, resume_repo: Any) -> 
                 reason=QUEUED_RESTART_REASON,
                 resume_prompt=entry.resume_prompt,
             )
-            written += 1
+            written.append(entry.thread_key)
         except Exception:
             logger.warning(
                 "Could not save queued run of thread %d for restart",
@@ -78,16 +77,25 @@ async def persist_queued_runs(slots: SessionSlotScheduler, resume_repo: Any) -> 
                 exc_info=True,
             )
     if written:
-        logger.info("Saved %d queued run(s) to replay after restart", written)
+        logger.info("Saved %d queued run(s) to replay after restart", len(written))
     return written
 
 
-def build_restart_action(bot: Any, *, command: str | None = None) -> RestartAction:
+def build_restart_action(
+    bot: Any,
+    *,
+    command: str | None = None,
+    grace_seconds: float = _COMMAND_GRACE_SECONDS,
+) -> RestartAction:
     """The restart to run once idle.
 
     With ``CCDB_RESTART_COMMAND`` (e.g. ``sudo systemctl restart my-bot``) that
     command runs.  Without it the bot closes itself and relies on its
     supervisor (systemd ``Restart=always``, Docker ``restart:``) to start it again.
+
+    The command is expected to end this process.  If we are still alive
+    ``grace_seconds`` after it was started (still running) or after it exited,
+    the restart did not happen and this raises, so the queue is released.
     """
     raw = command if command is not None else os.getenv(RESTART_COMMAND_ENV, "")
     argv = shlex.split(raw) if raw.strip() else []
@@ -96,11 +104,13 @@ def build_restart_action(bot: Any, *, command: str | None = None) -> RestartActi
         logger.info("Reserved restart: running %s", argv[0])
         proc = await asyncio.create_subprocess_exec(*argv)
         try:
-            code = await asyncio.wait_for(proc.wait(), timeout=_COMMAND_GRACE_SECONDS)
-        except TimeoutError:
-            return
+            code = await asyncio.wait_for(proc.wait(), timeout=grace_seconds)
+        except TimeoutError as exc:
+            raise RuntimeError(f"restart command still running after {grace_seconds:.0f}s") from exc
         if code != 0:
             raise RuntimeError(f"restart command exited with {code}")
+        await asyncio.sleep(grace_seconds)
+        raise RuntimeError("restart command succeeded but this process was not restarted")
 
     async def _close_bot() -> None:
         logger.info("Reserved restart: closing the bot for the supervisor to restart it")
@@ -117,21 +127,22 @@ class RestartReservation:
         slots: SessionSlotScheduler,
         restart: RestartAction,
         *,
-        persist: Callable[[], Awaitable[int]] | None = None,
+        resume_repo: Any = None,
         poll_interval: float = DEFAULT_POLL_INTERVAL,
     ) -> None:
         self._slots = slots
         self._restart = restart
-        self._persist = persist
+        self._resume_repo = resume_repo
         self._poll_interval = poll_interval
         self._task: asyncio.Task[None] | None = None
         self._phase = "idle"
         self._requested_by: str | None = None
         self._reason: str | None = None
         self._reserved_at: float | None = None
+        self._deadline: float | None = None
         self._last_error: str | None = None
-        self.resume_thread_id: int | None = None
-        self.resume_prompt: str | None = None
+        self._resume_thread_id: int | None = None
+        self._resume_prompt: str | None = None
 
     @property
     def reserved(self) -> bool:
@@ -145,11 +156,12 @@ class RestartReservation:
             "requested_by": self._requested_by,
             "reason": self._reason,
             "reserved_at": self._reserved_at,
+            "deadline": self._deadline,
             "running": sum(1 for i in snapshot if i.running),
             "waiting": sum(1 for i in snapshot if not i.running),
             "last_error": self._last_error,
             "resume_thread_id": (
-                str(self.resume_thread_id) if self.resume_thread_id is not None else None
+                str(self._resume_thread_id) if self._resume_thread_id is not None else None
             ),
         }
 
@@ -160,6 +172,7 @@ class RestartReservation:
         reason: str = "",
         resume_thread_id: int | None = None,
         resume_prompt: str | None = None,
+        max_wait_seconds: float | None = None,
     ) -> bool:
         """Start the reservation. False when one is already pending.
 
@@ -167,14 +180,18 @@ class RestartReservation:
         (typically the session that asked for it, to verify the new build).
         It is saved just before restarting, so the wait for the running
         sessions cannot outlast the pending-resume TTL.
+
+        ``max_wait_seconds`` gives up (and releases the queue) when the running
+        sessions take longer than that.  ``None`` waits as long as it takes.
         """
         if self.reserved:
             return False
-        self.resume_thread_id = resume_thread_id
-        self.resume_prompt = resume_prompt or None
+        self._resume_thread_id = resume_thread_id
+        self._resume_prompt = resume_prompt or None
         self._requested_by = requested_by or None
         self._reason = reason or None
         self._reserved_at = time.time()
+        self._deadline = self._reserved_at + max_wait_seconds if max_wait_seconds else None
         self._last_error = None
         self._phase = "draining"
         self._slots.hold()
@@ -193,25 +210,53 @@ class RestartReservation:
         assert self._task is not None
         self._task.cancel()
         self._task = None
-        self._phase = "idle"
-        self._slots.unhold()
+        self._release("idle")
         logger.info("Restart reservation cancelled")
         return True
 
+    def _release(self, phase: str, error: str | None = None) -> None:
+        self._phase = phase
+        self._last_error = error
+        self._slots.unhold()
+
     async def _run(self) -> None:
         while self._slots.running_count > 0:
+            if self._deadline is not None and time.time() >= self._deadline:
+                logger.warning("Reserved restart gave up: sessions still running")
+                self._release("idle", "timed out waiting for running sessions")
+                return
             await asyncio.sleep(self._poll_interval)
         self._phase = "restarting"
+        saved: list[int] = []
         try:
-            if self._persist is not None:
-                await self._persist()
+            saved = await self._save_for_restart()
             await self._restart()
         except Exception as exc:
             logger.exception("Reserved restart failed; releasing the queue")
-            self._last_error = f"{type(exc).__name__}: {exc}"
-            self._phase = "idle"
-            with contextlib.suppress(Exception):
-                self._slots.unhold()
+            # The queue runs here after all; replaying it later would run it twice.
+            await self._forget(saved)
+            self._release("idle", f"{type(exc).__name__}: {exc}")
+
+    async def _save_for_restart(self) -> list[int]:
+        saved = await persist_queued_runs(self._slots, self._resume_repo)
+        thread_id = self._resume_thread_id
+        # A queued message of that thread already resumes it, and a second row
+        # would replace the message (one row per thread).
+        if self._resume_repo is not None and thread_id is not None and thread_id not in saved:
+            await self._resume_repo.mark(
+                thread_id, reason=RESERVED_RESTART_REASON, resume_prompt=self._resume_prompt
+            )
+            saved.append(thread_id)
+        return saved
+
+    async def _forget(self, thread_ids: list[int]) -> None:
+        if self._resume_repo is None:
+            return
+        for thread_id in thread_ids:
+            try:
+                await self._resume_repo.delete_by_thread(thread_id)
+            except Exception:
+                logger.warning("Could not drop saved run of thread %d", thread_id, exc_info=True)
 
 
 # ---------------------------------------------------------------------------

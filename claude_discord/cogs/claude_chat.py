@@ -15,8 +15,8 @@ import contextlib
 import logging
 import os
 import tempfile
-from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
+from collections.abc import Awaitable, Callable, Coroutine
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord import app_commands
@@ -1290,16 +1290,23 @@ class ClaudeChatCog(commands.Cog):
             try:
                 # Post directly into the existing thread — no new thread needed
                 seed_message = await thread.send(f"🔄 **Bot restarted.**\n{resume_prompt}")
-                asyncio.create_task(
+                self._spawn_background(
                     self._run_claude(
                         seed_message,
                         thread,
                         resume_prompt,
                         session_id=entry.session_id,
+                        chat_only=(thread.parent_id or 0) in self._chat_only_channel_ids,
                     )
                 )
             except Exception:
                 logger.error("Failed to resume session in thread %d", thread_id, exc_info=True)
+
+    def _spawn_background(self, coro: Coroutine[Any, Any, None]) -> None:
+        """Run *coro* as a task the cog keeps alive (the loop holds only weak refs)."""
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     async def _replay_queued_run(self, thread_id: int, prompt: str) -> None:
         """Run a turn that was queued when the bot restarted.
@@ -1329,13 +1336,15 @@ class ClaudeChatCog(commands.Cog):
             if record is not None and session_id:
                 session_id = await self._session_id_for_current_backend(thread, record)
             logger.info("Replaying queued run in thread %d", thread.id)
-            asyncio.create_task(
+            self._spawn_background(
                 self._run_claude(
                     notice,
                     thread,
                     prompt,
                     session_id=session_id,
                     working_dir_override=record.working_dir if record else None,
+                    # Keep the channel's chat-only display, as a live reply would.
+                    chat_only=(thread.parent_id or 0) in self._chat_only_channel_ids,
                 )
             )
         except Exception:

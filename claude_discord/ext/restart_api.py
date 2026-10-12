@@ -1,10 +1,11 @@
 """``/api/restart`` — reserve, inspect and cancel a restart (see :mod:`..restart_reservation`).
 
-- ``POST /api/restart``: body ``{"reason": "...", "requested_by": "...",
-  "resume_thread_id": N, "resume_prompt": "..."}`` (all optional; the resume pair
-  continues that thread after the restart). Holds the slot queue and restarts
-  once nothing is running. 202 when reserved, 200 with the pending reservation
-  when one already exists, 503 when no session limit is configured.
+- ``POST /api/restart``: holds the slot queue and restarts once nothing is
+  running. Optional body fields: ``reason``, ``requested_by``,
+  ``resume_thread_id`` + ``resume_prompt`` (continue that thread after the
+  restart) and ``max_wait_seconds`` (give up when the running sessions take
+  longer). 202 when reserved, 200 with the pending reservation when one already
+  exists, 400 bad body, 503 when no session limit is configured.
 - ``GET /api/restart``: the reservation's state and the running/waiting counts.
 - ``DELETE /api/restart``: cancel; the queue resumes. 200, 404 when nothing is
   reserved, 409 when the restart is already under way.
@@ -18,11 +19,9 @@ from typing import Any
 from aiohttp import web
 
 from ..restart_reservation import (
-    RESERVED_RESTART_REASON,
     RestartReservation,
     build_restart_action,
     get_restart_reservation,
-    persist_queued_runs,
     set_restart_reservation,
 )
 from ..session_slots import get_session_slots
@@ -39,21 +38,9 @@ def _reservation_for(bot: Any, resume_repo: Any) -> RestartReservation | None:
     slots = get_session_slots()
     if slots is None:
         return None
-
-    async def _persist() -> int:
-        written = await persist_queued_runs(slots, resume_repo)
-        if resume_repo is not None and created.resume_thread_id is not None:
-            await resume_repo.mark(
-                created.resume_thread_id,
-                reason=RESERVED_RESTART_REASON,
-                resume_prompt=created.resume_prompt,
-            )
-            written += 1
-        return written
-
-    created = RestartReservation(slots, build_restart_action(bot), persist=_persist)
-    set_restart_reservation(created)
-    return created
+    reservation = RestartReservation(slots, build_restart_action(bot), resume_repo=resume_repo)
+    set_restart_reservation(reservation)
+    return reservation
 
 
 def _no_limit() -> web.Response:
@@ -80,6 +67,16 @@ async def handle_reserve_restart(request: web.Request, bot: Any, resume_repo: An
         except (TypeError, ValueError):
             return web.json_response({"error": "resume_thread_id must be an integer"}, status=400)
     resume_prompt = str(body.get("resume_prompt") or "")[:4000] or None
+    max_wait: float | None = None
+    if body.get("max_wait_seconds") not in (None, ""):
+        try:
+            max_wait = float(body["max_wait_seconds"])
+        except (TypeError, ValueError):
+            max_wait = -1.0
+        if max_wait <= 0:
+            return web.json_response(
+                {"error": "max_wait_seconds must be a positive number"}, status=400
+            )
 
     reservation = _reservation_for(bot, resume_repo)
     if reservation is None:
@@ -89,6 +86,7 @@ async def handle_reserve_restart(request: web.Request, bot: Any, resume_repo: An
         reason=reason,
         resume_thread_id=resume_thread_id,
         resume_prompt=resume_prompt,
+        max_wait_seconds=max_wait,
     )
     return web.json_response(
         {"status": "reserved" if created else "already_reserved", **reservation.status()},

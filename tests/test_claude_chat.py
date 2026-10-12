@@ -2447,6 +2447,7 @@ class TestQueuedRunsAcrossRestart:
         resume_repo.delete = AsyncMock()
         thread = MagicMock(spec=discord.Thread)
         thread.id = 555
+        thread.parent_id = 900
         notice = MagicMock()
         thread.send = AsyncMock(return_value=notice)
         bot = MagicMock(spec=["get_channel", "fetch_channel"])
@@ -2454,7 +2455,13 @@ class TestQueuedRunsAcrossRestart:
         record = MagicMock(session_id=None, working_dir="/w")
         repo = MagicMock()
         repo.get = AsyncMock(return_value=record)
-        cog = ClaudeChatCog(bot=bot, repo=repo, runner=MagicMock(), resume_repo=resume_repo)
+        cog = ClaudeChatCog(
+            bot=bot,
+            repo=repo,
+            runner=MagicMock(),
+            resume_repo=resume_repo,
+            chat_only_channel_ids={900},
+        )
 
         run = AsyncMock()
         with patch.object(cog, "_run_claude", new=run):
@@ -2466,6 +2473,7 @@ class TestQueuedRunsAcrossRestart:
         run.assert_awaited_once()
         assert run.call_args.args == (notice, thread, "please deploy")
         assert run.call_args.kwargs["working_dir_override"] == "/w"
+        assert run.call_args.kwargs["chat_only"] is True
 
     @pytest.mark.asyncio
     async def test_on_ready_routes_console_conversations_to_the_console(self) -> None:
