@@ -10,6 +10,7 @@ const HISTORY = 100;
 
 const I18N = {
   en: {
+    focus: "🎯 Focus", focus_first: "Do this first", focus_next: "Then", ai_guess: "AI guess", ai_set: "set by AI",
     me: "Inbox", ai: "Running", todo: "To do", idle: "Idle", recent: "Recent", tree: "Tree", snoozed: "Snoozed", done: "Done",
     filter: "Filter…", capture: "+ Write down work, press Enter (c) — Shift+Enter for a note line", capture_ai: "+ Write down work, Enter hands it to AI (c) — Shift+Enter for a note line",
     autostart: "AI starts right away", empty: "Nothing here. 🎉",
@@ -35,9 +36,10 @@ const I18N = {
           error: "failed", done: "done", someday: "someday", todo: "to do", idle: "idle" },
     help: [["j / k", "next / previous"], ["Enter", "open"], ["Esc", "close"], ["e", "done"],
            ["1–4", "priority P0–P3"], ["s", "snooze until tomorrow"], ["c", "write down work"],
-           ["r", "reply"], ["/", "filter"], ["g then i/a/u/t/w/d", "go to a view"], ["?", "this help"]],
+           ["r", "reply"], ["/", "filter"], ["g then f/i/a/u/t/w/d", "go to a view"], ["?", "this help"]],
   },
   ja: {
+    focus: "🎯 今やること", focus_first: "まずこれ", focus_next: "次に", ai_guess: "AIの見立て", ai_set: "AIが推定",
     me: "受信箱", ai: "実行中", todo: "やること", idle: "止まっている", recent: "更新順", tree: "ツリー", snoozed: "スヌーズ中", done: "完了",
     filter: "絞り込み…", capture: "＋ 思いついた仕事を書いて Enter（c）。Shift+Enter で改行してメモ", capture_ai: "＋ 思いついた仕事を書いて Enter → AIが着手（c）。Shift+Enter で改行してメモ",
     autostart: "AIがすぐ着手", empty: "ここには何もありません 🎉",
@@ -63,7 +65,7 @@ const I18N = {
           error: "失敗", done: "完了", someday: "いつか", todo: "やること", idle: "止まっている" },
     help: [["j / k", "次 / 前"], ["Enter", "開く"], ["Esc", "閉じる"], ["e", "完了"],
            ["1〜4", "優先度 P0〜P3"], ["s", "明日までスヌーズ"], ["c", "仕事を書き留める"],
-           ["r", "返信"], ["/", "絞り込み"], ["g → i/a/u/t/w/d", "画面を移動"], ["?", "このヘルプ"]],
+           ["r", "返信"], ["/", "絞り込み"], ["g → f/i/a/u/t/w/d", "画面を移動"], ["?", "このヘルプ"]],
   },
 };
 // ?lang=ja|en pins the language; otherwise the browser's preference decides.
@@ -80,13 +82,13 @@ document.documentElement.lang = LANG;
 const STATUS_ICON = { running: "⚙️", waiting: "❓", review: "👀", action: "📋", error: "⚠️",
   done: "✅", someday: "💤", todo: "○", idle: "·" };
 const VIEWS = [
-  { key: "me", hot: true }, { key: "ai" }, { key: "todo" }, { key: "idle" },
+  { key: "focus", hot: true }, { key: "me", hot: true }, { key: "ai" }, { key: "todo" }, { key: "idle" },
   { sep: true }, { key: "recent" }, { key: "tree" }, { key: "snoozed" }, { key: "done" },
 ];
-const VIEW_KEYS = { i: "me", a: "ai", u: "recent", t: "tree", w: "todo", d: "done" };
+const VIEW_KEYS = { f: "focus", i: "me", a: "ai", u: "recent", t: "tree", w: "todo", d: "done" };
 
 const state = {
-  items: [], byId: new Map(), slots: {}, view: localStorage.getItem("view") || "me",
+  items: [], byId: new Map(), slots: {}, view: localStorage.getItem("view") || "focus",
   selected: null, open: null, filter: "", collapsed: new Set(JSON.parse(localStorage.getItem("collapsed") || "[]")),
   messages: [], lastSync: null, pendingG: false, drafts: {},
   // The relay's own tool calls, status lines and automatic prompts stay hidden unless asked for.
@@ -199,6 +201,7 @@ function visibleRows() {
   const items = state.items.filter(matches);
   if (state.view === "tree") return treeRows(items.filter((i) => i.bucket !== "done"));
   if (state.view === "recent") return window.ConsoleRecent.rows(items);
+  if (state.view === "focus") return window.ConsoleFocus.rows(items);
   return items.filter((i) => i.bucket === state.view).map((item) => ({ item, depth: 0 }));
 }
 function treeRows(items) {
@@ -246,6 +249,7 @@ function renderNav() {
   const counts = {};
   for (const i of state.items) counts[i.bucket] = (counts[i.bucket] || 0) + 1;
   counts.tree = state.items.filter((i) => i.bucket !== "done").length;
+  counts.focus = window.ConsoleFocus.count(state.items);
   const nav = $("nav");
   nav.replaceChildren(
     h("div", { class: "brand", text: "Relay Console" }),
@@ -294,8 +298,11 @@ function rowNode({ item, depth, children }) {
   if (item.queued) meta.push(h("span", { text: T.queued }));
   if (item.last_activity_at) meta.push(h("span", { text: rel(item.last_activity_at) }));
   if (item.working_dir) meta.push(h("span", { text: item.working_dir.split("/").slice(-1)[0] }));
-  const side = [h("span", { class: `pri p${item.priority}`, text: `P${item.priority}` })];
-  if (item.due_at) side.push(h("span", { class: "due" + (item.overdue ? " over" : ""), text: shortDate(item.due_at) }));
+  // A value the model filled in is marked, so a guess never passes for a decision.
+  const side = [h("span", { class: `pri p${item.priority}` + (item.priority_by === "ai" ? " ai" : ""),
+    title: item.priority_by === "ai" ? T.ai_set : null, text: `P${item.priority}` })];
+  if (item.due_at) side.push(h("span", { class: "due" + (item.overdue ? " over" : "") + (item.due_by === "ai" ? " ai" : ""),
+    title: item.due_by === "ai" ? T.ai_set : null, text: shortDate(item.due_at) }));
   const twisty = children
     ? h("span", { class: "tw", onclick: (e) => { e.stopPropagation(); toggleCollapse(item.id); },
         text: state.collapsed.has(item.id) ? "▸" : "▾" })
@@ -309,7 +316,8 @@ function rowNode({ item, depth, children }) {
     h("span", { class: "st", title: T.st[item.status], text: STATUS_ICON[item.status] || "·" }),
     h("div", { class: "main", style: depth ? { paddingLeft: `${depth * 18}px` } : null },
       h("div", { class: "title" }, twisty, item.title || item.thread_name || item.id),
-      h("div", { class: "meta" }, ...meta)),
+      h("div", { class: "meta" }, ...meta),
+      state.view === "focus" ? window.ConsoleFocus.note(item) : null),
     h("div", { class: "side" }, ...side),
   );
 }
@@ -411,6 +419,7 @@ function drawerParts(item) {
     h("div", { class: "controls" },
       h("label", {}, T.priority, pri), h("label", {}, T.due, due),
       h("label", {}, T.project, project), h("label", {}, T.parent, parent)),
+    window.ConsoleFocus.drawerLine(item),
     h("div", { class: "controls" }, h("span", { class: "dim", text: T.snooze }), ...snooze),
     h("div", { class: "controls" }, ...actions),
   ];

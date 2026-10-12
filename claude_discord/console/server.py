@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -50,6 +51,14 @@ from .passkey_store import PasskeyStore
 from .passkeys import PasskeyService
 from .ratelimit import RateLimiter
 from .surface import apply_outcome
+from .triage import DEFAULT_MODEL as TRIAGE_DEFAULT_MODEL
+from .triage import INTERVAL_SECONDS as TRIAGE_INTERVAL_SECONDS
+from .triage import (
+    Triager,
+    TriageRepository,
+    apply_triage,
+    ask_model,
+)
 from .uploads import (
     MAX_IMAGES_PER_REPLY,
     MAX_UPLOAD_BYTES,
@@ -83,6 +92,7 @@ CSRF_HEADER = "X-Console-Request"
 MAX_REPLY_CHARS = 4000
 MAX_HISTORY = 100
 DEFAULT_HISTORY = 50
+MAX_TRIAGE_MESSAGES = 20
 #: How long the archived-thread listing is reused. Listing archives is a REST
 #: call per channel; the board is polled every few seconds.
 ARCHIVE_CACHE_SECONDS = 120.0
@@ -146,6 +156,7 @@ class ConsoleServer:
         store: PasskeyStore | None = None,
         skills: SkillLoader | None = None,
         codex_compactor: Callable[..., Awaitable[None]] | None = None,
+        triage: TriageRepository | None = None,
     ) -> None:
         self.api = api_server
         #: Lists skills per backend for slash-command autocomplete; None reads the disk.
@@ -155,6 +166,9 @@ class ConsoleServer:
         #: Threads being compacted; a reply waits instead of racing the rewrite.
         self._compacting: set[int] = set()
         self.work_repo = work_repo
+        #: The model's priority and deadline guesses; None turns automatic triage off.
+        self.triage = triage
+        self._triager: Triager | None = None
         #: The console's own conversations. Work started here lives in them,
         #: not in a chat thread; chat threads are still shown alongside.
         self.conversations = conversations
@@ -257,7 +271,19 @@ class ConsoleServer:
         await site.start()
         logger.info("Relay Console started: http://%s:%d", self.host, self.port)
 
+    def start_triage(self, ask: Callable[[str], Awaitable[str | None]], *, model: str) -> None:
+        """Triage open items in the background with *ask* (one model call per item)."""
+        if self.triage is None or self._triager is not None:
+            return
+        self._triager = Triager(
+            self.triage, ask=ask, read_messages=self.triage_messages, model=model
+        )
+        self._triager.start(self._board_items, TRIAGE_INTERVAL_SECONDS)
+        logger.info("Relay Console: automatic triage on (%s)", model)
+
     async def stop(self) -> None:
+        if self._triager is not None:
+            await self._triager.stop()
         if self._runner:
             await self._runner.cleanup()
 
@@ -300,6 +326,22 @@ class ConsoleServer:
             return {}
 
     async def board(self, request: web.Request) -> web.Response:
+        items = await self._board_items()
+        if self.triage is not None:
+            try:
+                items = apply_triage(items, await self.triage.all())
+            except Exception:
+                # Guesses are garnish; the board still answers without them.
+                logger.exception("console: could not read triage")
+        return web.json_response(
+            {
+                "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "items": items,
+                "slots": self._slots(),
+            }
+        )
+
+    async def _board_items(self) -> list[dict[str, Any]]:
         threads = await self._thread_snapshots() + await self._conversation_snapshots()
         overlays = await self.work_repo.list_all()
         lineage = await self._lineage()
@@ -315,13 +357,27 @@ class ConsoleServer:
         queued = self._queued_thread_ids()
         for item in items:
             item["queued"] = item["thread_id"] in queued
-        return web.json_response(
-            {
-                "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "items": items,
-                "slots": self._slots(),
-            }
-        )
+        return items
+
+    async def triage_messages(self, item: dict[str, Any]) -> list[tuple[str, str]]:
+        """What the triage model reads for *item*: its human and agent messages."""
+        if not item.get("thread_id"):
+            return [("note", item.get("note") or "")]
+        limit = MAX_TRIAGE_MESSAGES
+        key = await self._conversation_key(item["id"])
+        if key is not None and self.conversations is not None:
+            raw = [with_kind(m.as_dict()) for m in await self.conversations.history(key, limit)]
+        else:
+            thread, err = await self._thread_for(item["id"])
+            if err:
+                return []
+            history = [m async for m in thread.history(limit=limit)]
+            raw = [serialize_message(m) for m in reversed(history)]
+        return [
+            ("person" if m["kind"] == "human" else "agent", str(m.get("content") or ""))
+            for m in raw
+            if m["kind"] != "activity"
+        ]
 
     async def usage_read(self, request: web.Request) -> web.Response:
         if self.usage is None:
@@ -426,6 +482,9 @@ class ConsoleServer:
             )
         except WorkItemError as exc:
             return _error(str(exc), 400)
+        if self.triage is not None and ("priority" in body or "due_at" in body):
+            # What a human chose is no longer the model's to guess.
+            await self.triage.pin(item.id, priority="priority" in body, due="due_at" in body)
         return web.json_response({"item": item.as_dict()})
 
     async def done(self, request: web.Request) -> web.Response:
@@ -931,6 +990,10 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
     await store.init_db()
     passkeys = PasskeyService(store) if config.passkeys else None
     oidc = _oidc_client(config)
+    triage_command = _triage_command()
+    triage = TriageRepository(api_server.session_repo.db_path) if triage_command else None
+    if triage is not None:
+        await triage.init_db()
     console = ConsoleServer(
         api_server,
         work_repo,
@@ -943,8 +1006,16 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
         passkeys=passkeys,
         oidc=oidc,
         store=store,
+        triage=triage,
     )
     await console.start()
+    if triage_command:
+        model = (os.getenv("CCDB_CONSOLE_TRIAGE_MODEL") or "").strip() or TRIAGE_DEFAULT_MODEL
+
+        async def ask(prompt: str) -> str | None:
+            return await ask_model(prompt, command=triage_command, model=model)
+
+        console.start_triage(ask, model=model)
     if passkeys is not None:
         await passkeys.open_enrollment(force=os.getenv("CCDB_CONSOLE_ENROLL") == "1")
     return console
@@ -1001,6 +1072,17 @@ async def _build_session_host(
     # The wait watcher resumes a conversation after CI; it finds this one here.
     bot.console_sessions = host  # type: ignore[attr-defined]
     return host
+
+
+def _triage_command() -> str | None:
+    """The Claude CLI for automatic triage, or None when it is off or not installed.
+
+    On by default: ``CCDB_CONSOLE_TRIAGE=0`` turns it off.
+    """
+    if (os.getenv("CCDB_CONSOLE_TRIAGE") or "1").strip().lower() in ("0", "false", "off", "no"):
+        return None
+    command = (os.getenv("CCDB_CONSOLE_TRIAGE_COMMAND") or "claude").strip()
+    return command if shutil.which(command) else None
 
 
 def _oidc_client(config: ConsoleAuthConfig) -> OidcClient | None:

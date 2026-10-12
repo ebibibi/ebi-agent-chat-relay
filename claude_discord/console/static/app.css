@@ -96,6 +96,13 @@ button { cursor: pointer; }
 .pri.p1 { background: color-mix(in srgb, var(--p1) 25%, transparent); color: var(--p1); }
 .pri.p2 { background: color-mix(in srgb, var(--p2) 18%, transparent); color: var(--p2); }
 .pri.p3 { background: color-mix(in srgb, var(--p3) 25%, transparent); color: var(--dim); }
+/* Filled in by the triage model, not set by a person: outlined instead of solid. */
+.pri.ai { background: transparent; outline: 1px dashed currentColor; outline-offset: -1px; }
+.due.ai { font-style: italic; }
+.ai-note { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; margin-top: 2px; }
+.ai-note .next { color: var(--text); }
+.ai-note .why { color: var(--dim); }
+.ai-line { font-size: 12px; }
 .due.over { color: var(--err); font-weight: 600; }
 .tag { border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
 .tag.where { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }

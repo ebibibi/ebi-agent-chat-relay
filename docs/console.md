@@ -13,6 +13,7 @@ See [ADR-0010](adr/0010-add-an-api-first-console-on-its-own-listener.md) and, fo
 
 | View | Shows |
 |---|---|
+| **Focus** (default) | One ranking of what needs you now, across every list: whose move it is, then priority, then how close the deadline is. The top item stands alone under "Do this first"; each row shows the next step and why it ranks there. Work an agent is doing, finished, parked and snoozed items are left out. Reachable with `g f` |
 | **Inbox** | The ball is on you: ❓ waiting for an answer, 👀 something to review, 📋 a task only you can do, ⚠️ a failed turn |
 | **Running** | A turn is in flight (or queued for a slot) |
 | **To do** | Work you wrote down that no agent has yet |
@@ -20,6 +21,30 @@ See [ADR-0010](adr/0010-add-an-api-first-console-on-its-own-listener.md) and, fo
 | **Recent** | Everything, finished included, newest activity first under a heading per day. Each row names the list it now lives in, so you can find where a thread went |
 | **Tree** | Everything open, grouped by project, children under their parent |
 | **Snoozed / Done** | Hidden until the snooze ends / finished |
+
+## Automatic triage
+
+Nobody fills in priority and due date for every thread, so the console asks a fast model
+(Haiku by default) to. A background pass every minute picks up to six open items with new
+activity, gives the model the title and the latest human and agent messages, and stores its
+answer: a priority (P0–P3), a deadline if the conversation names one, the reason, and your next
+step. The model runs as a one-shot `claude -p` with tools, hooks and settings off, in a scratch
+directory, without relay or console credentials in its environment.
+
+A guess never overrides a person:
+
+- A priority or due date you set wins. Setting one from the console pins it, so later guesses
+  leave it alone. A priority other than P2 that existed before triage counts as yours.
+- A filled-in value is drawn outlined (priority) or in italics (due date), and the detail
+  drawer shows the model's full guess under "🤖 AI guess", including fields you overrode.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `CCDB_CONSOLE_TRIAGE` | `1` | `0` turns automatic triage off |
+| `CCDB_CONSOLE_TRIAGE_MODEL` | `haiku` | Model alias or id passed to `claude --model` |
+| `CCDB_CONSOLE_TRIAGE_COMMAND` | `claude` | The Claude CLI; triage stays off when it is not on `PATH` |
+
+Each triage is one model call, billed like any other `claude -p` call on that machine.
 
 ## Reading a thread
 
