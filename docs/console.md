@@ -18,7 +18,6 @@ See [ADR-0010](adr/0010-add-an-api-first-console-on-its-own-listener.md) and, fo
 | **Running** | A turn is in flight (or queued for a slot) |
 | **To do** | Work you wrote down that no agent has yet |
 | **Idle** | The agent stopped without saying whose move it is |
-| **Recent** | Everything, finished included, newest activity first under a heading per day. Each row names the list it now lives in, so you can find where a thread went |
 | **Tree** | Everything open, grouped by project, children under their parent |
 | **Recent** | Every item, finished ones included, newest activity first, grouped by day. Each row names the list it lives in now, so a thread that moved from Running to Done is still easy to find |
 | **Snoozed / Done** | Hidden until the snooze ends / finished |
