@@ -130,6 +130,16 @@ _HELP_CATEGORY: dict[str, str | None] = {
 _HELP_SECTION_ORDER: list[str] = ["📌 Session", "🤖 Model", "⚡ Effort", "🔧 Advanced"]
 
 
+_DEFAULT_RESUME_PROMPT = (
+    "The bot restarted. "
+    "Please report what you were working on before resuming. "
+    "⚠️ Context may have been compressed, which means the approval status of "
+    "planned tasks could be lost. "
+    "Before making any code changes, commits, or PRs, "
+    "re-confirm with the user that they want you to proceed."
+)
+
+
 class ClaudeChatCog(commands.Cog):
     """Cog that handles Claude Code conversations via Discord threads."""
 
@@ -1250,6 +1260,9 @@ class ClaudeChatCog(commands.Cog):
                 continue
 
             thread_id = entry.thread_id
+            resume_prompt = entry.resume_prompt or _DEFAULT_RESUME_PROMPT
+            if await self._resume_in_console(thread_id, resume_prompt):
+                continue
             try:
                 raw = self.bot.get_channel(thread_id)
                 if raw is None:
@@ -1272,15 +1285,6 @@ class ClaudeChatCog(commands.Cog):
                 )
                 continue
 
-            resume_prompt = entry.resume_prompt or (
-                "The bot restarted. "
-                "Please report what you were working on before resuming. "
-                "⚠️ Context may have been compressed, which means the approval status of "
-                "planned tasks could be lost. "
-                "Before making any code changes, commits, or PRs, "
-                "re-confirm with the user that they want you to proceed."
-            )
-
             logger.info(
                 "Resuming session in thread %d (session_id=%s, reason=%s)",
                 thread_id,
@@ -1301,6 +1305,26 @@ class ClaudeChatCog(commands.Cog):
                 )
             except Exception:
                 logger.error("Failed to resume session in thread %d", thread_id, exc_info=True)
+
+    async def _resume_in_console(self, thread_id: int, prompt: str) -> bool:
+        """Resume a Relay Console conversation, which has no Discord thread to fetch.
+
+        Returns False when the console does not own *thread_id*, so the caller
+        goes on to resume it in Discord.
+        """
+        from ..console.host import ConsoleSessionHost
+
+        console = getattr(self.bot, "console_sessions", None)
+        if not isinstance(console, ConsoleSessionHost):
+            return False
+        try:
+            if not await console.owns(thread_id):
+                return False
+            logger.info("Resuming console conversation %d after restart", thread_id)
+            await console.reply(thread_id, f"🔄 Bot restarted.\n{prompt}", "restart")
+        except Exception:
+            logger.error("Failed to resume console conversation %d", thread_id, exc_info=True)
+        return True
 
     def _spawn_background(self, coro: Coroutine[Any, Any, None]) -> None:
         """Run *coro* as a task the cog keeps alive (the loop holds only weak refs)."""

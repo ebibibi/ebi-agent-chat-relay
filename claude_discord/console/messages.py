@@ -74,6 +74,8 @@ def _attachments(message: Any) -> list[dict[str, object]]:
             "filename": str(getattr(a, "filename", "") or "file"),
             "url": str(getattr(a, "url", "") or ""),
             "size": getattr(a, "size", None),
+            # Lets the client show images inline; None when Discord did not say.
+            "content_type": getattr(a, "content_type", None),
         }
         for a in getattr(message, "attachments", None) or []
     ]

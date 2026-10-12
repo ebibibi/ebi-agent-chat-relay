@@ -5,44 +5,67 @@
 
 const API = "/console/api";
 const POLL_MS = 8000;
+const POLL_HIDDEN_MS = 30000;
 const HISTORY = 100;
 
 const I18N = {
   en: {
-    me: "Inbox", ai: "Running", todo: "To do", idle: "Idle", tree: "Tree", recent: "Recent", snoozed: "Snoozed", done: "Done",
-    today: "Today", yesterday: "Yesterday", undated: "No activity yet",
+    focus: "🎯 Focus", focus_first: "Do this first", focus_next: "Then", focus_waiting: "⏳ Waiting", focus_elsewhere: "📍 Somewhere else", place_new: "New place", add: "Add", delete: "Delete", place_manage: "Manage places", place_hint: "Where this can only be done", place_count: (n) => `${n} open`, place_unlisted: "in use, not listed", place_unlisted_hint: "Used on items (often guessed by AI) but not on your list", place_manage_hint: "Renaming or deleting a place changes it on every item. A deleted place leaves its items doable anywhere.", place_none: "No places yet.", place_delete_confirm: (n, c) => `Remove "${n}" from ${c} open item(s)?`, here: "I am at:", anywhere: "Anywhere", place: "Place", place_ph: "anywhere", no_due: "No due date", due_over: "overdue", due_in: (x) => `in ${x}`, u_min: "m", u_hour: "h", u_day: "d", focus_ready: "can do now", focus_from: (d) => `from ${d}`, ai_guess: "AI guess", ai_set: "set by AI",
+    me: "Inbox", ai: "Running", todo: "To do", idle: "Idle", recent: "Recent", tree: "Tree", snoozed: "Snoozed", done: "Done",
     filter: "Filter…", capture: "+ Write down work, press Enter (c) — Shift+Enter for a note line", capture_ai: "+ Write down work, Enter hands it to AI (c) — Shift+Enter for a note line",
     autostart: "AI starts right away", empty: "Nothing here. 🎉",
-    activity: (n) => `Show relay activity (${n})`, no_messages: "No messages yet.",
+    activity: (n) => `⚙ Activity (${n})`, details: "Details",
+    activity_hint: "Show or hide tool calls, status lines and automatic prompts",
+    notify_on: "🔔 Notifications on", notify_off: "🔕 Notifications off",
+    jump: "↓ Latest", jump_new: (n) => `↓ ${n} new`, no_messages: "No messages yet.",
     slots: (r, m, w) => `Slots ${r}/${m ?? "∞"}` + (w ? ` · ${w} queued` : ""),
     priority: "Priority", due: "Due", snooze: "Snooze", project: "Project", parent: "Under",
-    none: "—", done_btn: "Done (e)", reopen: "Reopen", open_chat: "Open in chat", start: "Hand to AI",
-    reply_ph: "Reply… (Ctrl+Enter to send)", send: "Send", hour: "1h", tomorrow: "Tomorrow", week: "Next week",
+    none: "—", reopen: "Reopen", finish: "Done", finish_confirm: "Click again to finish",
+    finish_hint: "Mark this thread done (click twice; shortcut e). Undo right after, or Reopen any time.",
+    reopen_hint: "Bring this thread back from Done", finished: "Done", undo: "Undo", reopened: "Reopened", open_chat: "Open in chat", start: "Hand to AI",
+    reply_ph: "Reply… (Ctrl+Enter to send, paste or drop images)",
+    paste_type: "Only PNG, JPEG, GIF and WebP images can be attached", paste_failed: "Could not attach the image",
+    paste_wait: "An image is still uploading",
+    slash_hint: "Type / for commands", compacting: "Compacting the conversation… (up to a few minutes)", slash_desc: { backend: "Switch the AI backend for this conversation",
+      model: "Choose the model for the current backend", effort: "Set the reasoning effort",
+      compact: "Summarize the conversation to free up context", context: "Show context window usage", cost: "Show token usage and cost" }, send: "Send", hour: "1h", tomorrow: "Tomorrow", week: "Next week",
     clear: "Clear", loading: "Loading…", sent: "Sent — the agent will pick it up", started: "Started", captured: "Added to To do",
+    today: "Today", yesterday: "Yesterday",
     saved: "Saved", offline: "offline", updated: "updated", no_project: "No project", queued: "queued",
     st: { running: "running", waiting: "waiting for you", review: "to review", action: "your task",
           error: "failed", done: "done", someday: "someday", todo: "to do", idle: "idle" },
     help: [["j / k", "next / previous"], ["Enter", "open"], ["Esc", "close"], ["e", "done"],
            ["1–4", "priority P0–P3"], ["s", "snooze until tomorrow"], ["c", "write down work"],
-           ["r", "reply"], ["/", "filter"], ["g then i/a/t/w/u/d", "go to a view"], ["?", "this help"]],
+           ["r", "reply"], ["/", "filter"], ["g then f/i/a/u/t/w/d", "go to a view"], ["?", "this help"]],
   },
   ja: {
-    me: "受信箱", ai: "実行中", todo: "やること", idle: "止まっている", tree: "ツリー", recent: "最近", snoozed: "スヌーズ中", done: "完了",
-    today: "今日", yesterday: "昨日", undated: "まだ動きなし",
+    focus: "🎯 今やること", focus_first: "まずこれ", focus_next: "次に", focus_waiting: "⏳ 待ち", focus_elsewhere: "📍 別の場所でやること", place_new: "新しい場所", add: "追加", delete: "削除", place_manage: "場所の管理", place_hint: "ここでしかできない場所・端末", place_count: (n) => `未完了 ${n}件`, place_unlisted: "未登録", place_unlisted_hint: "スレッドで使われているが一覧にない場所（多くはAIの推定）", place_manage_hint: "名前の変更・削除はすべてのスレッドに反映されます。削除した場所のスレッドは「どこでも」になります。", place_none: "まだ場所はありません。", place_delete_confirm: (n, c) => `「${n}」を未完了の ${c} 件から外しますか？`, here: "いまいる場所：", anywhere: "どこでも", place: "場所", place_ph: "どこでも", no_due: "期限なし", due_over: "超過", due_in: (x) => `あと${x}`, u_min: "分", u_hour: "時間", u_day: "日", focus_ready: "今すぐできる", focus_from: (d) => `${d}〜`, ai_guess: "AIの見立て", ai_set: "AIが推定",
+    me: "受信箱", ai: "実行中", todo: "やること", idle: "止まっている", recent: "更新順", tree: "ツリー", snoozed: "スヌーズ中", done: "完了",
     filter: "絞り込み…", capture: "＋ 思いついた仕事を書いて Enter（c）。Shift+Enter で改行してメモ", capture_ai: "＋ 思いついた仕事を書いて Enter → AIが着手（c）。Shift+Enter で改行してメモ",
     autostart: "AIがすぐ着手", empty: "ここには何もありません 🎉",
-    activity: (n) => `内部の動きも表示（${n}件）`, no_messages: "まだメッセージはありません",
+    activity: (n) => `⚙ 内部の動き（${n}）`, details: "詳細",
+    activity_hint: "ツール実行・状態表示・自動プロンプトの表示／非表示",
+    notify_on: "🔔 通知オン", notify_off: "🔕 通知オフ",
+    jump: "↓ 最新へ", jump_new: (n) => `↓ 新着 ${n}件`, no_messages: "まだメッセージはありません",
     slots: (r, m, w) => `枠 ${r}/${m ?? "∞"}` + (w ? `・待ち ${w}` : ""),
     priority: "優先度", due: "期限", snooze: "スヌーズ", project: "案件", parent: "親",
-    none: "なし", done_btn: "完了（e）", reopen: "戻す", open_chat: "チャットで開く", start: "AIに頼む",
-    reply_ph: "返信…（Ctrl+Enter で送信）", send: "送信", hour: "1時間", tomorrow: "明日", week: "来週",
+    none: "なし", reopen: "戻す", finish: "完了", finish_confirm: "もう一度押すと完了",
+    finish_hint: "このスレッドを完了にする（2回押す。ショートカット e）。直後なら「元に戻す」、あとからでも「戻す」で復活できます",
+    reopen_hint: "完了から戻す", finished: "完了にしました", undo: "元に戻す", reopened: "戻しました", open_chat: "チャットで開く", start: "AIに頼む",
+    reply_ph: "返信…（Ctrl+Enter で送信。画像は貼り付け・ドロップで添付）",
+    paste_type: "添付できるのは PNG・JPEG・GIF・WebP の画像だけです", paste_failed: "画像を添付できませんでした",
+    paste_wait: "画像をアップロード中です",
+    slash_hint: "/ でコマンド", compacting: "会話を圧縮しています…（数分かかることがあります）", slash_desc: { backend: "この会話のAIバックエンドを切り替える",
+      model: "今のバックエンドのモデルを選ぶ", effort: "推論の強さ（effort）を設定する",
+      compact: "ここまでの会話を要約してコンテキストを空ける", context: "コンテキストの使用量を見る", cost: "トークン使用量と料金を見る" }, send: "送信", hour: "1時間", tomorrow: "明日", week: "来週",
     clear: "解除", loading: "読み込み中…", sent: "送りました。エージェントが拾います", started: "スレッドを開始しました", captured: "「やること」に追加しました",
+    today: "今日", yesterday: "昨日",
     saved: "保存しました", offline: "接続できません", updated: "更新", no_project: "案件なし", queued: "待ち",
     st: { running: "実行中", waiting: "あなたの返事待ち", review: "確認待ち", action: "あなたの作業",
           error: "失敗", done: "完了", someday: "いつか", todo: "やること", idle: "止まっている" },
     help: [["j / k", "次 / 前"], ["Enter", "開く"], ["Esc", "閉じる"], ["e", "完了"],
            ["1〜4", "優先度 P0〜P3"], ["s", "明日までスヌーズ"], ["c", "仕事を書き留める"],
-           ["r", "返信"], ["/", "絞り込み"], ["g → i/a/t/w/u/d", "画面を移動"], ["?", "このヘルプ"]],
+           ["r", "返信"], ["/", "絞り込み"], ["g → f/i/a/u/t/w/d", "画面を移動"], ["?", "このヘルプ"]],
   },
 };
 // ?lang=ja|en pins the language; otherwise the browser's preference decides.
@@ -59,17 +82,20 @@ document.documentElement.lang = LANG;
 const STATUS_ICON = { running: "⚙️", waiting: "❓", review: "👀", action: "📋", error: "⚠️",
   done: "✅", someday: "💤", todo: "○", idle: "·" };
 const VIEWS = [
-  { key: "me", hot: true }, { key: "ai" }, { key: "todo" }, { key: "idle" },
-  { sep: true }, { key: "tree" }, { key: "recent" }, { key: "snoozed" }, { key: "done" },
+  { key: "focus", hot: true }, { key: "me", hot: true }, { key: "ai" }, { key: "todo" }, { key: "idle" },
+  { sep: true }, { key: "recent" }, { key: "tree" }, { key: "snoozed" }, { key: "done" },
 ];
-const VIEW_KEYS = { i: "me", a: "ai", t: "tree", w: "todo", u: "recent", d: "done" };
+const VIEW_KEYS = { f: "focus", i: "me", a: "ai", u: "recent", t: "tree", w: "todo", d: "done" };
 
 const state = {
-  items: [], byId: new Map(), slots: {}, view: localStorage.getItem("view") || "me",
+  items: [], byId: new Map(), slots: {}, view: localStorage.getItem("view") || "focus",
   selected: null, open: null, filter: "", collapsed: new Set(JSON.parse(localStorage.getItem("collapsed") || "[]")),
   messages: [], lastSync: null, pendingG: false, drafts: {},
   // The relay's own tool calls, status lines and automatic prompts stay hidden unless asked for.
   showActivity: localStorage.getItem("showActivity") === "1",
+  // The triage fields (priority, due, project, …) stay folded away unless asked for.
+  drawerOpen: localStorage.getItem("drawerOpen") === "1",
+  unseen: 0,
 };
 
 // ---------------------------------------------------------------- dom helpers
@@ -119,11 +145,16 @@ async function refresh() {
     state.items = data.items;
     state.byId = new Map(data.items.map((i) => [i.id, i]));
     state.slots = data.slots || {};
+    state.places = data.places || [];
     state.lastSync = new Date();
     $("sync").className = "sync";
     $("sync").textContent = `${T.updated} ${state.lastSync.toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}`;
     if (state.open && !state.byId.has(state.open)) state.open = null;
+    // Whatever is on screen is being read.
+    if (state.open && !document.hidden) markSeen(state.open);
+    pruneSeen();
     render();
+    if (window.ConsoleNotify) window.ConsoleNotify.onBoard(data.items);
     const open = state.open && state.byId.get(state.open);
     if (open && open.thread_id && (open.running || open.queued)) loadMessages(open.id);
   } catch (err) {
@@ -148,6 +179,24 @@ function shortDate(iso) {
   return d.toLocaleDateString(LANG, { month: "numeric", day: "numeric" }) +
     (d.getHours() || d.getMinutes() ? " " + d.toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) : "");
 }
+// "Due 10/14 18:00 (in 2d)" on every open row, "No due date" when there is none, so the
+// list answers "when is it due?" without opening anything.
+function dueLeft(iso) {
+  const min = (new Date(iso).getTime() - Date.now()) / 60000;
+  if (min < 0) return T.due_over;
+  if (min < 60) return T.due_in(`${Math.max(1, Math.round(min))}${T.u_min}`);
+  if (min < 1440) return T.due_in(`${Math.round(min / 60)}${T.u_hour}`);
+  return T.due_in(`${Math.round(min / 1440)}${T.u_day}`);
+}
+function dueLabel(item) {
+  if (!item.due_at) {
+    return item.bucket === "done" ? null : h("span", { class: "due none", text: T.no_due });
+  }
+  const soon = !item.overdue && new Date(item.due_at).getTime() - Date.now() < 86400000;
+  return h("span", { class: "due" + (item.overdue ? " over" : soon ? " soon" : "") + (item.due_by === "ai" ? " ai" : ""),
+    title: item.due_by === "ai" ? T.ai_set : null,
+    text: `${T.due} ${shortDate(item.due_at)}` + (item.bucket === "done" ? "" : `（${dueLeft(item.due_at)}）`) });
+}
 function toLocalInput(iso) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -170,7 +219,8 @@ function matches(item) {
 function visibleRows() {
   const items = state.items.filter(matches);
   if (state.view === "tree") return treeRows(items.filter((i) => i.bucket !== "done"));
-  if (state.view === "recent") return recentRows(items);
+  if (state.view === "recent") return window.ConsoleRecent.rows(items);
+  if (state.view === "focus") return window.ConsoleFocus.rows(items);
   return items.filter((i) => i.bucket === state.view).map((item) => ({ item, depth: 0 }));
 }
 function treeRows(items) {
@@ -206,34 +256,6 @@ function treeRows(items) {
   return rows;
 }
 
-// Every item, finished ones included, newest activity first, under one heading per local day.
-// "Activity" is last_activity_at: the thread's last message, or a capture's last edit.
-// The board is already bounded server-side (open threads plus the newest archived ones), so no paging.
-function recentRows(items) {
-  const when = (i) => i.last_activity_at || i.created_at || "";
-  const sorted = [...items].sort((a, b) => (when(a) < when(b)) - (when(a) > when(b)));
-  const rows = [];
-  let current = null;
-  for (const item of sorted) {
-    const label = dayLabel(when(item));
-    if (label !== current) { rows.push({ group: label }); current = label; }
-    rows.push({ item, depth: 0 });
-  }
-  return rows;
-}
-function dayLabel(iso) {
-  if (!iso) return T.undated;
-  const d = new Date(iso);
-  const today = new Date();
-  const start = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  const days = Math.round((start(today) - start(d)) / 86400e3);
-  if (days === 0) return T.today;
-  if (days === 1) return T.yesterday;
-  const opts = { month: "short", day: "numeric", weekday: "short" };
-  if (d.getFullYear() !== today.getFullYear()) opts.year = "numeric";
-  return d.toLocaleDateString(LANG, opts);
-}
-
 // ---------------------------------------------------------------- render
 function render() {
   syncHash();
@@ -246,6 +268,7 @@ function renderNav() {
   const counts = {};
   for (const i of state.items) counts[i.bucket] = (counts[i.bucket] || 0) + 1;
   counts.tree = state.items.filter((i) => i.bucket !== "done").length;
+  counts.focus = window.ConsoleFocus.count(state.items);
   const nav = $("nav");
   nav.replaceChildren(
     h("div", { class: "brand", text: "Relay Console" }),
@@ -256,6 +279,9 @@ function renderNav() {
       class: "count" + (v.hot && counts[v.key] ? " hot" : ""), text: counts[v.key] || "",
     }))),
     h("div", { class: "slots", text: T.slots(state.slots.running ?? 0, state.slots.max, state.slots.waiting) }),
+    window.ConsoleNotify ? h("button", { class: "nav-notify" + (window.ConsoleNotify.isOn() ? " on" : ""),
+      onclick: () => window.ConsoleNotify.toggle() },
+      h("span", { text: window.ConsoleNotify.isOn() ? T.notify_on : T.notify_off })) : null,
     h("button", { class: "nav-auth", onclick: () => window.ConsoleAuth.showDevices() },
       h("span", { text: `🔑 ${window.ConsoleAuth.label}` })),
   );
@@ -270,6 +296,7 @@ function renderList() {
   const nodes = [];
   for (const row of rows) {
     if (row.group !== undefined) { nodes.push(h("li", { class: "group", text: row.group })); continue; }
+    if (row.node) { nodes.push(row.node); continue; }
     nodes.push(rowNode(row));
   }
   list.replaceChildren(...nodes);
@@ -282,45 +309,118 @@ function renderList() {
 
 function rowNode({ item, depth, children }) {
   const meta = [];
-  // Recent mixes every list, so each row says which one the item lives in now.
-  if (state.view === "recent") meta.push(h("span", { class: "tag where", text: T[item.bucket] || item.bucket }));
+  // In Recent, name the list the item lives in now, unless its status already says so.
+  if (state.view === "recent" && T[item.bucket] && T[item.bucket] !== T.st[item.status]) {
+    meta.push(h("span", { class: "tag where", text: T[item.bucket] }));
+  }
   if (state.view !== "tree" && item.project) meta.push(h("span", { class: "tag", text: item.project }));
+  const place = window.ConsoleFocus.placeTag(item);
+  if (place) meta.push(place);
   meta.push(h("span", { class: item.running ? "live" : "", text: T.st[item.status] || item.status }));
   if (item.queued) meta.push(h("span", { text: T.queued }));
   if (item.last_activity_at) meta.push(h("span", { text: rel(item.last_activity_at) }));
   if (item.working_dir) meta.push(h("span", { text: item.working_dir.split("/").slice(-1)[0] }));
-  const side = [h("span", { class: `pri p${item.priority}`, text: `P${item.priority}` })];
-  if (item.due_at) side.push(h("span", { class: "due" + (item.overdue ? " over" : ""), text: shortDate(item.due_at) }));
+  // A value the model filled in is marked, so a guess never passes for a decision.
+  const side = [h("span", { class: `pri p${item.priority}` + (item.priority_by === "ai" ? " ai" : ""),
+    title: item.priority_by === "ai" ? T.ai_set : null, text: `P${item.priority}` })];
+  side.push(dueLabel(item));
   const twisty = children
     ? h("span", { class: "tw", onclick: (e) => { e.stopPropagation(); toggleCollapse(item.id); },
         text: state.collapsed.has(item.id) ? "▸" : "▾" })
     : (depth ? h("span", { class: "tw", text: "" }) : null);
   return h("li", {
-    class: "row" + (state.selected === item.id ? " sel" : "") + (item.bucket === "done" ? " done" : ""),
+    class: "row" + (state.selected === item.id ? " sel" : "") + (item.bucket === "done" ? " done" : "") +
+      (isUnread(item) ? " fresh" : ""),
     role: "option", "aria-selected": state.selected === item.id ? "true" : "false",
     onclick: () => { state.selected = item.id; openItem(item.id); },
   },
     h("span", { class: "st", title: T.st[item.status], text: STATUS_ICON[item.status] || "·" }),
     h("div", { class: "main", style: depth ? { paddingLeft: `${depth * 18}px` } : null },
       h("div", { class: "title" }, twisty, item.title || item.thread_name || item.id),
-      h("div", { class: "meta" }, ...meta)),
+      h("div", { class: "meta" }, ...meta),
+      state.view === "focus" ? window.ConsoleFocus.note(item) : null),
     h("div", { class: "side" }, ...side),
   );
 }
 
+// The detail pane keeps one skeleton per item: header, a collapsible drawer for the
+// triage fields, the conversation, the live panel slot and the reply box. A board
+// refresh rewrites only the header and drawer, so the conversation never loses its
+// scroll position and the reply box never loses what is being typed.
 function renderDetail() {
   const pane = $("detail");
   const item = state.open && state.byId.get(state.open);
   $("app").classList.toggle("no-detail", !item);
   pane.hidden = !item;
-  if (!item) { pane.replaceChildren(); return; }
-  // Re-rendering while the human types would eat their input: keep the pane
-  // and only refresh what the server owns.
-  const sameItem = pane.dataset.item === item.id;
-  if (sameItem && pane.contains(document.activeElement) &&
-      document.activeElement.matches("input:not([type=checkbox]), textarea, select")) return;
-  pane.dataset.item = item.id;
+  if (!item) { pane.replaceChildren(); delete pane.dataset.item; return; }
+  const key = `${item.id}|${item.thread_id ? 1 : 0}`;
+  if (pane.dataset.item !== key || !$("msgs")) buildDetail(pane, item, key);
 
+  // Leave the header alone while one of its fields is being edited.
+  const active = document.activeElement;
+  const editing = active && active.matches("input:not([type=checkbox]), select") &&
+    ($("d-head").contains(active) || $("d-drawer").contains(active));
+  if (!editing) {
+    $("d-head").replaceChildren(...headParts(item));
+    $("d-drawer").replaceChildren(...drawerParts(item));
+  }
+  $("d-drawer").hidden = !state.drawerOpen;
+  const msgs = $("msgs");
+  if (item.thread_id) fillMessages(msgs);
+  else msgs.replaceChildren(item.note
+    ? h("div", { class: "msg" }, h("div", { class: "body md" }, MD.render(item.note)))
+    : h("div", { class: "empty", text: T.no_messages }));
+}
+
+function buildDetail(pane, item, key) {
+  pane.dataset.item = key;
+  const msgs = h("div", { class: "msgs", id: "msgs", onscroll: updateJump });
+  const jump = h("button", { class: "jump", id: "jump", type: "button", hidden: true,
+    onclick: () => { msgs.scrollTop = msgs.scrollHeight; updateJump(); } });
+  const nodes = [
+    h("div", { class: "d-head", id: "d-head" }),
+    h("div", { class: "d-drawer", id: "d-drawer", hidden: true }),
+    h("div", { class: "msgs-wrap" }, msgs, jump),
+    h("div", { class: "live-slot", id: "live-slot" }),
+  ];
+  if (item.thread_id) {
+    // Drafts survive the refresh and switching between items.
+    const box = h("textarea", { id: "reply", placeholder: T.reply_ph, rows: 3,
+      oninput: (e) => { state.drafts[item.id] = e.target.value; grow(e.target); },
+      onkeydown: (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendReply(item.id, box); } } });
+    const tray = h("div", { class: "paste-tray", hidden: true });
+    const meta = h("div", { class: "reply-meta", hidden: true });
+    const form = h("form", { class: "reply", onsubmit: (e) => { e.preventDefault(); sendReply(item.id, box); } },
+      h("div", { class: "reply-main" }, meta, tray, box), h("button", { class: "btn primary", type: "submit", text: T.send }));
+    nodes.push(form);
+    box.value = state.drafts[item.id] || "";
+    window.ConsolePaste.attach(box, item.id, tray);
+    window.ConsoleSlash.attach(box, item.id, meta);
+    requestAnimationFrame(() => grow(box));
+  }
+  pane.replaceChildren(...nodes);
+}
+
+function headParts(item) {
+  const title = h("input", { class: "d-title-input", value: item.title || item.thread_name || "", "aria-label": "title",
+    onchange: (e) => patch(item.id, { title: e.target.value || null }) });
+  const parts = [
+    h("button", { class: "icon-btn", "aria-label": "close", onclick: closeItem, text: "←" }),
+    h("span", { class: "d-status", title: T.st[item.status], text: STATUS_ICON[item.status] || "·" }),
+    title,
+  ];
+  if (!item.thread_id) parts.push(h("button", { class: "btn primary", onclick: () => startItem(item.id), text: T.start }));
+  parts.push(window.ConsolePlaces.picker(item));
+  // Tool calls and status lines: one click away, never folded into the drawer.
+  if (item.thread_id) parts.push(activityToggle());
+  parts.push(h("button", { class: "btn d-more" + (state.drawerOpen ? " on" : ""), type: "button",
+    "aria-expanded": state.drawerOpen ? "true" : "false", onclick: toggleDrawer,
+    text: `${state.drawerOpen ? "▴" : "▾"} ${T.details}` }));
+  parts.push(window.ConsoleFinish.button(item));
+  return parts;
+}
+
+function drawerParts(item) {
   const pri = h("select", { onchange: (e) => patch(item.id, { priority: Number(e.target.value) }) },
     [0, 1, 2, 3].map((p) => h("option", { value: p, selected: item.priority === p, text: `P${p}` })));
   const due = h("input", { type: "datetime-local", value: toLocalInput(item.due_at),
@@ -336,59 +436,59 @@ function renderDetail() {
   if (item.snoozed_until) snooze.push(h("button", { class: "btn", onclick: () => patch(item.id, { snoozed_until: null }), text: T.clear }));
 
   const actions = [];
-  if (item.bucket === "done") actions.push(h("button", { class: "btn", onclick: () => act(item.id, "reopen"), text: T.reopen }));
-  else actions.push(h("button", { class: "btn good", onclick: () => act(item.id, "done"), text: T.done_btn }));
-  if (!item.thread_id) actions.push(h("button", { class: "btn primary", onclick: () => startItem(item.id), text: T.start }));
   if (item.url) actions.push(h("a", { class: "btn", href: item.url, target: "_blank", rel: "noopener", text: T.open_chat }));
-
-  const title = h("input", { value: item.title || "", "aria-label": "title",
-    onchange: (e) => patch(item.id, { title: e.target.value || null }) });
-  const head = h("div", { class: "d-head" },
-    h("div", { class: "d-title" },
-      h("button", { class: "icon-btn", "aria-label": "close", onclick: closeItem, text: "←" }),
-      h("span", { text: STATUS_ICON[item.status] }), title),
+  return [
     h("div", { class: "controls" },
       h("label", {}, T.priority, pri), h("label", {}, T.due, due),
       h("label", {}, T.project, project), h("label", {}, T.parent, parent)),
-    h("div", { class: "controls" }, h("label", {}, T.snooze), ...snooze),
-    h("div", { class: "controls" }, ...actions));
+    window.ConsoleFocus.drawerLine(item),
+    h("div", { class: "controls" }, h("span", { class: "dim", text: T.snooze }), ...snooze),
+    h("div", { class: "controls" }, ...actions),
+  ];
+}
 
-  if (item.thread_id) {
-    head.append(h("label", { class: "toggle" },
-      h("input", { type: "checkbox", id: "show-activity", checked: state.showActivity,
-        onchange: (e) => setShowActivity(e.target.checked) }),
-      h("span", { id: "activity-label", text: T.activity(activityCount()) })));
-  }
-  // Keep the message list across the poll so the reader's scroll position survives.
-  const msgs = (sameItem && $("msgs")) || h("div", { class: "msgs", id: "msgs" });
-  const scrollTop = msgs.scrollTop;
-  const followed = msgs.scrollHeight - scrollTop - msgs.clientHeight < 80;
-  fillMessages(msgs);
-  const nodes = [head, msgs];
-  if (item.thread_id) {
-    // Drafts survive the 8-second refresh and switching between items.
-    const box = h("textarea", { id: "reply", placeholder: T.reply_ph, rows: 5,
-      oninput: (e) => { state.drafts[item.id] = e.target.value; grow(e.target); },
-      onkeydown: (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendReply(item.id, box); } } });
-    nodes.push(h("form", { class: "reply", onsubmit: (e) => { e.preventDefault(); sendReply(item.id, box); } },
-      box, h("button", { class: "btn primary", type: "submit", text: T.send })));
-    box.value = state.drafts[item.id] || "";
-    requestAnimationFrame(() => grow(box));
-  } else if (item.note) {
-    msgs.replaceChildren(h("div", { class: "msg" }, h("div", { class: "body md" }, MD.render(item.note))));
-  }
-  pane.replaceChildren(...nodes);
-  if (sameItem) msgs.scrollTop = followed ? msgs.scrollHeight : scrollTop;
+function toggleDrawer() {
+  state.drawerOpen = !state.drawerOpen;
+  localStorage.setItem("drawerOpen", state.drawerOpen ? "1" : "0");
+  const box = $("msgs");
+  const pinned = box && nearBottom(box);
+  renderDetail();
+  if (pinned) box.scrollTop = box.scrollHeight;
+}
+
+// "Jump to latest" appears when the reader has scrolled up; it says so when new
+// messages arrived below.
+function nearBottom(box) { return box.scrollHeight - box.scrollTop - box.clientHeight < 80; }
+function updateJump() {
+  const box = $("msgs");
+  const jump = $("jump");
+  if (!box || !jump) return;
+  if (nearBottom(box)) state.unseen = 0;
+  jump.hidden = nearBottom(box);
+  jump.textContent = state.unseen ? T.jump_new(state.unseen) : T.jump;
+  jump.classList.toggle("hot", state.unseen > 0);
 }
 
 function activityCount() {
   return state.messagesFor === state.open ? state.messages.filter((m) => m.kind === "activity").length : 0;
+}
+function activityToggle() {
+  const n = activityCount();
+  return h("button", { class: "btn d-activity" + (state.showActivity ? " on" : ""), id: "d-activity", type: "button",
+    "aria-pressed": state.showActivity ? "true" : "false", hidden: !n && !state.showActivity,
+    title: T.activity_hint, onclick: () => setShowActivity(!state.showActivity), text: T.activity(n) });
+}
+// The count is known once the messages arrive, after the header was drawn.
+function syncActivityToggle() {
+  const old = $("d-activity");
+  if (old) old.replaceWith(activityToggle());
 }
 function setShowActivity(on) {
   state.showActivity = on;
   localStorage.setItem("showActivity", on ? "1" : "0");
   const box = $("msgs");
   if (box) fillMessages(box, { force: true, toBottom: true });
+  renderDetail();
 }
 // Textareas grow with what is typed, up to the CSS max-height.
 function grow(box) {
@@ -408,7 +508,9 @@ function messageNode(m) {
     body.append(card);
   }
   for (const a of m.attachments || []) {
-    body.append(h("div", { class: "file" }, /^https:\/\//.test(a.url)
+    const remote = /^https:\/\//.test(a.url);
+    if (remote && isImage(a)) body.append(chatImage(a));
+    body.append(h("div", { class: "file" }, remote
       ? h("a", { href: a.url, target: "_blank", rel: "noopener noreferrer", text: `📎 ${a.filename}` })
       : h("span", { text: `📎 ${a.filename}` })));
   }
@@ -417,20 +519,49 @@ function messageNode(m) {
     body);
 }
 
+// Images attached in a chat thread load straight from Discord's CDN (allowed by the CSP for img only).
+function isImage(a) {
+  if (a.content_type) return a.content_type.startsWith("image/");
+  return /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(a.filename || "");
+}
+function chatImage(a) {
+  const open = () => window.ConsoleLightbox && window.ConsoleLightbox(a.filename, a.url,
+    () => window.open(a.url, "_blank", "noopener,noreferrer"));
+  const img = h("img", { src: a.url, alt: a.filename, loading: "lazy" });
+  const btn = h("button", { class: "file-thumb", type: "button", title: a.filename, onclick: open }, img);
+  // The image's height arrives after the messages rendered; a reader at the end stays there.
+  img.addEventListener("load", () => {
+    const box = $("msgs");
+    if (box && box.scrollHeight - box.scrollTop - box.clientHeight - img.offsetHeight < 80) box.scrollTop = box.scrollHeight;
+  }, { once: true });
+  img.addEventListener("error", () => btn.remove(), { once: true });
+  return btn;
+}
+
 function fillMessages(container, { force = false, toBottom = false } = {}) {
-  if (state.messagesFor !== state.open) { container.replaceChildren(h("div", { class: "empty", text: T.loading })); return; }
+  if (state.messagesFor !== state.open) {
+    if (!container.dataset.sig) container.replaceChildren(h("div", { class: "empty", text: T.loading }));
+    return;
+  }
   const shown = state.showActivity ? state.messages : state.messages.filter((m) => m.kind !== "activity");
   // Re-render only when something changed, so a poll does not drop a text selection.
-  const sig = `${state.showActivity}|${state.messages.length}|${state.messages.map((m) => m.id).slice(-1)[0]}|` +
+  const sig = `${state.open}|${state.showActivity}|${state.messages.length}|${state.messages.map((m) => m.id).slice(-1)[0]}|` +
     state.messages.map((m) => (m.content || "").length).reduce((a, b) => a + b, 0);
   if (!force && container.dataset.sig === sig && container.childElementCount) return;
-  const nearBottom = toBottom || !container.dataset.sig ||
-    container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+  const first = !container.dataset.sig || !container.dataset.sig.startsWith(`${state.open}|`);
+  const follow = toBottom || first || nearBottom(container);
+  const before = container.dataset.count ? Number(container.dataset.count) : shown.length;
+  const top = container.scrollTop;
   container.dataset.sig = sig;
+  container.dataset.count = String(shown.length);
   container.replaceChildren(...(shown.length ? shown.map(messageNode) : [h("div", { class: "empty", text: T.no_messages })]));
-  const label = $("activity-label");
-  if (label) label.textContent = T.activity(activityCount());
-  if (nearBottom) container.scrollTop = container.scrollHeight;
+  if (follow) container.scrollTop = container.scrollHeight;
+  else {
+    // Replacing every child can reset the scroll position; put the reader back where they were.
+    container.scrollTop = top;
+    if (shown.length > before) state.unseen = (state.unseen || 0) + shown.length - before;
+  }
+  updateJump();
 }
 
 // ---------------------------------------------------------------- actions
@@ -451,14 +582,42 @@ function setView(view) {
   state.selected = rows.length ? rows[0].item.id : null;
   render();
 }
+// Unread, the way a mailbox means it: something happened in the thread after the
+// human last looked at it. "Last looked" is kept per item in this browser; items never
+// opened count from a baseline set on first use (a day back, so recent work shows).
+const seenAt = JSON.parse(localStorage.getItem("seenAt") || "{}");
+const seenBaseline = localStorage.getItem("seenBaseline") || (() => {
+  const b = new Date(Date.now() - 864e5).toISOString();
+  localStorage.setItem("seenBaseline", b);
+  return b;
+})();
+function isUnread(item) {
+  // A running turn keeps moving its activity time; it becomes news when it stops.
+  if (item.running || item.queued || !item.last_activity_at || item.id === state.open) return false;
+  if (item.bucket === "done" || item.bucket === "snoozed") return false;
+  return new Date(item.last_activity_at) > new Date(seenAt[item.id] || seenBaseline);
+}
+function markSeen(id) {
+  if (!id) return;
+  seenAt[id] = new Date().toISOString();
+  localStorage.setItem("seenAt", JSON.stringify(seenAt));
+}
+function pruneSeen() {
+  let changed = false;
+  for (const id of Object.keys(seenAt)) if (!state.byId.has(id)) { delete seenAt[id]; changed = true; }
+  if (changed) localStorage.setItem("seenAt", JSON.stringify(seenAt));
+}
 function toggleCollapse(id) {
   state.collapsed.has(id) ? state.collapsed.delete(id) : state.collapsed.add(id);
   localStorage.setItem("collapsed", JSON.stringify([...state.collapsed]));
   renderList();
 }
 async function openItem(id) {
+  if (state.open !== id) state.unseen = 0;
   state.open = id;
   state.selected = id;
+  if (state.open && state.open !== id) markSeen(state.open);
+  markSeen(id);
   state.messagesFor = null;
   render();
   const item = state.byId.get(id);
@@ -473,30 +632,38 @@ async function loadMessages(id) {
     state.messagesFor = id;
     const box = $("msgs");
     if (box) fillMessages(box);
+    syncActivityToggle();
   } catch (err) { toast(err.message); }
 }
-function closeItem() { state.open = null; render(); }
+function closeItem() { markSeen(state.open); state.open = null; render(); }
 async function patch(id, changes) {
   try { await api(`/items/${encodeURIComponent(id)}`, { method: "PATCH", body: changes }); toast(T.saved); await refresh(); }
   catch (err) { toast(err.message); }
 }
-async function act(id, action) {
-  try { await api(`/items/${encodeURIComponent(id)}/${action}`, { method: "POST", body: {} }); await refresh(); }
-  catch (err) { toast(err.message); }
-}
 async function sendReply(id, box) {
   const text = box.value.trim();
-  if (!text) return;
+  const images = window.ConsolePaste.ready(id);
+  if (images === null) { toast(T.paste_wait); return; }
+  if (!text && !images.length) return;
   box.disabled = true;
   try {
-    await api(`/items/${encodeURIComponent(id)}/reply`, { method: "POST", body: { text } });
+    // "/backend codex", "/model opus", "/kb-save …": a command, not a reply.
+    if (!images.length && await window.ConsoleSlash.run(id, text)) {
+      box.value = "";
+      delete state.drafts[id];
+      grow(box);
+      if (!/^\/(backend|model|effort)\b/.test(text)) { await refresh(); setTimeout(() => loadMessages(id), 1500); }
+      return;
+    }
+    await api(`/items/${encodeURIComponent(id)}/reply`, { method: "POST", body: { text, images } });
     box.value = "";
     delete state.drafts[id];
+    window.ConsolePaste.clear(id);
     toast(T.sent);
     await refresh();
     setTimeout(() => loadMessages(id), 1500);
   } catch (err) { toast(err.message); }
-  finally { box.disabled = false; }
+  finally { box.disabled = false; box.focus(); }
 }
 async function startItem(id) {
   try {
@@ -592,7 +759,7 @@ function wire() {
       case "j": case "ArrowDown": move(1); break;
       case "k": case "ArrowUp": move(-1); break;
       case "Enter": if (id) openItem(id); break;
-      case "e": if (id) act(id, "done"); break;
+      case "e": if (id && state.byId.get(id)?.bucket !== "done") window.ConsoleFinish.finish(id); break;
       case "1": case "2": case "3": case "4": if (id) patch(id, { priority: Number(e.key) - 1 }); break;
       case "s": if (id) patch(id, { snoozed_until: snoozeTarget("tomorrow").toISOString() }); break;
       case "c": $("capture-input").focus(); break;
@@ -605,10 +772,12 @@ function wire() {
     e.preventDefault();
   });
 
+  // A hidden tab keeps polling, more slowly, so a new notification still reaches the human.
   let timer = setInterval(refresh, POLL_MS);
   document.addEventListener("visibilitychange", () => {
     clearInterval(timer);
-    if (!document.hidden) { refresh(); timer = setInterval(refresh, POLL_MS); }
+    if (!document.hidden) refresh();
+    timer = setInterval(refresh, document.hidden ? POLL_HIDDEN_MS : POLL_MS);
   });
 }
 

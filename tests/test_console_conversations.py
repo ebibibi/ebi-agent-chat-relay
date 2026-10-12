@@ -54,7 +54,9 @@ async def env(tmp_path):
     await work.init_db()
     conversations = ConversationRepository(db)
     await conversations.init_db()
-    frontend = ConsoleFrontend(conversations, FrontendThreadRepository(db))
+    frontend = ConsoleFrontend(
+        conversations, FrontendThreadRepository(db), files_dir=tmp_path / "console_files"
+    )
 
     runs: list = []
     sessions = FakeSessions()
@@ -106,6 +108,7 @@ async def env(tmp_path):
             runs=runs,
             conversations=conversations,
             chat_cog=chat_cog,
+            console=console,
         )
 
 
@@ -344,6 +347,267 @@ async def test_files_need_authentication_and_a_real_path(env) -> None:
     path = "/console/api/files/1/" + "0" * 32 + "/a.txt"
     assert (await env.client.get(path)).status == 401
     assert (await env.client.get(path, headers=AUTH)).status == 404
+
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+
+
+async def _upload(env, data: bytes = PNG, content_type: str = "image/png"):
+    return await env.client.post(
+        "/console/api/uploads", data=data, headers={**WRITE, "Content-Type": content_type}
+    )
+
+
+async def test_a_pasted_image_is_stored_and_served_back(env) -> None:
+    response = await _upload(env)
+    assert response.status == 201
+    url = (await response.json())["url"]
+    assert url.startswith("/console/api/files/0/") and url.endswith(".png")
+    served = await env.client.get(url, headers=AUTH)
+    assert served.status == 200
+    assert await served.read() == PNG
+
+
+async def test_uploads_accept_only_real_images_of_bounded_size(env) -> None:
+    assert (await _upload(env, b"hello", "text/plain")).status == 415
+    # Says PNG, is not: the bytes decide, not the header.
+    assert (await _upload(env, b"GIF89a" + b"\x00" * 10, "image/png")).status == 400
+    assert (await _upload(env, b"", "image/png")).status == 400
+    too_big = b"\x89PNG\r\n\x1a\n" + b"\x00" * (10 * 1024 * 1024)
+    assert (await _upload(env, too_big)).status == 413
+    assert (
+        await env.client.post(
+            "/console/api/uploads", data=PNG, headers={**AUTH, "Content-Type": "image/png"}
+        )
+    ).status == 403  # CSRF header still required
+
+
+async def test_a_reply_hands_pasted_images_to_the_agent_by_path(env) -> None:
+    item_id = await _start(env)
+    url = (await (await _upload(env)).json())["url"]
+
+    replied = await env.client.post(
+        f"/console/api/items/{item_id}/reply",
+        json={"text": "what is this?", "images": [url]},
+        headers=WRITE,
+    )
+    assert replied.status == 202
+    await _settle(env.host)
+
+    prompt = env.runs[-1].prompt
+    assert prompt.startswith("what is this?")
+    # The agent gets a local path it can open; the transcript keeps a link that previews.
+    assert f"]({url})" in prompt
+    local = prompt.split(" — ")[-1].strip().splitlines()[0]
+    assert local.endswith(".png") and local.startswith("/")
+
+
+async def test_a_reply_may_be_only_an_image_but_not_a_forged_link(env) -> None:
+    item_id = await _start(env)
+    url = (await (await _upload(env)).json())["url"]
+    only_image = await env.client.post(
+        f"/console/api/items/{item_id}/reply", json={"images": [url]}, headers=WRITE
+    )
+    assert only_image.status == 202
+    forged = await env.client.post(
+        f"/console/api/items/{item_id}/reply",
+        json={"text": "x", "images": ["/console/api/files/0/" + "0" * 32 + "/nope.png"]},
+        headers=WRITE,
+    )
+    assert forged.status == 400
+
+
+async def test_a_screenshot_larger_than_the_json_limit_is_accepted(env) -> None:
+    screenshot = PNG + b"\x00" * (2 * 1024 * 1024)
+    assert (await _upload(env, screenshot)).status == 201
+
+
+class FakeSettings:
+    """BackendSettings, in memory: a thread override per key, defaulting to claude."""
+
+    def __init__(self) -> None:
+        self.backend: dict[int, str] = {}
+        self.model: dict[tuple[int, str], str] = {}
+        self.effort: dict[tuple[int, str], str] = {}
+
+    async def current_backend(self, thread_id=None):
+        return self.backend.get(thread_id, "claude")
+
+    async def current_model(self, backend, thread_id=None):
+        return self.model.get((thread_id, backend))
+
+    async def current_effort(self, backend, thread_id=None):
+        return self.effort.get((thread_id, backend))
+
+    async def set_backend(self, backend, *, thread_id=None):
+        self.backend[thread_id] = backend
+
+    async def set_model(self, backend, model, *, thread_id=None):
+        self.model[(thread_id, backend)] = model
+
+    async def set_effort(self, backend, effort, *, thread_id=None):
+        self.effort[(thread_id, backend)] = effort
+
+
+SKILLS = {
+    "claude": [{"name": "kb-save", "description": "save a KB entry"}],
+    "codex": [
+        {"name": "kb-save", "description": "save a KB entry"},
+        {"name": "codex-only", "description": "a Codex skill"},
+    ],
+}
+
+
+async def test_slash_command_catalog_follows_the_backend(env) -> None:
+    settings = FakeSettings()
+    env.console.api.components.backend_settings = settings
+    env.console._skills = lambda backend: SKILLS.get(backend, [])
+    item_id = await _start(env)
+    key = int(item_id[1:])
+
+    got = await (
+        await env.client.get(f"/console/api/items/{item_id}/commands", headers=AUTH)
+    ).json()
+    assert got["backend"] == "claude"
+    assert [c["name"] for c in got["commands"]] == ["backend", "model", "effort"]
+    assert [c["name"] for c in got["builtins"]] == ["compact", "context", "cost"]
+    assert got["efforts"] == ["low", "medium", "high", "max"]
+    assert [s["name"] for s in got["skills"]] == ["kb-save"]
+
+    switched = await env.client.post(
+        f"/console/api/items/{item_id}/command",
+        json={"name": "backend", "arg": "codex"},
+        headers=WRITE,
+    )
+    assert switched.status == 200
+    body = await switched.json()
+    assert settings.backend[key] == "codex"
+    # What is offered next is the new backend's.
+    assert body["catalog"]["backend"] == "codex"
+    assert [b["name"] for b in body["catalog"]["builtins"]] == ["compact"]
+    assert "xhigh" in body["catalog"]["efforts"]
+    assert "codex-only" in [s["name"] for s in body["catalog"]["skills"]]
+
+
+async def test_model_and_effort_are_set_for_this_conversation_only(env) -> None:
+    settings = FakeSettings()
+    env.console.api.components.backend_settings = settings
+    env.console._skills = lambda backend: []
+    item_id = await _start(env)
+    key = int(item_id[1:])
+
+    async def run(name, arg):
+        return await env.client.post(
+            f"/console/api/items/{item_id}/command", json={"name": name, "arg": arg}, headers=WRITE
+        )
+
+    assert (await run("model", "opus")).status == 200
+    assert settings.model[(key, "claude")] == "opus"
+    assert (await run("effort", "HIGH")).status == 200
+    assert settings.effort[(key, "claude")] == "high"
+    assert (await run("effort", "ultra")).status == 400  # not a Claude level
+    assert (await run("backend", "gpt")).status == 400
+    assert (await run("model", "two words")).status == 400
+    assert (await run("nope", "")).status == 400
+    assert None not in settings.backend  # never the global default
+
+
+async def test_a_skill_is_sent_to_the_agent_in_the_backends_own_form(env) -> None:
+    settings = FakeSettings()
+    env.console.api.components.backend_settings = settings
+    env.console._skills = lambda backend: SKILLS.get(backend, [])
+    item_id = await _start(env)
+    key = int(item_id[1:])
+
+    ran = await env.client.post(
+        f"/console/api/items/{item_id}/command",
+        json={"name": "kb-save", "arg": "the CSP fix"},
+        headers=WRITE,
+    )
+    assert ran.status == 202
+    await _settle(env.host)
+    assert env.runs[-1].prompt == "/kb-save the CSP fix"
+
+    settings.backend[key] = "codex"
+    await env.client.post(
+        f"/console/api/items/{item_id}/command", json={"name": "codex-only"}, headers=WRITE
+    )
+    await _settle(env.host)
+    assert env.runs[-1].prompt == 'Use the "codex-only" skill.'
+
+
+async def test_compact_on_codex_runs_through_app_server_not_as_a_reply(env) -> None:
+    settings = FakeSettings()
+    env.console.api.components.backend_settings = settings
+    env.console._skills = lambda backend: []
+    item_id = await _start(env)
+    key = int(item_id[1:])
+    settings.backend[key] = "codex"
+    sessions = FakeSessions()
+    env.console.api.session_repo = sessions
+    compacted: list[str] = []
+
+    async def compactor(session_id, **_):
+        compacted.append(session_id)
+
+    env.console._codex_compact = compactor
+
+    async def compact():
+        return await env.client.post(
+            f"/console/api/items/{item_id}/command", json={"name": "compact"}, headers=WRITE
+        )
+
+    got = await (
+        await env.client.get(f"/console/api/items/{item_id}/commands", headers=AUTH)
+    ).json()
+    assert got["builtins"] == [
+        {"name": "compact", "description": got["builtins"][0]["description"], "handled": True}
+    ]
+    # No Codex session yet (or one minted by another CLI): nothing to compact.
+    assert (await compact()).status == 409
+    sessions.records[key] = SimpleNamespace(session_id="0a1b-2c", backend="codex")
+    env.console.api._running_thread_ids.return_value = {key}
+    assert (await compact()).status == 409  # never under a running turn
+    env.console.api._running_thread_ids.return_value = set()
+    runs_before = len(env.runs)
+
+    done = await compact()
+    assert done.status == 200
+    assert compacted == ["0a1b-2c"]
+    assert len(env.runs) == runs_before  # the agent was not sent "/compact" as words
+
+
+async def test_a_reply_waits_while_the_conversation_is_compacted(env) -> None:
+    item_id = await _start(env)
+    env.console._compacting.add(int(item_id[1:]))
+    sent = await env.client.post(
+        f"/console/api/items/{item_id}/reply", json={"text": "hi"}, headers=WRITE
+    )
+    assert sent.status == 409
+
+
+async def test_compact_failure_is_reported(env) -> None:
+    from claude_discord.console.codex_compact import CompactError
+
+    settings = FakeSettings()
+    env.console.api.components.backend_settings = settings
+    item_id = await _start(env)
+    key = int(item_id[1:])
+    settings.backend[key] = "codex"
+    sessions = FakeSessions()
+    sessions.records[key] = SimpleNamespace(session_id="0a1b", backend="codex")
+    env.console.api.session_repo = sessions
+
+    async def broken(session_id, **_):
+        raise CompactError("Codex refused: no rollout found")
+
+    env.console._codex_compact = broken
+    res = await env.client.post(
+        f"/console/api/items/{item_id}/command", json={"name": "compact"}, headers=WRITE
+    )
+    assert res.status == 502
+    assert "no rollout found" in (await res.json())["error"]
+    assert key not in env.console._compacting
 
 
 async def test_a_queued_turn_replays_after_restart_without_a_second_human_message(env) -> None:

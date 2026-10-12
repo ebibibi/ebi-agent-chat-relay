@@ -13,13 +13,48 @@ See [ADR-0010](adr/0010-add-an-api-first-console-on-its-own-listener.md) and, fo
 
 | View | Shows |
 |---|---|
+| **Focus** (default) | What you can do now, across every list. Importance (priority first, P0 above P1 whatever else is true; then how close the deadline is; then whose move it is) and readiness are separate axes: only work you can act on right now ranks under "Do this first" and "Then"; anything waiting for a time, a person or a job goes under "⏳ Waiting", soonest first, and moves up once the time it named has come. Each row shows the next step and why it ranks there. Work bound to a place or device (📍 home, office, work PC) is tagged; pick where you are in the bar above the list and work bound elsewhere moves to "📍 Somewhere else". Set an item's place with the 📍 button in its header (pick one, Anywhere, or type a new one); add, rename and delete places under "⚙ Manage places" — a rename or delete reaches every item. Work an agent is doing, finished, parked and snoozed items are left out. Reachable with `g f` |
 | **Inbox** | The ball is on you: ❓ waiting for an answer, 👀 something to review, 📋 a task only you can do, ⚠️ a failed turn |
 | **Running** | A turn is in flight (or queued for a slot) |
 | **To do** | Work you wrote down that no agent has yet |
 | **Idle** | The agent stopped without saying whose move it is |
+| **Recent** | Everything, finished included, newest activity first under a heading per day. Each row names the list it now lives in, so you can find where a thread went |
 | **Tree** | Everything open, grouped by project, children under their parent |
 | **Recent** | Every item, finished ones included, newest activity first, grouped by day. Each row names the list it lives in now, so a thread that moved from Running to Done is still easy to find |
 | **Snoozed / Done** | Hidden until the snooze ends / finished |
+
+## Automatic triage
+
+Nobody fills in priority and due date for every thread, so the console asks a fast model
+to: the cheapest model of the backend chosen with `/backend` — Haiku on Claude, the cheapest
+"fast and affordable" model in Codex's own catalog on Codex (falling back to whichever CLI is
+installed). The choice is made per call, so switching the backend switches triage too. A background pass every minute picks up to six open items with new
+activity, gives the model the title and the latest human and agent messages, and stores its
+answer: a priority (P0–P3), a deadline if the conversation names one, the reason, your next
+step, whether you can take that step now or must wait (and for what, and until when), and
+whether it can only be done in one place or on one device. The model is shown the place labels
+already in use so it reuses them. Each call is one-shot and tool-less: `claude -p` with tools, hooks
+and settings off, or `codex exec` ephemeral and read-only without the user's config or rules,
+both in a scratch directory and without relay or console credentials in their environment.
+
+A guess never overrides a person:
+
+- A priority, due date or place you set wins. Setting one from the console pins it, so later
+  guesses leave it alone (clearing a place means "anywhere", not "guess again"). A priority other than P2 that existed before triage counts as yours.
+- A filled-in value is drawn outlined (priority) or in italics (due date), and the detail
+  drawer shows the model's full guess under "🤖 AI guess", including fields you overrode.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `CCDB_CONSOLE_TRIAGE` | `1` | `0` turns automatic triage off |
+| `CCDB_CONSOLE_TRIAGE_MODEL` | `haiku` | Model for Claude triage, passed to `claude --model` |
+| `CCDB_CONSOLE_TRIAGE_CODEX_MODEL` | *(cheapest in the catalog)* | Model for Codex triage, passed to `codex exec -m` |
+| `CCDB_CONSOLE_TRIAGE_COMMAND` | `claude` | The Claude CLI |
+| `CCDB_CODEX_COMMAND` | `codex` | The Codex CLI. Triage stays off only when neither CLI is on `PATH` |
+
+Each triage is one model call, billed like any other `claude -p` call on that machine.
+On Windows a Claude CLI installed by npm (`claude.cmd`) is started as `node` + its script, never
+through `cmd.exe`; a wrapper that cannot be resolved that way leaves triage idle and logs why.
 
 ## Reading a thread
 
@@ -33,7 +68,7 @@ Each message carries a `kind`:
 |---|---|---|
 | `human` | What a person wrote in the chat (console replies are posted by the bot, so they show as `agent` with their footer) | Always |
 | `agent` | Answers, questions, errors and files from the agent | Always |
-| `activity` | The relay's own bookkeeping: tool calls, thinking, session start/finish embeds, `-#` status notes, the usage footer, notification pings, rename notices and automatic continuation prompts | Only with "Show relay activity" |
+| `activity` | The relay's own bookkeeping: tool calls, thinking, session start/finish embeds, `-#` status notes, the usage footer, notification pings, rename notices and automatic continuation prompts. A console conversation records one `-#` line per finished tool call | Only with the "⚙ Activity" button in the detail header |
 
 The open thread reloads with the board while a turn is running, and the list keeps your scroll
 position unless you were already at the bottom.
@@ -66,7 +101,7 @@ remaining. On a phone the strip wraps, so every backend stays visible.
 
 
 `j`/`k` move, `Enter` opens, `Esc` closes, `e` done, `1`–`4` priority P0–P3, `s` snooze until
-tomorrow 09:00, `c` write down work (the first line is the title; `Shift+Enter` adds note lines), `r` reply, `/` filter, `g` then `i`/`a`/`t`/`w`/`u`/`d` switches
+tomorrow 09:00, `c` write down work (the first line is the title; `Shift+Enter` adds note lines), `r` reply, `/` filter, `g` then `f`/`i`/`a`/`u`/`t`/`w`/`d` switches
 view, `?` help. URLs carry the view and the open item (`/#me/t1234`), so a link can point at a
 single item.
 
@@ -249,6 +284,7 @@ Endpoints need authentication unless marked *(no sign-in)*. Every method except 
 | POST | `/console/api/items/{id}/reply` | `{text}` — continues the session, queued behind a running turn |
 | POST | `/console/api/items/{id}/done` | Mark done (also sets the ✅ marker on the thread) |
 | POST | `/console/api/items/{id}/reopen` | Clear the done/someday verdict |
+| GET / POST / PATCH / DELETE | `/console/api/places` | The managed list of places with open-item counts; add `{name}`, rename `{from, name}` (every item follows), delete `{name}` (items become doable anywhere) |
 | GET | `/console/api/items/{id}/live` | A console conversation's running turn: status, tool activity, the answer so far, whether it can be stopped |
 | POST | `/console/api/items/{id}/stop` | Stop the running turn of a console conversation (409 when nothing runs) |
 | GET | `/console/api/files/{key}/{token}/{name}` | A file an agent delivered in a console conversation |

@@ -284,6 +284,7 @@ def _item(
         "overdue": due is not None and due < now and status not in (STATUS_DONE, STATUS_SOMEDAY),
         "snoozed_until": snoozed_until if snoozed else None,
         "project": overlay.project if overlay else None,
+        "place": overlay.place if overlay else None,
         "note": overlay.note if overlay else None,
         "parent_id": parent_id,
         "running": running,

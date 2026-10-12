@@ -99,3 +99,16 @@ def test_a_stored_console_message_gets_a_kind() -> None:
     assert out["kind"] == KIND_ACTIVITY
     assert out["embeds"] == [] and out["attachments"] == []
     assert with_kind({**stored, "is_bot": False})["kind"] == KIND_HUMAN
+
+
+def test_attachments_carry_their_content_type_for_inline_previews() -> None:
+    image = SimpleNamespace(
+        filename="shot.png",
+        url="https://cdn.discordapp.com/attachments/1/2/shot.png?ex=1",
+        size=10,
+        content_type="image/png",
+    )
+    legacy = SimpleNamespace(filename="notes.md", url="https://cdn.discordapp.com/x", size=1)
+    out = serialize_message(_message("", attachments=[image, legacy]))
+    assert out["attachments"][0]["content_type"] == "image/png"
+    assert out["attachments"][1]["content_type"] is None

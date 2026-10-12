@@ -702,7 +702,7 @@ The operator sets the default and an allowlist in the environment (`CCDB_EXECUTI
   - [OpenAI Codex CLI](https://github.com/openai/codex) — `npm install -g @openai/codex` then `codex login`. Uses your existing ChatGPT Plus/Pro/Business subscription.
 - You can install both. Switch between them at runtime with `/backend` (see [Backend Switching](#backend-switching--claude--codex-on-demand)).
 
-**Platform support:** Primarily developed and tested on **Linux**. macOS and Windows are supported and pass CI, but receive less real-world testing — bug reports welcome.
+**Platform support:** Developed, tested and run in production on **Linux**; CI runs on Linux only. macOS and Windows are expected to work (Windows npm `.cmd` wrappers for the Claude and Codex CLIs are resolved to `node` + script) but get little real-world testing — bug reports welcome.
 
 ### Step 1 — Create a Discord Bot (one-time, ~2 minutes)
 

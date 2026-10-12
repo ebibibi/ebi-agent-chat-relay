@@ -8,8 +8,10 @@ from pathlib import Path
 import pytest
 
 from claude_code_core.frontend import ActivitySpec, OutboundFile, StatusKind
+from claude_code_core.types import ToolCategory
 from claude_discord.console.conversations import ConversationRepository
 from claude_discord.console.files import resolve_file
+from claude_discord.console.messages import with_kind
 from claude_discord.console.surface import ConsoleFrontend
 from claude_discord.database.frontend_thread_repo import FrontendThreadRepository
 from claude_discord.database.models import init_db
@@ -24,25 +26,43 @@ async def frontend(tmp_path) -> ConsoleFrontend:
     return ConsoleFrontend(repo, FrontendThreadRepository(db), files_dir=tmp_path / "console_files")
 
 
-async def test_activity_status_and_draft_are_live_not_stored(frontend) -> None:
+async def test_status_and_draft_are_live_and_a_finished_tool_leaves_a_record(frontend) -> None:
     surface = await frontend.open(external_id="c1", title="t")
     await surface.set_status(StatusKind.TOOL_COMMAND)
-    activity = await surface.open_activity(ActivitySpec(kind="tool", title="Bash", detail="ls"))
+    activity = await surface.open_activity(
+        ActivitySpec(kind="tool", title="Running: ls", category=ToolCategory.COMMAND)
+    )
+    assert await frontend.repo.history(surface.thread_key, 10) == []
     await activity.complete("ok")
     stream = surface.open_stream()
     await stream.append("half an ans")
 
     live = frontend.live.get(surface.thread_key).as_dict()
     assert live["status"] == "tool_command"
-    assert live["activities"] == [{"title": "Bash", "detail": "ls", "done": True, "ok": True}]
+    assert live["activities"] == [
+        {"title": "Running: ls", "detail": None, "done": True, "ok": True}
+    ]
     assert live["draft"] == "half an ans"
-    assert await frontend.repo.history(surface.thread_key, 10) == []
+    [record] = await frontend.repo.history(surface.thread_key, 10)
+    assert record.content == "-# ⌨️ Running: ls"
+    assert with_kind(record.as_dict())["kind"] == "activity"
 
     await stream.append("wer")
     await stream.finalize()
     assert frontend.live.get(surface.thread_key).draft == ""
-    [message] = await frontend.repo.history(surface.thread_key, 10)
+    record, message = await frontend.repo.history(surface.thread_key, 10)
     assert message.content == "half an answer"
+    assert with_kind(message.as_dict())["kind"] == "agent"
+
+
+async def test_a_failed_tool_is_recorded_as_failed_and_a_todo_list_is_not(frontend) -> None:
+    surface = await frontend.open(external_id="c1", title="t")
+    tool = await surface.open_activity(ActivitySpec(kind="tool", title="Fetching: https://x"))
+    await tool.cancel()
+    todo = await surface.open_activity(ActivitySpec(kind="todo", title="Tasks", detail="1/3"))
+    await todo.complete(None)
+    [record] = await frontend.repo.history(surface.thread_key, 10)
+    assert record.content == "-# 🔧 ✗ Fetching: https://x"
 
 
 async def test_stop_calls_the_runner_once(frontend) -> None:

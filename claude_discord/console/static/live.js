@@ -29,27 +29,34 @@
     return e;
   };
 
-  function panel() {
-    const msgs = document.getElementById("msgs");
-    if (!msgs) return null;
-    let box = document.getElementById("live");
-    if (!box || box.previousElementSibling !== msgs) {
-      if (box) box.remove();
-      box = el("div", "live");
-      box.id = "live";
-      box.setAttribute("aria-live", "polite");
-      msgs.after(box);
-    }
-    return box;
-  }
+  // The panel lives in its own slot under the conversation, so it never covers the
+  // messages it is reporting on. Open (the latest tool calls) unless folded to one line.
+  let open = localStorage.getItem("liveOpen") !== "0";
 
   function draw(id, data) {
     last = { id, data };
-    const box = panel();
+    const box = document.getElementById("live-slot");
     if (!box) return;
+    const msgs = document.getElementById("msgs");
+    const pinned = msgs && msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 80;
     const live = data.live || {};
+    const acts = live.activities || [];
+    const latest = acts.length ? acts[acts.length - 1] : null;
     const head = el("div", "live-head");
-    head.append(el("span", "live-status", `${STATUS[live.status] || "⚙️"} ${L.working}`));
+    const toggle = el("button", "live-toggle");
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    toggle.append(
+      el("span", "live-caret", open ? "▾" : "▸"),
+      el("span", "live-status", `${STATUS[live.status] || "⚙️"} ${L.working}`),
+      el("span", "live-latest", !open && latest ? `${latest.title}${latest.detail ? " — " + latest.detail : ""}` : ""),
+    );
+    toggle.addEventListener("click", () => {
+      open = !open;
+      localStorage.setItem("liveOpen", open ? "1" : "0");
+      if (last) draw(last.id, last.data);
+    });
+    head.append(toggle);
     if (live.can_stop) {
       const stop = el("button", "btn live-stop", L.stop);
       stop.type = "button";
@@ -61,20 +68,29 @@
       });
       head.append(stop);
     }
-    const acts = el("ul", "live-acts");
-    for (const a of (live.activities || []).slice(-6)) {
-      const mark = a.done ? (a.ok ? "✓" : "✗") : "…";
-      acts.append(el("li", a.done ? "done" : "", `${mark} ${a.title}${a.detail ? " — " + a.detail : ""}`));
+    const parts = [head];
+    if (open) {
+      const list = el("ul", "live-acts");
+      for (const a of acts.slice(-6)) {
+        const mark = a.done ? (a.ok ? "✓" : "✗") : "…";
+        list.append(el("li", a.done ? "done" : "", `${mark} ${a.title}${a.detail ? " — " + a.detail : ""}`));
+      }
+      parts.push(list);
+      if (live.draft) parts.push(el("div", "live-draft", live.draft));
     }
-    const parts = [head, acts];
-    if (live.draft) parts.push(el("div", "live-draft", live.draft));
-    box.replaceChildren(...parts);
+    const wrap = el("div", "live");
+    wrap.id = "live";
+    wrap.setAttribute("aria-live", "polite");
+    wrap.replaceChildren(...parts);
+    box.replaceChildren(wrap);
+    // The panel changed height; a reader following the conversation stays at its end.
+    if (pinned) msgs.scrollTop = msgs.scrollHeight;
   }
 
   function clear() {
     last = null;
-    const box = document.getElementById("live");
-    if (box) box.remove();
+    const box = document.getElementById("live-slot");
+    if (box) box.replaceChildren();
   }
 
   async function tick() {
@@ -106,14 +122,33 @@
   }
 
   // Delivered files: the link needs the console token, which a plain <a> cannot send.
-  function linkFiles() {
+  // Images get an inline thumbnail that opens a preview; everything else a download button.
+  const IMAGE_TYPES = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+    webp: "image/webp", bmp: "image/bmp", avif: "image/avif", svg: "image/svg+xml" };
+  const previews = new Map(); // href -> Promise<data: URL>, so a re-render does not refetch
+  const fileName = (href) => decodeURIComponent(href.split("/").pop());
+  const imageType = (href) => IMAGE_TYPES[(fileName(href).split(".").pop() || "").toLowerCase()];
+
+  // Anything added below the messages after they rendered (file rows, a thumbnail that
+  // finished loading) must not pull a reader who was following away from the end.
+  function keepPinned(change) {
+    const msgs = document.getElementById("msgs");
+    const pinned = msgs && msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 80;
+    change();
+    if (pinned) msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  function linkFiles() { keepPinned(addFileRows); }
+  function addFileRows() {
     for (const body of document.querySelectorAll(".msg .body:not([data-files])")) {
       body.setAttribute("data-files", "");
-      const found = body.textContent.match(/\/console\/api\/files\/\d+\/[0-9a-f]{32}\/[^\s)\]]+/g);
-      if (!found) continue;
+      const found = body.textContent.match(/\/console\/api\/files\/\d+\/[0-9a-f]{32}\/[^\s)\]]+/g)
+        || [...body.querySelectorAll(`a[href^="${FILES}"]`)].map((a) => a.getAttribute("href"));
+      if (!found.length) continue;
       const row = el("div", "live-files");
       for (const href of new Set(found)) {
-        const btn = el("button", "btn", `📎 ${L.download} ${decodeURIComponent(href.split("/").pop())}`);
+        if (imageType(href)) row.append(thumbnail(href));
+        const btn = el("button", "btn", `📎 ${L.download} ${fileName(href)}`);
         btn.type = "button";
         btn.addEventListener("click", () => download(href));
         row.append(btn);
@@ -122,17 +157,86 @@
     }
   }
 
-  async function download(href) {
+  async function fetchFile(href) {
     const headers = {};
     const token = localStorage.getItem("token");
     if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(href, { headers, credentials: "same-origin" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.blob();
+  }
+
+  // A data: URL, not a blob: one: the console's CSP allows img-src 'self' data: only.
+  function previewUrl(href) {
+    if (!previews.has(href)) {
+      previews.set(href, fetchFile(href).then((blob) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error);
+        // The server sends octet-stream; the extension says what the image is.
+        reader.readAsDataURL(new Blob([blob], { type: imageType(href) }));
+      })));
+      previews.get(href).catch(() => previews.delete(href));
+    }
+    return previews.get(href);
+  }
+
+  function thumbnail(href) {
+    const btn = el("button", "file-thumb");
+    btn.type = "button";
+    btn.title = fileName(href);
+    btn.append(el("span", "file-thumb-wait", "🖼️"));
+    previewUrl(href).then((url) => {
+      const img = el("img");
+      img.alt = fileName(href);
+      img.src = url;
+      // Decoded first, so the height is known when the end is re-pinned.
+      img.decode().catch(() => {}).then(() => keepPinned(() => btn.replaceChildren(img)));
+    }).catch(() => btn.replaceChildren(el("span", "file-thumb-wait", "⚠️")));
+    btn.addEventListener("click", () => preview(href));
+    return btn;
+  }
+
+  function preview(href) {
+    lightbox(fileName(href), previewUrl(href), () => download(href));
+  }
+
+  // Full-window image preview. *src* is a URL or a promise of one; Esc or a click closes it.
+  async function lightbox(name, src, onDownload) {
+    const shade = el("div", "lightbox");
+    const close = () => { shade.remove(); document.removeEventListener("keydown", onKey, true); };
+    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); close(); } };
+    const bar = el("div", "lightbox-bar");
+    bar.append(el("span", "lightbox-name", name));
+    if (onDownload) {
+      const save = el("button", "btn", `📎 ${L.download}`);
+      save.type = "button";
+      save.addEventListener("click", (e) => { e.stopPropagation(); onDownload(); });
+      bar.append(save);
+    }
+    const x = el("button", "btn", "✕");
+    x.type = "button";
+    x.addEventListener("click", close);
+    bar.append(x);
+    const img = el("img", "lightbox-img");
+    img.alt = name;
+    img.addEventListener("click", (e) => e.stopPropagation());
+    img.addEventListener("error", () => { close(); toast(L.failed); });
+    shade.append(bar, img);
+    shade.addEventListener("click", close);
+    document.addEventListener("keydown", onKey, true);
+    document.body.append(shade);
+    try { img.src = await src; }
+    catch (err) { close(); toast(`${L.failed}: ${err.message}`); }
+  }
+  window.ConsoleLightbox = lightbox;
+
+  async function download(href) {
     try {
-      const res = await fetch(href, { headers, credentials: "same-origin" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const url = URL.createObjectURL(await res.blob());
+      const url = URL.createObjectURL(await fetchFile(href));
       const a = el("a");
       a.href = url;
-      a.download = decodeURIComponent(href.split("/").pop());
+      a.download = fileName(href);
       document.body.append(a);
       a.click();
       a.remove();
@@ -144,7 +248,7 @@
     const a = e.target.closest && e.target.closest("a[href]");
     if (!a) return;
     const href = a.getAttribute("href");
-    if (href && href.startsWith(FILES)) { e.preventDefault(); download(href); }
+    if (href && href.startsWith(FILES)) { e.preventDefault(); if (imageType(href)) preview(href); else download(href); }
   });
 
   // The board refresh rebuilds the detail pane; put the panel back at once rather than
@@ -153,6 +257,7 @@
   if (detail) {
     new MutationObserver(() => {
       if (last && state.open === last.id && !document.getElementById("live")) draw(last.id, last.data);
+      else if (last && state.open !== last.id) clear();
       linkFiles();
     }).observe(detail, { childList: true });
   }

@@ -31,14 +31,43 @@ from ..thread_status import request_thread_outcome, schedule_thread_outcome
 from .auth import ConsoleAuthConfig, ConsoleAuthenticator, ConsoleAuthError
 from .auth_routes import AUTH_PREFIX, AuthRoutes
 from .board import SessionInfo, ThreadSnapshot, build_board
+from .codex_compact import CompactError, compact_codex_session
+from .commands import (
+    CONTROL_COMMANDS,
+    HANDLED_BUILTINS,
+    CommandError,
+    SkillLoader,
+    catalog,
+    default_skill_loader,
+    run_command,
+    skill_prompt,
+)
 from .conversations import ConversationRepository
 from .files import resolve_file
 from .messages import serialize_message, with_kind
 from .oidc import OidcClient, OidcConfig, provider_name
 from .passkey_store import PasskeyStore
 from .passkeys import PasskeyService
+from .places import PlaceError, PlaceRepository
+from .places import clean_name as clean_place
 from .ratelimit import RateLimiter
 from .surface import apply_outcome
+from .triage import INTERVAL_SECONDS as TRIAGE_INTERVAL_SECONDS
+from .triage import (
+    Triager,
+    TriageRepository,
+    apply_triage,
+)
+from .triage_models import CLAUDE_TRIAGE_MODEL, BackendAsk, installed
+from .uploads import (
+    MAX_IMAGES_PER_REPLY,
+    MAX_UPLOAD_BYTES,
+    UploadError,
+    accepted_type,
+    resolve_upload,
+    save_upload,
+    with_images,
+)
 from .usage import UsageReader
 from .work_repo import (
     STATE_DONE,
@@ -63,6 +92,7 @@ CSRF_HEADER = "X-Console-Request"
 MAX_REPLY_CHARS = 4000
 MAX_HISTORY = 100
 DEFAULT_HISTORY = 50
+MAX_TRIAGE_MESSAGES = 20
 #: How long the archived-thread listing is reused. Listing archives is a REST
 #: call per channel; the board is polled every few seconds.
 ARCHIVE_CACHE_SECONDS = 120.0
@@ -85,7 +115,9 @@ _STATIC_TYPES = {
 }
 _SECURITY_HEADERS = {
     "Content-Security-Policy": (
-        "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
+        # Discord's CDN is allowed for images only: attachments in chat threads preview inline.
+        "default-src 'self'; img-src 'self' data: https://cdn.discordapp.com "
+        "https://media.discordapp.net; style-src 'self'; script-src 'self'; "
         "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
     ),
     "X-Content-Type-Options": "nosniff",
@@ -122,9 +154,24 @@ class ConsoleServer:
         passkeys: PasskeyService | None = None,
         oidc: OidcClient | None = None,
         store: PasskeyStore | None = None,
+        skills: SkillLoader | None = None,
+        codex_compactor: Callable[..., Awaitable[None]] | None = None,
+        triage: TriageRepository | None = None,
+        places: PlaceRepository | None = None,
     ) -> None:
         self.api = api_server
+        #: Lists skills per backend for slash-command autocomplete; None reads the disk.
+        self._skills = skills
+        #: Runs ``/compact`` on a Codex session; injected so tests spawn nothing.
+        self._codex_compact = codex_compactor or compact_codex_session
+        #: Threads being compacted; a reply waits instead of racing the rewrite.
+        self._compacting: set[int] = set()
         self.work_repo = work_repo
+        #: The model's priority and deadline guesses; None turns automatic triage off.
+        self.triage = triage
+        #: The managed list of places work can be bound to.
+        self.places = places
+        self._triager: Triager | None = None
         #: The console's own conversations. Work started here lives in them,
         #: not in a chat thread; chat threads are still shown alongside.
         self.conversations = conversations
@@ -168,10 +215,17 @@ class ConsoleServer:
         r.add_get(f"{API_PREFIX}/me", self.me)
         r.add_get(f"{API_PREFIX}/board", self.board)
         r.add_get(f"{API_PREFIX}/usage", self.usage_read)
+        r.add_get(f"{API_PREFIX}/places", self.places_read)
+        r.add_post(f"{API_PREFIX}/places", self.place_add)
+        r.add_patch(f"{API_PREFIX}/places", self.place_rename)
+        r.add_delete(f"{API_PREFIX}/places", self.place_delete)
         r.add_post(f"{API_PREFIX}/items", self.create_item)
         r.add_patch(f"{API_PREFIX}/items/{{item_id}}", self.patch_item)
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/messages", self.messages)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/reply", self.reply)
+        r.add_post(f"{API_PREFIX}/uploads", self.upload)
+        r.add_get(f"{API_PREFIX}/items/{{item_id}}/commands", self.commands)
+        r.add_post(f"{API_PREFIX}/items/{{item_id}}/command", self.run_command)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/done", self.done)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/reopen", self.reopen)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/start", self.start_item)
@@ -224,7 +278,24 @@ class ConsoleServer:
         await site.start()
         logger.info("Relay Console started: http://%s:%d", self.host, self.port)
 
+    def start_triage(self, ask: Callable[[str], Awaitable[str | None]], *, model: str) -> None:
+        """Triage open items in the background with *ask* (one model call per item)."""
+        if self.triage is None or self._triager is not None:
+            return
+        places = self.places
+        self._triager = Triager(
+            self.triage,
+            ask=ask,
+            read_messages=self.triage_messages,
+            model=model,
+            registered_places=places.names if places is not None else None,
+        )
+        self._triager.start(self._board_items, TRIAGE_INTERVAL_SECONDS)
+        logger.info("Relay Console: automatic triage on (%s)", model)
+
     async def stop(self) -> None:
+        if self._triager is not None:
+            await self._triager.stop()
         if self._runner:
             await self._runner.cleanup()
 
@@ -267,6 +338,80 @@ class ConsoleServer:
             return {}
 
     async def board(self, request: web.Request) -> web.Response:
+        items = await self._board_items()
+        if self.triage is not None:
+            try:
+                items = apply_triage(items, await self.triage.all())
+            except Exception:
+                # Guesses are garnish; the board still answers without them.
+                logger.exception("console: could not read triage")
+        return web.json_response(
+            {
+                "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "items": items,
+                "slots": self._slots(),
+                "places": await self._place_list(items),
+            }
+        )
+
+    # -- places ------------------------------------------------------------
+    async def _place_list(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Every place: the managed list plus labels in use, with how many open items carry each."""
+        registered = await self.places.names() if self.places is not None else []
+        counts: dict[str, int] = {}
+        for item in items:
+            if item.get("place") and item.get("bucket") != "done":
+                counts[item["place"]] = counts.get(item["place"], 0) + 1
+        names = sorted(set(registered) | set(counts))
+        return [
+            {"name": n, "count": counts.get(n, 0), "registered": n in registered} for n in names
+        ]
+
+    async def places_read(self, request: web.Request) -> web.Response:
+        return web.json_response({"places": await self._place_list(await self._items())})
+
+    async def _items(self) -> list[dict[str, Any]]:
+        items = await self._board_items()
+        if self.triage is not None:
+            items = apply_triage(items, await self.triage.all())
+        return items
+
+    async def _place_change(
+        self, request: web.Request, change: Callable[[dict[str, Any]], Awaitable[Any]]
+    ) -> web.Response:
+        if self.places is None:
+            return _error("places are not available", 404)
+        body, err = await self._json(request)
+        if err:
+            return err
+        try:
+            await change(body)
+        except PlaceError as exc:
+            return _error(str(exc), 400)
+        return await self.places_read(request)
+
+    async def place_add(self, request: web.Request) -> web.Response:
+        async def add(body: dict[str, Any]) -> None:
+            assert self.places is not None
+            await self.places.add(body.get("name"))
+
+        return await self._place_change(request, add)
+
+    async def place_rename(self, request: web.Request) -> web.Response:
+        async def rename(body: dict[str, Any]) -> None:
+            assert self.places is not None
+            await self.places.rename(clean_place(body.get("from")), body.get("name"))
+
+        return await self._place_change(request, rename)
+
+    async def place_delete(self, request: web.Request) -> web.Response:
+        async def delete(body: dict[str, Any]) -> None:
+            assert self.places is not None
+            await self.places.delete(clean_place(body.get("name")))
+
+        return await self._place_change(request, delete)
+
+    async def _board_items(self) -> list[dict[str, Any]]:
         threads = await self._thread_snapshots() + await self._conversation_snapshots()
         overlays = await self.work_repo.list_all()
         lineage = await self._lineage()
@@ -282,13 +427,27 @@ class ConsoleServer:
         queued = self._queued_thread_ids()
         for item in items:
             item["queued"] = item["thread_id"] in queued
-        return web.json_response(
-            {
-                "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "items": items,
-                "slots": self._slots(),
-            }
-        )
+        return items
+
+    async def triage_messages(self, item: dict[str, Any]) -> list[tuple[str, str]]:
+        """What the triage model reads for *item*: its human and agent messages."""
+        if not item.get("thread_id"):
+            return [("note", item.get("note") or "")]
+        limit = MAX_TRIAGE_MESSAGES
+        key = await self._conversation_key(item["id"])
+        if key is not None and self.conversations is not None:
+            raw = [with_kind(m.as_dict()) for m in await self.conversations.history(key, limit)]
+        else:
+            thread, err = await self._thread_for(item["id"])
+            if err:
+                return []
+            history = [m async for m in thread.history(limit=limit)]
+            raw = [serialize_message(m) for m in reversed(history)]
+        return [
+            ("person" if m["kind"] == "human" else "agent", str(m.get("content") or ""))
+            for m in raw
+            if m["kind"] != "activity"
+        ]
 
     async def usage_read(self, request: web.Request) -> web.Response:
         if self.usage is None:
@@ -393,6 +552,14 @@ class ConsoleServer:
             )
         except WorkItemError as exc:
             return _error(str(exc), 400)
+        if self.places is not None and item.place:
+            # A place typed on an item joins the managed list.
+            await self.places.add(item.place)
+        if self.triage is not None and {"priority", "due_at", "place"} & set(body):
+            # What a human chose is no longer the model's to guess.
+            await self.triage.pin(
+                item.id, priority="priority" in body, due="due_at" in body, place="place" in body
+            )
         return web.json_response({"item": item.as_dict()})
 
     async def done(self, request: web.Request) -> web.Response:
@@ -443,18 +610,31 @@ class ConsoleServer:
         if err:
             return err
         text = str(body.get("text") or "").strip()
-        if not text:
+        images, err = self._reply_images(body.get("images"))
+        if err:
+            return err
+        if not text and not images:
             return _error("text is required", 400)
         if len(text) > MAX_REPLY_CHARS:
             return _error(f"text must be at most {MAX_REPLY_CHARS} characters", 400)
-        item_id = request.match_info["item_id"]
-        who = request[IDENTITY]
+        text = with_images(text, images)
+        return await self._deliver(request.match_info["item_id"], text, request[IDENTITY])
+
+    async def _deliver(self, item_id: str, text: str, who: str) -> web.Response:
+        """Queue *text* as the human's next message in the item's conversation."""
+        busy = _error("the conversation is being compacted; send again in a moment", 409)
         key = await self._conversation_key(item_id)
         if key is not None:
-            return await self._reply_in_console(item_id, key, text, who)
+            return (
+                busy
+                if key in self._compacting
+                else await self._reply_in_console(item_id, key, text, who)
+            )
         thread, err = await self._thread_for(item_id)
         if err:
             return err
+        if int(thread.id) in self._compacting:
+            return busy
         cog = self._chat_cog()
         if cog is None:
             return _error("the chat cog is not loaded", 503)
@@ -467,6 +647,143 @@ class ConsoleServer:
         self._background(cog.deliver_relayed_message(thread, prompt, interrupt=False))
         logger.info("console: %s replied in thread %s", who, thread.id)
         return web.json_response({"status": "delivered"}, status=202)
+
+    # -- slash commands ----------------------------------------------------
+    def _backend_settings(self) -> Any:
+        return getattr(getattr(self.api, "components", None), "backend_settings", None)
+
+    async def _command_key(self, item_id: str) -> tuple[int | None, web.Response | None]:
+        """The thread key commands apply to: a console conversation or a watched chat thread."""
+        key = await self._conversation_key(item_id)
+        if key is not None:
+            return key, None
+        thread, err = await self._thread_for(item_id)
+        if err:
+            return None, err
+        return int(thread.id), None
+
+    def _skill_loader(self) -> SkillLoader:
+        cogs = getattr(self.api.bot, "cogs", None)
+        skill_cog = cogs.get("SkillCommandCog") if isinstance(cogs, dict) else None
+        return self._skills or default_skill_loader(skill_cog)
+
+    async def commands(self, request: web.Request) -> web.Response:
+        """What the reply box autocompletes for this item: commands, models, efforts, skills."""
+        settings = self._backend_settings()
+        if settings is None:
+            return _error("this deployment has no backend settings", 503)
+        key, err = await self._command_key(request.match_info["item_id"])
+        if err:
+            return err
+        assert key is not None
+        return web.json_response(await catalog(settings, key, self._skill_loader()))
+
+    async def run_command(self, request: web.Request) -> web.Response:
+        """Run a slash command typed into the reply box.
+
+        ``backend``/``model``/``effort`` change this conversation's settings and
+        answer at once; any other name is a skill of the current backend and is
+        sent to the agent as the next message.
+        """
+        body, err = await self._json(request)
+        if err:
+            return err
+        settings = self._backend_settings()
+        if settings is None:
+            return _error("this deployment has no backend settings", 503)
+        item_id = request.match_info["item_id"]
+        key, err = await self._command_key(item_id)
+        if err:
+            return err
+        assert key is not None
+        name = str(body.get("name") or "").strip().lstrip("/")
+        arg = str(body.get("arg") or "")
+        if len(arg) > MAX_REPLY_CHARS:
+            return _error(f"arguments must be at most {MAX_REPLY_CHARS} characters", 400)
+        who = request[IDENTITY]
+        if name in {n for n, _ in CONTROL_COMMANDS}:
+            try:
+                result = await run_command(settings, key, name, arg)
+            except CommandError as exc:
+                return _error(str(exc), 400)
+            logger.info("console: %s ran /%s %s on %s", who, name, arg.strip()[:60], item_id)
+            return web.json_response(
+                {
+                    "message": result.message,
+                    "catalog": await catalog(settings, key, self._skill_loader()),
+                }
+            )
+        backend = await settings.current_backend(key)
+        if name in HANDLED_BUILTINS.get(backend, frozenset()):
+            return await self._compact_codex(key, item_id, who)
+        if name not in {s["name"] for s in self._skill_loader()(backend)}:
+            return _error(f"Unknown command `/{name}` for `{backend}`.", 400)
+        logger.info("console: %s ran skill /%s on %s", who, name, item_id)
+        return await self._deliver(item_id, skill_prompt(backend, name, arg), who)
+
+    async def _compact_codex(self, key: int, item_id: str, who: str) -> web.Response:
+        """``/compact`` on a Codex conversation, through ``codex app-server``."""
+        if key in self.api._running_thread_ids() or key in self._compacting:
+            return _error("wait until the current turn finishes, then compact", 409)
+        repo = self.api.session_repo
+        record = await repo.get(key) if repo is not None else None
+        if record is None or record.backend != "codex":
+            return _error("this conversation has no Codex session to compact yet", 409)
+        factory = vars(getattr(self.api, "components", None) or object()).get("backend_factory")
+        command = getattr(factory, "codex_command", None) or "codex"
+        self._compacting.add(key)
+        try:
+            await self._codex_compact(record.session_id, codex_command=command)
+        except CompactError as exc:
+            logger.warning("console: /compact failed on %s: %s", item_id, exc)
+            return _error(str(exc), 502)
+        finally:
+            self._compacting.discard(key)
+        logger.info("console: %s compacted Codex session of %s", who, item_id)
+        return web.json_response(
+            {"message": "Conversation compacted. The next reply continues from the summary."}
+        )
+
+    def _files_dir(self) -> Path | None:
+        return self.sessions.frontend.files_dir if self.sessions is not None else None
+
+    def _reply_images(self, raw: object) -> tuple[list[tuple[str, Path]], web.Response | None]:
+        """Pasted-image URLs from a reply body, resolved to stored files."""
+        if raw in (None, []):
+            return [], None
+        if not isinstance(raw, list) or len(raw) > MAX_IMAGES_PER_REPLY:
+            return [], _error(f"images must be a list of at most {MAX_IMAGES_PER_REPLY}", 400)
+        out: list[tuple[str, Path]] = []
+        for url in raw:
+            path = resolve_upload(self._files_dir(), url)
+            if path is None:
+                return [], _error("unknown image", 400)
+            out.append((url, path))
+        return out, None
+
+    async def upload(self, request: web.Request) -> web.Response:
+        """Store an image pasted into a reply; answer with the URL the reply names it by.
+
+        The body is the raw image. It is read here with its own limit because the
+        listener's JSON limit is far smaller than a screenshot.
+        """
+        files_dir = self._files_dir()
+        if files_dir is None:
+            return _error("this deployment cannot keep files", 503)
+        try:
+            mime = accepted_type(request.headers.get("Content-Type", ""))
+            if (request.content_length or 0) > MAX_UPLOAD_BYTES:
+                raise UploadError("the image is larger than 10 MB", 413)
+            data = bytearray()
+            async for chunk in request.content.iter_chunked(64 * 1024):
+                data.extend(chunk)
+                if len(data) > MAX_UPLOAD_BYTES:
+                    raise UploadError("the image is larger than 10 MB", 413)
+            url = await save_upload(files_dir, bytes(data), mime)
+        except UploadError as exc:
+            return _error(str(exc), exc.status)
+        logger.info("console: %s uploaded %s", request[IDENTITY], url)
+        return web.json_response({"url": url}, status=201)
 
     async def start_item(self, request: web.Request) -> web.Response:
         """Hand a captured item to an agent: open a console conversation and start a turn.
@@ -748,6 +1065,12 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
     await store.init_db()
     passkeys = PasskeyService(store) if config.passkeys else None
     oidc = _oidc_client(config)
+    triage_ask = _triage_ask(api_server)
+    triage = TriageRepository(api_server.session_repo.db_path) if triage_ask else None
+    places = PlaceRepository(api_server.session_repo.db_path)
+    await places.init_db()
+    if triage is not None:
+        await triage.init_db()
     console = ConsoleServer(
         api_server,
         work_repo,
@@ -760,8 +1083,12 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
         passkeys=passkeys,
         oidc=oidc,
         store=store,
+        triage=triage,
+        places=places,
     )
     await console.start()
+    if triage_ask is not None:
+        console.start_triage(triage_ask, model=triage_ask.model)
     if passkeys is not None:
         await passkeys.open_enrollment(force=os.getenv("CCDB_CONSOLE_ENROLL") == "1")
     return console
@@ -818,6 +1145,33 @@ async def _build_session_host(
     # The wait watcher resumes a conversation after CI; it finds this one here.
     bot.console_sessions = host  # type: ignore[attr-defined]
     return host
+
+
+def _triage_ask(api_server: ApiServer) -> BackendAsk | None:
+    """The model call for automatic triage, or None when it is off or no CLI is installed.
+
+    On by default (``CCDB_CONSOLE_TRIAGE=0`` turns it off). It follows the
+    backend chosen with ``/backend``: Haiku on Claude, Codex's cheapest model
+    on Codex, falling back to whichever CLI is installed.
+    """
+    if (os.getenv("CCDB_CONSOLE_TRIAGE") or "1").strip().lower() in ("0", "false", "off", "no"):
+        return None
+    claude = installed((os.getenv("CCDB_CONSOLE_TRIAGE_COMMAND") or "claude").strip())
+    codex = installed((os.getenv("CCDB_CODEX_COMMAND") or "codex").strip())
+    if claude is None and codex is None:
+        return None
+    settings = getattr(api_server.components, "backend_settings", None)
+
+    async def current_backend() -> str:
+        return str(await settings.current_backend()) if settings is not None else "claude"
+
+    return BackendAsk(
+        current_backend,
+        claude_command=claude,
+        codex_command=codex,
+        claude_model=(os.getenv("CCDB_CONSOLE_TRIAGE_MODEL") or "").strip() or CLAUDE_TRIAGE_MODEL,
+        codex_model=(os.getenv("CCDB_CONSOLE_TRIAGE_CODEX_MODEL") or "").strip() or None,
+    )
 
 
 def _oidc_client(config: ConsoleAuthConfig) -> OidcClient | None:

@@ -11,6 +11,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Relay Console: Focus view and automatic triage** (#933) — a new default view answers "what
+  do I do now?". A fast model reads each open thread with new activity and fills in what nobody
+  set by hand: priority, a deadline the conversation names, why, the next step, whether that step
+  can be done now or must wait (for what, until when), and whether it is bound to a place or
+  device. Importance, readiness and place stay separate axes: only work you can do here and now
+  ranks under "Do this first"; waiting work returns on its own once its time comes. Triage uses
+  the cheapest model of the backend chosen with `/backend` (Haiku on Claude, the cheapest model in
+  Codex's catalog on Codex) as a one-shot, tool-less call. A value a person sets always wins and is
+  pinned. `CCDB_CONSOLE_TRIAGE=0` turns it off.
+- **Relay Console: places** (#933) — tag work that can only be done at home, at the office or on
+  the work PC with the 📍 button, say where you are, and work bound elsewhere moves out of the
+  way. Places are managed (add, rename, delete — every item follows) from the screen and
+  `/console/api/places`.
+- **Relay Console: due dates on every row** — "Due 10/14 18:00 (in 2d)", highlighted within a day,
+  "overdue" in red, "No due date" when none.
+- **Relay Console: everyday use** (#938) — resizable columns; the conversation keeps its room and
+  scroll position; chime, toast, unread marks and desktop notifications when something comes to
+  you; images from chat threads and agents preview in place, and can be pasted into a reply;
+  slash commands, skills and CLI built-ins autocomplete in the reply box, with a real `/compact`
+  for Codex conversations through `codex app-server`; one guarded click finishes a thread, with
+  undo; tool calls of console conversations are kept as a log behind the "⚙ Activity" button
+  (#930).
+
 - **Relay Console: Recent view** (#927) — every item, finished ones included, newest activity
   first and grouped by day, with each row naming the list it lives in now. In the nav and on
   `g u`. See [docs/console.md](docs/console.md).
@@ -23,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its supervisor to start again. See [docs/session-queue.md](docs/session-queue.md).
 
 ### Fixed
+
+- **Windows: console triage and Codex `/compact` start npm `.cmd` CLIs** (#937) — they are
+  resolved to `node` + script (current cmd-shim wrappers included) and never run through
+  `cmd.exe` with untrusted arguments.
+- **Relay Console conversations resume after a bot restart.**
 
 - **A turn queued at shutdown no longer loses the user's message** (#915) — it used to be resumed
   with the generic "bot restarted" prompt; it now replays the message it was waiting to send,
