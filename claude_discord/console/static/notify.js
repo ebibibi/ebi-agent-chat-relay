@@ -11,6 +11,7 @@ window.ConsoleNotify = (() => {
   let seen = null; // id -> { bucket, status, running } from the previous board
   let audio = null;
   let missed = 0;
+  let asked = false;
 
   // Browsers only allow sound after the page has been interacted with.
   const unlock = () => {
@@ -19,6 +20,11 @@ window.ConsoleNotify = (() => {
       if (Ctx) audio = new Ctx();
     }
     if (audio && audio.state === "suspended") audio.resume();
+    // Ask for desktop notifications once, on the first gesture (browsers refuse without one).
+    if (enabled && !asked && "Notification" in window && Notification.permission === "default") {
+      asked = true;
+      Notification.requestPermission().catch(() => { /* the in-page signals still work */ });
+    }
   };
   document.addEventListener("pointerdown", unlock, { capture: true });
   document.addEventListener("keydown", unlock, { capture: true });
