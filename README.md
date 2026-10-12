@@ -445,7 +445,7 @@ On by default (`CCDB_ATTENTION_ENABLED=false` stops recording); every number is 
 
 ### Relay Console — Triage Agent Work from Desktop or Phone
 
-An API-first triage screen on its own authenticated listener. Every thread is sorted by whose move it is — **Inbox** (❓ / 👀 / 📋 / ⚠️: the ball is on you), **Running**, **To do**, **Idle**, a project/parent **Tree**, **Snoozed** and **Done** — with priority P0–P3, due dates and snooze. Reply, mark done, or write down new work — quick capture hands it to an agent right away by default (a checkbox, remembered per browser, keeps it as a plain note) — and it runs in a conversation the console owns (no chat thread), on the same session runner, with its transcript in the session database and replies resuming the same session. Status is derived from what ccdb already knows (outcome markers, running turns, the slot queue, spawn lineage), so agents do nothing new; only priority/due/snooze/project/parent live in a new `work_items` table. Threads render as Markdown, with the relay's own activity (tool calls, status lines, automatic prompts) hidden unless you ask for it. Keyboard-driven on desktop, installable to a phone's home screen.
+An API-first triage screen on its own authenticated listener. Every thread is sorted by whose move it is — **Inbox** (❓ / 👀 / 📋 / ⚠️: the ball is on you), **Running**, **To do**, **Idle**, a project/parent **Tree**, **Snoozed** and **Done**, plus a **Recent** view of every item (finished ones included) by last activity — with priority P0–P3, due dates and snooze. Reply, mark done, or write down new work — quick capture hands it to an agent right away by default (a checkbox, remembered per browser, keeps it as a plain note) — and it runs in a conversation the console owns (no chat thread), on the same session runner, with its transcript in the session database and replies resuming the same session. Status is derived from what ccdb already knows (outcome markers, running turns, the slot queue, spawn lineage), so agents do nothing new; only priority/due/snooze/project/parent live in a new `work_items` table. Threads render as Markdown, with the relay's own activity (tool calls, status lines, automatic prompts) hidden unless you ask for it. Keyboard-driven on desktop, installable to a phone's home screen.
 
 ```bash
 uv add "claude-code-discord-bridge[console] @ git+https://github.com/ebibibi/ebi-agent-chat-relay.git"
@@ -629,6 +629,7 @@ The operator sets the default and an allowlist in the environment (`CCDB_EXECUTI
 - **Webhook triggers** — Trigger Claude Code tasks from GitHub Actions or any CI/CD system
 - **Auto-upgrade** — Automatically update the bot when upstream packages are released
 - **DrainAware restart** — Waits for active sessions to finish before restarting
+- **Reserved restart** — `POST /api/restart` holds the session queue, lets running turns finish, restarts once nothing is running (via `CCDB_RESTART_COMMAND`, or by closing the bot for its supervisor to restart), then replays everything that was queued in order; `GET` shows the state, `DELETE` cancels. See [docs/session-queue.md](docs/session-queue.md)
 - **Auto-resume marking** — Active sessions are automatically marked for resume on any shutdown (upgrade restart via `AutoUpgradeCog`, or any other shutdown via `ClaudeChatCog.cog_unload()`); on restart Claude reports its previous state and re-confirms with the user before resuming any implementation work
 - **Restart approval** — Optional gate to confirm upgrades; approve via ✅ reaction in the upgrade thread or via button posted to the parent channel; the button re-posts itself at the bottom as new messages arrive so it stays visible
 - **Manual upgrade trigger** — `/upgrade` slash command lets authorised users trigger the upgrade pipeline directly from Discord (opt-in via `slash_command_enabled=True`)
@@ -1389,6 +1390,9 @@ uv sync --extra api
 | POST | `/api/lounge` | Post a message to the AI Lounge (with optional `label`); returns a `hint` field when the message exceeds 200 characters |
 | GET | `/api/sessions` | List every session — live and stored — with state, working dir and latest lounge note (`state=running`, `exclude_thread`, `limit`) |
 | GET | `/api/slots` | Session slot queue: `max_slots`, threads holding a slot (`running`) and the queue in start order (`waiting`) |
+| GET | `/api/restart` | Reserved restart state: `reserved`, `phase` (`idle` / `draining` / `restarting`), running and waiting counts, `last_error` |
+| POST | `/api/restart` | Reserve a restart: hold the queue, restart once nothing runs, then replay everything queued (202; 200 if already reserved) |
+| DELETE | `/api/restart` | Cancel the reservation; the queue resumes (404 none, 409 already restarting) |
 | POST | `/api/slots/{thread_id}/{action}` | Steer the queue — `prioritize` / `defer` a waiting thread, `pause` a running one (404 wrong state, 409 conflict such as `nothing_waiting`, 503 no limit configured) |
 | GET | `/api/search` | Find a past thread by keyword — `LIKE` over summary and working dir; add `body=1` to also grep local Claude transcripts (each hit then carries a `snippet` and `source`); returns each hit with a Discord `deep_link` (`q` required, optional `origin`, `limit` max 50) |
 | GET | `/api/threads/{thread_id}/messages` | Read another thread's conversation, oldest first (`limit`) |

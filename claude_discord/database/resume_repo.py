@@ -103,7 +103,7 @@ class PendingResumeRepository:
                 """
                 SELECT id, thread_id, session_id, reason, resume_prompt, created_at
                 FROM pending_resumes
-                ORDER BY created_at ASC
+                ORDER BY created_at ASC, id ASC
                 """
             )
             rows = await cursor.fetchall()

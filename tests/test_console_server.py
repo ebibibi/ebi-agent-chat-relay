@@ -202,3 +202,9 @@ async def test_start_must_be_a_boolean(client) -> None:
         "/console/api/items", json={"title": "x", "start": "yes"}, headers=WRITE
     )
     assert response.status == 400
+
+
+async def test_the_recent_view_is_in_the_nav_and_on_g_u(client) -> None:
+    script = await (await client.get("/static/app.js")).text()
+    assert '{ key: "recent" }' in script
+    assert 'u: "recent"' in script

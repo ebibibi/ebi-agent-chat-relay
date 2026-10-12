@@ -90,10 +90,27 @@ class ConsoleSessionHost:
         await apply_outcome(self.frontend.repo, thread_key, None)
         await self._submit(surface, prompt, author)
 
+    async def resume_queued(self, thread_key: int, prompt: str) -> None:
+        """Run a turn that was queued when the bot restarted.
+
+        The human's message is already in the transcript, so it is not
+        appended again.
+        """
+        surface = await self.frontend.resolve_surface(thread_key)
+        if surface is None:
+            raise LookupError(f"unknown console conversation {thread_key}")
+        await surface.send_text(
+            "🔄 Bot restarted. Running the message that was queued before the restart."
+        )
+        self._spawn(surface, prompt)
+
     async def _submit(self, surface: ConsoleSurface, prompt: str, author: str) -> None:
         await self.frontend.repo.append(
             surface.thread_key, author=author, is_bot=False, content=prompt
         )
+        self._spawn(surface, prompt)
+
+    def _spawn(self, surface: ConsoleSurface, prompt: str) -> None:
         task = asyncio.create_task(self._run_queued(surface, prompt))
         self._tasks.add(task)
         task.add_done_callback(self._finished)

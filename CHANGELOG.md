@@ -11,6 +11,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Relay Console: Recent view** (#927) — every item, finished ones included, newest activity
+  first and grouped by day, with each row naming the list it lives in now. In the nav and on
+  `g u`. See [docs/console.md](docs/console.md).
+
+- **Reserved restart** (#915) — `POST /api/restart` holds the session queue: running turns
+  finish, every new request (chat, console, scheduler, spawn) queues instead of starting, and the
+  bot restarts as soon as nothing is running. Everything that was queued then runs after the
+  restart, in queue order. `GET /api/restart` shows the state, `DELETE /api/restart` cancels and
+  lets the queue go. Restarts with `CCDB_RESTART_COMMAND` when set, otherwise closes the bot for
+  its supervisor to start again. See [docs/session-queue.md](docs/session-queue.md).
+
+### Fixed
+
+- **A turn queued at shutdown no longer loses the user's message** (#915) — it used to be resumed
+  with the generic "bot restarted" prompt; it now replays the message it was waiting to send,
+  in Discord threads and Relay Console conversations alike.
+
 - **Relay Console: sign in with Google, Entra ID or any OIDC provider** (#894) — optional, next
   to passkeys and without Cloudflare in front. Set `CCDB_CONSOLE_OIDC_ISSUER`, `_CLIENT_ID`,
   `_CLIENT_SECRET`, `CCDB_CONSOLE_ORIGIN` and `CCDB_CONSOLE_ALLOWED_EMAILS`. Authorization code

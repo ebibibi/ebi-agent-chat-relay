@@ -13,6 +13,10 @@ the queue reorderable:
   as deferred, so it resumes automatically (same CLI session, via ``--resume``)
   when a slot is free again.  Pausing is refused when nobody is waiting —
   freeing a slot nobody will take only restarts the same session at once.
+- **hold**: no waiter starts, however many slots are free.  A reserved
+  restart holds the queue so the running sessions can finish while new
+  requests wait; each waiter keeps the prompt it would run, so the queue can
+  be carried across the restart (see ``restart_reservation``).
 
 The scheduler is frontend-neutral and lives in one process-wide instance so
 every entry point (chat, scheduler, webhooks, REST ingest) shares one limit,
@@ -51,6 +55,8 @@ class SlotEntry:
     running: bool = False
     pause_requested: bool = False
     resumed_from_pause: bool = False
+    # What this run would send if it had to start over in a new process.
+    resume_prompt: str | None = None
     enqueued_at: float = field(default_factory=time.time)
     started_at: float | None = None
     on_pause: Callable[[], Awaitable[None]] | None = None
@@ -104,6 +110,7 @@ class SessionSlotScheduler:
         self._running: list[SlotEntry] = []
         self._waiting: list[SlotEntry] = []
         self._seq = itertools.count()
+        self._held = False
 
     @property
     def max_slots(self) -> int:
@@ -112,6 +119,24 @@ class SessionSlotScheduler:
     @property
     def running_count(self) -> int:
         return len(self._running)
+
+    @property
+    def held(self) -> bool:
+        """True while no waiter may start (a restart is pending)."""
+        return self._held
+
+    def hold(self) -> None:
+        """Stop starting waiters. Running sessions are not touched."""
+        if not self._held:
+            logger.info("Slot queue: held (no new run starts)")
+        self._held = True
+
+    def unhold(self) -> None:
+        """Start waiters again, filling every free slot."""
+        if self._held:
+            logger.info("Slot queue: hold released")
+        self._held = False
+        self._dispatch()
 
     def is_authorized(self, user_id: int) -> bool:
         """Whether a frontend user may reorder or pause sessions."""
@@ -123,7 +148,7 @@ class SessionSlotScheduler:
 
     def would_wait(self, priority: SlotPriority = SlotPriority.NORMAL) -> bool:
         """True if a new run with ``priority`` could not start right now."""
-        if len(self._running) >= self._max_slots:
+        if self._held or len(self._running) >= self._max_slots:
             return True
         return any(w.priority >= priority for w in self._waiting)
 
@@ -134,6 +159,7 @@ class SessionSlotScheduler:
         label: str = "",
         priority: SlotPriority = SlotPriority.NORMAL,
         resumed_from_pause: bool = False,
+        resume_prompt: str | None = None,
     ) -> SlotEntry:
         """Wait for a slot and return the entry that now holds it.
 
@@ -147,6 +173,7 @@ class SessionSlotScheduler:
             seq=next(self._seq),
             priority=priority,
             resumed_from_pause=resumed_from_pause,
+            resume_prompt=resume_prompt,
             _granted=loop.create_future(),
         )
         self._waiting.append(entry)
@@ -173,6 +200,8 @@ class SessionSlotScheduler:
         return sorted(self._waiting, key=lambda e: (-e.priority, e.seq))
 
     def _dispatch(self) -> None:
+        if self._held:
+            return
         while len(self._running) < self._max_slots and self._waiting:
             nxt = self._ordered_waiting()[0]
             self._waiting.remove(nxt)
@@ -232,6 +261,12 @@ class SessionSlotScheduler:
             raise SlotActionError("already_pausing", "This thread is already being paused.")
         if entry.on_pause is None:
             raise SlotActionError("not_pausable", "This run cannot be paused.")
+        if self._held:
+            raise SlotActionError(
+                "held",
+                "A restart is pending, so a freed slot would stay empty. "
+                "Let this run finish, or use Stop to end it.",
+            )
         if not self._waiting:
             raise SlotActionError(
                 "nothing_waiting",
@@ -253,6 +288,14 @@ class SessionSlotScheduler:
             if entry.thread_key == thread_key:
                 return index
         return None
+
+    def is_waiting(self, thread_key: int) -> bool:
+        """Whether *thread_key* is queued (not running)."""
+        return self._find_waiting(thread_key) is not None
+
+    def waiting_entries(self) -> list[SlotEntry]:
+        """The queue in the order it would start."""
+        return self._ordered_waiting()
 
     def snapshot(self) -> list[SlotInfo]:
         """Running entries (oldest first) followed by the queue in start order."""

@@ -33,7 +33,7 @@ TEAMSISH = SurfaceCapabilities(
 LONG_TEXT = "\n\n".join(f"Paragraph {i}. " + "word " * 60 for i in range(40))
 
 ASCII_TABLE = "| Name | Role |\n|---|---|\n| Ada | Engineer |\n| Bob | Designer |"
-CJK_TABLE = "| 名前 | 役割 |\n|---|---|\n| 胡田 | エンジニア |\n| 明希 | デザイナー |"
+CJK_TABLE = "| 名前 | 役割 |\n|---|---|\n| 胡田 | エンジニア |\n| 佐藤 | デザイナー |"
 
 
 class TestMessageLimitComesFromCapabilities:
