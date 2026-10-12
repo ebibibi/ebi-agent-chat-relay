@@ -5,6 +5,7 @@
 
 const API = "/console/api";
 const POLL_MS = 8000;
+const POLL_HIDDEN_MS = 30000;
 const HISTORY = 100;
 
 const I18N = {
@@ -12,7 +13,9 @@ const I18N = {
     me: "Inbox", ai: "Running", todo: "To do", idle: "Idle", tree: "Tree", snoozed: "Snoozed", done: "Done",
     filter: "Filter…", capture: "+ Write down work, press Enter (c) — Shift+Enter for a note line", capture_ai: "+ Write down work, Enter hands it to AI (c) — Shift+Enter for a note line",
     autostart: "AI starts right away", empty: "Nothing here. 🎉",
-    activity: (n) => `Show relay activity (${n})`, no_messages: "No messages yet.",
+    activity: (n) => `Show relay activity (${n})`, details: "Details",
+    notify_on: "🔔 Notifications on", notify_off: "🔕 Notifications off",
+    jump: "↓ Latest", jump_new: (n) => `↓ ${n} new`, no_messages: "No messages yet.",
     slots: (r, m, w) => `Slots ${r}/${m ?? "∞"}` + (w ? ` · ${w} queued` : ""),
     priority: "Priority", due: "Due", snooze: "Snooze", project: "Project", parent: "Under",
     none: "—", done_btn: "Done (e)", reopen: "Reopen", open_chat: "Open in chat", start: "Hand to AI",
@@ -29,7 +32,9 @@ const I18N = {
     me: "受信箱", ai: "実行中", todo: "やること", idle: "止まっている", tree: "ツリー", snoozed: "スヌーズ中", done: "完了",
     filter: "絞り込み…", capture: "＋ 思いついた仕事を書いて Enter（c）。Shift+Enter で改行してメモ", capture_ai: "＋ 思いついた仕事を書いて Enter → AIが着手（c）。Shift+Enter で改行してメモ",
     autostart: "AIがすぐ着手", empty: "ここには何もありません 🎉",
-    activity: (n) => `内部の動きも表示（${n}件）`, no_messages: "まだメッセージはありません",
+    activity: (n) => `内部の動きも表示（${n}件）`, details: "詳細",
+    notify_on: "🔔 通知オン", notify_off: "🔕 通知オフ",
+    jump: "↓ 最新へ", jump_new: (n) => `↓ 新着 ${n}件`, no_messages: "まだメッセージはありません",
     slots: (r, m, w) => `枠 ${r}/${m ?? "∞"}` + (w ? `・待ち ${w}` : ""),
     priority: "優先度", due: "期限", snooze: "スヌーズ", project: "案件", parent: "親",
     none: "なし", done_btn: "完了（e）", reopen: "戻す", open_chat: "チャットで開く", start: "AIに頼む",
@@ -68,6 +73,9 @@ const state = {
   messages: [], lastSync: null, pendingG: false, drafts: {},
   // The relay's own tool calls, status lines and automatic prompts stay hidden unless asked for.
   showActivity: localStorage.getItem("showActivity") === "1",
+  // The triage fields (priority, due, project, …) stay folded away unless asked for.
+  drawerOpen: localStorage.getItem("drawerOpen") === "1",
+  unseen: 0, fresh: new Set(),
 };
 
 // ---------------------------------------------------------------- dom helpers
@@ -122,6 +130,7 @@ async function refresh() {
     $("sync").textContent = `${T.updated} ${state.lastSync.toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}`;
     if (state.open && !state.byId.has(state.open)) state.open = null;
     render();
+    if (window.ConsoleNotify) window.ConsoleNotify.onBoard(data.items);
     const open = state.open && state.byId.get(state.open);
     if (open && open.thread_id && (open.running || open.queued)) loadMessages(open.id);
   } catch (err) {
@@ -225,6 +234,9 @@ function renderNav() {
       class: "count" + (v.hot && counts[v.key] ? " hot" : ""), text: counts[v.key] || "",
     }))),
     h("div", { class: "slots", text: T.slots(state.slots.running ?? 0, state.slots.max, state.slots.waiting) }),
+    window.ConsoleNotify ? h("button", { class: "nav-notify" + (window.ConsoleNotify.isOn() ? " on" : ""),
+      onclick: () => window.ConsoleNotify.toggle() },
+      h("span", { text: window.ConsoleNotify.isOn() ? T.notify_on : T.notify_off })) : null,
     h("button", { class: "nav-auth", onclick: () => window.ConsoleAuth.showDevices() },
       h("span", { text: `🔑 ${window.ConsoleAuth.label}` })),
   );
@@ -263,7 +275,8 @@ function rowNode({ item, depth, children }) {
         text: state.collapsed.has(item.id) ? "▸" : "▾" })
     : (depth ? h("span", { class: "tw", text: "" }) : null);
   return h("li", {
-    class: "row" + (state.selected === item.id ? " sel" : "") + (item.bucket === "done" ? " done" : ""),
+    class: "row" + (state.selected === item.id ? " sel" : "") + (item.bucket === "done" ? " done" : "") +
+      (state.fresh.has(item.id) ? " fresh" : ""),
     role: "option", "aria-selected": state.selected === item.id ? "true" : "false",
     onclick: () => { state.selected = item.id; openItem(item.id); },
   },
@@ -275,19 +288,75 @@ function rowNode({ item, depth, children }) {
   );
 }
 
+// The detail pane keeps one skeleton per item: header, a collapsible drawer for the
+// triage fields, the conversation, the live panel slot and the reply box. A board
+// refresh rewrites only the header and drawer, so the conversation never loses its
+// scroll position and the reply box never loses what is being typed.
 function renderDetail() {
   const pane = $("detail");
   const item = state.open && state.byId.get(state.open);
   $("app").classList.toggle("no-detail", !item);
   pane.hidden = !item;
-  if (!item) { pane.replaceChildren(); return; }
-  // Re-rendering while the human types would eat their input: keep the pane
-  // and only refresh what the server owns.
-  const sameItem = pane.dataset.item === item.id;
-  if (sameItem && pane.contains(document.activeElement) &&
-      document.activeElement.matches("input:not([type=checkbox]), textarea, select")) return;
-  pane.dataset.item = item.id;
+  if (!item) { pane.replaceChildren(); delete pane.dataset.item; return; }
+  const key = `${item.id}|${item.thread_id ? 1 : 0}`;
+  if (pane.dataset.item !== key || !$("msgs")) buildDetail(pane, item, key);
 
+  // Leave the header alone while one of its fields is being edited.
+  const active = document.activeElement;
+  const editing = active && active.matches("input:not([type=checkbox]), select") &&
+    ($("d-head").contains(active) || $("d-drawer").contains(active));
+  if (!editing) {
+    $("d-head").replaceChildren(...headParts(item));
+    $("d-drawer").replaceChildren(...drawerParts(item));
+  }
+  $("d-drawer").hidden = !state.drawerOpen;
+  const msgs = $("msgs");
+  if (item.thread_id) fillMessages(msgs);
+  else msgs.replaceChildren(item.note
+    ? h("div", { class: "msg" }, h("div", { class: "body md" }, MD.render(item.note)))
+    : h("div", { class: "empty", text: T.no_messages }));
+}
+
+function buildDetail(pane, item, key) {
+  pane.dataset.item = key;
+  const msgs = h("div", { class: "msgs", id: "msgs", onscroll: updateJump });
+  const jump = h("button", { class: "jump", id: "jump", type: "button", hidden: true,
+    onclick: () => { msgs.scrollTop = msgs.scrollHeight; updateJump(); } });
+  const nodes = [
+    h("div", { class: "d-head", id: "d-head" }),
+    h("div", { class: "d-drawer", id: "d-drawer", hidden: true }),
+    h("div", { class: "msgs-wrap" }, msgs, jump),
+    h("div", { class: "live-slot", id: "live-slot" }),
+  ];
+  if (item.thread_id) {
+    // Drafts survive the refresh and switching between items.
+    const box = h("textarea", { id: "reply", placeholder: T.reply_ph, rows: 3,
+      oninput: (e) => { state.drafts[item.id] = e.target.value; grow(e.target); },
+      onkeydown: (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendReply(item.id, box); } } });
+    nodes.push(h("form", { class: "reply", onsubmit: (e) => { e.preventDefault(); sendReply(item.id, box); } },
+      box, h("button", { class: "btn primary", type: "submit", text: T.send })));
+    box.value = state.drafts[item.id] || "";
+    requestAnimationFrame(() => grow(box));
+  }
+  pane.replaceChildren(...nodes);
+}
+
+function headParts(item) {
+  const title = h("input", { class: "d-title-input", value: item.title || item.thread_name || "", "aria-label": "title",
+    onchange: (e) => patch(item.id, { title: e.target.value || null }) });
+  const parts = [
+    h("button", { class: "icon-btn", "aria-label": "close", onclick: closeItem, text: "←" }),
+    h("span", { class: "d-status", title: T.st[item.status], text: STATUS_ICON[item.status] || "·" }),
+    title,
+  ];
+  if (!item.thread_id) parts.push(h("button", { class: "btn primary", onclick: () => startItem(item.id), text: T.start }));
+  parts.push(h("button", { class: "btn d-more" + (state.drawerOpen ? " on" : ""), type: "button",
+    "aria-expanded": state.drawerOpen ? "true" : "false", onclick: toggleDrawer,
+    text: `${state.drawerOpen ? "▴" : "▾"} ${T.details}` }));
+  return parts;
+}
+
+function drawerParts(item) {
   const pri = h("select", { onchange: (e) => patch(item.id, { priority: Number(e.target.value) }) },
     [0, 1, 2, 3].map((p) => h("option", { value: p, selected: item.priority === p, text: `P${p}` })));
   const due = h("input", { type: "datetime-local", value: toLocalInput(item.due_at),
@@ -305,47 +374,42 @@ function renderDetail() {
   const actions = [];
   if (item.bucket === "done") actions.push(h("button", { class: "btn", onclick: () => act(item.id, "reopen"), text: T.reopen }));
   else actions.push(h("button", { class: "btn good", onclick: () => act(item.id, "done"), text: T.done_btn }));
-  if (!item.thread_id) actions.push(h("button", { class: "btn primary", onclick: () => startItem(item.id), text: T.start }));
   if (item.url) actions.push(h("a", { class: "btn", href: item.url, target: "_blank", rel: "noopener", text: T.open_chat }));
-
-  const title = h("input", { value: item.title || "", "aria-label": "title",
-    onchange: (e) => patch(item.id, { title: e.target.value || null }) });
-  const head = h("div", { class: "d-head" },
-    h("div", { class: "d-title" },
-      h("button", { class: "icon-btn", "aria-label": "close", onclick: closeItem, text: "←" }),
-      h("span", { text: STATUS_ICON[item.status] }), title),
+  // Chat threads carry the relay's own bookkeeping; console conversations have almost none.
+  if (item.thread_id && activityCount()) {
+    actions.push(h("label", { class: "toggle" },
+      h("input", { type: "checkbox", checked: state.showActivity, onchange: (e) => setShowActivity(e.target.checked) }),
+      h("span", { text: T.activity(activityCount()) })));
+  }
+  return [
     h("div", { class: "controls" },
       h("label", {}, T.priority, pri), h("label", {}, T.due, due),
       h("label", {}, T.project, project), h("label", {}, T.parent, parent)),
-    h("div", { class: "controls" }, h("label", {}, T.snooze), ...snooze),
-    h("div", { class: "controls" }, ...actions));
+    h("div", { class: "controls" }, h("span", { class: "dim", text: T.snooze }), ...snooze),
+    h("div", { class: "controls" }, ...actions),
+  ];
+}
 
-  if (item.thread_id) {
-    head.append(h("label", { class: "toggle" },
-      h("input", { type: "checkbox", id: "show-activity", checked: state.showActivity,
-        onchange: (e) => setShowActivity(e.target.checked) }),
-      h("span", { id: "activity-label", text: T.activity(activityCount()) })));
-  }
-  // Keep the message list across the poll so the reader's scroll position survives.
-  const msgs = (sameItem && $("msgs")) || h("div", { class: "msgs", id: "msgs" });
-  const scrollTop = msgs.scrollTop;
-  const followed = msgs.scrollHeight - scrollTop - msgs.clientHeight < 80;
-  fillMessages(msgs);
-  const nodes = [head, msgs];
-  if (item.thread_id) {
-    // Drafts survive the 8-second refresh and switching between items.
-    const box = h("textarea", { id: "reply", placeholder: T.reply_ph, rows: 5,
-      oninput: (e) => { state.drafts[item.id] = e.target.value; grow(e.target); },
-      onkeydown: (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendReply(item.id, box); } } });
-    nodes.push(h("form", { class: "reply", onsubmit: (e) => { e.preventDefault(); sendReply(item.id, box); } },
-      box, h("button", { class: "btn primary", type: "submit", text: T.send })));
-    box.value = state.drafts[item.id] || "";
-    requestAnimationFrame(() => grow(box));
-  } else if (item.note) {
-    msgs.replaceChildren(h("div", { class: "msg" }, h("div", { class: "body md" }, MD.render(item.note))));
-  }
-  pane.replaceChildren(...nodes);
-  if (sameItem) msgs.scrollTop = followed ? msgs.scrollHeight : scrollTop;
+function toggleDrawer() {
+  state.drawerOpen = !state.drawerOpen;
+  localStorage.setItem("drawerOpen", state.drawerOpen ? "1" : "0");
+  const box = $("msgs");
+  const pinned = box && nearBottom(box);
+  renderDetail();
+  if (pinned) box.scrollTop = box.scrollHeight;
+}
+
+// "Jump to latest" appears when the reader has scrolled up; it says so when new
+// messages arrived below.
+function nearBottom(box) { return box.scrollHeight - box.scrollTop - box.clientHeight < 80; }
+function updateJump() {
+  const box = $("msgs");
+  const jump = $("jump");
+  if (!box || !jump) return;
+  if (nearBottom(box)) state.unseen = 0;
+  jump.hidden = nearBottom(box);
+  jump.textContent = state.unseen ? T.jump_new(state.unseen) : T.jump;
+  jump.classList.toggle("hot", state.unseen > 0);
 }
 
 function activityCount() {
@@ -356,6 +420,7 @@ function setShowActivity(on) {
   localStorage.setItem("showActivity", on ? "1" : "0");
   const box = $("msgs");
   if (box) fillMessages(box, { force: true, toBottom: true });
+  renderDetail();
 }
 // Textareas grow with what is typed, up to the CSS max-height.
 function grow(box) {
@@ -385,19 +450,29 @@ function messageNode(m) {
 }
 
 function fillMessages(container, { force = false, toBottom = false } = {}) {
-  if (state.messagesFor !== state.open) { container.replaceChildren(h("div", { class: "empty", text: T.loading })); return; }
+  if (state.messagesFor !== state.open) {
+    if (!container.dataset.sig) container.replaceChildren(h("div", { class: "empty", text: T.loading }));
+    return;
+  }
   const shown = state.showActivity ? state.messages : state.messages.filter((m) => m.kind !== "activity");
   // Re-render only when something changed, so a poll does not drop a text selection.
-  const sig = `${state.showActivity}|${state.messages.length}|${state.messages.map((m) => m.id).slice(-1)[0]}|` +
+  const sig = `${state.open}|${state.showActivity}|${state.messages.length}|${state.messages.map((m) => m.id).slice(-1)[0]}|` +
     state.messages.map((m) => (m.content || "").length).reduce((a, b) => a + b, 0);
   if (!force && container.dataset.sig === sig && container.childElementCount) return;
-  const nearBottom = toBottom || !container.dataset.sig ||
-    container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+  const first = !container.dataset.sig || !container.dataset.sig.startsWith(`${state.open}|`);
+  const follow = toBottom || first || nearBottom(container);
+  const before = container.dataset.count ? Number(container.dataset.count) : shown.length;
+  const top = container.scrollTop;
   container.dataset.sig = sig;
+  container.dataset.count = String(shown.length);
   container.replaceChildren(...(shown.length ? shown.map(messageNode) : [h("div", { class: "empty", text: T.no_messages })]));
-  const label = $("activity-label");
-  if (label) label.textContent = T.activity(activityCount());
-  if (nearBottom) container.scrollTop = container.scrollHeight;
+  if (follow) container.scrollTop = container.scrollHeight;
+  else {
+    // Replacing every child can reset the scroll position; put the reader back where they were.
+    container.scrollTop = top;
+    if (shown.length > before) state.unseen = (state.unseen || 0) + shown.length - before;
+  }
+  updateJump();
 }
 
 // ---------------------------------------------------------------- actions
@@ -424,8 +499,10 @@ function toggleCollapse(id) {
   renderList();
 }
 async function openItem(id) {
+  if (state.open !== id) state.unseen = 0;
   state.open = id;
   state.selected = id;
+  state.fresh.delete(id);
   state.messagesFor = null;
   render();
   const item = state.byId.get(id);
@@ -572,10 +649,12 @@ function wire() {
     e.preventDefault();
   });
 
+  // A hidden tab keeps polling, more slowly, so a new notification still reaches the human.
   let timer = setInterval(refresh, POLL_MS);
   document.addEventListener("visibilitychange", () => {
     clearInterval(timer);
-    if (!document.hidden) { refresh(); timer = setInterval(refresh, POLL_MS); }
+    if (!document.hidden) refresh();
+    timer = setInterval(refresh, document.hidden ? POLL_HIDDEN_MS : POLL_MS);
   });
 }
 

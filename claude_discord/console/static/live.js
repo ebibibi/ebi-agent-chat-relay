@@ -29,27 +29,34 @@
     return e;
   };
 
-  function panel() {
-    const msgs = document.getElementById("msgs");
-    if (!msgs) return null;
-    let box = document.getElementById("live");
-    if (!box || box.previousElementSibling !== msgs) {
-      if (box) box.remove();
-      box = el("div", "live");
-      box.id = "live";
-      box.setAttribute("aria-live", "polite");
-      msgs.after(box);
-    }
-    return box;
-  }
+  // The panel lives in its own slot under the conversation and is one line high unless
+  // opened, so it never covers the messages it is reporting on.
+  let open = localStorage.getItem("liveOpen") === "1";
 
   function draw(id, data) {
     last = { id, data };
-    const box = panel();
+    const box = document.getElementById("live-slot");
     if (!box) return;
+    const msgs = document.getElementById("msgs");
+    const pinned = msgs && msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 80;
     const live = data.live || {};
+    const acts = live.activities || [];
+    const latest = acts.length ? acts[acts.length - 1] : null;
     const head = el("div", "live-head");
-    head.append(el("span", "live-status", `${STATUS[live.status] || "⚙️"} ${L.working}`));
+    const toggle = el("button", "live-toggle");
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    toggle.append(
+      el("span", "live-caret", open ? "▾" : "▸"),
+      el("span", "live-status", `${STATUS[live.status] || "⚙️"} ${L.working}`),
+      el("span", "live-latest", !open && latest ? `${latest.title}${latest.detail ? " — " + latest.detail : ""}` : ""),
+    );
+    toggle.addEventListener("click", () => {
+      open = !open;
+      localStorage.setItem("liveOpen", open ? "1" : "0");
+      if (last) draw(last.id, last.data);
+    });
+    head.append(toggle);
     if (live.can_stop) {
       const stop = el("button", "btn live-stop", L.stop);
       stop.type = "button";
@@ -61,20 +68,29 @@
       });
       head.append(stop);
     }
-    const acts = el("ul", "live-acts");
-    for (const a of (live.activities || []).slice(-6)) {
-      const mark = a.done ? (a.ok ? "✓" : "✗") : "…";
-      acts.append(el("li", a.done ? "done" : "", `${mark} ${a.title}${a.detail ? " — " + a.detail : ""}`));
+    const parts = [head];
+    if (open) {
+      const list = el("ul", "live-acts");
+      for (const a of acts.slice(-6)) {
+        const mark = a.done ? (a.ok ? "✓" : "✗") : "…";
+        list.append(el("li", a.done ? "done" : "", `${mark} ${a.title}${a.detail ? " — " + a.detail : ""}`));
+      }
+      parts.push(list);
+      if (live.draft) parts.push(el("div", "live-draft", live.draft));
     }
-    const parts = [head, acts];
-    if (live.draft) parts.push(el("div", "live-draft", live.draft));
-    box.replaceChildren(...parts);
+    const wrap = el("div", "live");
+    wrap.id = "live";
+    wrap.setAttribute("aria-live", "polite");
+    wrap.replaceChildren(...parts);
+    box.replaceChildren(wrap);
+    // The panel changed height; a reader following the conversation stays at its end.
+    if (pinned) msgs.scrollTop = msgs.scrollHeight;
   }
 
   function clear() {
     last = null;
-    const box = document.getElementById("live");
-    if (box) box.remove();
+    const box = document.getElementById("live-slot");
+    if (box) box.replaceChildren();
   }
 
   async function tick() {
@@ -153,6 +169,7 @@
   if (detail) {
     new MutationObserver(() => {
       if (last && state.open === last.id && !document.getElementById("live")) draw(last.id, last.data);
+      else if (last && state.open !== last.id) clear();
       linkFiles();
     }).observe(detail, { childList: true });
   }
