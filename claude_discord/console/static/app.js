@@ -10,7 +10,7 @@ const HISTORY = 100;
 
 const I18N = {
   en: {
-    focus: "🎯 Focus", focus_first: "Do this first", focus_next: "Then", focus_waiting: "⏳ Waiting", no_due: "No due date", due_over: "overdue", due_in: (x) => `in ${x}`, u_min: "m", u_hour: "h", u_day: "d", focus_ready: "can do now", focus_from: (d) => `from ${d}`, ai_guess: "AI guess", ai_set: "set by AI",
+    focus: "🎯 Focus", focus_first: "Do this first", focus_next: "Then", focus_waiting: "⏳ Waiting", focus_elsewhere: "📍 Somewhere else", here: "I am at:", anywhere: "Anywhere", place: "Place", place_ph: "anywhere", no_due: "No due date", due_over: "overdue", due_in: (x) => `in ${x}`, u_min: "m", u_hour: "h", u_day: "d", focus_ready: "can do now", focus_from: (d) => `from ${d}`, ai_guess: "AI guess", ai_set: "set by AI",
     me: "Inbox", ai: "Running", todo: "To do", idle: "Idle", recent: "Recent", tree: "Tree", snoozed: "Snoozed", done: "Done",
     filter: "Filter…", capture: "+ Write down work, press Enter (c) — Shift+Enter for a note line", capture_ai: "+ Write down work, Enter hands it to AI (c) — Shift+Enter for a note line",
     autostart: "AI starts right away", empty: "Nothing here. 🎉",
@@ -39,7 +39,7 @@ const I18N = {
            ["r", "reply"], ["/", "filter"], ["g then f/i/a/u/t/w/d", "go to a view"], ["?", "this help"]],
   },
   ja: {
-    focus: "🎯 今やること", focus_first: "まずこれ", focus_next: "次に", focus_waiting: "⏳ 待ち", no_due: "期限なし", due_over: "超過", due_in: (x) => `あと${x}`, u_min: "分", u_hour: "時間", u_day: "日", focus_ready: "今すぐできる", focus_from: (d) => `${d}〜`, ai_guess: "AIの見立て", ai_set: "AIが推定",
+    focus: "🎯 今やること", focus_first: "まずこれ", focus_next: "次に", focus_waiting: "⏳ 待ち", focus_elsewhere: "📍 別の場所でやること", here: "いまいる場所：", anywhere: "どこでも", place: "場所", place_ph: "どこでも", no_due: "期限なし", due_over: "超過", due_in: (x) => `あと${x}`, u_min: "分", u_hour: "時間", u_day: "日", focus_ready: "今すぐできる", focus_from: (d) => `${d}〜`, ai_guess: "AIの見立て", ai_set: "AIが推定",
     me: "受信箱", ai: "実行中", todo: "やること", idle: "止まっている", recent: "更新順", tree: "ツリー", snoozed: "スヌーズ中", done: "完了",
     filter: "絞り込み…", capture: "＋ 思いついた仕事を書いて Enter（c）。Shift+Enter で改行してメモ", capture_ai: "＋ 思いついた仕事を書いて Enter → AIが着手（c）。Shift+Enter で改行してメモ",
     autostart: "AIがすぐ着手", empty: "ここには何もありません 🎉",
@@ -295,6 +295,7 @@ function renderList() {
   const nodes = [];
   for (const row of rows) {
     if (row.group !== undefined) { nodes.push(h("li", { class: "group", text: row.group })); continue; }
+    if (row.node) { nodes.push(row.node); continue; }
     nodes.push(rowNode(row));
   }
   list.replaceChildren(...nodes);
@@ -312,6 +313,8 @@ function rowNode({ item, depth, children }) {
     meta.push(h("span", { class: "tag where", text: T[item.bucket] }));
   }
   if (state.view !== "tree" && item.project) meta.push(h("span", { class: "tag", text: item.project }));
+  const place = window.ConsoleFocus.placeTag(item);
+  if (place) meta.push(place);
   meta.push(h("span", { class: item.running ? "live" : "", text: T.st[item.status] || item.status }));
   if (item.queued) meta.push(h("span", { text: T.queued }));
   if (item.last_activity_at) meta.push(h("span", { text: rel(item.last_activity_at) }));
@@ -422,6 +425,13 @@ function drawerParts(item) {
     onchange: (e) => patch(item.id, { due_at: e.target.value ? new Date(e.target.value).toISOString() : null }) });
   const project = h("input", { type: "text", value: item.project || "", placeholder: T.project, size: 14,
     onchange: (e) => patch(item.id, { project: e.target.value || null }) });
+  // Only a place a person set is shown as the field's value; a guess is the placeholder.
+  const human = item.place_by === "ai" ? "" : item.place || "";
+  const place = h("input", { type: "text", value: human, list: "known-places", size: 10,
+    placeholder: item.place_by === "ai" ? `🤖 ${item.place}` : T.place_ph,
+    onchange: (e) => patch(item.id, { place: e.target.value || null }) });
+  const known = h("datalist", { id: "known-places" },
+    window.ConsoleFocus.places(state.items).map((p) => h("option", { value: p })));
   const parents = state.items.filter((i) => i.id !== item.id && i.bucket !== "done");
   const parent = h("select", { onchange: (e) => patch(item.id, { parent_id: e.target.value || null }) },
     h("option", { value: "", text: T.none }),
@@ -435,7 +445,7 @@ function drawerParts(item) {
   return [
     h("div", { class: "controls" },
       h("label", {}, T.priority, pri), h("label", {}, T.due, due),
-      h("label", {}, T.project, project), h("label", {}, T.parent, parent)),
+      h("label", {}, T.project, project), h("label", {}, T.place, place, known), h("label", {}, T.parent, parent)),
     window.ConsoleFocus.drawerLine(item),
     h("div", { class: "controls" }, h("span", { class: "dim", text: T.snooze }), ...snooze),
     h("div", { class: "controls" }, ...actions),

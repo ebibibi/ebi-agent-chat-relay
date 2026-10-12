@@ -53,6 +53,9 @@ MAX_MESSAGES = 16
 MAX_MESSAGE_CHARS = 700
 MAX_PROMPT_CHARS = 9000
 MAX_NOTE_CHARS = 120
+MAX_PLACE_CHARS = 40
+#: Place labels offered to the model, so it reuses "home" instead of inventing "house".
+MAX_KNOWN_PLACES = 20
 
 #: Statuses that are not work to triage.
 _SKIP_STATUSES = frozenset({"done", "someday", "running"})
@@ -74,23 +77,32 @@ CREATE TABLE IF NOT EXISTS ai_triage (
 );
 """
 #: Columns added after the first release of the table: (name, SQL type).
-_ADDED_COLUMNS = (("ready", "INTEGER"), ("ready_at", "TEXT"), ("waiting_for", "TEXT"))
+_ADDED_COLUMNS = (
+    ("ready", "INTEGER"),
+    ("ready_at", "TEXT"),
+    ("waiting_for", "TEXT"),
+    ("place", "TEXT"),
+    ("pinned_place", "INTEGER NOT NULL DEFAULT 0"),
+)
 #: Part of every basis: a new prompt re-triages everything once.
-PROMPT_VERSION = "2"
+PROMPT_VERSION = "3"
 
 _PROMPT = """\
-You triage a person's work queue. Read one item and judge two separate things:
-how important it is, and whether the person can act on it right now or must wait.
+You triage a person's work queue. Read one item and judge three separate things:
+how important it is, whether the person can act on it right now or must wait,
+and whether it can only be done in one place or on one device.
 
 Now: {now} (the person's local time)
 Item title: {title}
 Item status: {status}
+Places this person already uses: {places}
 Conversation, oldest first (the person and their AI agent):
 {messages}
 
 Answer with one JSON object and nothing else:
 {{"priority": 0-3, "due": "YYYY-MM-DD" | "YYYY-MM-DDTHH:MM" | null, "reason": "…", "next": "…",
- "ready": true | false, "ready_at": "YYYY-MM-DDTHH:MM" | null, "waiting_for": "…"}}
+ "ready": true | false, "ready_at": "YYYY-MM-DDTHH:MM" | null, "waiting_for": "…",
+ "place": "…" | null}}
 
 priority: 0 = must happen today, blocks others, a customer or a hard deadline is waiting;
 1 = this week, or someone is waiting; 2 = normal; 3 = low, someday, or just information.
@@ -103,7 +115,11 @@ for another person's reply or work, for an agent or a job to finish, or for an e
 Importance does not make an item ready: an urgent item that must wait is ready: false.
 ready_at: when "next" becomes possible, if the conversation says or implies it; otherwise null.
 waiting_for: when ready is false, what the person waits for, at most 40 characters; else "".
-Write reason, next and waiting_for in the conversation's language.
+place: where "next" can only be done, if it is bound to one: a location (home, the office),
+a device or network (the company PC, a lab machine, a phone), or similar. Reuse a label from
+"Places this person already uses" when one fits; otherwise at most 12 characters.
+null when it can be done anywhere. Being at a place is not waiting: ready stays true.
+Write reason, next, waiting_for and place in the conversation's language.
 """
 
 _JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
@@ -124,6 +140,7 @@ class TriageResult:
     ready: bool = True
     ready_at: str | None = None
     waiting_for: str = ""
+    place: str | None = None
 
 
 @dataclass(frozen=True)
@@ -142,6 +159,8 @@ class Triage:
     ready: bool | None = None
     ready_at: str | None = None
     waiting_for: str | None = None
+    place: str | None = None
+    pinned_place: bool = False
 
 
 class TriageRepository:
@@ -169,12 +188,13 @@ class TriageRepository:
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(
                 "INSERT INTO ai_triage (item_id, priority, due_at, reason, next_step, ready,"
-                " ready_at, waiting_for, basis, model, updated_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " ready_at, waiting_for, place, basis, model, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 " ON CONFLICT(item_id) DO UPDATE SET priority = excluded.priority,"
                 " due_at = excluded.due_at, reason = excluded.reason,"
                 " next_step = excluded.next_step, ready = excluded.ready,"
                 " ready_at = excluded.ready_at, waiting_for = excluded.waiting_for,"
+                " place = excluded.place,"
                 " basis = excluded.basis, model = excluded.model, updated_at = excluded.updated_at",
                 (
                     item_id,
@@ -185,6 +205,7 @@ class TriageRepository:
                     int(result.ready),
                     result.ready_at,
                     result.waiting_for,
+                    result.place,
                     basis,
                     model,
                     _now(),
@@ -192,17 +213,20 @@ class TriageRepository:
             )
             await db.commit()
 
-    async def pin(self, item_id: str, *, priority: bool = False, due: bool = False) -> None:
+    async def pin(
+        self, item_id: str, *, priority: bool = False, due: bool = False, place: bool = False
+    ) -> None:
         """A human set these fields: the model's guess no longer applies to them."""
-        if not priority and not due:
+        if not priority and not due and not place:
             return
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(
-                "INSERT INTO ai_triage (item_id, pinned_priority, pinned_due) VALUES (?, ?, ?)"
-                " ON CONFLICT(item_id) DO UPDATE SET"
+                "INSERT INTO ai_triage (item_id, pinned_priority, pinned_due, pinned_place)"
+                " VALUES (?, ?, ?, ?) ON CONFLICT(item_id) DO UPDATE SET"
                 " pinned_priority = MAX(pinned_priority, excluded.pinned_priority),"
-                " pinned_due = MAX(pinned_due, excluded.pinned_due)",
-                (item_id, int(priority), int(due)),
+                " pinned_due = MAX(pinned_due, excluded.pinned_due),"
+                " pinned_place = MAX(pinned_place, excluded.pinned_place)",
+                (item_id, int(priority), int(due), int(place)),
             )
             await db.commit()
 
@@ -221,6 +245,8 @@ def _to_triage(row: aiosqlite.Row) -> Triage:
         ready=None if row["ready"] is None else bool(row["ready"]),
         ready_at=row["ready_at"],
         waiting_for=row["waiting_for"],
+        place=row["place"],
+        pinned_place=bool(row["pinned_place"]),
     )
 
 
@@ -228,7 +254,12 @@ def _to_triage(row: aiosqlite.Row) -> Triage:
 
 
 def build_prompt(
-    *, title: str, status: str, messages: Sequence[tuple[str, str]], now: datetime
+    *,
+    title: str,
+    status: str,
+    messages: Sequence[tuple[str, str]],
+    now: datetime,
+    places: Iterable[str] = (),
 ) -> str:
     """The prompt for one item. *messages* are (who, text), oldest first."""
     lines = [
@@ -243,6 +274,7 @@ def build_prompt(
         now=now.astimezone().strftime("%Y-%m-%d %H:%M (%a)"),
         title=" ".join(title.split())[:200] or "(untitled)",
         status=status,
+        places=", ".join(sorted({p for p in places if p})[:MAX_KNOWN_PLACES]) or "(none yet)",
         messages=body or "(no messages)",
     )
 
@@ -292,6 +324,7 @@ def parse_reply(raw: str, *, now: datetime) -> TriageResult | None:
         ready=data.get("ready") is not False,
         ready_at=_parse_due(data.get("ready_at"), now),
         waiting_for=_short(data.get("waiting_for"))[:60],
+        place=_short(data.get("place"))[:MAX_PLACE_CHARS] or None,
     )
 
 
@@ -387,12 +420,16 @@ def apply_triage(
                 "ready": row.ready,
                 "ready_at": row.ready_at,
                 "waiting_for": row.waiting_for,
+                "place": row.place,
                 "updated_at": row.updated_at,
             }
             human_priority = row.pinned_priority or item.get("priority") != DEFAULT_PRIORITY
             if not human_priority:
                 new["priority"] = row.priority
                 new["priority_by"] = "ai"
+            if row.place and not item.get("place") and not row.pinned_place:
+                new["place"] = row.place
+                new["place_by"] = "ai"
             if row.due_at and not item.get("due_at") and not row.pinned_due:
                 due = _parse_ts(row.due_at)
                 new["due_at"] = row.due_at
@@ -444,6 +481,13 @@ def focus_score(item: dict[str, Any], *, now: datetime) -> int | None:
     if item.get("status") in _HUMAN_STATUSES:
         score += 20
     return score
+
+
+def known_places(items: Iterable[dict[str, Any]], rows: dict[str, Triage]) -> list[str]:
+    """Place labels in use: the ones people set first, then the model's."""
+    human = [i["place"] for i in items if i.get("place")]
+    guessed = [r.place for r in rows.values() if r.place]
+    return list(dict.fromkeys(human + guessed))
 
 
 # -- the loop --------------------------------------------------------------
@@ -500,17 +544,19 @@ class Triager:
 
     async def run_once(self, items: Sequence[dict[str, Any]]) -> int:
         """Triage what is due; the number of items that got an answer."""
-        batch = self.due(items, await self.repo.all())
+        rows = await self.repo.all()
+        batch = self.due(items, rows)
+        places = known_places(items, rows)
         gate = asyncio.Semaphore(self._concurrency)
 
         async def one(item: dict[str, Any]) -> bool:
             async with gate:
-                return await self._triage(item)
+                return await self._triage(item, places)
 
         results = await asyncio.gather(*(one(i) for i in batch))
         return sum(results)
 
-    async def _triage(self, item: dict[str, Any]) -> bool:
+    async def _triage(self, item: dict[str, Any], places: Iterable[str] = ()) -> bool:
         basis = _basis(item)
         try:
             messages = await self._read(item)
@@ -519,6 +565,7 @@ class Triager:
                 status=str(item.get("status")),
                 messages=messages,
                 now=datetime.now(UTC),
+                places=places,
             )
             result = parse_reply(await self._ask(prompt) or "", now=datetime.now(UTC))
             if result is None:

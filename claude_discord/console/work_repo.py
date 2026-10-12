@@ -32,6 +32,8 @@ STATES = (STATE_OPEN, STATE_DONE, STATE_SOMEDAY)
 MAX_TITLE_CHARS = 200
 MAX_NOTE_CHARS = 4000
 MAX_PROJECT_CHARS = 300
+#: A place or device the work is bound to: "home", "office", "work laptop".
+MAX_PLACE_CHARS = 40
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS work_items (
@@ -61,6 +63,7 @@ EDITABLE_FIELDS = (
     "snoozed_until",
     "project",
     "state",
+    "place",
 )
 
 
@@ -89,6 +92,8 @@ class WorkItem:
     state: str
     created_at: str
     updated_at: str
+    #: Where the work can only be done, set by a person; None means anywhere.
+    place: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -104,6 +109,7 @@ class WorkItem:
             "state": self.state,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "place": self.place,
         }
 
 
@@ -125,6 +131,7 @@ def _row_to_item(row: aiosqlite.Row) -> WorkItem:
         state=row["state"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        place=row["place"],
     )
 
 
@@ -184,6 +191,8 @@ def validate_changes(changes: dict[str, Any]) -> dict[str, Any]:
             clean[field] = _optional_text(value, field, MAX_NOTE_CHARS)
         elif field == "project":
             clean[field] = _optional_text(value, field, MAX_PROJECT_CHARS)
+        elif field == "place":
+            clean[field] = _optional_text(value, field, MAX_PLACE_CHARS)
         elif field == "parent_id":
             clean[field] = _optional_text(value, field, 64)
     return clean
@@ -198,6 +207,10 @@ class WorkItemRepository:
     async def init_db(self) -> None:
         async with aiosqlite.connect(self._db_path) as db:
             await db.executescript(_SCHEMA)
+            have = {row[1] for row in await db.execute_fetchall("PRAGMA table_info(work_items)")}
+            if "place" not in have:
+                # Added after the first release; existing rows mean "anywhere".
+                await db.execute("ALTER TABLE work_items ADD COLUMN place TEXT")
             await db.commit()
 
     async def list_all(self) -> list[WorkItem]:
@@ -233,6 +246,7 @@ class WorkItemRepository:
             state=clean.get("state", STATE_OPEN),
             created_at=now,
             updated_at=now,
+            place=clean.get("place"),
         )
         await self._check_parent(item.id, item.parent_id)
         await self._write(item)
@@ -337,13 +351,13 @@ class WorkItemRepository:
     async def _upsert(db: aiosqlite.Connection, item: WorkItem) -> None:
         await db.execute(
             "INSERT INTO work_items (id, thread_id, title, note, parent_id, priority, due_at,"
-            " snoozed_until, project, state, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " snoozed_until, project, state, created_at, updated_at, place)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(id) DO UPDATE SET title = excluded.title, note = excluded.note,"
             " parent_id = excluded.parent_id, priority = excluded.priority,"
             " due_at = excluded.due_at, snoozed_until = excluded.snoozed_until,"
             " project = excluded.project, state = excluded.state,"
-            " updated_at = excluded.updated_at",
+            " updated_at = excluded.updated_at, place = excluded.place",
             (
                 item.id,
                 item.thread_id,
@@ -357,5 +371,6 @@ class WorkItemRepository:
                 item.state,
                 item.created_at,
                 item.updated_at,
+                item.place,
             ),
         )

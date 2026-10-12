@@ -317,3 +317,69 @@ def test_a_new_prompt_version_retriages_everything() -> None:
     from claude_discord.console.triage import PROMPT_VERSION, _basis
 
     assert _basis(_item()).startswith(f"{PROMPT_VERSION}|")
+
+
+# -- the third axis: where can it be done? ------------------------------------
+
+
+def test_a_place_is_parsed_and_known_places_are_offered() -> None:
+    reply = parse_reply('{"priority": 1, "place": "事務所", "ready": true}', now=NOW)
+    assert reply is not None and (reply.place, reply.ready) == ("事務所", True)
+    anywhere = parse_reply('{"priority": 1, "place": null}', now=NOW)
+    assert anywhere is not None and anywhere.place is None
+    prompt = build_prompt(title="t", status="idle", messages=[], now=NOW, places=["自宅", "会社PC"])
+    assert "Places this person already uses: 会社PC, 自宅" in prompt
+
+
+async def test_a_guessed_place_fills_in_and_a_persons_place_wins(repo) -> None:
+    from claude_discord.console.triage import known_places
+
+    result = TriageResult(1, None, "r", "n", place="自宅")
+    for item_id in ("t1", "t2", "t3"):
+        await repo.save(item_id, result, basis="b", model="haiku")
+    await repo.pin("t3", place=True)
+    rows = await repo.all()
+    items = [_item("t1"), _item("t2", place="会社PC"), _item("t3")]
+    one, two, three = apply_triage(items, rows, now=NOW)
+    assert (one["place"], one["place_by"]) == ("自宅", "ai")
+    assert (two["place"], "place_by" in two) == ("会社PC", False)
+    assert (three.get("place"), three["ai"]["place"]) == (None, "自宅")
+    assert one["actionable"] is True  # a place is not a wait
+    assert known_places(items, rows) == ["会社PC", "自宅"]
+
+
+async def test_setting_a_place_from_the_console_pins_it(tmp_path) -> None:
+    db = str(tmp_path / "sessions.db")
+    work = WorkItemRepository(db)
+    await work.init_db()
+    triage = TriageRepository(db)
+    await triage.init_db()
+    api = MagicMock()
+    api.default_channel_id = None
+    api.lineage_repo = None
+    api.session_repo = None
+    api.bot.get_channel.return_value = None
+    api.bot.cogs = {}
+    api._running_thread_ids.return_value = set()
+    console = ConsoleServer(
+        api, work, ConsoleAuthenticator(ConsoleAuthConfig(token=TOKEN)), port=0, triage=triage
+    )
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    write = {**auth, "X-Console-Request": "1"}
+    async with TestClient(TestServer(console.app)) as client:
+        created = await client.post(
+            "/console/api/items", json={"title": "Swap the router", "place": "自宅"}, headers=write
+        )
+        item_id = (await created.json())["item"]["id"]
+        await triage.save(
+            item_id, TriageResult(1, None, "r", "n", place="事務所"), basis="b", model="m"
+        )
+        [item] = (await (await client.get("/console/api/board", headers=auth)).json())["items"]
+        assert (item["place"], "place_by" in item) == ("自宅", False)
+        await client.patch(f"/console/api/items/{item_id}", json={"place": None}, headers=write)
+        [item] = (await (await client.get("/console/api/board", headers=auth)).json())["items"]
+        assert item["place"] is None  # cleared by a person: anywhere, not the guess
+        bad = await client.patch(
+            f"/console/api/items/{item_id}", json={"place": "x" * 41}, headers=write
+        )
+        assert bad.status == 400

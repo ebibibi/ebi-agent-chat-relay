@@ -13,7 +13,7 @@ See [ADR-0010](adr/0010-add-an-api-first-console-on-its-own-listener.md) and, fo
 
 | View | Shows |
 |---|---|
-| **Focus** (default) | What you can do now, across every list. Importance (priority first, P0 above P1 whatever else is true; then how close the deadline is; then whose move it is) and readiness are separate axes: only work you can act on right now ranks under "Do this first" and "Then"; anything waiting for a time, a person or a job goes under "⏳ Waiting", soonest first, and moves up once the time it named has come. Each row shows the next step and why it ranks there. Work an agent is doing, finished, parked and snoozed items are left out. Reachable with `g f` |
+| **Focus** (default) | What you can do now, across every list. Importance (priority first, P0 above P1 whatever else is true; then how close the deadline is; then whose move it is) and readiness are separate axes: only work you can act on right now ranks under "Do this first" and "Then"; anything waiting for a time, a person or a job goes under "⏳ Waiting", soonest first, and moves up once the time it named has come. Each row shows the next step and why it ranks there. Work bound to a place or device (📍 home, office, work PC) is tagged; pick where you are in the bar above the list and work bound elsewhere moves to "📍 Somewhere else". Work an agent is doing, finished, parked and snoozed items are left out. Reachable with `g f` |
 | **Inbox** | The ball is on you: ❓ waiting for an answer, 👀 something to review, 📋 a task only you can do, ⚠️ a failed turn |
 | **Running** | A turn is in flight (or queued for a slot) |
 | **To do** | Work you wrote down that no agent has yet |
@@ -28,13 +28,15 @@ Nobody fills in priority and due date for every thread, so the console asks a fa
 (Haiku by default) to. A background pass every minute picks up to six open items with new
 activity, gives the model the title and the latest human and agent messages, and stores its
 answer: a priority (P0–P3), a deadline if the conversation names one, the reason, your next
-step, and whether you can take that step now or must wait (and for what, and until when). The model runs as a one-shot `claude -p` with tools, hooks and settings off, in a scratch
+step, whether you can take that step now or must wait (and for what, and until when), and
+whether it can only be done in one place or on one device. The model is shown the place labels
+already in use so it reuses them. The model runs as a one-shot `claude -p` with tools, hooks and settings off, in a scratch
 directory, without relay or console credentials in its environment.
 
 A guess never overrides a person:
 
-- A priority or due date you set wins. Setting one from the console pins it, so later guesses
-  leave it alone. A priority other than P2 that existed before triage counts as yours.
+- A priority, due date or place you set wins. Setting one from the console pins it, so later
+  guesses leave it alone (clearing a place means "anywhere", not "guess again"). A priority other than P2 that existed before triage counts as yours.
 - A filled-in value is drawn outlined (priority) or in italics (due date), and the detail
   drawer shows the model's full guess under "🤖 AI guess", including fields you overrode.
 

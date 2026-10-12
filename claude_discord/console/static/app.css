@@ -105,6 +105,12 @@ button { cursor: pointer; }
 .ai-note .wait { color: var(--p1); }
 .ai-note.waiting .next { color: var(--dim); }
 .ai-line { font-size: 12px; }
+.tag.place { border-color: color-mix(in srgb, var(--ai) 50%, var(--line)); }
+.tag.place.ai { font-style: italic; border-style: dashed; }
+.tag.place.away { color: var(--p1); }
+.place-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 14px 2px; font-size: 12px; list-style: none; }
+.chip { background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; color: var(--dim); font-size: 12px; cursor: pointer; }
+.chip.on { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
 .due.over { color: var(--err); font-weight: 600; }
 .due.soon { color: var(--p1); font-weight: 600; }
 .due.none { opacity: .55; }

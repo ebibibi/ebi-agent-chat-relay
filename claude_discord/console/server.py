@@ -482,9 +482,11 @@ class ConsoleServer:
             )
         except WorkItemError as exc:
             return _error(str(exc), 400)
-        if self.triage is not None and ("priority" in body or "due_at" in body):
+        if self.triage is not None and {"priority", "due_at", "place"} & set(body):
             # What a human chose is no longer the model's to guess.
-            await self.triage.pin(item.id, priority="priority" in body, due="due_at" in body)
+            await self.triage.pin(
+                item.id, priority="priority" in body, due="due_at" in body, place="place" in body
+            )
         return web.json_response({"item": item.as_dict()})
 
     async def done(self, request: web.Request) -> web.Response:

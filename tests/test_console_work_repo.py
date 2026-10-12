@@ -109,3 +109,28 @@ async def test_a_cycle_through_lineage_is_refused(repo) -> None:
     # t2 was spawned by t1; putting t1 under t2 would close a loop.
     with pytest.raises(WorkItemError, match="cycle"):
         await repo.update(thread_item_id(1), {"parent_id": "t2"}, implicit_parents={"t2": "t1"})
+
+
+async def test_a_table_from_before_places_gains_the_column(tmp_path) -> None:
+    import aiosqlite
+
+    db = str(tmp_path / "old.db")
+    async with aiosqlite.connect(db) as conn:
+        await conn.execute(
+            "CREATE TABLE work_items (id TEXT PRIMARY KEY, thread_id INTEGER UNIQUE, title TEXT,"
+            " note TEXT, parent_id TEXT, priority INTEGER NOT NULL DEFAULT 2, due_at TEXT,"
+            " snoozed_until TEXT, project TEXT, state TEXT NOT NULL DEFAULT 'open',"
+            " created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
+        await conn.execute(
+            "INSERT INTO work_items (id, title, created_at, updated_at)"
+            " VALUES ('c1', 'x', 'a', 'a')"
+        )
+        await conn.commit()
+    repo = WorkItemRepository(db)
+    await repo.init_db()
+    await repo.init_db()
+    [item] = await repo.list_all()
+    assert item.place is None
+    updated = await repo.update("c1", {"place": " 事務所 "})
+    assert updated.place == "事務所"
