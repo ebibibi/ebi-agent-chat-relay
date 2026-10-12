@@ -1326,7 +1326,7 @@ class TestIngest:
                 "attachments_manifest": [
                     {"name": "shot.png", "message": "返信 1"},
                     {
-                        "name": "MEHJdebug.log",
+                        "name": "ACMEdebug.log",
                         "status": "linked",
                         "message": "返信 2",
                         "reason": "SharePoint download failed",
@@ -1341,18 +1341,18 @@ class TestIngest:
         # The caller — the only party that can re-send — is told what is missing.
         assert data["attachments"]["verified"] is True
         assert data["attachments"]["complete"] is False
-        assert data["attachments"]["not_delivered"][0]["name"] == "MEHJdebug.log"
+        assert data["attachments"]["not_delivered"][0]["name"] == "ACMEdebug.log"
 
         # The session is told before it is asked to do anything.
         _channel, prompt = mock_cog.spawn_session.call_args.args
-        assert "MEHJdebug.log" in prompt
+        assert "ACMEdebug.log" in prompt
         assert "返信 2" in prompt
         assert prompt.index("⚠️") < prompt.index("See attached")
 
         # And the ledger is written next to the files.
         report = list(tmp_path.glob("ingest/*/ATTACHMENTS-REPORT.md"))
         assert len(report) == 1
-        assert "MEHJdebug.log" in report[0].read_text(encoding="utf-8")
+        assert "ACMEdebug.log" in report[0].read_text(encoding="utf-8")
 
     @pytest.mark.asyncio
     async def test_complete_manifest_adds_no_warning(
@@ -1642,7 +1642,7 @@ class TestIngestResult:
 
         thread = MagicMock()
         thread.id = 111222333
-        thread.name = "MEHJ thread"
+        thread.name = "ACME thread"
         thread.send = AsyncMock()
         thread.add_user = AsyncMock()
 
