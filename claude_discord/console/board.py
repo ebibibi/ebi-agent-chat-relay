@@ -78,6 +78,9 @@ class SessionInfo:
     backend: str | None = None
     model: str | None = None
     last_used_at: str | None = None
+    #: Size of the model's context window and how much of it the last turn used.
+    context_window: int | None = None
+    context_used: int | None = None
 
 
 def _parse(ts: str | None) -> datetime | None:
@@ -295,7 +298,17 @@ def _item(
         "working_dir": session.working_dir if session else None,
         "backend": session.backend if session else None,
         "model": session.model if session else None,
+        "context": _context(session),
     }
+
+
+def _context(session: SessionInfo | None) -> dict[str, Any] | None:
+    """How full the thread's context window is, as of its last turn; None when unknown."""
+    if session is None or not session.context_window or session.context_used is None:
+        return None
+    used = max(0, session.context_used)
+    window = session.context_window
+    return {"used": used, "window": window, "pct": min(100, round(used / window * 100))}
 
 
 def triage_key(item: dict[str, Any]) -> tuple[Any, ...]:

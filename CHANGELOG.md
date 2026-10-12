@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the work PC with the 📍 button, say where you are, and work bound elsewhere moves out of the
   way. Places are managed (add, rename, delete — every item follows) from the screen and
   `/console/api/places`.
+- **Relay Console: context usage per thread** (#946) — each row shows how full the thread's
+  context window was after its last turn ("🧠 45%", amber from 70%, red from 90%), and the
+  detail header shows used / window ("182k / 200k"), read from the session table.
 - **Relay Console: due dates on every row** — "Due 10/14 18:00 (in 2d)", highlighted within a day,
   "overdue" in red, "No due date" when none.
 - **Relay Console: everyday use** (#938) — resizable columns; the conversation keeps its room and

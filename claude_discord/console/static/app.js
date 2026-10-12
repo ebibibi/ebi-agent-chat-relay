@@ -10,7 +10,7 @@ const HISTORY = 100;
 
 const I18N = {
   en: {
-    focus: "🎯 Focus", focus_first: "Do this first", focus_next: "Then", focus_waiting: "⏳ Waiting", focus_elsewhere: "📍 Somewhere else", place_new: "New place", add: "Add", delete: "Delete", place_manage: "Manage places", place_hint: "Where this can only be done", place_count: (n) => `${n} open`, place_unlisted: "in use, not listed", place_unlisted_hint: "Used on items (often guessed by AI) but not on your list", place_manage_hint: "Renaming or deleting a place changes it on every item. A deleted place leaves its items doable anywhere.", place_none: "No places yet.", place_delete_confirm: (n, c) => `Remove "${n}" from ${c} open item(s)?`, here: "I am at:", anywhere: "Anywhere", place: "Place", place_ph: "anywhere", no_due: "No due date", due_over: "overdue", due_in: (x) => `in ${x}`, u_min: "m", u_hour: "h", u_day: "d", focus_ready: "can do now", focus_from: (d) => `from ${d}`, ai_guess: "AI guess", ai_set: "set by AI",
+    focus: "🎯 Focus", focus_first: "Do this first", focus_next: "Then", focus_waiting: "⏳ Waiting", focus_elsewhere: "📍 Somewhere else", place_new: "New place", add: "Add", delete: "Delete", place_manage: "Manage places", place_hint: "Where this can only be done", place_count: (n) => `${n} open`, place_unlisted: "in use, not listed", place_unlisted_hint: "Used on items (often guessed by AI) but not on your list", place_manage_hint: "Renaming or deleting a place changes it on every item. A deleted place leaves its items doable anywhere.", place_none: "No places yet.", place_delete_confirm: (n, c) => `Remove "${n}" from ${c} open item(s)?`, here: "I am at:", anywhere: "Anywhere", place: "Place", place_ph: "anywhere", no_due: "No due date", context_hint: (d) => `Context window used by the last turn: ${d}`, due_over: "overdue", due_in: (x) => `in ${x}`, u_min: "m", u_hour: "h", u_day: "d", focus_ready: "can do now", focus_from: (d) => `from ${d}`, ai_guess: "AI guess", ai_set: "set by AI",
     me: "Inbox", ai: "Running", todo: "To do", idle: "Idle", recent: "Recent", tree: "Tree", snoozed: "Snoozed", done: "Done",
     filter: "Filter…", capture: "+ Write down work, press Enter (c) — Shift+Enter for a note line", capture_ai: "+ Write down work, Enter hands it to AI (c) — Shift+Enter for a note line",
     autostart: "AI starts right away", empty: "Nothing here. 🎉",
@@ -39,7 +39,7 @@ const I18N = {
            ["r", "reply"], ["/", "filter"], ["g then f/i/a/u/t/w/d", "go to a view"], ["?", "this help"]],
   },
   ja: {
-    focus: "🎯 今やること", focus_first: "まずこれ", focus_next: "次に", focus_waiting: "⏳ 待ち", focus_elsewhere: "📍 別の場所でやること", place_new: "新しい場所", add: "追加", delete: "削除", place_manage: "場所の管理", place_hint: "ここでしかできない場所・端末", place_count: (n) => `未完了 ${n}件`, place_unlisted: "未登録", place_unlisted_hint: "スレッドで使われているが一覧にない場所（多くはAIの推定）", place_manage_hint: "名前の変更・削除はすべてのスレッドに反映されます。削除した場所のスレッドは「どこでも」になります。", place_none: "まだ場所はありません。", place_delete_confirm: (n, c) => `「${n}」を未完了の ${c} 件から外しますか？`, here: "いまいる場所：", anywhere: "どこでも", place: "場所", place_ph: "どこでも", no_due: "期限なし", due_over: "超過", due_in: (x) => `あと${x}`, u_min: "分", u_hour: "時間", u_day: "日", focus_ready: "今すぐできる", focus_from: (d) => `${d}〜`, ai_guess: "AIの見立て", ai_set: "AIが推定",
+    focus: "🎯 今やること", focus_first: "まずこれ", focus_next: "次に", focus_waiting: "⏳ 待ち", focus_elsewhere: "📍 別の場所でやること", place_new: "新しい場所", add: "追加", delete: "削除", place_manage: "場所の管理", place_hint: "ここでしかできない場所・端末", place_count: (n) => `未完了 ${n}件`, place_unlisted: "未登録", place_unlisted_hint: "スレッドで使われているが一覧にない場所（多くはAIの推定）", place_manage_hint: "名前の変更・削除はすべてのスレッドに反映されます。削除した場所のスレッドは「どこでも」になります。", place_none: "まだ場所はありません。", place_delete_confirm: (n, c) => `「${n}」を未完了の ${c} 件から外しますか？`, here: "いまいる場所：", anywhere: "どこでも", place: "場所", place_ph: "どこでも", no_due: "期限なし", context_hint: (d) => `直近のターンで使ったコンテキスト：${d}`, due_over: "超過", due_in: (x) => `あと${x}`, u_min: "分", u_hour: "時間", u_day: "日", focus_ready: "今すぐできる", focus_from: (d) => `${d}〜`, ai_guess: "AIの見立て", ai_set: "AIが推定",
     me: "受信箱", ai: "実行中", todo: "やること", idle: "止まっている", recent: "更新順", tree: "ツリー", snoozed: "スヌーズ中", done: "完了",
     filter: "絞り込み…", capture: "＋ 思いついた仕事を書いて Enter（c）。Shift+Enter で改行してメモ", capture_ai: "＋ 思いついた仕事を書いて Enter → AIが着手（c）。Shift+Enter で改行してメモ",
     autostart: "AIがすぐ着手", empty: "ここには何もありません 🎉",
@@ -181,6 +181,19 @@ function shortDate(iso) {
 }
 // "Due 10/14 18:00 (in 2d)" on every open row, "No due date" when there is none, so the
 // list answers "when is it due?" without opening anything.
+// How full the thread's context window is after its last turn: "🧠 45%" in a row,
+// "🧠 45% · 90k / 200k" in the detail header. Amber from 70%, red from 90%.
+function tokens(n) {
+  return n >= 1e6 ? `${(n / 1e6).toFixed(n % 1e6 ? 1 : 0)}M` : `${Math.round(n / 1000)}k`;
+}
+function contextTag(item, full) {
+  const c = item.context;
+  if (!c) return null;
+  const level = c.pct >= 90 ? " full" : c.pct >= 70 ? " warm" : "";
+  const detail = `${tokens(c.used)} / ${tokens(c.window)}`;
+  return h("span", { class: (full ? "btn d-ctx" : "ctx") + level, title: T.context_hint(detail),
+    text: full ? `🧠 ${c.pct}% · ${detail}` : `🧠 ${c.pct}%` });
+}
 function dueLeft(iso) {
   const min = (new Date(iso).getTime() - Date.now()) / 60000;
   if (min < 0) return T.due_over;
@@ -320,6 +333,8 @@ function rowNode({ item, depth, children }) {
   if (item.queued) meta.push(h("span", { text: T.queued }));
   if (item.last_activity_at) meta.push(h("span", { text: rel(item.last_activity_at) }));
   if (item.working_dir) meta.push(h("span", { text: item.working_dir.split("/").slice(-1)[0] }));
+  const ctx = contextTag(item, false);
+  if (ctx) meta.push(ctx);
   // A value the model filled in is marked, so a guess never passes for a decision.
   const side = [h("span", { class: `pri p${item.priority}` + (item.priority_by === "ai" ? " ai" : ""),
     title: item.priority_by === "ai" ? T.ai_set : null, text: `P${item.priority}` })];
@@ -410,6 +425,8 @@ function headParts(item) {
     title,
   ];
   if (!item.thread_id) parts.push(h("button", { class: "btn primary", onclick: () => startItem(item.id), text: T.start }));
+  const ctx = contextTag(item, true);
+  if (ctx) parts.push(ctx);
   parts.push(window.ConsolePlaces.picker(item));
   // Tool calls and status lines: one click away, never folded into the drawer.
   if (item.thread_id) parts.push(activityToggle());

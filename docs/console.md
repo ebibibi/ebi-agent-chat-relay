@@ -22,6 +22,10 @@ See [ADR-0010](adr/0010-add-an-api-first-console-on-its-own-listener.md) and, fo
 | **Recent** | Every item, finished ones included, newest activity first, grouped by day. Each row names the list it lives in now, so a thread that moved from Running to Done is still easy to find |
 | **Snoozed / Done** | Hidden until the snooze ends / finished |
 
+Each thread also shows how full its context window was after its last turn — 🧠 and a percentage
+on the row (amber from 70%, red from 90%), used / window tokens in the detail header — so a
+thread close to compaction is visible before it happens.
+
 ## Automatic triage
 
 Nobody fills in priority and due date for every thread, so the console asks a fast model

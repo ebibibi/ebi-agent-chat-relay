@@ -130,6 +130,9 @@ button { cursor: pointer; }
 .due.over { color: var(--err); font-weight: 600; }
 .due.soon { color: var(--p1); font-weight: 600; }
 .due.none { opacity: .55; }
+.ctx.warm, .d-ctx.warm { color: var(--p1); }
+.ctx.full, .d-ctx.full { color: var(--err); font-weight: 600; }
+.detail .d-ctx { flex: none; font-size: 12px; color: var(--dim); cursor: default; }
 .tag { border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
 .tag.where { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 .live { color: var(--ai); }
@@ -138,9 +141,9 @@ button { cursor: pointer; }
 
 .detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
 /* One compact header row; the triage fields fold into the drawer below it. */
-.detail .d-head { padding: 8px 12px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.detail .d-head { padding: 8px 12px; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; flex-shrink: 0; }
 .detail .d-status { flex: none; }
-.detail .d-title-input { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; background: transparent; border: 1px solid transparent;
+.detail .d-title-input { flex: 1 1 14em; min-width: 10em; font-size: 15px; font-weight: 600; background: transparent; border: 1px solid transparent;
   border-radius: 6px; padding: 3px 6px; text-overflow: ellipsis; }
 .detail .d-title-input:focus { border-color: var(--line); outline: none; background: var(--panel); }
 .detail .d-more { flex: none; color: var(--dim); font-size: 12px; }

@@ -1008,6 +1008,8 @@ class ConsoleServer:
                 backend=r.backend,
                 model=r.model,
                 last_used_at=r.last_used_at,
+                context_window=r.context_window,
+                context_used=r.context_used,
             )
             for r in records
         }
