@@ -106,6 +106,8 @@ button { cursor: pointer; }
 .ai-note.waiting .next { color: var(--dim); }
 .ai-line { font-size: 12px; }
 .due.over { color: var(--err); font-weight: 600; }
+.due.soon { color: var(--p1); font-weight: 600; }
+.due.none { opacity: .55; }
 .tag { border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
 .tag.where { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 .live { color: var(--ai); }

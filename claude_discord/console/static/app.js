@@ -10,7 +10,7 @@ const HISTORY = 100;
 
 const I18N = {
   en: {
-    focus: "🎯 Focus", focus_first: "Do this first", focus_next: "Then", focus_waiting: "⏳ Waiting", focus_ready: "can do now", focus_from: (d) => `from ${d}`, ai_guess: "AI guess", ai_set: "set by AI",
+    focus: "🎯 Focus", focus_first: "Do this first", focus_next: "Then", focus_waiting: "⏳ Waiting", no_due: "No due date", due_over: "overdue", due_in: (x) => `in ${x}`, u_min: "m", u_hour: "h", u_day: "d", focus_ready: "can do now", focus_from: (d) => `from ${d}`, ai_guess: "AI guess", ai_set: "set by AI",
     me: "Inbox", ai: "Running", todo: "To do", idle: "Idle", recent: "Recent", tree: "Tree", snoozed: "Snoozed", done: "Done",
     filter: "Filter…", capture: "+ Write down work, press Enter (c) — Shift+Enter for a note line", capture_ai: "+ Write down work, Enter hands it to AI (c) — Shift+Enter for a note line",
     autostart: "AI starts right away", empty: "Nothing here. 🎉",
@@ -39,7 +39,7 @@ const I18N = {
            ["r", "reply"], ["/", "filter"], ["g then f/i/a/u/t/w/d", "go to a view"], ["?", "this help"]],
   },
   ja: {
-    focus: "🎯 今やること", focus_first: "まずこれ", focus_next: "次に", focus_waiting: "⏳ 待ち", focus_ready: "今すぐできる", focus_from: (d) => `${d}〜`, ai_guess: "AIの見立て", ai_set: "AIが推定",
+    focus: "🎯 今やること", focus_first: "まずこれ", focus_next: "次に", focus_waiting: "⏳ 待ち", no_due: "期限なし", due_over: "超過", due_in: (x) => `あと${x}`, u_min: "分", u_hour: "時間", u_day: "日", focus_ready: "今すぐできる", focus_from: (d) => `${d}〜`, ai_guess: "AIの見立て", ai_set: "AIが推定",
     me: "受信箱", ai: "実行中", todo: "やること", idle: "止まっている", recent: "更新順", tree: "ツリー", snoozed: "スヌーズ中", done: "完了",
     filter: "絞り込み…", capture: "＋ 思いついた仕事を書いて Enter（c）。Shift+Enter で改行してメモ", capture_ai: "＋ 思いついた仕事を書いて Enter → AIが着手（c）。Shift+Enter で改行してメモ",
     autostart: "AIがすぐ着手", empty: "ここには何もありません 🎉",
@@ -178,6 +178,24 @@ function shortDate(iso) {
   return d.toLocaleDateString(LANG, { month: "numeric", day: "numeric" }) +
     (d.getHours() || d.getMinutes() ? " " + d.toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) : "");
 }
+// "Due 10/14 18:00 (in 2d)" on every open row, "No due date" when there is none, so the
+// list answers "when is it due?" without opening anything.
+function dueLeft(iso) {
+  const min = (new Date(iso).getTime() - Date.now()) / 60000;
+  if (min < 0) return T.due_over;
+  if (min < 60) return T.due_in(`${Math.max(1, Math.round(min))}${T.u_min}`);
+  if (min < 1440) return T.due_in(`${Math.round(min / 60)}${T.u_hour}`);
+  return T.due_in(`${Math.round(min / 1440)}${T.u_day}`);
+}
+function dueLabel(item) {
+  if (!item.due_at) {
+    return item.bucket === "done" ? null : h("span", { class: "due none", text: T.no_due });
+  }
+  const soon = !item.overdue && new Date(item.due_at).getTime() - Date.now() < 86400000;
+  return h("span", { class: "due" + (item.overdue ? " over" : soon ? " soon" : "") + (item.due_by === "ai" ? " ai" : ""),
+    title: item.due_by === "ai" ? T.ai_set : null,
+    text: `${T.due} ${shortDate(item.due_at)}` + (item.bucket === "done" ? "" : `（${dueLeft(item.due_at)}）`) });
+}
 function toLocalInput(iso) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -301,8 +319,7 @@ function rowNode({ item, depth, children }) {
   // A value the model filled in is marked, so a guess never passes for a decision.
   const side = [h("span", { class: `pri p${item.priority}` + (item.priority_by === "ai" ? " ai" : ""),
     title: item.priority_by === "ai" ? T.ai_set : null, text: `P${item.priority}` })];
-  if (item.due_at) side.push(h("span", { class: "due" + (item.overdue ? " over" : "") + (item.due_by === "ai" ? " ai" : ""),
-    title: item.due_by === "ai" ? T.ai_set : null, text: shortDate(item.due_at) }));
+  side.push(dueLabel(item));
   const twisty = children
     ? h("span", { class: "tw", onclick: (e) => { e.stopPropagation(); toggleCollapse(item.id); },
         text: state.collapsed.has(item.id) ? "▸" : "▾" })
