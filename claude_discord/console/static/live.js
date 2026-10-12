@@ -197,29 +197,39 @@
     return btn;
   }
 
-  async function preview(href) {
+  function preview(href) {
+    lightbox(fileName(href), previewUrl(href), () => download(href));
+  }
+
+  // Full-window image preview. *src* is a URL or a promise of one; Esc or a click closes it.
+  async function lightbox(name, src, onDownload) {
     const shade = el("div", "lightbox");
     const close = () => { shade.remove(); document.removeEventListener("keydown", onKey, true); };
     const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); close(); } };
     const bar = el("div", "lightbox-bar");
-    const name = el("span", "lightbox-name", fileName(href));
-    const save = el("button", "btn", `📎 ${L.download}`);
-    save.type = "button";
-    save.addEventListener("click", (e) => { e.stopPropagation(); download(href); });
+    bar.append(el("span", "lightbox-name", name));
+    if (onDownload) {
+      const save = el("button", "btn", `📎 ${L.download}`);
+      save.type = "button";
+      save.addEventListener("click", (e) => { e.stopPropagation(); onDownload(); });
+      bar.append(save);
+    }
     const x = el("button", "btn", "✕");
     x.type = "button";
     x.addEventListener("click", close);
-    bar.append(name, save, x);
+    bar.append(x);
     const img = el("img", "lightbox-img");
-    img.alt = fileName(href);
+    img.alt = name;
     img.addEventListener("click", (e) => e.stopPropagation());
+    img.addEventListener("error", () => { close(); toast(L.failed); });
     shade.append(bar, img);
     shade.addEventListener("click", close);
     document.addEventListener("keydown", onKey, true);
     document.body.append(shade);
-    try { img.src = await previewUrl(href); }
+    try { img.src = await src; }
     catch (err) { close(); toast(`${L.failed}: ${err.message}`); }
   }
+  window.ConsoleLightbox = lightbox;
 
   async function download(href) {
     try {

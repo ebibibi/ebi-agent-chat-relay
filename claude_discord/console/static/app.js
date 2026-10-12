@@ -440,13 +440,34 @@ function messageNode(m) {
     body.append(card);
   }
   for (const a of m.attachments || []) {
-    body.append(h("div", { class: "file" }, /^https:\/\//.test(a.url)
+    const remote = /^https:\/\//.test(a.url);
+    if (remote && isImage(a)) body.append(chatImage(a));
+    body.append(h("div", { class: "file" }, remote
       ? h("a", { href: a.url, target: "_blank", rel: "noopener noreferrer", text: `📎 ${a.filename}` })
       : h("span", { text: `📎 ${a.filename}` })));
   }
   return h("div", { class: `msg ${kind}` },
     h("div", { class: "who" }, h("span", { text: m.author }), h("span", { text: m.created_at ? shortDate(m.created_at) : "" })),
     body);
+}
+
+// Images attached in a chat thread load straight from Discord's CDN (allowed by the CSP for img only).
+function isImage(a) {
+  if (a.content_type) return a.content_type.startsWith("image/");
+  return /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(a.filename || "");
+}
+function chatImage(a) {
+  const open = () => window.ConsoleLightbox && window.ConsoleLightbox(a.filename, a.url,
+    () => window.open(a.url, "_blank", "noopener,noreferrer"));
+  const img = h("img", { src: a.url, alt: a.filename, loading: "lazy" });
+  const btn = h("button", { class: "file-thumb", type: "button", title: a.filename, onclick: open }, img);
+  // The image's height arrives after the messages rendered; a reader at the end stays there.
+  img.addEventListener("load", () => {
+    const box = $("msgs");
+    if (box && box.scrollHeight - box.scrollTop - box.clientHeight - img.offsetHeight < 80) box.scrollTop = box.scrollHeight;
+  }, { once: true });
+  img.addEventListener("error", () => btn.remove(), { once: true });
+  return btn;
 }
 
 function fillMessages(container, { force = false, toBottom = false } = {}) {

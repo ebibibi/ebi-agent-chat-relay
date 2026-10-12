@@ -85,7 +85,9 @@ _STATIC_TYPES = {
 }
 _SECURITY_HEADERS = {
     "Content-Security-Policy": (
-        "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
+        # Discord's CDN is allowed for images only: attachments in chat threads preview inline.
+        "default-src 'self'; img-src 'self' data: https://cdn.discordapp.com "
+        "https://media.discordapp.net; style-src 'self'; script-src 'self'; "
         "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
     ),
     "X-Content-Type-Options": "nosniff",
