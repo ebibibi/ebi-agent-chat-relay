@@ -13,7 +13,7 @@ See [ADR-0010](adr/0010-add-an-api-first-console-on-its-own-listener.md) and, fo
 
 | View | Shows |
 |---|---|
-| **Focus** (default) | What you can do now, across every list. Importance (whose move it is, then priority, then how close the deadline is) and readiness are separate axes: only work you can act on right now ranks under "Do this first" and "Then"; anything waiting for a time, a person or a job goes under "⏳ Waiting", soonest first, and moves up once the time it named has come. Each row shows the next step and why it ranks there. Work an agent is doing, finished, parked and snoozed items are left out. Reachable with `g f` |
+| **Focus** (default) | What you can do now, across every list. Importance (priority first, P0 above P1 whatever else is true; then how close the deadline is; then whose move it is) and readiness are separate axes: only work you can act on right now ranks under "Do this first" and "Then"; anything waiting for a time, a person or a job goes under "⏳ Waiting", soonest first, and moves up once the time it named has come. Each row shows the next step and why it ranks there. Work an agent is doing, finished, parked and snoozed items are left out. Reachable with `g f` |
 | **Inbox** | The ball is on you: ❓ waiting for an answer, 👀 something to review, 📋 a task only you can do, ⚠️ a failed turn |
 | **Running** | A turn is in flight (or queued for a slot) |
 | **To do** | Work you wrote down that no agent has yet |

@@ -114,6 +114,16 @@ async def test_a_guess_fills_only_what_a_human_left_unset(repo) -> None:
     assert items[0]["priority"] == 2  # the input is not changed
 
 
+def test_priority_outranks_deadline_and_whose_move_it_is() -> None:
+    overdue = (NOW - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    p0_idle = focus_score(_item(priority=0), now=NOW)
+    p1_waiting_overdue = focus_score(
+        _item(priority=1, status="waiting", bucket="me", due_at=overdue), now=NOW
+    )
+    assert p0_idle is not None and p1_waiting_overdue is not None
+    assert p0_idle > p1_waiting_overdue
+
+
 def test_focus_ranks_the_humans_move_priority_and_deadline() -> None:
     soon = (NOW + timedelta(hours=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
     waiting = focus_score(_item(status="waiting", bucket="me"), now=NOW)

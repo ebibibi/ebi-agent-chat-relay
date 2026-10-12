@@ -416,14 +416,15 @@ def actionable(row: Triage | None, *, now: datetime) -> bool:
 def focus_score(item: dict[str, Any], *, now: datetime) -> int | None:
     """How important this item is to the human; None when it is not theirs at all.
 
-    Whose move it is counts first, then priority, then how close the deadline is.
+    Priority decides first (P0 above P1 whatever else is true), then how close
+    the deadline is, then whose move it is. Each weight is smaller than the gap
+    between two priorities, so a lower priority never overtakes a higher one.
     Work an agent is doing, finished or parked work, and snoozed items are out.
     Whether it can be done now is a separate axis: see ``actionable``.
     """
     if item.get("bucket") in ("done", "snoozed", "ai") or item.get("status") in _SKIP_STATUSES:
         return None
-    score = 30 if item.get("status") in _HUMAN_STATUSES else 10
-    score += (3 - int(item.get("priority", DEFAULT_PRIORITY))) * 12
+    score = (3 - int(item.get("priority", DEFAULT_PRIORITY))) * 100
     due = _parse_ts(item.get("due_at"))
     if due is not None:
         left = due - now
@@ -435,6 +436,8 @@ def focus_score(item: dict[str, Any], *, now: datetime) -> int | None:
             score += 15
         elif left < timedelta(days=7):
             score += 5
+    if item.get("status") in _HUMAN_STATUSES:
+        score += 20
     return score
 
 
