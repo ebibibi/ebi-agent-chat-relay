@@ -68,6 +68,7 @@ window.ConsoleNotify = (() => {
   function announce(fresh) {
     // The open conversation is already in front of the reader; only other rows light up.
     for (const item of fresh) if (item.id !== state.open) state.fresh.add(item.id);
+    saveUnread();
     renderList();
     chime();
     const first = fresh[0];
@@ -100,6 +101,10 @@ window.ConsoleNotify = (() => {
     // The first board is the starting point, not news.
     const fresh = seen && enabled ? events(items) : [];
     seen = next;
+    if ([...state.fresh].some((id) => !next.has(id))) {
+      for (const id of [...state.fresh]) if (!next.has(id)) state.fresh.delete(id);
+      saveUnread();
+    }
     if (fresh.length) announce(fresh);
   }
 

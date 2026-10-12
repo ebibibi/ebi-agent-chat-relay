@@ -75,7 +75,7 @@ const state = {
   showActivity: localStorage.getItem("showActivity") === "1",
   // The triage fields (priority, due, project, …) stay folded away unless asked for.
   drawerOpen: localStorage.getItem("drawerOpen") === "1",
-  unseen: 0, fresh: new Set(),
+  unseen: 0, fresh: new Set(JSON.parse(localStorage.getItem("unread") || "[]")),
 };
 
 // ---------------------------------------------------------------- dom helpers
@@ -514,6 +514,8 @@ function setView(view) {
   state.selected = rows.length ? rows[0].item.id : null;
   render();
 }
+// Unread marks survive a reload, the way a mailbox remembers what was opened.
+function saveUnread() { localStorage.setItem("unread", JSON.stringify([...state.fresh])); }
 function toggleCollapse(id) {
   state.collapsed.has(id) ? state.collapsed.delete(id) : state.collapsed.add(id);
   localStorage.setItem("collapsed", JSON.stringify([...state.collapsed]));
@@ -523,7 +525,7 @@ async function openItem(id) {
   if (state.open !== id) state.unseen = 0;
   state.open = id;
   state.selected = id;
-  state.fresh.delete(id);
+  if (state.fresh.delete(id)) saveUnread();
   state.messagesFor = null;
   render();
   const item = state.byId.get(id);

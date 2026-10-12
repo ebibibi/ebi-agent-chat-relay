@@ -72,10 +72,13 @@ button { cursor: pointer; }
   padding: 8px 14px; border-left: 3px solid transparent; cursor: pointer; }
 .row:hover { background: var(--panel); }
 .row.sel { background: var(--raise); border-left-color: var(--accent); }
-/* Something new happened here since it was last opened. */
-.row.fresh { border-left-color: var(--me); animation: fresh 1.2s ease-out 2; }
-.row.fresh .title { font-weight: 700; }
-@keyframes fresh { from { background: color-mix(in srgb, var(--me) 28%, transparent); } }
+/* Unread, like a mail client: bold title, a dot, a faint tint. No motion — the list
+   re-renders on every poll and an animation would replay each time. */
+.row.fresh { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.row.fresh.sel { background: var(--raise); }
+.row.fresh .title { font-weight: 700; color: #fff; }
+.row.fresh .title::before { content: ""; display: inline-block; width: 7px; height: 7px; margin: 0 6px 1px 0;
+  border-radius: 50%; background: var(--accent); vertical-align: middle; }
 .nav .nav-notify { color: var(--dim); margin-top: 4px; }
 .nav .nav-notify.on { color: var(--text); }
 .toast.clickable { cursor: pointer; border-color: var(--me); }
