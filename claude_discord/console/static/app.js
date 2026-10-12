@@ -9,7 +9,8 @@ const HISTORY = 100;
 
 const I18N = {
   en: {
-    me: "Inbox", ai: "Running", todo: "To do", idle: "Idle", tree: "Tree", snoozed: "Snoozed", done: "Done",
+    me: "Inbox", ai: "Running", todo: "To do", idle: "Idle", tree: "Tree", recent: "Recent", snoozed: "Snoozed", done: "Done",
+    today: "Today", yesterday: "Yesterday", undated: "No activity yet",
     filter: "Filter…", capture: "+ Write down work, press Enter (c) — Shift+Enter for a note line", capture_ai: "+ Write down work, Enter hands it to AI (c) — Shift+Enter for a note line",
     autostart: "AI starts right away", empty: "Nothing here. 🎉",
     activity: (n) => `Show relay activity (${n})`, no_messages: "No messages yet.",
@@ -23,10 +24,11 @@ const I18N = {
           error: "failed", done: "done", someday: "someday", todo: "to do", idle: "idle" },
     help: [["j / k", "next / previous"], ["Enter", "open"], ["Esc", "close"], ["e", "done"],
            ["1–4", "priority P0–P3"], ["s", "snooze until tomorrow"], ["c", "write down work"],
-           ["r", "reply"], ["/", "filter"], ["g then i/a/t/w/d", "go to a view"], ["?", "this help"]],
+           ["r", "reply"], ["/", "filter"], ["g then i/a/t/w/u/d", "go to a view"], ["?", "this help"]],
   },
   ja: {
-    me: "受信箱", ai: "実行中", todo: "やること", idle: "止まっている", tree: "ツリー", snoozed: "スヌーズ中", done: "完了",
+    me: "受信箱", ai: "実行中", todo: "やること", idle: "止まっている", tree: "ツリー", recent: "最近", snoozed: "スヌーズ中", done: "完了",
+    today: "今日", yesterday: "昨日", undated: "まだ動きなし",
     filter: "絞り込み…", capture: "＋ 思いついた仕事を書いて Enter（c）。Shift+Enter で改行してメモ", capture_ai: "＋ 思いついた仕事を書いて Enter → AIが着手（c）。Shift+Enter で改行してメモ",
     autostart: "AIがすぐ着手", empty: "ここには何もありません 🎉",
     activity: (n) => `内部の動きも表示（${n}件）`, no_messages: "まだメッセージはありません",
@@ -40,7 +42,7 @@ const I18N = {
           error: "失敗", done: "完了", someday: "いつか", todo: "やること", idle: "止まっている" },
     help: [["j / k", "次 / 前"], ["Enter", "開く"], ["Esc", "閉じる"], ["e", "完了"],
            ["1〜4", "優先度 P0〜P3"], ["s", "明日までスヌーズ"], ["c", "仕事を書き留める"],
-           ["r", "返信"], ["/", "絞り込み"], ["g → i/a/t/w/d", "画面を移動"], ["?", "このヘルプ"]],
+           ["r", "返信"], ["/", "絞り込み"], ["g → i/a/t/w/u/d", "画面を移動"], ["?", "このヘルプ"]],
   },
 };
 // ?lang=ja|en pins the language; otherwise the browser's preference decides.
@@ -58,9 +60,9 @@ const STATUS_ICON = { running: "⚙️", waiting: "❓", review: "👀", action:
   done: "✅", someday: "💤", todo: "○", idle: "·" };
 const VIEWS = [
   { key: "me", hot: true }, { key: "ai" }, { key: "todo" }, { key: "idle" },
-  { sep: true }, { key: "tree" }, { key: "snoozed" }, { key: "done" },
+  { sep: true }, { key: "tree" }, { key: "recent" }, { key: "snoozed" }, { key: "done" },
 ];
-const VIEW_KEYS = { i: "me", a: "ai", t: "tree", w: "todo", d: "done" };
+const VIEW_KEYS = { i: "me", a: "ai", t: "tree", w: "todo", u: "recent", d: "done" };
 
 const state = {
   items: [], byId: new Map(), slots: {}, view: localStorage.getItem("view") || "me",
@@ -168,6 +170,7 @@ function matches(item) {
 function visibleRows() {
   const items = state.items.filter(matches);
   if (state.view === "tree") return treeRows(items.filter((i) => i.bucket !== "done"));
+  if (state.view === "recent") return recentRows(items);
   return items.filter((i) => i.bucket === state.view).map((item) => ({ item, depth: 0 }));
 }
 function treeRows(items) {
@@ -201,6 +204,34 @@ function treeRows(items) {
     walk(`__${k}`, 0);
   }
   return rows;
+}
+
+// Every item, finished ones included, newest activity first, under one heading per local day.
+// "Activity" is last_activity_at: the thread's last message, or a capture's last edit.
+// The board is already bounded server-side (open threads plus the newest archived ones), so no paging.
+function recentRows(items) {
+  const when = (i) => i.last_activity_at || i.created_at || "";
+  const sorted = [...items].sort((a, b) => (when(a) < when(b)) - (when(a) > when(b)));
+  const rows = [];
+  let current = null;
+  for (const item of sorted) {
+    const label = dayLabel(when(item));
+    if (label !== current) { rows.push({ group: label }); current = label; }
+    rows.push({ item, depth: 0 });
+  }
+  return rows;
+}
+function dayLabel(iso) {
+  if (!iso) return T.undated;
+  const d = new Date(iso);
+  const today = new Date();
+  const start = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((start(today) - start(d)) / 86400e3);
+  if (days === 0) return T.today;
+  if (days === 1) return T.yesterday;
+  const opts = { month: "short", day: "numeric", weekday: "short" };
+  if (d.getFullYear() !== today.getFullYear()) opts.year = "numeric";
+  return d.toLocaleDateString(LANG, opts);
 }
 
 // ---------------------------------------------------------------- render
@@ -251,6 +282,8 @@ function renderList() {
 
 function rowNode({ item, depth, children }) {
   const meta = [];
+  // Recent mixes every list, so each row says which one the item lives in now.
+  if (state.view === "recent") meta.push(h("span", { class: "tag where", text: T[item.bucket] || item.bucket }));
   if (state.view !== "tree" && item.project) meta.push(h("span", { class: "tag", text: item.project }));
   meta.push(h("span", { class: item.running ? "live" : "", text: T.st[item.status] || item.status }));
   if (item.queued) meta.push(h("span", { text: T.queued }));

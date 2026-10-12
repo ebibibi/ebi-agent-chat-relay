@@ -18,6 +18,7 @@ See [ADR-0010](adr/0010-add-an-api-first-console-on-its-own-listener.md) and, fo
 | **To do** | Work you wrote down that no agent has yet |
 | **Idle** | The agent stopped without saying whose move it is |
 | **Tree** | Everything open, grouped by project, children under their parent |
+| **Recent** | Every item, finished ones included, newest activity first, grouped by day. Each row names the list it lives in now, so a thread that moved from Running to Done is still easy to find |
 | **Snoozed / Done** | Hidden until the snooze ends / finished |
 
 ## Reading a thread
@@ -37,7 +38,11 @@ Each message carries a `kind`:
 The open thread reloads with the board while a turn is running, and the list keeps your scroll
 position unless you were already at the bottom.
 
-Within a view items sort by priority (P0 first), then overdue, then due date, then whoever has
+In Recent, "activity" means the thread's last message (or, for work you wrote down, its last
+edit); changing priority or snooze does not move an item. Recent shows what the board already
+loads (open threads plus the newest 50 archived threads per channel), so it needs no paging.
+
+Within the other views items sort by priority (P0 first), then overdue, then due date, then whoever has
 waited longest.
 
 Status is derived from what ccdb already knows: the outcome marker on the thread title, running
@@ -61,7 +66,7 @@ remaining. On a phone the strip wraps, so every backend stays visible.
 
 
 `j`/`k` move, `Enter` opens, `Esc` closes, `e` done, `1`–`4` priority P0–P3, `s` snooze until
-tomorrow 09:00, `c` write down work (the first line is the title; `Shift+Enter` adds note lines), `r` reply, `/` filter, `g` then `i`/`a`/`t`/`w`/`d` switches
+tomorrow 09:00, `c` write down work (the first line is the title; `Shift+Enter` adds note lines), `r` reply, `/` filter, `g` then `i`/`a`/`t`/`w`/`u`/`d` switches
 view, `?` help. URLs carry the view and the open item (`/#me/t1234`), so a link can point at a
 single item.
 
