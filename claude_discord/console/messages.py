@@ -108,8 +108,15 @@ def classify(
     return KIND_AGENT
 
 
-def serialize_message(message: Any) -> dict[str, object]:
-    """Reduce a discord.Message to what the console client renders."""
+def serialize_message(
+    message: Any, *, actions: list[dict[str, str]] | None = None
+) -> dict[str, object]:
+    """Reduce a discord.Message to what the console client renders.
+
+    *actions* are the buttons the console may press on it (see
+    :mod:`claude_discord.message_actions`). Discord's own components are not
+    read: a bot cannot click them.
+    """
     content = str(getattr(message, "content", "") or "")
     author: Any = getattr(message, "author", None)
     is_bot = bool(getattr(author, "bot", False))
@@ -123,6 +130,9 @@ def serialize_message(message: Any) -> dict[str, object]:
         embeds=embeds,
         attachments=attachments,
     )
+    if actions:
+        # Waiting on the person: never fold it away as bookkeeping.
+        kind = KIND_AGENT
     created_at: Any = getattr(message, "created_at", None)
     return {
         "id": getattr(message, "id", None),
@@ -133,6 +143,7 @@ def serialize_message(message: Any) -> dict[str, object]:
         "truncated": len(content) > MAX_CONTENT_CHARS,
         "embeds": embeds,
         "attachments": attachments,
+        "actions": actions or [],
         "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else None,
         "jump_url": getattr(message, "jump_url", None),
     }
@@ -150,4 +161,5 @@ def with_kind(message: dict[str, Any]) -> dict[str, object]:
         ),
         "embeds": [],
         "attachments": [],
+        "actions": [],
     }

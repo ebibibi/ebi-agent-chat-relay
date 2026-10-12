@@ -183,6 +183,10 @@ a.btn { text-decoration: none; display: inline-block; }
 .msg .who { color: var(--dim); font-size: 12px; margin-bottom: 3px; display: flex; justify-content: space-between; gap: 8px; }
 .msg .body { overflow-wrap: anywhere; }
 .embed { border-left: 3px solid var(--line); background: var(--raise); border-radius: 4px; padding: 4px 8px; margin: 4px 0; }
+.msg-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.msg-actions .act-success { border-color: #2e9d5b; color: #2e9d5b; }
+.msg-actions .act-danger { border-color: #d9534f; color: #d9534f; }
+.msg-actions .act-primary { border-color: var(--accent, #5865f2); }
 .embed-title { font-weight: 600; }
 .file a { color: var(--accent); }
 

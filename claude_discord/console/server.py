@@ -27,6 +27,7 @@ from urllib.parse import quote
 
 from aiohttp import web
 
+from ..message_actions import message_actions
 from ..thread_marker import OUTCOME_DONE, thread_outcome
 from ..thread_status import request_thread_outcome, schedule_thread_outcome
 from .auth import ConsoleAuthConfig, ConsoleAuthenticator, ConsoleAuthError
@@ -234,6 +235,10 @@ class ConsoleServer:
         r.add_patch(f"{API_PREFIX}/items/{{item_id}}", self.patch_item)
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/messages", self.messages)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/reply", self.reply)
+        r.add_post(
+            f"{API_PREFIX}/items/{{item_id}}/messages/{{message_id}}/actions/{{action_id}}",
+            self.press_action,
+        )
         r.add_post(f"{API_PREFIX}/uploads", self.upload)
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/commands", self.commands)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/command", self.run_command)
@@ -485,7 +490,14 @@ class ConsoleServer:
             logger.warning("console: history of %s failed: %s", thread.id, exc)
             return _error("could not read the thread", 502)
         history.reverse()
-        return web.json_response({"messages": [serialize_message(m) for m in history]})
+        return web.json_response(
+            {
+                "messages": [
+                    serialize_message(m, actions=message_actions.for_message(thread.id, m.id))
+                    for m in history
+                ]
+            }
+        )
 
     async def live(self, request: web.Request) -> web.Response:
         """What a console conversation's running turn is doing right now."""
@@ -526,6 +538,26 @@ class ConsoleServer:
             return _error("nothing is running", 409)
         logger.info("console: %s stopped conversation %s", _q(request[IDENTITY]), key)
         return web.json_response({"status": "stopping"}, status=202)
+
+    async def press_action(self, request: web.Request) -> web.Response:
+        """Press a button on a thread message, as clicking it in Discord would."""
+        thread, err = await self._thread_for(request.match_info["item_id"])
+        if err:
+            return err
+        message_id = request.match_info["message_id"]
+        if not message_id.isdigit():
+            return _error("message_id must be a number", 400)
+        who = request[IDENTITY]
+        try:
+            pressed = await message_actions.invoke(
+                thread.id, int(message_id), request.match_info["action_id"], who
+            )
+        except Exception:
+            logger.exception("console: action on message %s failed", message_id)
+            return _error("the action failed", 500)
+        if not pressed:
+            return _error("this button is no longer waiting for an answer", 404)
+        return web.json_response({"status": "pressed"})
 
     async def create_item(self, request: web.Request) -> web.Response:
         body, err = await self._json(request)

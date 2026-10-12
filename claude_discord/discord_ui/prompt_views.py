@@ -39,6 +39,13 @@ import discord
 
 from claude_code_core.frontend import ChoicePrompt, FormField, FormPrompt
 
+from ..message_actions import (
+    STYLE_DANGER,
+    STYLE_SECONDARY,
+    STYLE_SUCCESS,
+    MessageAction,
+)
+
 logger = logging.getLogger(__name__)
 
 # Discord allows five components per action row; four buttons leaves a slot
@@ -78,6 +85,30 @@ class ChoiceView(discord.ui.View):
             self._resolve((default,) if default is not None else None)
             return (default,) if default is not None else None
 
+    def console_actions(self, message: discord.Message) -> list[MessageAction]:
+        """The choices as actions the Relay Console can press.
+
+        Single choice only: a multi-select needs a form, so the console
+        answers those by replying in text as before.
+        """
+        if self._prompt.multi_select:
+            return []
+        return [
+            MessageAction(
+                c.label,
+                self._console_answer(message, c.value),
+                _ACTION_STYLES.get(c.style, STYLE_SECONDARY),
+            )
+            for c in self._prompt.choices[:25]
+        ]
+
+    def _console_answer(self, message: discord.Message, value: str):  # noqa: ANN202
+        async def answer(who: str) -> None:
+            self._resolve((value,))
+            await _disable_message(message, self)
+
+        return answer
+
     def _resolve(self, values: tuple[str, ...] | None) -> None:
         if not self._future.done():
             self._future.set_result(values)
@@ -86,6 +117,9 @@ class ChoiceView(discord.ui.View):
     async def on_timeout(self) -> None:
         default = self._prompt.default_on_timeout
         self._resolve((default,) if default is not None else None)
+
+
+_ACTION_STYLES = {"positive": STYLE_SUCCESS, "destructive": STYLE_DANGER}
 
 
 class _ChoiceButton(discord.ui.Button):
@@ -209,9 +243,13 @@ def _placeholder_for(field: FormField) -> str:
 
 async def _disable(interaction: discord.Interaction, view: discord.ui.View) -> None:
     """Grey the controls out so a second click cannot race the first."""
+    await _disable_message(interaction.message, view)
+
+
+async def _disable_message(message: discord.Message | None, view: discord.ui.View) -> None:
     for child in view.children:
         if isinstance(child, discord.ui.Button | discord.ui.Select):
             child.disabled = True
-    if interaction.message:
+    if message:
         with contextlib.suppress(discord.HTTPException):
-            await interaction.message.edit(view=view)
+            await message.edit(view=view)

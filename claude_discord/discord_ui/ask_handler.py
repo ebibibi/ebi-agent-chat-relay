@@ -17,6 +17,7 @@ import discord
 
 from ..claude.types import AskQuestion
 from ..database.ask_repo import PendingAskRepository
+from ..message_actions import STYLE_PRIMARY, MessageAction, message_actions
 from .ask_bus import ask_bus as _ask_bus
 from .ask_view import AskView
 from .embeds import ask_embed
@@ -80,6 +81,8 @@ async def collect_ask_answers(
             **user_mention_kwargs(notify_user_id),
         )
 
+        message_actions.register(thread.id, msg.id, _console_actions(q, thread.id, msg))
+
         try:
             selected = await asyncio.wait_for(answer_queue.get(), timeout=ASK_ANSWER_TIMEOUT)
         except TimeoutError:
@@ -102,6 +105,7 @@ async def collect_ask_answers(
             continue
         finally:
             _ask_bus.unregister(thread.id)
+            message_actions.clear(msg.id)
 
         if ask_repo is not None:
             await ask_repo.delete(thread.id)
@@ -120,3 +124,22 @@ async def collect_ask_answers(
         + "\n\n".join(parts)
         + "\n\nPlease continue based on these answers."
     )
+
+
+def _console_actions(q: AskQuestion, thread_id: int, msg: discord.Message) -> list[MessageAction]:
+    """The options as actions the Relay Console can press (single choice only).
+
+    A multi-select or a free-text answer is still given by replying in text.
+    """
+    if q.multi_select:
+        return []
+
+    def answer(label: str):  # noqa: ANN202
+        async def press(who: str) -> None:
+            if _ask_bus.post_answer(thread_id, [label]):
+                with contextlib.suppress(discord.HTTPException):
+                    await msg.edit(content=f"-# ✅ **Selected:** {label}", embed=None, view=None)
+
+        return press
+
+    return [MessageAction(o.label, answer(o.label), STYLE_PRIMARY) for o in q.options[:25]]
