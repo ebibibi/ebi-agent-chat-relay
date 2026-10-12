@@ -111,6 +111,10 @@ button { cursor: pointer; }
 .detail .d-title-input:focus { border-color: var(--line); outline: none; background: var(--panel); }
 .detail .d-more { flex: none; color: var(--dim); font-size: 12px; }
 .detail .d-more.on { color: var(--text); border-color: var(--accent); }
+/* Finish sits at the far right, apart from Details, and needs a confirming second click. */
+.detail .d-finish { flex: none; margin-left: 6px; color: var(--ai); border-color: color-mix(in srgb, var(--ai) 45%, var(--line)); }
+.detail .d-finish.armed { background: var(--ai); color: #0d1020; border-color: var(--ai); font-weight: 600; }
+.toast.undo { display: flex; align-items: center; gap: 12px; }
 .detail .d-drawer { padding: 8px 16px 10px; border-bottom: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column;
   gap: 8px; flex-shrink: 0; max-height: 40%; overflow-y: auto; }
 .detail .dim { color: var(--dim); font-size: 12px; }

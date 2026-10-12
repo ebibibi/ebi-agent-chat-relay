@@ -18,7 +18,9 @@ const I18N = {
     jump: "↓ Latest", jump_new: (n) => `↓ ${n} new`, no_messages: "No messages yet.",
     slots: (r, m, w) => `Slots ${r}/${m ?? "∞"}` + (w ? ` · ${w} queued` : ""),
     priority: "Priority", due: "Due", snooze: "Snooze", project: "Project", parent: "Under",
-    none: "—", done_btn: "Done (e)", reopen: "Reopen", open_chat: "Open in chat", start: "Hand to AI",
+    none: "—", reopen: "Reopen", finish: "Done", finish_confirm: "Click again to finish",
+    finish_hint: "Mark this thread done (click twice; shortcut e). Undo right after, or Reopen any time.",
+    reopen_hint: "Bring this thread back from Done", finished: "Done", undo: "Undo", reopened: "Reopened", open_chat: "Open in chat", start: "Hand to AI",
     reply_ph: "Reply… (Ctrl+Enter to send, paste or drop images)",
     paste_type: "Only PNG, JPEG, GIF and WebP images can be attached", paste_failed: "Could not attach the image",
     paste_wait: "An image is still uploading",
@@ -42,7 +44,9 @@ const I18N = {
     jump: "↓ 最新へ", jump_new: (n) => `↓ 新着 ${n}件`, no_messages: "まだメッセージはありません",
     slots: (r, m, w) => `枠 ${r}/${m ?? "∞"}` + (w ? `・待ち ${w}` : ""),
     priority: "優先度", due: "期限", snooze: "スヌーズ", project: "案件", parent: "親",
-    none: "なし", done_btn: "完了（e）", reopen: "戻す", open_chat: "チャットで開く", start: "AIに頼む",
+    none: "なし", reopen: "戻す", finish: "完了", finish_confirm: "もう一度押すと完了",
+    finish_hint: "このスレッドを完了にする（2回押す。ショートカット e）。直後なら「元に戻す」、あとからでも「戻す」で復活できます",
+    reopen_hint: "完了から戻す", finished: "完了にしました", undo: "元に戻す", reopened: "戻しました", open_chat: "チャットで開く", start: "AIに頼む",
     reply_ph: "返信…（Ctrl+Enter で送信。画像は貼り付け・ドロップで添付）",
     paste_type: "添付できるのは PNG・JPEG・GIF・WebP の画像だけです", paste_failed: "画像を添付できませんでした",
     paste_wait: "画像をアップロード中です",
@@ -371,6 +375,7 @@ function headParts(item) {
   parts.push(h("button", { class: "btn d-more" + (state.drawerOpen ? " on" : ""), type: "button",
     "aria-expanded": state.drawerOpen ? "true" : "false", onclick: toggleDrawer,
     text: `${state.drawerOpen ? "▴" : "▾"} ${T.details}` }));
+  parts.push(window.ConsoleFinish.button(item));
   return parts;
 }
 
@@ -390,8 +395,6 @@ function drawerParts(item) {
   if (item.snoozed_until) snooze.push(h("button", { class: "btn", onclick: () => patch(item.id, { snoozed_until: null }), text: T.clear }));
 
   const actions = [];
-  if (item.bucket === "done") actions.push(h("button", { class: "btn", onclick: () => act(item.id, "reopen"), text: T.reopen }));
-  else actions.push(h("button", { class: "btn good", onclick: () => act(item.id, "done"), text: T.done_btn }));
   if (item.url) actions.push(h("a", { class: "btn", href: item.url, target: "_blank", rel: "noopener", text: T.open_chat }));
   // Chat threads carry the relay's own bookkeeping; console conversations have almost none.
   if (item.thread_id && activityCount()) {
@@ -589,10 +592,6 @@ async function patch(id, changes) {
   try { await api(`/items/${encodeURIComponent(id)}`, { method: "PATCH", body: changes }); toast(T.saved); await refresh(); }
   catch (err) { toast(err.message); }
 }
-async function act(id, action) {
-  try { await api(`/items/${encodeURIComponent(id)}/${action}`, { method: "POST", body: {} }); await refresh(); }
-  catch (err) { toast(err.message); }
-}
 async function sendReply(id, box) {
   const text = box.value.trim();
   const images = window.ConsolePaste.ready(id);
@@ -712,7 +711,7 @@ function wire() {
       case "j": case "ArrowDown": move(1); break;
       case "k": case "ArrowUp": move(-1); break;
       case "Enter": if (id) openItem(id); break;
-      case "e": if (id) act(id, "done"); break;
+      case "e": if (id && state.byId.get(id)?.bucket !== "done") window.ConsoleFinish.finish(id); break;
       case "1": case "2": case "3": case "4": if (id) patch(id, { priority: Number(e.key) - 1 }); break;
       case "s": if (id) patch(id, { snoozed_until: snoozeTarget("tomorrow").toISOString() }); break;
       case "c": $("capture-input").focus(); break;
