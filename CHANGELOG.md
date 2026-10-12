@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Relay Console: Recent view** (#927) — every item, finished ones included, newest activity
+  first and grouped by day, with each row naming the list it lives in now. In the nav and on
+  `g u`. See [docs/console.md](docs/console.md).
+
 - **Reserved restart** (#915) — `POST /api/restart` holds the session queue: running turns
   finish, every new request (chat, console, scheduler, spawn) queues instead of starting, and the
   bot restarts as soon as nothing is running. Everything that was queued then runs after the
