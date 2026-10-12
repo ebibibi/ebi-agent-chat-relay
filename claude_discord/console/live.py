@@ -1,10 +1,10 @@
 """What a console conversation is doing right now, for the live view.
 
 A chat platform shows a running turn as it happens: tool embeds, a streaming
-answer, a Stop button. The console stores none of that (see ``surface.py``);
-this keeps it in memory while the turn runs so a client can poll it. Nothing
-here survives a restart, and nothing needs to: once the turn ends, the
-transcript has the answer.
+answer, a Stop button. This keeps that in memory while the turn runs so a
+client can poll it. Nothing here survives a restart, and nothing needs to:
+once the turn ends, the transcript has the answer and one line per finished
+tool call (see ``surface.py``).
 """
 
 from __future__ import annotations

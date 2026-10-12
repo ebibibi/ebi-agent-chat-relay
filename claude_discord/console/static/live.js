@@ -29,9 +29,9 @@
     return e;
   };
 
-  // The panel lives in its own slot under the conversation and is one line high unless
-  // opened, so it never covers the messages it is reporting on.
-  let open = localStorage.getItem("liveOpen") === "1";
+  // The panel lives in its own slot under the conversation, so it never covers the
+  // messages it is reporting on. Open (the latest tool calls) unless folded to one line.
+  let open = localStorage.getItem("liveOpen") !== "0";
 
   function draw(id, data) {
     last = { id, data };

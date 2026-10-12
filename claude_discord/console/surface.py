@@ -6,9 +6,10 @@ so a console conversation runs through the shared session runner with no chat
 platform involved, and its transcript lives in ``console_messages``.
 
 What a chat platform renders live — tool activity, the streaming answer, the
-Stop button — goes to the in-memory ``LiveBoard`` while the turn runs. Only
-what a human reads afterwards is stored: the model's answers, questions it
-asks, warnings or errors, and links to delivered files.
+Stop button — goes to the in-memory ``LiveBoard`` while the turn runs. What a
+human reads afterwards is stored: the model's answers, questions it asks,
+warnings or errors, links to delivered files, and one subtext line per
+finished tool call (shown only when the reader asks for relay activity).
 """
 
 from __future__ import annotations
@@ -65,6 +66,8 @@ FILES_ROUTE = "/console/api/files"
 #: Notices worth keeping in the transcript. Session start/finish cards and
 #: "thinking" asides are live-progress chatter a reader does not need later.
 _KEPT_NOTICES = {NoticeLevel.WARNING, NoticeLevel.ERROR}
+#: The live view's icons, by tool category, for the transcript's activity lines.
+_TOOL_ICONS = {"read": "📖", "edit": "✏️", "command": "⌨️", "web": "🌐"}
 
 
 async def apply_outcome(repo: ConversationRepository, thread_key: int, outcome: str | None) -> str:
@@ -129,11 +132,24 @@ class _TextStream:
 
 
 class _Activity:
-    """Tool activity is live progress: shown while the turn runs, never stored."""
+    """Tool activity: live progress while it runs, one subtext line in the transcript once done.
 
-    def __init__(self, entry: LiveActivity, live: LiveState) -> None:
+    The line starts with ``-# `` (subtext), which the console classifies as
+    relay activity: hidden unless the reader asks to see it, like a chat
+    thread's tool embeds. A todo list is progress only and leaves no line.
+    """
+
+    def __init__(
+        self,
+        entry: LiveActivity,
+        live: LiveState,
+        spec: ActivitySpec,
+        record: Callable[[str], Awaitable[str | None]],
+    ) -> None:
         self._entry = entry
         self._live = live
+        self._spec = spec
+        self._record = record
 
     async def update(self, detail: str) -> None:
         if not self._entry.done:
@@ -141,12 +157,27 @@ class _Activity:
             self._live.touch()
 
     async def complete(self, result: str | None, *, ok: bool = True) -> None:
+        if self._entry.done:
+            return
         self._entry.done = True
         self._entry.ok = ok
         self._live.touch()
+        if self._spec.kind != "tool":
+            return
+        try:
+            await self._record(_activity_line(self._spec, self._entry, ok=ok))
+        except Exception:
+            # A missing log line must not end the turn the tool belongs to.
+            logger.warning("console: could not record a tool call", exc_info=True)
 
     async def cancel(self) -> None:
         await self.complete(None, ok=False)
+
+
+def _activity_line(spec: ActivitySpec, entry: LiveActivity, *, ok: bool) -> str:
+    icon = _TOOL_ICONS.get(spec.category.value if spec.category else "", "🔧")
+    text = entry.title + (f" — {entry.detail}" if entry.detail else "")
+    return f"-# {icon} {'' if ok else '✗ '}{' '.join(text.split())[:300]}"
 
 
 class _Interrupt:
@@ -253,7 +284,7 @@ class ConsoleSurface:
         entry = LiveActivity(title=spec.title, detail=spec.detail)
         live.activities.append(entry)
         live.touch()
-        return _Activity(entry, live)
+        return _Activity(entry, live, spec, self._store)
 
     async def set_status(self, status: StatusKind) -> None:
         live = self.live

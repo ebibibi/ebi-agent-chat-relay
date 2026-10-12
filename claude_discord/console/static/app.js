@@ -13,7 +13,8 @@ const I18N = {
     me: "Inbox", ai: "Running", todo: "To do", idle: "Idle", recent: "Recent", tree: "Tree", snoozed: "Snoozed", done: "Done",
     filter: "Filter…", capture: "+ Write down work, press Enter (c) — Shift+Enter for a note line", capture_ai: "+ Write down work, Enter hands it to AI (c) — Shift+Enter for a note line",
     autostart: "AI starts right away", empty: "Nothing here. 🎉",
-    activity: (n) => `Show relay activity (${n})`, details: "Details",
+    activity: (n) => `⚙ Activity (${n})`, details: "Details",
+    activity_hint: "Show or hide tool calls, status lines and automatic prompts",
     notify_on: "🔔 Notifications on", notify_off: "🔕 Notifications off",
     jump: "↓ Latest", jump_new: (n) => `↓ ${n} new`, no_messages: "No messages yet.",
     slots: (r, m, w) => `Slots ${r}/${m ?? "∞"}` + (w ? ` · ${w} queued` : ""),
@@ -40,7 +41,8 @@ const I18N = {
     me: "受信箱", ai: "実行中", todo: "やること", idle: "止まっている", recent: "更新順", tree: "ツリー", snoozed: "スヌーズ中", done: "完了",
     filter: "絞り込み…", capture: "＋ 思いついた仕事を書いて Enter（c）。Shift+Enter で改行してメモ", capture_ai: "＋ 思いついた仕事を書いて Enter → AIが着手（c）。Shift+Enter で改行してメモ",
     autostart: "AIがすぐ着手", empty: "ここには何もありません 🎉",
-    activity: (n) => `内部の動きも表示（${n}件）`, details: "詳細",
+    activity: (n) => `⚙ 内部の動き（${n}）`, details: "詳細",
+    activity_hint: "ツール実行・状態表示・自動プロンプトの表示／非表示",
     notify_on: "🔔 通知オン", notify_off: "🔕 通知オフ",
     jump: "↓ 最新へ", jump_new: (n) => `↓ 新着 ${n}件`, no_messages: "まだメッセージはありません",
     slots: (r, m, w) => `枠 ${r}/${m ?? "∞"}` + (w ? `・待ち ${w}` : ""),
@@ -379,6 +381,8 @@ function headParts(item) {
     title,
   ];
   if (!item.thread_id) parts.push(h("button", { class: "btn primary", onclick: () => startItem(item.id), text: T.start }));
+  // Tool calls and status lines: one click away, never folded into the drawer.
+  if (item.thread_id) parts.push(activityToggle());
   parts.push(h("button", { class: "btn d-more" + (state.drawerOpen ? " on" : ""), type: "button",
     "aria-expanded": state.drawerOpen ? "true" : "false", onclick: toggleDrawer,
     text: `${state.drawerOpen ? "▴" : "▾"} ${T.details}` }));
@@ -403,12 +407,6 @@ function drawerParts(item) {
 
   const actions = [];
   if (item.url) actions.push(h("a", { class: "btn", href: item.url, target: "_blank", rel: "noopener", text: T.open_chat }));
-  // Chat threads carry the relay's own bookkeeping; console conversations have almost none.
-  if (item.thread_id && activityCount()) {
-    actions.push(h("label", { class: "toggle" },
-      h("input", { type: "checkbox", checked: state.showActivity, onchange: (e) => setShowActivity(e.target.checked) }),
-      h("span", { text: T.activity(activityCount()) })));
-  }
   return [
     h("div", { class: "controls" },
       h("label", {}, T.priority, pri), h("label", {}, T.due, due),
@@ -442,6 +440,17 @@ function updateJump() {
 
 function activityCount() {
   return state.messagesFor === state.open ? state.messages.filter((m) => m.kind === "activity").length : 0;
+}
+function activityToggle() {
+  const n = activityCount();
+  return h("button", { class: "btn d-activity" + (state.showActivity ? " on" : ""), id: "d-activity", type: "button",
+    "aria-pressed": state.showActivity ? "true" : "false", hidden: !n && !state.showActivity,
+    title: T.activity_hint, onclick: () => setShowActivity(!state.showActivity), text: T.activity(n) });
+}
+// The count is known once the messages arrive, after the header was drawn.
+function syncActivityToggle() {
+  const old = $("d-activity");
+  if (old) old.replaceWith(activityToggle());
 }
 function setShowActivity(on) {
   state.showActivity = on;
@@ -592,6 +601,7 @@ async function loadMessages(id) {
     state.messagesFor = id;
     const box = $("msgs");
     if (box) fillMessages(box);
+    syncActivityToggle();
   } catch (err) { toast(err.message); }
 }
 function closeItem() { markSeen(state.open); state.open = null; render(); }
