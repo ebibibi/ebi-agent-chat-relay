@@ -896,6 +896,86 @@ class TestOnReady:
         # delete was still called (single-fire)
         resume_repo.delete.assert_called_once_with(1)
 
+    @staticmethod
+    def _console_entry(thread_id: int, prompt: str | None):
+        from claude_discord.database.resume_repo import PendingResume
+
+        return PendingResume(
+            id=9,
+            thread_id=thread_id,
+            session_id="sess-console",
+            reason="self_restart",
+            resume_prompt=prompt,
+            created_at="2026-10-12 09:00:00",
+        )
+
+    @pytest.mark.asyncio
+    async def test_on_ready_resumes_console_conversation(self) -> None:
+        """A Relay Console conversation has no Discord thread: resume it through the console."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from claude_discord.console.host import ConsoleSessionHost
+        from claude_discord.database.resume_repo import PendingResumeRepository
+
+        resume_repo = MagicMock(spec=PendingResumeRepository)
+        resume_repo.get_pending = AsyncMock(
+            return_value=[self._console_entry(6123, "Report back.")]
+        )
+        resume_repo.delete = AsyncMock()
+
+        console = MagicMock(spec=ConsoleSessionHost)
+        console.owns = AsyncMock(return_value=True)
+        console.reply = AsyncMock()
+
+        bot = MagicMock()
+        bot.console_sessions = console
+        cog = ClaudeChatCog(bot=bot, repo=MagicMock(), runner=MagicMock(), resume_repo=resume_repo)
+
+        await cog.on_ready()
+
+        resume_repo.delete.assert_called_once_with(9)
+        console.reply.assert_awaited_once()
+        thread_key, prompt, _author = console.reply.await_args.args
+        assert thread_key == 6123
+        assert "Report back." in prompt
+        bot.get_channel.assert_not_called()
+        bot.fetch_channel.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_on_ready_falls_back_to_discord_when_console_does_not_own(self) -> None:
+        """A thread the console does not own still resumes in Discord."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        import discord
+
+        from claude_discord.console.host import ConsoleSessionHost
+        from claude_discord.database.resume_repo import PendingResumeRepository
+
+        resume_repo = MagicMock(spec=PendingResumeRepository)
+        resume_repo.get_pending = AsyncMock(return_value=[self._console_entry(555, None)])
+        resume_repo.delete = AsyncMock()
+
+        console = MagicMock(spec=ConsoleSessionHost)
+        console.owns = AsyncMock(return_value=False)
+        console.reply = AsyncMock()
+
+        thread = MagicMock(spec=discord.Thread)
+        thread.id = 555
+        thread.send = AsyncMock(return_value=MagicMock())
+        thread.parent = MagicMock(spec=discord.TextChannel)
+
+        bot = MagicMock()
+        bot.console_sessions = console
+        bot.get_channel.return_value = thread
+        cog = ClaudeChatCog(bot=bot, repo=MagicMock(), runner=MagicMock(), resume_repo=resume_repo)
+
+        with patch.object(cog, "_run_claude", new=AsyncMock()) as run:
+            await cog.on_ready()
+            await asyncio.sleep(0)
+
+        console.reply.assert_not_called()
+        run.assert_called_once()
+
 
 class TestCogUnloadMarkForResume:
     """Tests for cog_unload() auto-marking active sessions for restart-resume."""
