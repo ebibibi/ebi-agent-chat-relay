@@ -170,3 +170,23 @@ def test_a_loop_through_lineage_is_cut_so_nothing_disappears() -> None:
     )
     roots = [i for i in items.values() if i["parent_id"] is None]
     assert len(roots) == 1, "exactly one link of the loop is cut"
+
+
+def test_context_usage_comes_from_the_session_table() -> None:
+    from claude_discord.console.board import SessionInfo
+
+    threads = [ThreadSnapshot(thread_id=n, name=f"t{n}") for n in (1, 2, 3, 4)]
+    sessions = {
+        1: SessionInfo(context_window=200_000, context_used=90_000),
+        2: SessionInfo(context_window=200_000, context_used=250_000),
+        3: SessionInfo(context_window=None, context_used=1_000),
+    }
+    items = {
+        i["id"]: i
+        for i in build_board(
+            threads=threads, overlays=[], lineage={}, running=set(), sessions=sessions, now=NOW
+        )
+    }
+    assert items["t1"]["context"] == {"used": 90_000, "window": 200_000, "pct": 45}
+    assert items["t2"]["context"]["pct"] == 100  # an over-full report is capped
+    assert items["t3"]["context"] is None and items["t4"]["context"] is None
