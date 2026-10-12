@@ -201,6 +201,9 @@ def test_provider_names() -> None:
     assert provider_name("https://accounts.google.com") == "Google"
     assert provider_name("https://login.microsoftonline.com/tid/v2.0") == "Microsoft"
     assert provider_name("https://id.example.com") == "SSO"
+    # The host decides, not a substring anywhere in the URL.
+    assert provider_name("https://evil.example/accounts.google.com") == "SSO"
+    assert provider_name("https://accounts.google.com.evil.example") == "SSO"
 
 
 def test_oidc_configuration_problems() -> None:

@@ -37,7 +37,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +64,10 @@ class OidcError(Exception):
 
 def provider_name(issuer: str) -> str:
     """A label for the sign-in button when the operator did not set one."""
-    if "accounts.google.com" in issuer:
+    host = (urlparse(issuer).hostname or "").lower()
+    if host == "accounts.google.com":
         return "Google"
-    if "login.microsoftonline.com" in issuer:
+    if host == "login.microsoftonline.com":
         return "Microsoft"
     return "SSO"
 
