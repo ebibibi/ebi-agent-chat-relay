@@ -142,11 +142,11 @@ class TestPromptWarning:
         self,
     ) -> None:
         entries, _ = im.parse_manifest(
-            [{"name": "MEHJdebug.log", "status": "linked", "message": "返信 12"}]
+            [{"name": "ACMEdebug.log", "status": "linked", "message": "返信 12"}]
         )
         warning = im.render_prompt_warning(im.reconcile(entries, []))
         assert warning is not None
-        assert "MEHJdebug.log" in warning
+        assert "ACMEdebug.log" in warning
         assert "推測" in warning
 
     def test_newest_message_losing_an_attachment_is_called_out(self, tmp_path: Path) -> None:

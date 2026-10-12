@@ -69,7 +69,7 @@ def thread_body(**over) -> dict:
         "thread": {
             "team": TEAM,
             "root_mid": ROOT,
-            "title": "MEHJ後のIntune登録に関して",
+            "title": "ACME後のIntune登録に関して",
             "url": "https://teams.cloud.microsoft/x",
         },
         "messages": [],
@@ -646,8 +646,8 @@ async def test_sync_requires_the_ingest_token(client: TestClient) -> None:
 
 
 def test_thread_dirname_is_readable_and_unique() -> None:
-    name = teams_sync.thread_dirname("MEHJ後のIntune登録に関して", ROOT)
-    assert name == f"MEHJ後のIntune登録に関して--{ROOT}"
+    name = teams_sync.thread_dirname("ACME後のIntune登録に関して", ROOT)
+    assert name == f"ACME後のIntune登録に関して--{ROOT}"
     # Path- and Obsidian-hostile characters never reach the filesystem.
     assert "/" not in teams_sync.thread_dirname("a/b:c*d?[e]", ROOT)
 
@@ -709,13 +709,13 @@ async def test_thread_lands_in_its_company_folder(client: TestClient, vault: Pat
         "/api/teams/sync/push",
         headers=AUTH,
         json=thread_body(
-            thread={"team": TEAM, "root_mid": ROOT, "title": "件名", "org": "日本工営"},
+            thread={"team": TEAM, "root_mid": ROOT, "title": "件名", "org": "Contoso"},
             messages=[msg(ROOT, "本文", "h1")],
         ),
     )
     folder = Path((await resp.json())["folder"])
-    assert folder.parent == vault / "日本工営"
-    assert json.loads((folder / "thread.json").read_text())["org"] == "日本工営"
+    assert folder.parent == vault / "Contoso"
+    assert json.loads((folder / "thread.json").read_text())["org"] == "Contoso"
 
 
 async def test_unlabelled_thread_stays_at_the_root(client: TestClient, vault: Path) -> None:
@@ -749,7 +749,7 @@ async def test_a_thread_already_filed_flat_is_reused_not_duplicated(
         "/api/teams/sync/push",
         headers=AUTH,
         json=thread_body(
-            thread={"team": TEAM, "root_mid": ROOT, "title": "件名", "org": "日本工営"},
+            thread={"team": TEAM, "root_mid": ROOT, "title": "件名", "org": "Contoso"},
             messages=[msg(ROOT, "本文", "h1")],
         ),
     )
@@ -765,7 +765,7 @@ async def test_a_thread_moved_into_a_company_folder_by_hand_keeps_syncing(
         "/api/teams/sync/push", headers=AUTH, json=thread_body(messages=[msg(ROOT, "本文", "h1")])
     )
     flat = Path((await first.json())["folder"])
-    moved = vault / "日本工営" / flat.name
+    moved = vault / "Contoso" / flat.name
     moved.parent.mkdir()
     flat.rename(moved)
 
@@ -789,7 +789,7 @@ async def test_the_orgs_file_is_authoritative_over_the_client(
     would last exactly until the next sync.
     """
     (vault / "orgs.json").write_text(
-        json.dumps({"teams": {TEAM: "日本工営"}}, ensure_ascii=False), encoding="utf-8"
+        json.dumps({"teams": {TEAM: "Contoso"}}, ensure_ascii=False), encoding="utf-8"
     )
     resp = await client.post(
         "/api/teams/sync/push",
@@ -799,7 +799,7 @@ async def test_the_orgs_file_is_authoritative_over_the_client(
             messages=[msg(ROOT, "本文", "h1")],
         ),
     )
-    assert Path((await resp.json())["folder"]).parent == vault / "日本工営"
+    assert Path((await resp.json())["folder"]).parent == vault / "Contoso"
 
 
 async def test_a_new_company_label_is_remembered_for_the_team(
@@ -814,11 +814,11 @@ async def test_a_new_company_label_is_remembered_for_the_team(
         "/api/teams/sync/push",
         headers=AUTH,
         json=thread_body(
-            thread={"team": TEAM, "root_mid": ROOT, "title": "件名", "org": "日本工営"},
+            thread={"team": TEAM, "root_mid": ROOT, "title": "件名", "org": "Contoso"},
             messages=[msg(ROOT, "本文", "h1")],
         ),
     )
-    assert json.loads((vault / "orgs.json").read_text())["teams"][TEAM] == "日本工営"
+    assert json.loads((vault / "orgs.json").read_text())["teams"][TEAM] == "Contoso"
 
     other = await client.post(
         "/api/teams/sync/push",
@@ -828,7 +828,7 @@ async def test_a_new_company_label_is_remembered_for_the_team(
             messages=[msg("1784110000999", "本文", "h9")],
         ),
     )
-    assert Path((await other.json())["folder"]).parent == vault / "日本工営"
+    assert Path((await other.json())["folder"]).parent == vault / "Contoso"
 
 
 async def test_a_hostile_company_name_cannot_escape_the_vault(
@@ -849,7 +849,7 @@ async def test_a_hostile_company_name_cannot_escape_the_vault(
 
 
 def test_org_dirname_keeps_a_readable_japanese_name() -> None:
-    assert teams_sync.org_dirname("日本工営") == "日本工営"
+    assert teams_sync.org_dirname("Contoso") == "Contoso"
     assert teams_sync.org_dirname("  ") == ""
     assert "/" not in teams_sync.org_dirname("a/b:c")
     assert teams_sync.org_dirname("..") == ""
@@ -861,12 +861,12 @@ async def test_readme_names_the_company(client: TestClient) -> None:
         "/api/teams/sync/push",
         headers=AUTH,
         json=thread_body(
-            thread={"team": TEAM, "root_mid": ROOT, "title": "件名", "org": "日本工営"},
+            thread={"team": TEAM, "root_mid": ROOT, "title": "件名", "org": "Contoso"},
             messages=[msg(ROOT, "本文", "h1")],
         ),
     )
     readme = (Path((await resp.json())["folder"]) / "README.md").read_text()
-    assert "- 会社: 日本工営" in readme
+    assert "- 会社: Contoso" in readme
 
 
 # ---------------------------------------------------------------------------
