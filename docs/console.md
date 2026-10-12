@@ -17,6 +17,7 @@ See [ADR-0010](adr/0010-add-an-api-first-console-on-its-own-listener.md) and, fo
 | **Running** | A turn is in flight (or queued for a slot) |
 | **To do** | Work you wrote down that no agent has yet |
 | **Idle** | The agent stopped without saying whose move it is |
+| **Recent** | Everything, finished included, newest activity first under a heading per day. Each row names the list it now lives in, so you can find where a thread went |
 | **Tree** | Everything open, grouped by project, children under their parent |
 | **Snoozed / Done** | Hidden until the snooze ends / finished |
 
@@ -61,7 +62,7 @@ remaining. On a phone the strip wraps, so every backend stays visible.
 
 
 `j`/`k` move, `Enter` opens, `Esc` closes, `e` done, `1`–`4` priority P0–P3, `s` snooze until
-tomorrow 09:00, `c` write down work (the first line is the title; `Shift+Enter` adds note lines), `r` reply, `/` filter, `g` then `i`/`a`/`t`/`w`/`d` switches
+tomorrow 09:00, `c` write down work (the first line is the title; `Shift+Enter` adds note lines), `r` reply, `/` filter, `g` then `i`/`a`/`u`/`t`/`w`/`d` switches
 view, `?` help. URLs carry the view and the open item (`/#me/t1234`), so a link can point at a
 single item.
 

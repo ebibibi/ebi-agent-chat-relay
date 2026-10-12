@@ -10,7 +10,7 @@ const HISTORY = 100;
 
 const I18N = {
   en: {
-    me: "Inbox", ai: "Running", todo: "To do", idle: "Idle", tree: "Tree", snoozed: "Snoozed", done: "Done",
+    me: "Inbox", ai: "Running", todo: "To do", idle: "Idle", recent: "Recent", tree: "Tree", snoozed: "Snoozed", done: "Done",
     filter: "Filter…", capture: "+ Write down work, press Enter (c) — Shift+Enter for a note line", capture_ai: "+ Write down work, Enter hands it to AI (c) — Shift+Enter for a note line",
     autostart: "AI starts right away", empty: "Nothing here. 🎉",
     activity: (n) => `Show relay activity (${n})`, details: "Details",
@@ -28,15 +28,16 @@ const I18N = {
       model: "Choose the model for the current backend", effort: "Set the reasoning effort",
       compact: "Summarize the conversation to free up context", context: "Show context window usage", cost: "Show token usage and cost" }, send: "Send", hour: "1h", tomorrow: "Tomorrow", week: "Next week",
     clear: "Clear", loading: "Loading…", sent: "Sent — the agent will pick it up", started: "Started", captured: "Added to To do",
+    today: "Today", yesterday: "Yesterday",
     saved: "Saved", offline: "offline", updated: "updated", no_project: "No project", queued: "queued",
     st: { running: "running", waiting: "waiting for you", review: "to review", action: "your task",
           error: "failed", done: "done", someday: "someday", todo: "to do", idle: "idle" },
     help: [["j / k", "next / previous"], ["Enter", "open"], ["Esc", "close"], ["e", "done"],
            ["1–4", "priority P0–P3"], ["s", "snooze until tomorrow"], ["c", "write down work"],
-           ["r", "reply"], ["/", "filter"], ["g then i/a/t/w/d", "go to a view"], ["?", "this help"]],
+           ["r", "reply"], ["/", "filter"], ["g then i/a/u/t/w/d", "go to a view"], ["?", "this help"]],
   },
   ja: {
-    me: "受信箱", ai: "実行中", todo: "やること", idle: "止まっている", tree: "ツリー", snoozed: "スヌーズ中", done: "完了",
+    me: "受信箱", ai: "実行中", todo: "やること", idle: "止まっている", recent: "更新順", tree: "ツリー", snoozed: "スヌーズ中", done: "完了",
     filter: "絞り込み…", capture: "＋ 思いついた仕事を書いて Enter（c）。Shift+Enter で改行してメモ", capture_ai: "＋ 思いついた仕事を書いて Enter → AIが着手（c）。Shift+Enter で改行してメモ",
     autostart: "AIがすぐ着手", empty: "ここには何もありません 🎉",
     activity: (n) => `内部の動きも表示（${n}件）`, details: "詳細",
@@ -54,12 +55,13 @@ const I18N = {
       model: "今のバックエンドのモデルを選ぶ", effort: "推論の強さ（effort）を設定する",
       compact: "ここまでの会話を要約してコンテキストを空ける", context: "コンテキストの使用量を見る", cost: "トークン使用量と料金を見る" }, send: "送信", hour: "1時間", tomorrow: "明日", week: "来週",
     clear: "解除", loading: "読み込み中…", sent: "送りました。エージェントが拾います", started: "スレッドを開始しました", captured: "「やること」に追加しました",
+    today: "今日", yesterday: "昨日",
     saved: "保存しました", offline: "接続できません", updated: "更新", no_project: "案件なし", queued: "待ち",
     st: { running: "実行中", waiting: "あなたの返事待ち", review: "確認待ち", action: "あなたの作業",
           error: "失敗", done: "完了", someday: "いつか", todo: "やること", idle: "止まっている" },
     help: [["j / k", "次 / 前"], ["Enter", "開く"], ["Esc", "閉じる"], ["e", "完了"],
            ["1〜4", "優先度 P0〜P3"], ["s", "明日までスヌーズ"], ["c", "仕事を書き留める"],
-           ["r", "返信"], ["/", "絞り込み"], ["g → i/a/t/w/d", "画面を移動"], ["?", "このヘルプ"]],
+           ["r", "返信"], ["/", "絞り込み"], ["g → i/a/u/t/w/d", "画面を移動"], ["?", "このヘルプ"]],
   },
 };
 // ?lang=ja|en pins the language; otherwise the browser's preference decides.
@@ -77,9 +79,9 @@ const STATUS_ICON = { running: "⚙️", waiting: "❓", review: "👀", action:
   done: "✅", someday: "💤", todo: "○", idle: "·" };
 const VIEWS = [
   { key: "me", hot: true }, { key: "ai" }, { key: "todo" }, { key: "idle" },
-  { sep: true }, { key: "tree" }, { key: "snoozed" }, { key: "done" },
+  { sep: true }, { key: "recent" }, { key: "tree" }, { key: "snoozed" }, { key: "done" },
 ];
-const VIEW_KEYS = { i: "me", a: "ai", t: "tree", w: "todo", d: "done" };
+const VIEW_KEYS = { i: "me", a: "ai", u: "recent", t: "tree", w: "todo", d: "done" };
 
 const state = {
   items: [], byId: new Map(), slots: {}, view: localStorage.getItem("view") || "me",
@@ -194,6 +196,7 @@ function matches(item) {
 function visibleRows() {
   const items = state.items.filter(matches);
   if (state.view === "tree") return treeRows(items.filter((i) => i.bucket !== "done"));
+  if (state.view === "recent") return window.ConsoleRecent.rows(items);
   return items.filter((i) => i.bucket === state.view).map((item) => ({ item, depth: 0 }));
 }
 function treeRows(items) {
@@ -280,6 +283,10 @@ function renderList() {
 
 function rowNode({ item, depth, children }) {
   const meta = [];
+  // In Recent, name the list the item lives in now, unless its status already says so.
+  if (state.view === "recent" && T[item.bucket] && T[item.bucket] !== T.st[item.status]) {
+    meta.push(h("span", { class: "tag where", text: T[item.bucket] }));
+  }
   if (state.view !== "tree" && item.project) meta.push(h("span", { class: "tag", text: item.project }));
   meta.push(h("span", { class: item.running ? "live" : "", text: T.st[item.status] || item.status }));
   if (item.queued) meta.push(h("span", { text: T.queued }));

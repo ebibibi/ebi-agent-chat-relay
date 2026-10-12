@@ -51,6 +51,7 @@ async def test_the_shell_is_served_with_security_headers(client) -> None:
     assert "default-src 'self'" in csp and "connect-src 'self'" in csp
     assert (await client.get("/static/app.js")).status == 200
     assert (await client.get("/static/markdown.js")).status == 200
+    assert (await client.get("/static/recent.js")).status == 200
 
 
 async def test_static_files_cannot_escape_the_directory(client) -> None:

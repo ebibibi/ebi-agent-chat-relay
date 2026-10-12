@@ -98,6 +98,7 @@ button { cursor: pointer; }
 .pri.p3 { background: color-mix(in srgb, var(--p3) 25%, transparent); color: var(--dim); }
 .due.over { color: var(--err); font-weight: 600; }
 .tag { border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
+.tag.where { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 .live { color: var(--ai); }
 
 .empty { color: var(--dim); text-align: center; padding: 40px 20px; }
