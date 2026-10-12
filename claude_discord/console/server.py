@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -125,6 +126,16 @@ _SECURITY_HEADERS = {
     "X-Frame-Options": "DENY",
     "Cache-Control": "no-store",
 }
+
+
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _q(value: object) -> str:
+    """A client-supplied value made safe for a log line: no line breaks or control characters."""
+    # str.replace first: it is the form static analysers recognise as a log sanitiser.
+    text = str(value).replace("\r", " ").replace("\n", " ")
+    return _CONTROL.sub(" ", text)[:200]
 
 
 def _error(message: str, status: int) -> web.Response:
@@ -513,7 +524,7 @@ class ConsoleServer:
             return _error("this item has no console conversation", 404)
         if not await self.sessions.stop(key, request[IDENTITY]):
             return _error("nothing is running", 409)
-        logger.info("console: %s stopped conversation %s", request[IDENTITY], key)
+        logger.info("console: %s stopped conversation %s", _q(request[IDENTITY]), key)
         return web.json_response({"status": "stopping"}, status=202)
 
     async def create_item(self, request: web.Request) -> web.Response:
@@ -645,7 +656,7 @@ class ConsoleServer:
         schedule_thread_outcome(thread, None)
         prompt = f"{text}\n\n-# 🖥️ via Relay Console ({who})"
         self._background(cog.deliver_relayed_message(thread, prompt, interrupt=False))
-        logger.info("console: %s replied in thread %s", who, thread.id)
+        logger.info("console: %s replied in thread %s", _q(who), thread.id)
         return web.json_response({"status": "delivered"}, status=202)
 
     # -- slash commands ----------------------------------------------------
@@ -706,7 +717,9 @@ class ConsoleServer:
                 result = await run_command(settings, key, name, arg)
             except CommandError as exc:
                 return _error(str(exc), 400)
-            logger.info("console: %s ran /%s %s on %s", who, name, arg.strip()[:60], item_id)
+            logger.info(
+                "console: %s ran /%s %s on %s", _q(who), _q(name), _q(arg.strip()[:60]), _q(item_id)
+            )
             return web.json_response(
                 {
                     "message": result.message,
@@ -718,7 +731,7 @@ class ConsoleServer:
             return await self._compact_codex(key, item_id, who)
         if name not in {s["name"] for s in self._skill_loader()(backend)}:
             return _error(f"Unknown command `/{name}` for `{backend}`.", 400)
-        logger.info("console: %s ran skill /%s on %s", who, name, item_id)
+        logger.info("console: %s ran skill /%s on %s", _q(who), _q(name), _q(item_id))
         return await self._deliver(item_id, skill_prompt(backend, name, arg), who)
 
     async def _compact_codex(self, key: int, item_id: str, who: str) -> web.Response:
@@ -735,11 +748,11 @@ class ConsoleServer:
         try:
             await self._codex_compact(record.session_id, codex_command=command)
         except CompactError as exc:
-            logger.warning("console: /compact failed on %s: %s", item_id, exc)
+            logger.warning("console: /compact failed on %s: %s", _q(item_id), _q(exc))
             return _error(str(exc), 502)
         finally:
             self._compacting.discard(key)
-        logger.info("console: %s compacted Codex session of %s", who, item_id)
+        logger.info("console: %s compacted Codex session of %s", _q(who), _q(item_id))
         return web.json_response(
             {"message": "Conversation compacted. The next reply continues from the summary."}
         )
@@ -782,7 +795,7 @@ class ConsoleServer:
             url = await save_upload(files_dir, bytes(data), mime)
         except UploadError as exc:
             return _error(str(exc), exc.status)
-        logger.info("console: %s uploaded %s", request[IDENTITY], url)
+        logger.info("console: %s uploaded %s", _q(request[IDENTITY]), _q(url))
         return web.json_response({"url": url}, status=201)
 
     async def start_item(self, request: web.Request) -> web.Response:
@@ -828,7 +841,7 @@ class ConsoleServer:
                 author=who,
             )
         except Exception:
-            logger.exception("console: start of %s failed", item_id)
+            logger.exception("console: start of %s failed", _q(item_id))
             return _error("could not start the conversation", 502)
         if parent_thread_id is not None and self.api.lineage_repo is not None:
             from ..thread_marker import family_code
@@ -843,7 +856,7 @@ class ConsoleServer:
             overlay = await self.work_repo.attach_thread(item_id, thread_key)
         except WorkItemError:
             logger.exception(
-                "console: conversation %s started but %s could not follow", thread_key, item_id
+                "console: conversation %s started but %s could not follow", thread_key, _q(item_id)
             )
             return _error("the conversation started, but the item could not be linked to it", 500)
         return web.json_response({"item": overlay.as_dict()}, status=201)
@@ -861,7 +874,7 @@ class ConsoleServer:
             await self.sessions.reply(thread_key, text, who)
         except LookupError:
             return _error("unknown conversation", 404)
-        logger.info("console: %s replied in conversation %s", who, thread_key)
+        logger.info("console: %s replied in conversation %s", _q(who), thread_key)
         return web.json_response({"status": "delivered"}, status=202)
 
     # -- helpers -----------------------------------------------------------
