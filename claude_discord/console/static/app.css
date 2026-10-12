@@ -24,10 +24,25 @@ button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 
 /* One fixed-height row: each column scrolls on its own instead of the whole page. */
-.app { display: grid; grid-template-columns: 220px minmax(320px, 1fr) minmax(360px, 46%);
+/* --nav-w / --detail-w are set by resize.js when the user drags a column border. The detail
+   pane is capped so the list always keeps 320px, however wide it was dragged. */
+.app { --nav-w: 220px; --detail-w: 46%; --list-min: 320px;
+  --detail-col: max(320px, min(var(--detail-w), calc(100% - var(--nav-w) - var(--list-min))));
+  position: relative; display: grid;
+  grid-template-columns: var(--nav-w) minmax(var(--list-min), 1fr) var(--detail-col);
   grid-template-rows: minmax(0, 1fr); height: 100vh; height: 100dvh; overflow: hidden; }
 .app > * { min-height: 0; }
-.app.no-detail { grid-template-columns: 220px 1fr; }
+.app.no-detail { grid-template-columns: var(--nav-w) 1fr; }
+
+.col-resize { position: absolute; top: 0; bottom: 0; width: 9px; margin-left: -4px; z-index: 3;
+  cursor: col-resize; touch-action: none; }
+.col-resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 1px; transition: background .1s; }
+.col-resize:hover::after, .col-resize:focus-visible::after, .app.resizing .col-resize::after { background: var(--accent); }
+.col-resize:focus-visible { outline: none; }
+.col-resize-nav { left: var(--nav-w); }
+.col-resize-detail { left: calc(100% - var(--detail-col)); }
+.app.no-detail .col-resize-detail { display: none; }
+.app.resizing { cursor: col-resize; user-select: none; }
 
 .nav { background: var(--panel); border-right: 1px solid var(--line); padding: 12px 8px; overflow-y: auto; }
 .nav .brand { font-weight: 700; padding: 4px 10px 12px; letter-spacing: .02em; }
@@ -141,6 +156,7 @@ a.btn { text-decoration: none; display: inline-block; }
 .only-narrow { display: none; }
 @media (max-width: 900px) {
   .app, .app.no-detail { grid-template-columns: minmax(0, 1fr); }
+  .col-resize { display: none; }
   .sync:not(.bad) { display: none; }
   .list-pane { border-right: 0; }
   .nav { position: fixed; inset: 0 30% 0 0; z-index: 5; transform: translateX(-100%); transition: transform .15s; }
