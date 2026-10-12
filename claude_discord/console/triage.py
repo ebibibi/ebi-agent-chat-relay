@@ -34,6 +34,7 @@ from typing import Any
 import aiosqlite
 
 from claude_code_core.child_env import strip_transport_credentials
+from claude_code_core.runner import resolve_cli_argv
 
 from .work_repo import DEFAULT_PRIORITY
 
@@ -308,9 +309,13 @@ async def ask_model(
     timeout: float = ASK_TIMEOUT_SECONDS,
 ) -> str | None:
     """One ``claude -p`` call with no tools, hooks or settings; its stdout, or None."""
+    argv = resolve_cli_argv(command)
+    if argv is None:
+        logger.warning("console triage: cannot start %s on this platform", command)
+        return None
     try:
         proc = await asyncio.create_subprocess_exec(
-            command,
+            *argv,
             "-p",
             "--model",
             model,

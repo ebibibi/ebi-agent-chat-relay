@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import stat
+import sys
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
@@ -187,6 +188,7 @@ async def test_a_pass_is_capped_and_newest_first(repo) -> None:
     assert picked == ["t4", "t3"]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="uses a POSIX shell script")
 async def test_the_model_runs_without_tools_hooks_or_relay_credentials(
     tmp_path, monkeypatch
 ) -> None:
@@ -206,6 +208,7 @@ async def test_the_model_runs_without_tools_hooks_or_relay_credentials(
     assert args[-1] == "0"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="uses a POSIX shell script")
 async def test_a_missing_or_failing_cli_is_none(tmp_path) -> None:
     assert await ask_model("x", command=str(tmp_path / "nope")) is None
     fake = tmp_path / "claude"

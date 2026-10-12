@@ -50,9 +50,10 @@ def _resolve_windows_cmd(cmd_path: Path) -> list[str] | None:
     """
     try:
         content = cmd_path.read_text(encoding="utf-8", errors="ignore")
-        match = re.search(r'"%~dp0\\([^"]+\.js)"', content)
+        # Older npm writes "%~dp0\x.js", current cmd-shim "%dp0%\x.js".
+        match = re.search(r'"(?:%~dp0|%dp0%)\\([^"]+\.js)"', content)
         if match:
-            cli_js = cmd_path.parent / match.group(1)
+            cli_js = cmd_path.parent.joinpath(*match.group(1).split("\\"))
             if cli_js.exists():
                 node = shutil.which("node") or "node"
                 return [node, str(cli_js)]
@@ -70,6 +71,21 @@ def _resolve_windows_cmd(cmd_path: Path) -> list[str] | None:
         cmd_path,
     )
     return None
+
+
+def resolve_cli_argv(command: str) -> list[str] | None:
+    """The argv prefix that starts the CLI *command*, or None when it cannot be run safely.
+
+    On Windows a CLI installed by npm is a ``.cmd`` wrapper, which
+    ``create_subprocess_exec`` cannot start, and which must not be started
+    through ``cmd.exe`` with untrusted arguments (they would be re-parsed by the
+    batch interpreter). It is resolved to ``[node, cli.js]`` instead; a wrapper
+    that cannot be resolved yields None. Elsewhere the command is used as is.
+    """
+    found = shutil.which(command) or command
+    if sys.platform == "win32" and found.lower().endswith((".cmd", ".bat")):
+        return _resolve_windows_cmd(Path(found))
+    return [found]
 
 
 class ClaudeRunner:

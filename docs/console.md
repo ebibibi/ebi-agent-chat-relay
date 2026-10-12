@@ -45,6 +45,8 @@ A guess never overrides a person:
 | `CCDB_CONSOLE_TRIAGE_COMMAND` | `claude` | The Claude CLI; triage stays off when it is not on `PATH` |
 
 Each triage is one model call, billed like any other `claude -p` call on that machine.
+On Windows a Claude CLI installed by npm (`claude.cmd`) is started as `node` + its script, never
+through `cmd.exe`; a wrapper that cannot be resolved that way leaves triage idle and logs why.
 
 ## Reading a thread
 

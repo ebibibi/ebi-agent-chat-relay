@@ -962,8 +962,8 @@ class TestResolveWindowsCmd:
     )
 
     def _make_cmd(self, tmp_path: Path, rel_js: str) -> Path:
-        """Write a minimal .cmd wrapper and the target .js file."""
-        js_path = tmp_path / rel_js
+        """Write a minimal .cmd wrapper and the target .js file (Windows separators in rel_js)."""
+        js_path = tmp_path.joinpath(*rel_js.replace("\\", "/").split("/"))
         js_path.parent.mkdir(parents=True, exist_ok=True)
         js_path.write_text("// cli entry\n")
 

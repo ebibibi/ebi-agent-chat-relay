@@ -18,10 +18,13 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import re
 import shlex
 from collections.abc import Mapping
 from typing import Any
+
+from claude_code_core.runner import resolve_cli_argv
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +101,11 @@ async def compact_codex_session(
     """Compact the Codex conversation *session_id*, or raise CompactError."""
     if not _SESSION_ID.match(session_id or ""):
         raise CompactError("this conversation has no Codex session to compact yet")
-    parts = shlex.split(codex_command) or ["codex"]
+    parts = shlex.split(codex_command, posix=os.name != "nt") or ["codex"]
+    head = resolve_cli_argv(parts[0])
+    if head is None:
+        raise CompactError("could not start Codex on this platform")
+    parts = head + parts[1:]
     try:
         proc = await asyncio.create_subprocess_exec(
             *parts,
