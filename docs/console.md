@@ -25,13 +25,16 @@ See [ADR-0010](adr/0010-add-an-api-first-console-on-its-own-listener.md) and, fo
 ## Automatic triage
 
 Nobody fills in priority and due date for every thread, so the console asks a fast model
-(Haiku by default) to. A background pass every minute picks up to six open items with new
+to: the cheapest model of the backend chosen with `/backend` — Haiku on Claude, the cheapest
+"fast and affordable" model in Codex's own catalog on Codex (falling back to whichever CLI is
+installed). The choice is made per call, so switching the backend switches triage too. A background pass every minute picks up to six open items with new
 activity, gives the model the title and the latest human and agent messages, and stores its
 answer: a priority (P0–P3), a deadline if the conversation names one, the reason, your next
 step, whether you can take that step now or must wait (and for what, and until when), and
 whether it can only be done in one place or on one device. The model is shown the place labels
-already in use so it reuses them. The model runs as a one-shot `claude -p` with tools, hooks and settings off, in a scratch
-directory, without relay or console credentials in its environment.
+already in use so it reuses them. Each call is one-shot and tool-less: `claude -p` with tools, hooks
+and settings off, or `codex exec` ephemeral and read-only without the user's config or rules,
+both in a scratch directory and without relay or console credentials in their environment.
 
 A guess never overrides a person:
 
@@ -43,8 +46,10 @@ A guess never overrides a person:
 | Variable | Default | Meaning |
 |---|---|---|
 | `CCDB_CONSOLE_TRIAGE` | `1` | `0` turns automatic triage off |
-| `CCDB_CONSOLE_TRIAGE_MODEL` | `haiku` | Model alias or id passed to `claude --model` |
-| `CCDB_CONSOLE_TRIAGE_COMMAND` | `claude` | The Claude CLI; triage stays off when it is not on `PATH` |
+| `CCDB_CONSOLE_TRIAGE_MODEL` | `haiku` | Model for Claude triage, passed to `claude --model` |
+| `CCDB_CONSOLE_TRIAGE_CODEX_MODEL` | *(cheapest in the catalog)* | Model for Codex triage, passed to `codex exec -m` |
+| `CCDB_CONSOLE_TRIAGE_COMMAND` | `claude` | The Claude CLI |
+| `CCDB_CODEX_COMMAND` | `codex` | The Codex CLI. Triage stays off only when neither CLI is on `PATH` |
 
 Each triage is one model call, billed like any other `claude -p` call on that machine.
 On Windows a Claude CLI installed by npm (`claude.cmd`) is started as `node` + its script, never

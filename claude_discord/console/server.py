@@ -17,7 +17,6 @@ import asyncio
 import json
 import logging
 import os
-import shutil
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -53,14 +52,13 @@ from .places import PlaceError, PlaceRepository
 from .places import clean_name as clean_place
 from .ratelimit import RateLimiter
 from .surface import apply_outcome
-from .triage import DEFAULT_MODEL as TRIAGE_DEFAULT_MODEL
 from .triage import INTERVAL_SECONDS as TRIAGE_INTERVAL_SECONDS
 from .triage import (
     Triager,
     TriageRepository,
     apply_triage,
-    ask_model,
 )
+from .triage_models import CLAUDE_TRIAGE_MODEL, BackendAsk, installed
 from .uploads import (
     MAX_IMAGES_PER_REPLY,
     MAX_UPLOAD_BYTES,
@@ -1067,8 +1065,8 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
     await store.init_db()
     passkeys = PasskeyService(store) if config.passkeys else None
     oidc = _oidc_client(config)
-    triage_command = _triage_command()
-    triage = TriageRepository(api_server.session_repo.db_path) if triage_command else None
+    triage_ask = _triage_ask(api_server)
+    triage = TriageRepository(api_server.session_repo.db_path) if triage_ask else None
     places = PlaceRepository(api_server.session_repo.db_path)
     await places.init_db()
     if triage is not None:
@@ -1089,13 +1087,8 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
         places=places,
     )
     await console.start()
-    if triage_command:
-        model = (os.getenv("CCDB_CONSOLE_TRIAGE_MODEL") or "").strip() or TRIAGE_DEFAULT_MODEL
-
-        async def ask(prompt: str) -> str | None:
-            return await ask_model(prompt, command=triage_command, model=model)
-
-        console.start_triage(ask, model=model)
+    if triage_ask is not None:
+        console.start_triage(triage_ask, model=triage_ask.model)
     if passkeys is not None:
         await passkeys.open_enrollment(force=os.getenv("CCDB_CONSOLE_ENROLL") == "1")
     return console
@@ -1154,15 +1147,31 @@ async def _build_session_host(
     return host
 
 
-def _triage_command() -> str | None:
-    """The Claude CLI for automatic triage, or None when it is off or not installed.
+def _triage_ask(api_server: ApiServer) -> BackendAsk | None:
+    """The model call for automatic triage, or None when it is off or no CLI is installed.
 
-    On by default: ``CCDB_CONSOLE_TRIAGE=0`` turns it off.
+    On by default (``CCDB_CONSOLE_TRIAGE=0`` turns it off). It follows the
+    backend chosen with ``/backend``: Haiku on Claude, Codex's cheapest model
+    on Codex, falling back to whichever CLI is installed.
     """
     if (os.getenv("CCDB_CONSOLE_TRIAGE") or "1").strip().lower() in ("0", "false", "off", "no"):
         return None
-    command = (os.getenv("CCDB_CONSOLE_TRIAGE_COMMAND") or "claude").strip()
-    return command if shutil.which(command) else None
+    claude = installed((os.getenv("CCDB_CONSOLE_TRIAGE_COMMAND") or "claude").strip())
+    codex = installed((os.getenv("CCDB_CODEX_COMMAND") or "codex").strip())
+    if claude is None and codex is None:
+        return None
+    settings = getattr(api_server.components, "backend_settings", None)
+
+    async def current_backend() -> str:
+        return str(await settings.current_backend()) if settings is not None else "claude"
+
+    return BackendAsk(
+        current_backend,
+        claude_command=claude,
+        codex_command=codex,
+        claude_model=(os.getenv("CCDB_CONSOLE_TRIAGE_MODEL") or "").strip() or CLAUDE_TRIAGE_MODEL,
+        codex_model=(os.getenv("CCDB_CONSOLE_TRIAGE_CODEX_MODEL") or "").strip() or None,
+    )
 
 
 def _oidc_client(config: ConsoleAuthConfig) -> OidcClient | None:

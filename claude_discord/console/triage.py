@@ -573,7 +573,9 @@ class Triager:
             result = parse_reply(await self._ask(prompt) or "", now=datetime.now(UTC))
             if result is None:
                 raise ValueError("no usable answer")
-            await self.repo.save(item["id"], result, basis=basis, model=self._model)
+            # A backend-following ask names the model it used for this item.
+            model = str(getattr(self._ask, "model", self._model))
+            await self.repo.save(item["id"], result, basis=basis, model=model)
         except Exception as exc:
             logger.info("console triage: %s skipped: %s", item["id"], exc)
             self._failed[item["id"]] = (basis, time.monotonic())
