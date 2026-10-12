@@ -47,7 +47,7 @@ async def test_the_shell_is_served_with_security_headers(client) -> None:
     assert "frame-ancestors 'none'" in csp
     # Images attached in Discord threads load from Discord's CDN; nothing else does.
     img_src = next(d for d in csp.split(";") if d.strip().startswith("img-src")).split()
-    assert "https://cdn.discordapp.com" in img_src and "https://media.discordapp.net" in img_src
+    assert {"https://cdn.discordapp.com", "https://media.discordapp.net"} <= set(img_src)
     assert "default-src 'self'" in csp and "connect-src 'self'" in csp
     assert (await client.get("/static/app.js")).status == 200
     assert (await client.get("/static/markdown.js")).status == 200
@@ -208,3 +208,10 @@ async def test_the_recent_view_is_in_the_nav_and_on_g_u(client) -> None:
     script = await (await client.get("/static/app.js")).text()
     assert '{ key: "recent" }' in script
     assert 'u: "recent"' in script
+
+
+def test_log_values_cannot_forge_lines() -> None:
+    from claude_discord.console.server import _q
+
+    assert _q("t1\nINFO forged\r\x1b[2J") == "t1 INFO forged  [2J"
+    assert len(_q("x" * 500)) == 200
