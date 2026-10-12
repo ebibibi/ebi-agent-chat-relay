@@ -39,6 +39,15 @@ from .passkey_store import PasskeyStore
 from .passkeys import PasskeyService
 from .ratelimit import RateLimiter
 from .surface import apply_outcome
+from .uploads import (
+    MAX_IMAGES_PER_REPLY,
+    MAX_UPLOAD_BYTES,
+    UploadError,
+    accepted_type,
+    resolve_upload,
+    save_upload,
+    with_images,
+)
 from .usage import UsageReader
 from .work_repo import (
     STATE_DONE,
@@ -174,6 +183,7 @@ class ConsoleServer:
         r.add_patch(f"{API_PREFIX}/items/{{item_id}}", self.patch_item)
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/messages", self.messages)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/reply", self.reply)
+        r.add_post(f"{API_PREFIX}/uploads", self.upload)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/done", self.done)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/reopen", self.reopen)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/start", self.start_item)
@@ -445,10 +455,14 @@ class ConsoleServer:
         if err:
             return err
         text = str(body.get("text") or "").strip()
-        if not text:
+        images, err = self._reply_images(body.get("images"))
+        if err:
+            return err
+        if not text and not images:
             return _error("text is required", 400)
         if len(text) > MAX_REPLY_CHARS:
             return _error(f"text must be at most {MAX_REPLY_CHARS} characters", 400)
+        text = with_images(text, images)
         item_id = request.match_info["item_id"]
         who = request[IDENTITY]
         key = await self._conversation_key(item_id)
@@ -469,6 +483,47 @@ class ConsoleServer:
         self._background(cog.deliver_relayed_message(thread, prompt, interrupt=False))
         logger.info("console: %s replied in thread %s", who, thread.id)
         return web.json_response({"status": "delivered"}, status=202)
+
+    def _files_dir(self) -> Path | None:
+        return self.sessions.frontend.files_dir if self.sessions is not None else None
+
+    def _reply_images(self, raw: object) -> tuple[list[tuple[str, Path]], web.Response | None]:
+        """Pasted-image URLs from a reply body, resolved to stored files."""
+        if raw in (None, []):
+            return [], None
+        if not isinstance(raw, list) or len(raw) > MAX_IMAGES_PER_REPLY:
+            return [], _error(f"images must be a list of at most {MAX_IMAGES_PER_REPLY}", 400)
+        out: list[tuple[str, Path]] = []
+        for url in raw:
+            path = resolve_upload(self._files_dir(), url)
+            if path is None:
+                return [], _error("unknown image", 400)
+            out.append((url, path))
+        return out, None
+
+    async def upload(self, request: web.Request) -> web.Response:
+        """Store an image pasted into a reply; answer with the URL the reply names it by.
+
+        The body is the raw image. It is read here with its own limit because the
+        listener's JSON limit is far smaller than a screenshot.
+        """
+        files_dir = self._files_dir()
+        if files_dir is None:
+            return _error("this deployment cannot keep files", 503)
+        try:
+            mime = accepted_type(request.headers.get("Content-Type", ""))
+            if (request.content_length or 0) > MAX_UPLOAD_BYTES:
+                raise UploadError("the image is larger than 10 MB", 413)
+            data = bytearray()
+            async for chunk in request.content.iter_chunked(64 * 1024):
+                data.extend(chunk)
+                if len(data) > MAX_UPLOAD_BYTES:
+                    raise UploadError("the image is larger than 10 MB", 413)
+            url = await save_upload(files_dir, bytes(data), mime)
+        except UploadError as exc:
+            return _error(str(exc), exc.status)
+        logger.info("console: %s uploaded %s", request[IDENTITY], url)
+        return web.json_response({"url": url}, status=201)
 
     async def start_item(self, request: web.Request) -> web.Response:
         """Hand a captured item to an agent: open a console conversation and start a turn.

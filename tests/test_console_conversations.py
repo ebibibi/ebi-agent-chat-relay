@@ -54,7 +54,9 @@ async def env(tmp_path):
     await work.init_db()
     conversations = ConversationRepository(db)
     await conversations.init_db()
-    frontend = ConsoleFrontend(conversations, FrontendThreadRepository(db))
+    frontend = ConsoleFrontend(
+        conversations, FrontendThreadRepository(db), files_dir=tmp_path / "console_files"
+    )
 
     runs: list = []
     sessions = FakeSessions()
@@ -344,3 +346,76 @@ async def test_files_need_authentication_and_a_real_path(env) -> None:
     path = "/console/api/files/1/" + "0" * 32 + "/a.txt"
     assert (await env.client.get(path)).status == 401
     assert (await env.client.get(path, headers=AUTH)).status == 404
+
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+
+
+async def _upload(env, data: bytes = PNG, content_type: str = "image/png"):
+    return await env.client.post(
+        "/console/api/uploads", data=data, headers={**WRITE, "Content-Type": content_type}
+    )
+
+
+async def test_a_pasted_image_is_stored_and_served_back(env) -> None:
+    response = await _upload(env)
+    assert response.status == 201
+    url = (await response.json())["url"]
+    assert url.startswith("/console/api/files/0/") and url.endswith(".png")
+    served = await env.client.get(url, headers=AUTH)
+    assert served.status == 200
+    assert await served.read() == PNG
+
+
+async def test_uploads_accept_only_real_images_of_bounded_size(env) -> None:
+    assert (await _upload(env, b"hello", "text/plain")).status == 415
+    # Says PNG, is not: the bytes decide, not the header.
+    assert (await _upload(env, b"GIF89a" + b"\x00" * 10, "image/png")).status == 400
+    assert (await _upload(env, b"", "image/png")).status == 400
+    too_big = b"\x89PNG\r\n\x1a\n" + b"\x00" * (10 * 1024 * 1024)
+    assert (await _upload(env, too_big)).status == 413
+    assert (
+        await env.client.post(
+            "/console/api/uploads", data=PNG, headers={**AUTH, "Content-Type": "image/png"}
+        )
+    ).status == 403  # CSRF header still required
+
+
+async def test_a_reply_hands_pasted_images_to_the_agent_by_path(env) -> None:
+    item_id = await _start(env)
+    url = (await (await _upload(env)).json())["url"]
+
+    replied = await env.client.post(
+        f"/console/api/items/{item_id}/reply",
+        json={"text": "what is this?", "images": [url]},
+        headers=WRITE,
+    )
+    assert replied.status == 202
+    await _settle(env.host)
+
+    prompt = env.runs[-1].prompt
+    assert prompt.startswith("what is this?")
+    # The agent gets a local path it can open; the transcript keeps a link that previews.
+    assert f"]({url})" in prompt
+    local = prompt.split(" — ")[-1].strip().splitlines()[0]
+    assert local.endswith(".png") and local.startswith("/")
+
+
+async def test_a_reply_may_be_only_an_image_but_not_a_forged_link(env) -> None:
+    item_id = await _start(env)
+    url = (await (await _upload(env)).json())["url"]
+    only_image = await env.client.post(
+        f"/console/api/items/{item_id}/reply", json={"images": [url]}, headers=WRITE
+    )
+    assert only_image.status == 202
+    forged = await env.client.post(
+        f"/console/api/items/{item_id}/reply",
+        json={"text": "x", "images": ["/console/api/files/0/" + "0" * 32 + "/nope.png"]},
+        headers=WRITE,
+    )
+    assert forged.status == 400
+
+
+async def test_a_screenshot_larger_than_the_json_limit_is_accepted(env) -> None:
+    screenshot = PNG + b"\x00" * (2 * 1024 * 1024)
+    assert (await _upload(env, screenshot)).status == 201

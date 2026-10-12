@@ -19,7 +19,9 @@ const I18N = {
     slots: (r, m, w) => `Slots ${r}/${m ?? "∞"}` + (w ? ` · ${w} queued` : ""),
     priority: "Priority", due: "Due", snooze: "Snooze", project: "Project", parent: "Under",
     none: "—", done_btn: "Done (e)", reopen: "Reopen", open_chat: "Open in chat", start: "Hand to AI",
-    reply_ph: "Reply… (Ctrl+Enter to send)", send: "Send", hour: "1h", tomorrow: "Tomorrow", week: "Next week",
+    reply_ph: "Reply… (Ctrl+Enter to send, paste or drop images)",
+    paste_type: "Only PNG, JPEG, GIF and WebP images can be attached", paste_failed: "Could not attach the image",
+    paste_wait: "An image is still uploading", send: "Send", hour: "1h", tomorrow: "Tomorrow", week: "Next week",
     clear: "Clear", loading: "Loading…", sent: "Sent — the agent will pick it up", started: "Started", captured: "Added to To do",
     saved: "Saved", offline: "offline", updated: "updated", no_project: "No project", queued: "queued",
     st: { running: "running", waiting: "waiting for you", review: "to review", action: "your task",
@@ -38,7 +40,9 @@ const I18N = {
     slots: (r, m, w) => `枠 ${r}/${m ?? "∞"}` + (w ? `・待ち ${w}` : ""),
     priority: "優先度", due: "期限", snooze: "スヌーズ", project: "案件", parent: "親",
     none: "なし", done_btn: "完了（e）", reopen: "戻す", open_chat: "チャットで開く", start: "AIに頼む",
-    reply_ph: "返信…（Ctrl+Enter で送信）", send: "送信", hour: "1時間", tomorrow: "明日", week: "来週",
+    reply_ph: "返信…（Ctrl+Enter で送信。画像は貼り付け・ドロップで添付）",
+    paste_type: "添付できるのは PNG・JPEG・GIF・WebP の画像だけです", paste_failed: "画像を添付できませんでした",
+    paste_wait: "画像をアップロード中です", send: "送信", hour: "1時間", tomorrow: "明日", week: "来週",
     clear: "解除", loading: "読み込み中…", sent: "送りました。エージェントが拾います", started: "スレッドを開始しました", captured: "「やること」に追加しました",
     saved: "保存しました", offline: "接続できません", updated: "更新", no_project: "案件なし", queued: "待ち",
     st: { running: "実行中", waiting: "あなたの返事待ち", review: "確認待ち", action: "あなたの作業",
@@ -75,7 +79,7 @@ const state = {
   showActivity: localStorage.getItem("showActivity") === "1",
   // The triage fields (priority, due, project, …) stay folded away unless asked for.
   drawerOpen: localStorage.getItem("drawerOpen") === "1",
-  unseen: 0, fresh: new Set(JSON.parse(localStorage.getItem("unread") || "[]")),
+  unseen: 0,
 };
 
 // ---------------------------------------------------------------- dom helpers
@@ -129,6 +133,9 @@ async function refresh() {
     $("sync").className = "sync";
     $("sync").textContent = `${T.updated} ${state.lastSync.toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}`;
     if (state.open && !state.byId.has(state.open)) state.open = null;
+    // Whatever is on screen is being read.
+    if (state.open && !document.hidden) markSeen(state.open);
+    pruneSeen();
     render();
     if (window.ConsoleNotify) window.ConsoleNotify.onBoard(data.items);
     const open = state.open && state.byId.get(state.open);
@@ -276,7 +283,7 @@ function rowNode({ item, depth, children }) {
     : (depth ? h("span", { class: "tw", text: "" }) : null);
   return h("li", {
     class: "row" + (state.selected === item.id ? " sel" : "") + (item.bucket === "done" ? " done" : "") +
-      (state.fresh.has(item.id) ? " fresh" : ""),
+      (isUnread(item) ? " fresh" : ""),
     role: "option", "aria-selected": state.selected === item.id ? "true" : "false",
     onclick: () => { state.selected = item.id; openItem(item.id); },
   },
@@ -333,9 +340,12 @@ function buildDetail(pane, item, key) {
     const box = h("textarea", { id: "reply", placeholder: T.reply_ph, rows: 3,
       oninput: (e) => { state.drafts[item.id] = e.target.value; grow(e.target); },
       onkeydown: (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendReply(item.id, box); } } });
-    nodes.push(h("form", { class: "reply", onsubmit: (e) => { e.preventDefault(); sendReply(item.id, box); } },
-      box, h("button", { class: "btn primary", type: "submit", text: T.send })));
+    const tray = h("div", { class: "paste-tray", hidden: true });
+    const form = h("form", { class: "reply", onsubmit: (e) => { e.preventDefault(); sendReply(item.id, box); } },
+      h("div", { class: "reply-main" }, tray, box), h("button", { class: "btn primary", type: "submit", text: T.send }));
+    nodes.push(form);
     box.value = state.drafts[item.id] || "";
+    window.ConsolePaste.attach(box, item.id, tray);
     requestAnimationFrame(() => grow(box));
   }
   pane.replaceChildren(...nodes);
@@ -514,8 +524,31 @@ function setView(view) {
   state.selected = rows.length ? rows[0].item.id : null;
   render();
 }
-// Unread marks survive a reload, the way a mailbox remembers what was opened.
-function saveUnread() { localStorage.setItem("unread", JSON.stringify([...state.fresh])); }
+// Unread, the way a mailbox means it: something happened in the thread after the
+// human last looked at it. "Last looked" is kept per item in this browser; items never
+// opened count from a baseline set on first use (a day back, so recent work shows).
+const seenAt = JSON.parse(localStorage.getItem("seenAt") || "{}");
+const seenBaseline = localStorage.getItem("seenBaseline") || (() => {
+  const b = new Date(Date.now() - 864e5).toISOString();
+  localStorage.setItem("seenBaseline", b);
+  return b;
+})();
+function isUnread(item) {
+  // A running turn keeps moving its activity time; it becomes news when it stops.
+  if (item.running || item.queued || !item.last_activity_at || item.id === state.open) return false;
+  if (item.bucket === "done" || item.bucket === "snoozed") return false;
+  return new Date(item.last_activity_at) > new Date(seenAt[item.id] || seenBaseline);
+}
+function markSeen(id) {
+  if (!id) return;
+  seenAt[id] = new Date().toISOString();
+  localStorage.setItem("seenAt", JSON.stringify(seenAt));
+}
+function pruneSeen() {
+  let changed = false;
+  for (const id of Object.keys(seenAt)) if (!state.byId.has(id)) { delete seenAt[id]; changed = true; }
+  if (changed) localStorage.setItem("seenAt", JSON.stringify(seenAt));
+}
 function toggleCollapse(id) {
   state.collapsed.has(id) ? state.collapsed.delete(id) : state.collapsed.add(id);
   localStorage.setItem("collapsed", JSON.stringify([...state.collapsed]));
@@ -525,7 +558,8 @@ async function openItem(id) {
   if (state.open !== id) state.unseen = 0;
   state.open = id;
   state.selected = id;
-  if (state.fresh.delete(id)) saveUnread();
+  if (state.open && state.open !== id) markSeen(state.open);
+  markSeen(id);
   state.messagesFor = null;
   render();
   const item = state.byId.get(id);
@@ -542,7 +576,7 @@ async function loadMessages(id) {
     if (box) fillMessages(box);
   } catch (err) { toast(err.message); }
 }
-function closeItem() { state.open = null; render(); }
+function closeItem() { markSeen(state.open); state.open = null; render(); }
 async function patch(id, changes) {
   try { await api(`/items/${encodeURIComponent(id)}`, { method: "PATCH", body: changes }); toast(T.saved); await refresh(); }
   catch (err) { toast(err.message); }
@@ -553,12 +587,15 @@ async function act(id, action) {
 }
 async function sendReply(id, box) {
   const text = box.value.trim();
-  if (!text) return;
+  const images = window.ConsolePaste.ready(id);
+  if (images === null) { toast(T.paste_wait); return; }
+  if (!text && !images.length) return;
   box.disabled = true;
   try {
-    await api(`/items/${encodeURIComponent(id)}/reply`, { method: "POST", body: { text } });
+    await api(`/items/${encodeURIComponent(id)}/reply`, { method: "POST", body: { text, images } });
     box.value = "";
     delete state.drafts[id];
+    window.ConsolePaste.clear(id);
     toast(T.sent);
     await refresh();
     setTimeout(() => loadMessages(id), 1500);
