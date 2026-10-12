@@ -31,8 +31,10 @@ from ..thread_status import request_thread_outcome, schedule_thread_outcome
 from .auth import ConsoleAuthConfig, ConsoleAuthenticator, ConsoleAuthError
 from .auth_routes import AUTH_PREFIX, AuthRoutes
 from .board import SessionInfo, ThreadSnapshot, build_board
+from .codex_compact import CompactError, compact_codex_session
 from .commands import (
     CONTROL_COMMANDS,
+    HANDLED_BUILTINS,
     CommandError,
     SkillLoader,
     catalog,
@@ -143,10 +145,15 @@ class ConsoleServer:
         oidc: OidcClient | None = None,
         store: PasskeyStore | None = None,
         skills: SkillLoader | None = None,
+        codex_compactor: Callable[..., Awaitable[None]] | None = None,
     ) -> None:
         self.api = api_server
         #: Lists skills per backend for slash-command autocomplete; None reads the disk.
         self._skills = skills
+        #: Runs ``/compact`` on a Codex session; injected so tests spawn nothing.
+        self._codex_compact = codex_compactor or compact_codex_session
+        #: Threads being compacted; a reply waits instead of racing the rewrite.
+        self._compacting: set[int] = set()
         self.work_repo = work_repo
         #: The console's own conversations. Work started here lives in them,
         #: not in a chat thread; chat threads are still shown alongside.
@@ -481,12 +488,19 @@ class ConsoleServer:
 
     async def _deliver(self, item_id: str, text: str, who: str) -> web.Response:
         """Queue *text* as the human's next message in the item's conversation."""
+        busy = _error("the conversation is being compacted; send again in a moment", 409)
         key = await self._conversation_key(item_id)
         if key is not None:
-            return await self._reply_in_console(item_id, key, text, who)
+            return (
+                busy
+                if key in self._compacting
+                else await self._reply_in_console(item_id, key, text, who)
+            )
         thread, err = await self._thread_for(item_id)
         if err:
             return err
+        if int(thread.id) in self._compacting:
+            return busy
         cog = self._chat_cog()
         if cog is None:
             return _error("the chat cog is not loaded", 503)
@@ -566,10 +580,35 @@ class ConsoleServer:
                 }
             )
         backend = await settings.current_backend(key)
+        if name in HANDLED_BUILTINS.get(backend, frozenset()):
+            return await self._compact_codex(key, item_id, who)
         if name not in {s["name"] for s in self._skill_loader()(backend)}:
             return _error(f"Unknown command `/{name}` for `{backend}`.", 400)
         logger.info("console: %s ran skill /%s on %s", who, name, item_id)
         return await self._deliver(item_id, skill_prompt(backend, name, arg), who)
+
+    async def _compact_codex(self, key: int, item_id: str, who: str) -> web.Response:
+        """``/compact`` on a Codex conversation, through ``codex app-server``."""
+        if key in self.api._running_thread_ids() or key in self._compacting:
+            return _error("wait until the current turn finishes, then compact", 409)
+        repo = self.api.session_repo
+        record = await repo.get(key) if repo is not None else None
+        if record is None or record.backend != "codex":
+            return _error("this conversation has no Codex session to compact yet", 409)
+        factory = vars(getattr(self.api, "components", None) or object()).get("backend_factory")
+        command = getattr(factory, "codex_command", None) or "codex"
+        self._compacting.add(key)
+        try:
+            await self._codex_compact(record.session_id, codex_command=command)
+        except CompactError as exc:
+            logger.warning("console: /compact failed on %s: %s", item_id, exc)
+            return _error(str(exc), 502)
+        finally:
+            self._compacting.discard(key)
+        logger.info("console: %s compacted Codex session of %s", who, item_id)
+        return web.json_response(
+            {"message": "Conversation compacted. The next reply continues from the summary."}
+        )
 
     def _files_dir(self) -> Path | None:
         return self.sessions.frontend.files_dir if self.sessions is not None else None

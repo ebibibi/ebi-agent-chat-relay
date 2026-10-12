@@ -484,7 +484,7 @@ async def test_slash_command_catalog_follows_the_backend(env) -> None:
     assert settings.backend[key] == "codex"
     # What is offered next is the new backend's.
     assert body["catalog"]["backend"] == "codex"
-    assert body["catalog"]["builtins"] == []
+    assert [b["name"] for b in body["catalog"]["builtins"]] == ["compact"]
     assert "xhigh" in body["catalog"]["efforts"]
     assert "codex-only" in [s["name"] for s in body["catalog"]["skills"]]
 
@@ -534,3 +534,77 @@ async def test_a_skill_is_sent_to_the_agent_in_the_backends_own_form(env) -> Non
     )
     await _settle(env.host)
     assert env.runs[-1].prompt == 'Use the "codex-only" skill.'
+
+
+async def test_compact_on_codex_runs_through_app_server_not_as_a_reply(env) -> None:
+    settings = FakeSettings()
+    env.console.api.components.backend_settings = settings
+    env.console._skills = lambda backend: []
+    item_id = await _start(env)
+    key = int(item_id[1:])
+    settings.backend[key] = "codex"
+    sessions = FakeSessions()
+    env.console.api.session_repo = sessions
+    compacted: list[str] = []
+
+    async def compactor(session_id, **_):
+        compacted.append(session_id)
+
+    env.console._codex_compact = compactor
+
+    async def compact():
+        return await env.client.post(
+            f"/console/api/items/{item_id}/command", json={"name": "compact"}, headers=WRITE
+        )
+
+    got = await (
+        await env.client.get(f"/console/api/items/{item_id}/commands", headers=AUTH)
+    ).json()
+    assert got["builtins"] == [
+        {"name": "compact", "description": got["builtins"][0]["description"], "handled": True}
+    ]
+    # No Codex session yet (or one minted by another CLI): nothing to compact.
+    assert (await compact()).status == 409
+    sessions.records[key] = SimpleNamespace(session_id="0a1b-2c", backend="codex")
+    env.console.api._running_thread_ids.return_value = {key}
+    assert (await compact()).status == 409  # never under a running turn
+    env.console.api._running_thread_ids.return_value = set()
+    runs_before = len(env.runs)
+
+    done = await compact()
+    assert done.status == 200
+    assert compacted == ["0a1b-2c"]
+    assert len(env.runs) == runs_before  # the agent was not sent "/compact" as words
+
+
+async def test_a_reply_waits_while_the_conversation_is_compacted(env) -> None:
+    item_id = await _start(env)
+    env.console._compacting.add(int(item_id[1:]))
+    sent = await env.client.post(
+        f"/console/api/items/{item_id}/reply", json={"text": "hi"}, headers=WRITE
+    )
+    assert sent.status == 409
+
+
+async def test_compact_failure_is_reported(env) -> None:
+    from claude_discord.console.codex_compact import CompactError
+
+    settings = FakeSettings()
+    env.console.api.components.backend_settings = settings
+    item_id = await _start(env)
+    key = int(item_id[1:])
+    settings.backend[key] = "codex"
+    sessions = FakeSessions()
+    sessions.records[key] = SimpleNamespace(session_id="0a1b", backend="codex")
+    env.console.api.session_repo = sessions
+
+    async def broken(session_id, **_):
+        raise CompactError("Codex refused: no rollout found")
+
+    env.console._codex_compact = broken
+    res = await env.client.post(
+        f"/console/api/items/{item_id}/command", json={"name": "compact"}, headers=WRITE
+    )
+    assert res.status == 502
+    assert "no rollout found" in (await res.json())["error"]
+    assert key not in env.console._compacting

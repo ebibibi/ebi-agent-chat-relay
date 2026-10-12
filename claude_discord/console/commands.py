@@ -32,15 +32,28 @@ CONTROL_COMMANDS: tuple[tuple[str, str], ...] = (
     ("model", "Choose the model for the current backend"),
     ("effort", "Set the reasoning effort for the current backend"),
 )
-#: CLI built-ins offered for completion and sent to the CLI unchanged. Only
-#: ones that make sense in a resumed, non-interactive turn; Codex ``exec`` has none.
+#: CLI built-ins offered for completion. Claude Code runs them itself, so they go
+#: out as plain text. ``codex exec`` reads them as words for the model, so the
+#: Codex ones are *handled* here (``/compact`` through ``codex app-server``).
 BUILTIN_COMMANDS: dict[str, tuple[tuple[str, str], ...]] = {
     "claude": (
         ("compact", "Summarize the conversation so far to free up context"),
         ("context", "Show how much of the context window is in use"),
         ("cost", "Show the token usage and cost of this session"),
     ),
+    "codex": (("compact", "Summarize the conversation so far to free up context"),),
 }
+HANDLED_BUILTINS: dict[str, frozenset[str]] = {"codex": frozenset({"compact"})}
+
+
+def builtins_for(backend: str) -> list[dict[str, Any]]:
+    handled = HANDLED_BUILTINS.get(backend, frozenset())
+    return [
+        {"name": n, "description": d, "handled": n in handled}
+        for n, d in BUILTIN_COMMANDS.get(backend, ())
+    ]
+
+
 MAX_SKILLS = 400
 
 #: Loads ``[{name, description}]`` for a backend. Injected so tests need no disk.
@@ -92,7 +105,7 @@ async def catalog(
         "model": await settings.current_model(backend, thread_key),
         "effort": await settings.current_effort(backend, thread_key),
         "commands": [{"name": n, "description": d} for n, d in CONTROL_COMMANDS],
-        "builtins": [{"name": n, "description": d} for n, d in BUILTIN_COMMANDS.get(backend, ())],
+        "builtins": builtins_for(backend),
         "backends": list(ALL_BACKENDS),
         "models": await models(backend),
         "efforts": effort_levels(backend),

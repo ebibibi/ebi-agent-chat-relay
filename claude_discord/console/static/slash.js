@@ -132,8 +132,10 @@ window.ConsoleSlash = (() => {
     const c = m && await load(id);
     if (!m || !c) return false;
     const [, name, arg = ""] = m;
-    const known = c.commands.some((x) => x.name === name) || c.skills.some((s) => s.name === name);
-    if (!known) return false; // CLI built-ins (/compact) and pasted paths go out as text
+    const known = c.commands.some((x) => x.name === name) || c.skills.some((s) => s.name === name) ||
+      (c.builtins || []).some((b) => b.name === name && b.handled);
+    if (!known) return false; // Claude's built-ins (/compact) and pasted paths go out as text
+    if (name === "compact") toast(T.compacting);
     const res = await api(`/items/${encodeURIComponent(id)}/command`, { method: "POST", body: { name, arg } });
     if (res && res.catalog) {
       catalogs.set(id, res.catalog);
