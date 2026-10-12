@@ -470,6 +470,7 @@ async def test_slash_command_catalog_follows_the_backend(env) -> None:
     ).json()
     assert got["backend"] == "claude"
     assert [c["name"] for c in got["commands"]] == ["backend", "model", "effort"]
+    assert [c["name"] for c in got["builtins"]] == ["compact", "context", "cost"]
     assert got["efforts"] == ["low", "medium", "high", "max"]
     assert [s["name"] for s in got["skills"]] == ["kb-save"]
 
@@ -483,6 +484,7 @@ async def test_slash_command_catalog_follows_the_backend(env) -> None:
     assert settings.backend[key] == "codex"
     # What is offered next is the new backend's.
     assert body["catalog"]["backend"] == "codex"
+    assert body["catalog"]["builtins"] == []
     assert "xhigh" in body["catalog"]["efforts"]
     assert "codex-only" in [s["name"] for s in body["catalog"]["skills"]]
 

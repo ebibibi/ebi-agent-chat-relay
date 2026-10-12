@@ -5,7 +5,8 @@ application commands; the console offers the same three, scoped to the one
 conversation the human is looking at, plus the skills of whichever backend
 that conversation runs on. The catalog is what the client autocompletes from:
 backends, the models and effort levels valid for the *current* backend, and
-its skills — so switching backend changes what is offered next.
+its CLI built-ins (``/compact`` …, passed through as plain text) and its
+skills — so switching backend changes what is offered next.
 
 Settings go through ``BackendSettings`` with the thread key, exactly where the
 Discord commands put a thread override, so a thread switched here is switched
@@ -31,6 +32,15 @@ CONTROL_COMMANDS: tuple[tuple[str, str], ...] = (
     ("model", "Choose the model for the current backend"),
     ("effort", "Set the reasoning effort for the current backend"),
 )
+#: CLI built-ins offered for completion and sent to the CLI unchanged. Only
+#: ones that make sense in a resumed, non-interactive turn; Codex ``exec`` has none.
+BUILTIN_COMMANDS: dict[str, tuple[tuple[str, str], ...]] = {
+    "claude": (
+        ("compact", "Summarize the conversation so far to free up context"),
+        ("context", "Show how much of the context window is in use"),
+        ("cost", "Show the token usage and cost of this session"),
+    ),
+}
 MAX_SKILLS = 400
 
 #: Loads ``[{name, description}]`` for a backend. Injected so tests need no disk.
@@ -82,6 +92,7 @@ async def catalog(
         "model": await settings.current_model(backend, thread_key),
         "effort": await settings.current_effort(backend, thread_key),
         "commands": [{"name": n, "description": d} for n, d in CONTROL_COMMANDS],
+        "builtins": [{"name": n, "description": d} for n, d in BUILTIN_COMMANDS.get(backend, ())],
         "backends": list(ALL_BACKENDS),
         "models": await models(backend),
         "efforts": effort_levels(backend),

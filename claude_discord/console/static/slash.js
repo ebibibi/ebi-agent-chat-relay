@@ -1,5 +1,5 @@
 // Slash commands in the reply box: "/" opens a list of commands and the current backend's
-// skills; after "/backend ", "/model " or "/effort " it lists the values valid right now.
+// built-ins and skills; after "/backend ", "/model " or "/effort " it lists the values valid right now.
 // ↑↓ move, Tab or Enter completes, Esc closes. Sending a "/command" runs it instead of
 // replying. Loaded before app.js, which calls attach() for each reply box.
 "use strict";
@@ -42,7 +42,7 @@ window.ConsoleSlash = (() => {
     const q = (spaced ? rest || "" : name).toLowerCase();
     if (!spaced) {
       const all = [
-        ...c.commands.map((x) => ({ insert: `/${x.name} `, label: `/${x.name}`, hint: T.slash_desc[x.name] || x.description })),
+        ...[...c.commands, ...(c.builtins || [])].map((x) => ({ insert: `/${x.name} `, label: `/${x.name}`, hint: T.slash_desc[x.name] || x.description })),
         ...c.skills.map((s) => ({ insert: `/${s.name} `, label: `/${s.name}`, hint: s.description || "" })),
       ];
       return rank(all, q, (o) => o.label.slice(1));
@@ -133,7 +133,7 @@ window.ConsoleSlash = (() => {
     if (!m || !c) return false;
     const [, name, arg = ""] = m;
     const known = c.commands.some((x) => x.name === name) || c.skills.some((s) => s.name === name);
-    if (!known) return false; // e.g. a pasted path: send it as text
+    if (!known) return false; // CLI built-ins (/compact) and pasted paths go out as text
     const res = await api(`/items/${encodeURIComponent(id)}/command`, { method: "POST", body: { name, arg } });
     if (res && res.catalog) {
       catalogs.set(id, res.catalog);
