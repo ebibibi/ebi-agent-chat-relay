@@ -73,6 +73,16 @@ Each message carries a `kind`:
 | `agent` | Answers, questions, errors and files from the agent | Always |
 | `activity` | The relay's own bookkeeping: tool calls, thinking, session start/finish embeds, `-#` status notes, the usage footer, notification pings, rename notices and automatic continuation prompts. A console conversation records one `-#` line per finished tool call | Only with the "⚙ Activity" button in the detail header |
 
+### Attaching files
+
+Paste a file, drop it on the reply box, or pick it with 📎 next to Send — up to 10 per reply.
+Each uploads at once (`POST /console/api/uploads`, the raw body, `X-Filename` the
+percent-encoded name) and waits above the box: images as thumbnails, other files as a named chip.
+Images (PNG, JPEG, GIF, WebP) are checked by their bytes and capped at 10 MB; any other file is
+kept as it came under a bare, sanitised version of its name, up to 50 MB. The reply names the
+uploads (`files`), and the agent receives each one by local path. Uploads are served back only
+as downloads (`application/octet-stream`, `Content-Disposition: attachment`).
+
 The open thread reloads with the board while a turn is running, and the list keeps your scroll
 position unless you were already at the bottom.
 

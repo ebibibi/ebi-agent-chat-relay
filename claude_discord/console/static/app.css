@@ -260,6 +260,14 @@ a.btn.primary { color: #0d1020; }
 .paste-item { position: relative; width: 72px; height: 72px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--raise); }
 .paste-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .paste-item.busy img { opacity: .45; }
+.paste-file { position: relative; display: flex; flex-direction: column; justify-content: center; gap: 2px;
+  max-width: 220px; height: 72px; padding: 6px 26px 6px 10px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--raise); font-size: 12px; }
+.paste-file.busy { opacity: .55; }
+.paste-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reply-side { display: flex; flex-direction: column; gap: 6px; align-self: flex-end; }
+.btn.attach { font-size: 16px; padding: 4px 10px; }
+.reply.dropping { outline: 2px dashed var(--accent); outline-offset: -4px; }
 .paste-x { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; padding: 0; line-height: 18px; font-size: 11px;
   border: 0; border-radius: 50%; background: rgb(0 0 0 / .7); color: #fff; }
 .reply-main { position: relative; }

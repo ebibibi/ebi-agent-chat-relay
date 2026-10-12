@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+from urllib.parse import quote
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
@@ -352,10 +353,11 @@ async def test_files_need_authentication_and_a_real_path(env) -> None:
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
 
 
-async def _upload(env, data: bytes = PNG, content_type: str = "image/png"):
-    return await env.client.post(
-        "/console/api/uploads", data=data, headers={**WRITE, "Content-Type": content_type}
-    )
+async def _upload(env, data: bytes = PNG, content_type: str = "image/png", name: str | None = None):
+    headers = {**WRITE, "Content-Type": content_type}
+    if name is not None:
+        headers["X-Filename"] = quote(name)
+    return await env.client.post("/console/api/uploads", data=data, headers=headers)
 
 
 async def test_a_pasted_image_is_stored_and_served_back(env) -> None:
@@ -368,8 +370,7 @@ async def test_a_pasted_image_is_stored_and_served_back(env) -> None:
     assert await served.read() == PNG
 
 
-async def test_uploads_accept_only_real_images_of_bounded_size(env) -> None:
-    assert (await _upload(env, b"hello", "text/plain")).status == 415
+async def test_images_are_checked_and_bounded(env) -> None:
     # Says PNG, is not: the bytes decide, not the header.
     assert (await _upload(env, b"GIF89a" + b"\x00" * 10, "image/png")).status == 400
     assert (await _upload(env, b"", "image/png")).status == 400
@@ -420,6 +421,76 @@ async def test_a_reply_may_be_only_an_image_but_not_a_forged_link(env) -> None:
 async def test_a_screenshot_larger_than_the_json_limit_is_accepted(env) -> None:
     screenshot = PNG + b"\x00" * (2 * 1024 * 1024)
     assert (await _upload(env, screenshot)).status == 201
+
+
+async def test_any_file_is_kept_under_its_own_safe_name_and_served_as_a_download(env) -> None:
+    response = await _upload(env, b"a,b\n1,2\n", "text/csv", "売上 2026(10月).csv")
+    assert response.status == 201
+    url = (await response.json())["url"]
+    assert url.startswith("/console/api/files/0/") and " " not in url
+    served = await env.client.get(url, headers=AUTH)
+    assert served.status == 200
+    assert await served.read() == b"a,b\n1,2\n"
+    assert served.headers["Content-Type"] == "application/octet-stream"
+    assert served.headers["Content-Disposition"].startswith("attachment;")
+
+
+@pytest.mark.parametrize(
+    "raw, kept",
+    [
+        ("../../etc/passwd", "passwd"),
+        ("C:\\Users\\me\\report.pdf", "report.pdf"),
+        (".bashrc", "bashrc"),
+        ("a<b>:c?.txt", "a_b__c_.txt"),
+        ("x" * 300 + ".log", None),
+        ("", None),
+        ("///", None),
+    ],
+)
+def test_a_browser_file_name_becomes_a_bare_safe_name(raw, kept) -> None:
+    from claude_discord.console.uploads import MAX_NAME_CHARS, safe_name
+
+    name = safe_name(quote(raw))
+    if raw.startswith("x"):
+        assert name is not None and len(name) <= MAX_NAME_CHARS and name.endswith(".log")
+    else:
+        assert name == kept
+
+
+async def test_other_files_have_a_larger_bound(env) -> None:
+    from claude_discord.console.uploads import MAX_UPLOAD_BYTES
+
+    big = b"\x00" * (12 * 1024 * 1024)
+    assert (await _upload(env, big, "application/zip", "logs.zip")).status == 201
+    too_big = b"\x00" * (MAX_UPLOAD_BYTES + 1)
+    assert (await _upload(env, too_big, "application/zip", "huge.zip")).status == 413
+    assert (await _upload(env, b"", "text/plain", "empty.txt")).status == 400
+
+
+async def test_a_reply_hands_any_attachment_to_the_agent_by_path(env) -> None:
+    item_id = await _start(env)
+    pdf = (await (await _upload(env, b"%PDF-1.7", "application/pdf", "spec.pdf")).json())["url"]
+    png = (await (await _upload(env)).json())["url"]
+    replied = await env.client.post(
+        f"/console/api/items/{item_id}/reply",
+        json={"text": "read these", "files": [pdf], "images": [png]},
+        headers=WRITE,
+    )
+    assert replied.status == 202
+    await _settle(env.host)
+    prompt = env.runs[-1].prompt
+    assert "📎 Attached files" in prompt
+    assert "spec.pdf" in prompt and ".png" in prompt
+    too_many = await env.client.post(
+        f"/console/api/items/{item_id}/reply",
+        json={"text": "x", "files": [pdf] * 11},
+        headers=WRITE,
+    )
+    assert too_many.status == 400
+    not_a_list = await env.client.post(
+        f"/console/api/items/{item_id}/reply", json={"text": "x", "files": 3}, headers=WRITE
+    )
+    assert not_a_list.status == 400
 
 
 class FakeSettings:

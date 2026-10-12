@@ -23,9 +23,10 @@ const I18N = {
     none: "—", reopen: "Reopen", finish: "Done", finish_confirm: "Click again to finish",
     finish_hint: "Mark this thread done (click twice; shortcut e). Undo right after, or Reopen any time.",
     reopen_hint: "Bring this thread back from Done", finished: "Done", undo: "Undo", reopened: "Reopened", open_chat: "Open in chat", start: "Hand to AI",
-    reply_ph: "Reply… (Ctrl+Enter to send, paste or drop images)",
-    paste_type: "Only PNG, JPEG, GIF and WebP images can be attached", paste_failed: "Could not attach the image",
-    paste_wait: "An image is still uploading",
+    reply_ph: "Reply… (Ctrl+Enter to send; paste, drop or 📎 to attach files)",
+    attach_failed: "Could not attach the file", attach_hint: "Attach files",
+    attach_big: (n, max) => `${n} is larger than ${max}`, attach_many: (n) => `At most ${n} files per reply`,
+    paste_wait: "A file is still uploading",
     slash_hint: "Type / for commands", compacting: "Compacting the conversation… (up to a few minutes)", slash_desc: { backend: "Switch the AI backend for this conversation",
       model: "Choose the model for the current backend", effort: "Set the reasoning effort",
       compact: "Summarize the conversation to free up context", context: "Show context window usage", cost: "Show token usage and cost" }, send: "Send", hour: "1h", tomorrow: "Tomorrow", week: "Next week",
@@ -53,9 +54,10 @@ const I18N = {
     none: "なし", reopen: "戻す", finish: "完了", finish_confirm: "もう一度押すと完了",
     finish_hint: "このスレッドを完了にする（2回押す。ショートカット e）。直後なら「元に戻す」、あとからでも「戻す」で復活できます",
     reopen_hint: "完了から戻す", finished: "完了にしました", undo: "元に戻す", reopened: "戻しました", open_chat: "チャットで開く", start: "AIに頼む",
-    reply_ph: "返信…（Ctrl+Enter で送信。画像は貼り付け・ドロップで添付）",
-    paste_type: "添付できるのは PNG・JPEG・GIF・WebP の画像だけです", paste_failed: "画像を添付できませんでした",
-    paste_wait: "画像をアップロード中です",
+    reply_ph: "返信…（Ctrl+Enter で送信。ファイルは貼り付け・ドロップ・📎で添付）",
+    attach_failed: "ファイルを添付できませんでした", attach_hint: "ファイルを添付",
+    attach_big: (n, max) => `${n} は ${max} を超えています`, attach_many: (n) => `添付は1回 ${n} 件までです`,
+    paste_wait: "ファイルをアップロード中です",
     slash_hint: "/ でコマンド", compacting: "会話を圧縮しています…（数分かかることがあります）", slash_desc: { backend: "この会話のAIバックエンドを切り替える",
       model: "今のバックエンドのモデルを選ぶ", effort: "推論の強さ（effort）を設定する",
       compact: "ここまでの会話を要約してコンテキストを空ける", context: "コンテキストの使用量を見る", cost: "トークン使用量と料金を見る" }, send: "送信", hour: "1時間", tomorrow: "明日", week: "来週",
@@ -408,7 +410,9 @@ function buildDetail(pane, item, key) {
     const tray = h("div", { class: "paste-tray", hidden: true });
     const meta = h("div", { class: "reply-meta", hidden: true });
     const form = h("form", { class: "reply", onsubmit: (e) => { e.preventDefault(); sendReply(item.id, box); } },
-      h("div", { class: "reply-main" }, meta, tray, box), h("button", { class: "btn primary", type: "submit", text: T.send }));
+      h("div", { class: "reply-main" }, meta, tray, box),
+      h("div", { class: "reply-side" }, window.ConsolePaste.button(item.id),
+        h("button", { class: "btn primary", type: "submit", text: T.send })));
     nodes.push(form);
     box.value = state.drafts[item.id] || "";
     window.ConsolePaste.attach(box, item.id, tray);
@@ -680,20 +684,20 @@ async function patch(id, changes) {
 }
 async function sendReply(id, box) {
   const text = box.value.trim();
-  const images = window.ConsolePaste.ready(id);
-  if (images === null) { toast(T.paste_wait); return; }
-  if (!text && !images.length) return;
+  const files = window.ConsolePaste.ready(id);
+  if (files === null) { toast(T.paste_wait); return; }
+  if (!text && !files.length) return;
   box.disabled = true;
   try {
     // "/backend codex", "/model opus", "/kb-save …": a command, not a reply.
-    if (!images.length && await window.ConsoleSlash.run(id, text)) {
+    if (!files.length && await window.ConsoleSlash.run(id, text)) {
       box.value = "";
       delete state.drafts[id];
       grow(box);
       if (!/^\/(backend|model|effort)\b/.test(text)) { await refresh(); setTimeout(() => loadMessages(id), 1500); }
       return;
     }
-    await api(`/items/${encodeURIComponent(id)}/reply`, { method: "POST", body: { text, images } });
+    await api(`/items/${encodeURIComponent(id)}/reply`, { method: "POST", body: { text, files } });
     box.value = "";
     delete state.drafts[id];
     window.ConsolePaste.clear(id);
