@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the work PC with the 📍 button, say where you are, and work bound elsewhere moves out of the
   way. Places are managed (add, rename, delete — every item follows) from the screen and
   `/console/api/places`.
+- **Relay Console: attach any file** (#950) — paste, drop or pick (📎) any file into a reply, not
+  only images; up to 10 per reply, 50 MB each (images 10 MB, still checked by their bytes). The
+  agent gets each file by local path; the original name is kept, sanitised.
 - **Relay Console: context usage per thread** (#946) — each row shows how full the thread's
   context window was after its last turn ("🧠 45%", amber from 70%, red from 90%), and the
   detail header shows used / window ("182k / 200k"), read from the session table.
