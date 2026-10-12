@@ -110,6 +110,22 @@ button { cursor: pointer; }
 .tag.place.away { color: var(--p1); }
 .place-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 14px 2px; font-size: 12px; list-style: none; }
 .chip { background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; color: var(--dim); font-size: 12px; cursor: pointer; }
+.chip.ghost { border-style: dashed; }
+.detail .d-place { flex: none; color: var(--dim); font-size: 12px; }
+.detail .d-place.on { color: var(--text); border-color: color-mix(in srgb, var(--ai) 50%, var(--line)); }
+.detail .d-place.ai { font-style: italic; border-style: dashed; }
+.place-menu { position: fixed; z-index: 20; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px; display: flex; flex-direction: column; gap: 8px; max-width: 320px; box-shadow: 0 8px 24px rgb(0 0 0 / .4); font-size: 12px; }
+.place-menu .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.place-add { display: flex; gap: 6px; }
+.place-add input { flex: 1; min-width: 0; }
+.btn.link { background: none; border: 0; color: var(--accent); text-align: left; padding: 0; }
+.btn.danger { color: var(--err); }
+.places-card { min-width: min(420px, 92vw); display: flex; flex-direction: column; gap: 10px; }
+.places-head { display: flex; justify-content: space-between; align-items: center; }
+.places-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.places-list li { display: flex; align-items: center; gap: 8px; }
+.places-list input { flex: 1; min-width: 0; }
 .chip.on { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
 .due.over { color: var(--err); font-weight: 600; }
 .due.soon { color: var(--p1); font-weight: 600; }

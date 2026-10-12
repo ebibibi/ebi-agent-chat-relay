@@ -514,6 +514,7 @@ class Triager:
         model: str = DEFAULT_MODEL,
         per_pass: int = PER_PASS,
         concurrency: int = CONCURRENCY,
+        registered_places: Callable[[], Awaitable[list[str]]] | None = None,
     ) -> None:
         self.repo = repo
         self._ask = ask
@@ -521,6 +522,7 @@ class Triager:
         self._model = model
         self._per_pass = per_pass
         self._concurrency = concurrency
+        self._registered = registered_places
         self._failed: dict[str, tuple[str, float]] = {}
         self._task: asyncio.Task[None] | None = None
 
@@ -546,7 +548,8 @@ class Triager:
         """Triage what is due; the number of items that got an answer."""
         rows = await self.repo.all()
         batch = self.due(items, rows)
-        places = known_places(items, rows)
+        managed = await self._registered() if self._registered is not None else []
+        places = list(dict.fromkeys(managed + known_places(items, rows)))
         gate = asyncio.Semaphore(self._concurrency)
 
         async def one(item: dict[str, Any]) -> bool:

@@ -49,6 +49,8 @@ from .messages import serialize_message, with_kind
 from .oidc import OidcClient, OidcConfig, provider_name
 from .passkey_store import PasskeyStore
 from .passkeys import PasskeyService
+from .places import PlaceError, PlaceRepository
+from .places import clean_name as clean_place
 from .ratelimit import RateLimiter
 from .surface import apply_outcome
 from .triage import DEFAULT_MODEL as TRIAGE_DEFAULT_MODEL
@@ -157,6 +159,7 @@ class ConsoleServer:
         skills: SkillLoader | None = None,
         codex_compactor: Callable[..., Awaitable[None]] | None = None,
         triage: TriageRepository | None = None,
+        places: PlaceRepository | None = None,
     ) -> None:
         self.api = api_server
         #: Lists skills per backend for slash-command autocomplete; None reads the disk.
@@ -168,6 +171,8 @@ class ConsoleServer:
         self.work_repo = work_repo
         #: The model's priority and deadline guesses; None turns automatic triage off.
         self.triage = triage
+        #: The managed list of places work can be bound to.
+        self.places = places
         self._triager: Triager | None = None
         #: The console's own conversations. Work started here lives in them,
         #: not in a chat thread; chat threads are still shown alongside.
@@ -212,6 +217,10 @@ class ConsoleServer:
         r.add_get(f"{API_PREFIX}/me", self.me)
         r.add_get(f"{API_PREFIX}/board", self.board)
         r.add_get(f"{API_PREFIX}/usage", self.usage_read)
+        r.add_get(f"{API_PREFIX}/places", self.places_read)
+        r.add_post(f"{API_PREFIX}/places", self.place_add)
+        r.add_patch(f"{API_PREFIX}/places", self.place_rename)
+        r.add_delete(f"{API_PREFIX}/places", self.place_delete)
         r.add_post(f"{API_PREFIX}/items", self.create_item)
         r.add_patch(f"{API_PREFIX}/items/{{item_id}}", self.patch_item)
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/messages", self.messages)
@@ -275,8 +284,13 @@ class ConsoleServer:
         """Triage open items in the background with *ask* (one model call per item)."""
         if self.triage is None or self._triager is not None:
             return
+        places = self.places
         self._triager = Triager(
-            self.triage, ask=ask, read_messages=self.triage_messages, model=model
+            self.triage,
+            ask=ask,
+            read_messages=self.triage_messages,
+            model=model,
+            registered_places=places.names if places is not None else None,
         )
         self._triager.start(self._board_items, TRIAGE_INTERVAL_SECONDS)
         logger.info("Relay Console: automatic triage on (%s)", model)
@@ -338,8 +352,66 @@ class ConsoleServer:
                 "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "items": items,
                 "slots": self._slots(),
+                "places": await self._place_list(items),
             }
         )
+
+    # -- places ------------------------------------------------------------
+    async def _place_list(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Every place: the managed list plus labels in use, with how many open items carry each."""
+        registered = await self.places.names() if self.places is not None else []
+        counts: dict[str, int] = {}
+        for item in items:
+            if item.get("place") and item.get("bucket") != "done":
+                counts[item["place"]] = counts.get(item["place"], 0) + 1
+        names = sorted(set(registered) | set(counts))
+        return [
+            {"name": n, "count": counts.get(n, 0), "registered": n in registered} for n in names
+        ]
+
+    async def places_read(self, request: web.Request) -> web.Response:
+        return web.json_response({"places": await self._place_list(await self._items())})
+
+    async def _items(self) -> list[dict[str, Any]]:
+        items = await self._board_items()
+        if self.triage is not None:
+            items = apply_triage(items, await self.triage.all())
+        return items
+
+    async def _place_change(
+        self, request: web.Request, change: Callable[[dict[str, Any]], Awaitable[Any]]
+    ) -> web.Response:
+        if self.places is None:
+            return _error("places are not available", 404)
+        body, err = await self._json(request)
+        if err:
+            return err
+        try:
+            await change(body)
+        except PlaceError as exc:
+            return _error(str(exc), 400)
+        return await self.places_read(request)
+
+    async def place_add(self, request: web.Request) -> web.Response:
+        async def add(body: dict[str, Any]) -> None:
+            assert self.places is not None
+            await self.places.add(body.get("name"))
+
+        return await self._place_change(request, add)
+
+    async def place_rename(self, request: web.Request) -> web.Response:
+        async def rename(body: dict[str, Any]) -> None:
+            assert self.places is not None
+            await self.places.rename(clean_place(body.get("from")), body.get("name"))
+
+        return await self._place_change(request, rename)
+
+    async def place_delete(self, request: web.Request) -> web.Response:
+        async def delete(body: dict[str, Any]) -> None:
+            assert self.places is not None
+            await self.places.delete(clean_place(body.get("name")))
+
+        return await self._place_change(request, delete)
 
     async def _board_items(self) -> list[dict[str, Any]]:
         threads = await self._thread_snapshots() + await self._conversation_snapshots()
@@ -482,6 +554,9 @@ class ConsoleServer:
             )
         except WorkItemError as exc:
             return _error(str(exc), 400)
+        if self.places is not None and item.place:
+            # A place typed on an item joins the managed list.
+            await self.places.add(item.place)
         if self.triage is not None and {"priority", "due_at", "place"} & set(body):
             # What a human chose is no longer the model's to guess.
             await self.triage.pin(
@@ -994,6 +1069,8 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
     oidc = _oidc_client(config)
     triage_command = _triage_command()
     triage = TriageRepository(api_server.session_repo.db_path) if triage_command else None
+    places = PlaceRepository(api_server.session_repo.db_path)
+    await places.init_db()
     if triage is not None:
         await triage.init_db()
     console = ConsoleServer(
@@ -1009,6 +1086,7 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
         oidc=oidc,
         store=store,
         triage=triage,
+        places=places,
     )
     await console.start()
     if triage_command:

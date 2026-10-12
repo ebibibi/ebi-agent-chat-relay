@@ -10,7 +10,7 @@ const HISTORY = 100;
 
 const I18N = {
   en: {
-    focus: "🎯 Focus", focus_first: "Do this first", focus_next: "Then", focus_waiting: "⏳ Waiting", focus_elsewhere: "📍 Somewhere else", here: "I am at:", anywhere: "Anywhere", place: "Place", place_ph: "anywhere", no_due: "No due date", due_over: "overdue", due_in: (x) => `in ${x}`, u_min: "m", u_hour: "h", u_day: "d", focus_ready: "can do now", focus_from: (d) => `from ${d}`, ai_guess: "AI guess", ai_set: "set by AI",
+    focus: "🎯 Focus", focus_first: "Do this first", focus_next: "Then", focus_waiting: "⏳ Waiting", focus_elsewhere: "📍 Somewhere else", place_new: "New place", add: "Add", delete: "Delete", place_manage: "Manage places", place_hint: "Where this can only be done", place_count: (n) => `${n} open`, place_unlisted: "in use, not listed", place_unlisted_hint: "Used on items (often guessed by AI) but not on your list", place_manage_hint: "Renaming or deleting a place changes it on every item. A deleted place leaves its items doable anywhere.", place_none: "No places yet.", place_delete_confirm: (n, c) => `Remove "${n}" from ${c} open item(s)?`, here: "I am at:", anywhere: "Anywhere", place: "Place", place_ph: "anywhere", no_due: "No due date", due_over: "overdue", due_in: (x) => `in ${x}`, u_min: "m", u_hour: "h", u_day: "d", focus_ready: "can do now", focus_from: (d) => `from ${d}`, ai_guess: "AI guess", ai_set: "set by AI",
     me: "Inbox", ai: "Running", todo: "To do", idle: "Idle", recent: "Recent", tree: "Tree", snoozed: "Snoozed", done: "Done",
     filter: "Filter…", capture: "+ Write down work, press Enter (c) — Shift+Enter for a note line", capture_ai: "+ Write down work, Enter hands it to AI (c) — Shift+Enter for a note line",
     autostart: "AI starts right away", empty: "Nothing here. 🎉",
@@ -39,7 +39,7 @@ const I18N = {
            ["r", "reply"], ["/", "filter"], ["g then f/i/a/u/t/w/d", "go to a view"], ["?", "this help"]],
   },
   ja: {
-    focus: "🎯 今やること", focus_first: "まずこれ", focus_next: "次に", focus_waiting: "⏳ 待ち", focus_elsewhere: "📍 別の場所でやること", here: "いまいる場所：", anywhere: "どこでも", place: "場所", place_ph: "どこでも", no_due: "期限なし", due_over: "超過", due_in: (x) => `あと${x}`, u_min: "分", u_hour: "時間", u_day: "日", focus_ready: "今すぐできる", focus_from: (d) => `${d}〜`, ai_guess: "AIの見立て", ai_set: "AIが推定",
+    focus: "🎯 今やること", focus_first: "まずこれ", focus_next: "次に", focus_waiting: "⏳ 待ち", focus_elsewhere: "📍 別の場所でやること", place_new: "新しい場所", add: "追加", delete: "削除", place_manage: "場所の管理", place_hint: "ここでしかできない場所・端末", place_count: (n) => `未完了 ${n}件`, place_unlisted: "未登録", place_unlisted_hint: "スレッドで使われているが一覧にない場所（多くはAIの推定）", place_manage_hint: "名前の変更・削除はすべてのスレッドに反映されます。削除した場所のスレッドは「どこでも」になります。", place_none: "まだ場所はありません。", place_delete_confirm: (n, c) => `「${n}」を未完了の ${c} 件から外しますか？`, here: "いまいる場所：", anywhere: "どこでも", place: "場所", place_ph: "どこでも", no_due: "期限なし", due_over: "超過", due_in: (x) => `あと${x}`, u_min: "分", u_hour: "時間", u_day: "日", focus_ready: "今すぐできる", focus_from: (d) => `${d}〜`, ai_guess: "AIの見立て", ai_set: "AIが推定",
     me: "受信箱", ai: "実行中", todo: "やること", idle: "止まっている", recent: "更新順", tree: "ツリー", snoozed: "スヌーズ中", done: "完了",
     filter: "絞り込み…", capture: "＋ 思いついた仕事を書いて Enter（c）。Shift+Enter で改行してメモ", capture_ai: "＋ 思いついた仕事を書いて Enter → AIが着手（c）。Shift+Enter で改行してメモ",
     autostart: "AIがすぐ着手", empty: "ここには何もありません 🎉",
@@ -145,6 +145,7 @@ async function refresh() {
     state.items = data.items;
     state.byId = new Map(data.items.map((i) => [i.id, i]));
     state.slots = data.slots || {};
+    state.places = data.places || [];
     state.lastSync = new Date();
     $("sync").className = "sync";
     $("sync").textContent = `${T.updated} ${state.lastSync.toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}`;
@@ -409,6 +410,7 @@ function headParts(item) {
     title,
   ];
   if (!item.thread_id) parts.push(h("button", { class: "btn primary", onclick: () => startItem(item.id), text: T.start }));
+  parts.push(window.ConsolePlaces.picker(item));
   // Tool calls and status lines: one click away, never folded into the drawer.
   if (item.thread_id) parts.push(activityToggle());
   parts.push(h("button", { class: "btn d-more" + (state.drawerOpen ? " on" : ""), type: "button",
@@ -425,13 +427,6 @@ function drawerParts(item) {
     onchange: (e) => patch(item.id, { due_at: e.target.value ? new Date(e.target.value).toISOString() : null }) });
   const project = h("input", { type: "text", value: item.project || "", placeholder: T.project, size: 14,
     onchange: (e) => patch(item.id, { project: e.target.value || null }) });
-  // Only a place a person set is shown as the field's value; a guess is the placeholder.
-  const human = item.place_by === "ai" ? "" : item.place || "";
-  const place = h("input", { type: "text", value: human, list: "known-places", size: 10,
-    placeholder: item.place_by === "ai" ? `🤖 ${item.place}` : T.place_ph,
-    onchange: (e) => patch(item.id, { place: e.target.value || null }) });
-  const known = h("datalist", { id: "known-places" },
-    window.ConsoleFocus.places(state.items).map((p) => h("option", { value: p })));
   const parents = state.items.filter((i) => i.id !== item.id && i.bucket !== "done");
   const parent = h("select", { onchange: (e) => patch(item.id, { parent_id: e.target.value || null }) },
     h("option", { value: "", text: T.none }),
@@ -445,7 +440,7 @@ function drawerParts(item) {
   return [
     h("div", { class: "controls" },
       h("label", {}, T.priority, pri), h("label", {}, T.due, due),
-      h("label", {}, T.project, project), h("label", {}, T.place, place, known), h("label", {}, T.parent, parent)),
+      h("label", {}, T.project, project), h("label", {}, T.parent, parent)),
     window.ConsoleFocus.drawerLine(item),
     h("div", { class: "controls" }, h("span", { class: "dim", text: T.snooze }), ...snooze),
     h("div", { class: "controls" }, ...actions),

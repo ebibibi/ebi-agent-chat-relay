@@ -25,18 +25,15 @@ window.ConsoleFocus = (() => {
     render();
   }
 
-  function places(items) {
-    return [...new Set(items.filter((i) => i.place && i.bucket !== "done").map((i) => i.place))].sort();
-  }
-
-  function placeBar(items) {
-    const known = places(items);
+  function placeBar() {
+    const known = window.ConsolePlaces.names();
     if (here && !known.includes(here)) known.push(here);
-    if (!known.length) return null;
     const chip = (value, label) => h("button", { type: "button", class: "chip" + (here === value ? " on" : ""),
       "aria-pressed": here === value ? "true" : "false", onclick: () => setHere(value), text: label });
     return h("li", { class: "place-bar" }, h("span", { class: "dim", text: T.here }),
-      chip("", T.anywhere), ...known.map((p) => chip(p, `📍 ${p}`)));
+      chip("", T.anywhere), ...known.map((p) => chip(p, `📍 ${p}`)),
+      h("button", { type: "button", class: "chip ghost", title: T.place_manage,
+        onclick: () => window.ConsolePlaces.manage(), text: `⚙ ${T.place_manage}` }));
   }
 
   function rows(items) {
@@ -46,8 +43,7 @@ window.ConsoleFocus = (() => {
     const later = live.filter((i) => i.actionable === false)
       .sort((a, b) => readyAt(a).localeCompare(readyAt(b)) || byImportance(a, b));
     const out = [];
-    const bar = placeBar(items);
-    if (bar) out.push({ node: bar });
+    out.push({ node: placeBar() });
     const add = (label, list) => {
       if (list.length) out.push({ group: label }, ...list.map((item) => ({ item, depth: 0 })));
     };
@@ -99,5 +95,5 @@ window.ConsoleFocus = (() => {
       ai.next_step ? h("span", { text: `→ ${ai.next_step}` }) : null);
   }
 
-  return { rows, count, note, drawerLine, placeTag, places };
+  return { rows, count, note, drawerLine, placeTag };
 })();
