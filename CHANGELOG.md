@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the cheapest model of the backend chosen with `/backend` (Haiku on Claude, the cheapest model in
   Codex's catalog on Codex) as a one-shot, tool-less call. A value a person sets always wins and is
   pinned. `CCDB_CONSOLE_TRIAGE=0` turns it off.
+- **Relay Console: several places at once** (#961) — the Focus view's "I am at" bar takes more
+  than one place (home and the work PC); work bound to any of them counts as here.
 - **Relay Console: places** (#933) — tag work that can only be done at home, at the office or on
   the work PC with the 📍 button, say where you are, and work bound elsewhere moves out of the
   way. Places are managed (add, rename, delete — every item follows) from the screen and

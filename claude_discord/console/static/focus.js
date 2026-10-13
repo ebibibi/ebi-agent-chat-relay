@@ -3,8 +3,9 @@
 // the rows. Readiness decides whether a row is here at all: anything waiting (for a time, a
 // person, a job) goes to "Waiting", soonest first, and comes back once its time has come.
 // Place: work bound to a location or device ("home", "office", "work PC") shows a 📍 tag,
-// and once the human says where they are, work bound elsewhere moves to its own group, so
-// "Do this first" is always something that can be done here and now.
+// and once the human says where they are — one place or several (home and the work PC) —
+// work bound to none of them moves to its own group, so "Do this first" is always
+// something that can be done here and now.
 // Priority, deadline, readiness and place come from a fast model where nobody set them.
 // Loaded before app.js, which calls rows() from visibleRows() and note() from rowNode().
 "use strict";
@@ -16,22 +17,37 @@ window.ConsoleFocus = (() => {
     (a.last_activity_at || "").localeCompare(b.last_activity_at || "");
   const readyAt = (i) => (i.ai && i.ai.ready_at) || "9999";
 
-  // Where the human is now; "" means "don't filter by place". Remembered per browser.
-  let here = localStorage.getItem("here") || "";
-  const elsewhere = (i) => Boolean(here && i.place && i.place !== here);
-  function setHere(place) {
-    here = place;
-    localStorage.setItem("here", place);
+  // Where the human is now: any number of places, matched with OR; none means "don't filter
+  // by place". Remembered per browser; an older single-place setting carries over.
+  function loadHere() {
+    const raw = localStorage.getItem("here") || "";
+    try {
+      const list = JSON.parse(raw);
+      if (Array.isArray(list)) return new Set(list.filter((p) => typeof p === "string" && p));
+    } catch { /* a plain place name from before */ }
+    return new Set(raw ? [raw] : []);
+  }
+  let here = loadHere();
+  const elsewhere = (i) => Boolean(here.size && i.place && !here.has(i.place));
+  function saveHere(next) {
+    here = next;
+    localStorage.setItem("here", JSON.stringify([...here]));
     render();
   }
+  const toggleHere = (place) => {
+    const next = new Set(here);
+    if (next.has(place)) next.delete(place); else next.add(place);
+    saveHere(next);
+  };
 
   function placeBar() {
     const known = window.ConsolePlaces.names();
-    if (here && !known.includes(here)) known.push(here);
-    const chip = (value, label) => h("button", { type: "button", class: "chip" + (here === value ? " on" : ""),
-      "aria-pressed": here === value ? "true" : "false", onclick: () => setHere(value), text: label });
-    return h("li", { class: "place-bar" }, h("span", { class: "dim", text: T.here }),
-      chip("", T.anywhere), ...known.map((p) => chip(p, `📍 ${p}`)),
+    for (const p of here) if (!known.includes(p)) known.push(p);
+    const chip = (on, label, onclick) => h("button", { type: "button", class: "chip" + (on ? " on" : ""),
+      "aria-pressed": on ? "true" : "false", onclick, text: label });
+    return h("li", { class: "place-bar" }, h("span", { class: "dim", text: T.here, title: T.here_hint }),
+      chip(!here.size, T.anywhere, () => saveHere(new Set())),
+      ...known.map((p) => chip(here.has(p), `📍 ${p}`, () => toggleHere(p))),
       h("button", { type: "button", class: "chip ghost", title: T.place_manage,
         onclick: () => window.ConsolePlaces.manage(), text: `⚙ ${T.place_manage}` }));
   }
