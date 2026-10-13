@@ -49,6 +49,7 @@ const items = [fixture('p','サイト公開をまとめる'), fixture('c','画�
   assert.equal(await page.locator('#reply').inputValue(),'この文章は更新中も残る');
   await page.setViewportSize({width:390,height:844});
   await page.waitForFunction(() => document.getElementById('nav').getBoundingClientRect().right <= 0);
+  await page.evaluate(() => renderDetail());
   if (process.env.CONSOLE_TEST_SCREENSHOTS) {
     await page.screenshot({path: process.env.CONSOLE_TEST_SCREENSHOTS + '/mobile.png'});
   }
