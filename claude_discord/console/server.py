@@ -693,6 +693,11 @@ class ConsoleServer:
         files, err = self._reply_files(_listed(body.pop("files", None)))
         if err:
             return err
+        note = body.get("note")
+        if isinstance(note, str) and len(note.strip()) > MAX_REPLY_CHARS:
+            body["note"], err = await self._attach_long_text(note.strip())
+            if err:
+                return err
         if files:
             body["note"] = with_attachments(str(body.get("note") or "").strip(), files)
         try:
@@ -788,8 +793,9 @@ class ConsoleServer:
             return err
         if not text and not files:
             return _error("text is required", 400)
-        if len(text) > MAX_REPLY_CHARS:
-            return _error(f"text must be at most {MAX_REPLY_CHARS} characters", 400)
+        text, err = await self._attach_long_text(text)
+        if err:
+            return err
         text = with_attachments(text, files)
         return await self._deliver(request.match_info["item_id"], text, request[IDENTITY])
 
@@ -954,6 +960,21 @@ class ConsoleServer:
     def _files_dir(self) -> Path | None:
         return self.sessions.frontend.files_dir if self.sessions is not None else None
 
+    async def _attach_long_text(self, text: str) -> tuple[str, web.Response | None]:
+        """Keep a long user message intact in a downloadable UTF-8 file."""
+        if len(text) <= MAX_REPLY_CHARS:
+            return text, None
+        files_dir = self._files_dir()
+        if files_dir is None:
+            return text, _error("this deployment cannot keep files", 503)
+        url = await save_upload(files_dir, text.encode("utf-8"), "text/plain", "message.txt")
+        path = resolve_upload(files_dir, url)
+        if path is None:
+            return text, _error("could not store the message attachment", 500)
+        return with_attachments(
+            "Read message.txt for the full user message and respond to it.", [(url, path)]
+        ), None
+
     def _reply_files(self, raw: list[object]) -> tuple[list[tuple[str, Path]], web.Response | None]:
         """Attachment URLs from a reply body, resolved to stored files."""
         if not raw:
@@ -1027,10 +1048,11 @@ class ConsoleServer:
             return _error("only a captured item without a thread can be started", 400)
         extra = str(body.get("prompt") or "").strip()
         prompt = "\n\n".join(p for p in (item.title, item.note, extra) if p)
-        if len(prompt) > MAX_REPLY_CHARS:
-            return _error(f"the prompt must be at most {MAX_REPLY_CHARS} characters", 400)
         if self.sessions is None:
             return _error("the console cannot run agents in this deployment", 503)
+        prompt, err = await self._attach_long_text(prompt)
+        if err:
+            return err
         parent_thread_id = None
         if item.parent_id and item.parent_id.startswith("t") and item.parent_id[1:].isdigit():
             parent_thread_id = int(item.parent_id[1:])

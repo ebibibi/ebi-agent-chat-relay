@@ -123,5 +123,18 @@ window.ConsolePaste = (() => {
   }
   function clear(id) { pending.delete(id); draw(id); }
 
-  return { attach, button, ready, clear };
+  // Upload before sending JSON: long Unicode messages can exceed its byte limit too.
+  async function prepareText(text, files) {
+    if (text.length <= 4000) return { text, files };
+    if (files.length >= MAX_COUNT) throw new Error(T.attach_many(MAX_COUNT));
+    const file = new File([text], "message.txt", { type: "text/plain;charset=utf-8" });
+    if (file.size > MAX_FILE) throw new Error(T.attach_big(file.name, sizeText(MAX_FILE)));
+    const url = await upload(file);
+    return {
+      text: "Read message.txt for the full user message and respond to it.",
+      files: [...files, url],
+    };
+  }
+
+  return { attach, button, ready, clear, prepareText };
 })();

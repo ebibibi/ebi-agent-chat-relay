@@ -776,7 +776,8 @@ async function sendReply(id, box) {
       if (!/^\/(backend|model|effort)\b/.test(text)) { await refresh(); setTimeout(() => loadMessages(id), 1500); }
       return;
     }
-    await api(`/items/${encodeURIComponent(id)}/reply`, { method: "POST", body: { text, files } });
+    const body = await window.ConsolePaste.prepareText(text, files);
+    await api(`/items/${encodeURIComponent(id)}/reply`, { method: "POST", body });
     box.value = "";
     delete state.drafts[id];
     window.ConsolePaste.clear(id);
@@ -805,6 +806,9 @@ async function capture(text) {
   if (files === null) { toast(T.paste_wait); return false; }
   if (files.length) body.files = files;
   try {
+    const prepared = await window.ConsolePaste.prepareText(text, files);
+    if (prepared.text !== text) body.note = prepared.text;
+    if (prepared.files.length) body.files = prepared.files;
     const data = await api("/items", { method: "POST", body });
     window.ConsolePaste.clear(CAPTURE);
     const started = Boolean(data.item.thread_id);

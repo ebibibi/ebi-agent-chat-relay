@@ -719,3 +719,73 @@ async def test_a_queued_turn_replays_after_restart_without_a_second_human_messag
 async def test_replaying_an_unknown_conversation_raises(env) -> None:
     with pytest.raises(LookupError):
         await env.host.resume_queued(424242, "hello")
+
+
+@pytest.mark.parametrize("length", [4000, 4001, 6000])
+async def test_long_reply_preserves_full_text_in_downloadable_attachment(env, length) -> None:
+    item_id = await _start(env)
+    text = ("日本語🎉\n" * length)[: length - 1] + "終"
+    response = await env.client.post(
+        f"/console/api/items/{item_id}/reply", json={"text": text}, headers=WRITE
+    )
+    assert response.status == 202
+    await _settle(env.host)
+    prompt = env.runs[-1].prompt
+    if length == 4000:
+        assert prompt.startswith(text.strip())
+        return
+    assert len(prompt) < 4000
+    files = list(env.host.frontend.files_dir.glob("0/*/message.txt"))
+    assert len(files) == 1
+    assert files[0].read_text(encoding="utf-8") == text.strip()
+    assert str(files[0]) in prompt
+    url = prompt.split("](", 1)[1].split(")", 1)[0]
+    download = await env.client.get(url, headers=AUTH)
+    assert download.status == 200
+    assert await download.text() == text.strip()
+
+
+async def test_long_capture_autostarts_with_full_note_as_attachment(env) -> None:
+    text = "詳しい依頼\n" * 1500
+    response = await env.client.post(
+        "/console/api/items",
+        json={"title": "Long request", "note": text, "start": True},
+        headers=WRITE,
+    )
+    data = await response.json()
+    assert response.status == 201
+    assert "start_error" not in data
+    await _settle(env.host)
+    files = list(env.host.frontend.files_dir.glob("0/*/message.txt"))
+    assert len(files) == 1
+    assert files[0].read_text(encoding="utf-8") == text.strip()
+    assert str(files[0]) in env.runs[-1].prompt
+
+
+async def test_long_reply_keeps_existing_attachments(env) -> None:
+    item_id = await _start(env)
+    upload = await _upload(env, b"supporting context", "text/plain", "context.txt")
+    url = (await upload.json())["url"]
+    response = await env.client.post(
+        f"/console/api/items/{item_id}/reply",
+        json={"text": "x" * 4001, "files": [url]},
+        headers=WRITE,
+    )
+    assert response.status == 202
+    await _settle(env.host)
+    assert "message.txt" in env.runs[-1].prompt
+    assert url in env.runs[-1].prompt
+
+
+async def test_combined_start_prompt_over_limit_becomes_attachment(env) -> None:
+    response = await env.client.post(
+        "/console/api/items",
+        json={"title": "t" * 200, "note": "n" * 3900, "start": True},
+        headers=WRITE,
+    )
+    assert response.status == 201
+    assert "start_error" not in await response.json()
+    await _settle(env.host)
+    [file] = list(env.host.frontend.files_dir.glob("0/*/message.txt"))
+    assert file.read_text(encoding="utf-8") == "t" * 200 + "\n\n" + "n" * 3900
+    assert str(file) in env.runs[-1].prompt
