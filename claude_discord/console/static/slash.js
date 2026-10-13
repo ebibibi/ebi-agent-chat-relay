@@ -30,8 +30,16 @@ window.ConsoleSlash = (() => {
     meta.hidden = !c;
     if (!c) return;
     const parts = [c.backend, c.model, c.effort].filter(Boolean).join(" · ");
-    meta.replaceChildren(h("span", { class: "slash-now", text: `🤖 ${parts}` }),
-      h("span", { class: "slash-hint", text: T.slash_hint }));
+    const id = itemId;
+    const now = h("button", { class: "slash-now", type: "button", title: T.bp_title_thread,
+      onclick: (e) => {
+        e.stopPropagation();
+        window.ConsoleBackend.open(window.ConsoleBackend.forItem(id, (next) => {
+          catalogs.set(id, next);
+          if (id === itemId) drawMeta();
+        }), now);
+      }, text: `🤖 ${parts} ▾` });
+    meta.replaceChildren(now, h("span", { class: "slash-hint", text: T.slash_hint }));
   }
 
   // What to offer for the text before the caret, or [] when it is not a command.

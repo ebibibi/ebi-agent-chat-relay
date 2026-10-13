@@ -10,7 +10,10 @@ const HISTORY = 100;
 
 const I18N = {
   en: {
-    focus: "🎯 Focus", focus_first: "Do this first", focus_next: "Then", focus_waiting: "⏳ Waiting", focus_elsewhere: "📍 Somewhere else", place_new: "New place", add: "Add", delete: "Delete", place_manage: "Manage places", place_hint: "Where this can only be done", place_count: (n) => `${n} open`, place_unlisted: "in use, not listed", place_unlisted_hint: "Used on items (often guessed by AI) but not on your list", place_manage_hint: "Renaming or deleting a place changes it on every item. A deleted place leaves its items doable anywhere.", place_none: "No places yet.", place_delete_confirm: (n, c) => `Remove "${n}" from ${c} open item(s)?`, here: "I am at:", here_hint: "Pick every place you are at; work bound to any of them counts as here", anywhere: "Anywhere", place: "Place", place_ph: "anywhere", no_due: "No due date", pause: "Pause", stop: "Stop", resume: "Resume", first: "First", later: "Later",
+    focus: "🎯 Focus", focus_first: "Do this first", focus_next: "Then", focus_waiting: "⏳ Waiting", focus_elsewhere: "📍 Somewhere else", place_new: "New place", add: "Add", delete: "Delete", place_manage: "Manage places", place_hint: "Where this can only be done", place_count: (n) => `${n} open`, place_unlisted: "in use, not listed", place_unlisted_hint: "Used on items (often guessed by AI) but not on your list", place_manage_hint: "Renaming or deleting a place changes it on every item. A deleted place leaves its items doable anywhere.", place_none: "No places yet.", place_delete_confirm: (n, c) => `Remove "${n}" from ${c} open item(s)?`, here: "I am at:", here_hint: "Pick every place you are at; work bound to any of them counts as here", anywhere: "Anywhere", place: "Place", place_ph: "anywhere", no_due: "No due date", bp_backend: "Backend", bp_model: "Model", bp_effort: "Effort",
+    bp_model_other: "other model, Enter", bp_default: "Default", bp_title_thread: "Backend for this conversation",
+    bp_title_default: "Default for new conversations", bp_note_thread: "Applies from the next turn of this conversation.",
+    bp_note_default: "New conversations start with this; a conversation's own choice wins.", pause: "Pause", stop: "Stop", resume: "Resume", first: "First", later: "Later",
     paused: "paused", pause_hint: "Stop this turn now and mark the thread paused; Resume carries on",
     stop_hint: "Stop this turn now", resume_hint: "Ask the agent to carry on from where it was paused",
     first_hint: "Start this one before the others waiting", later_hint: "Let the others waiting go first",
@@ -49,7 +52,10 @@ const I18N = {
            ["r", "reply"], ["/", "filter"], ["h", "hide / show done"], ["p", "pin / unpin (working on now)"], ["g then f/i/a/u/t/w/d", "go to a view"], ["?", "this help"]],
   },
   ja: {
-    focus: "🎯 今やること", focus_first: "まずこれ", focus_next: "次に", focus_waiting: "⏳ 待ち", focus_elsewhere: "📍 別の場所でやること", place_new: "新しい場所", add: "追加", delete: "削除", place_manage: "場所の管理", place_hint: "ここでしかできない場所・端末", place_count: (n) => `未完了 ${n}件`, place_unlisted: "未登録", place_unlisted_hint: "スレッドで使われているが一覧にない場所（多くはAIの推定）", place_manage_hint: "名前の変更・削除はすべてのスレッドに反映されます。削除した場所のスレッドは「どこでも」になります。", place_none: "まだ場所はありません。", place_delete_confirm: (n, c) => `「${n}」を未完了の ${c} 件から外しますか？`, here: "いまいる場所：", here_hint: "いまいる場所を全部選べます。どれかに当てはまるものを「ここでできる」とみなします", anywhere: "どこでも", place: "場所", place_ph: "どこでも", no_due: "期限なし", pause: "一時停止", stop: "停止", resume: "再開", first: "先に", later: "後回し",
+    focus: "🎯 今やること", focus_first: "まずこれ", focus_next: "次に", focus_waiting: "⏳ 待ち", focus_elsewhere: "📍 別の場所でやること", place_new: "新しい場所", add: "追加", delete: "削除", place_manage: "場所の管理", place_hint: "ここでしかできない場所・端末", place_count: (n) => `未完了 ${n}件`, place_unlisted: "未登録", place_unlisted_hint: "スレッドで使われているが一覧にない場所（多くはAIの推定）", place_manage_hint: "名前の変更・削除はすべてのスレッドに反映されます。削除した場所のスレッドは「どこでも」になります。", place_none: "まだ場所はありません。", place_delete_confirm: (n, c) => `「${n}」を未完了の ${c} 件から外しますか？`, here: "いまいる場所：", here_hint: "いまいる場所を全部選べます。どれかに当てはまるものを「ここでできる」とみなします", anywhere: "どこでも", place: "場所", place_ph: "どこでも", no_due: "期限なし", bp_backend: "バックエンド", bp_model: "モデル", bp_effort: "思考の深さ",
+    bp_model_other: "ほかのモデル名（Enter）", bp_default: "既定", bp_title_thread: "この会話のバックエンド",
+    bp_title_default: "新しい会話の既定", bp_note_thread: "この会話の次のターンから切り替わります。",
+    bp_note_default: "新しく始める会話はこの設定で動きます。会話ごとに選んだものが優先されます。", pause: "一時停止", stop: "停止", resume: "再開", first: "先に", later: "後回し",
     paused: "一時停止中", pause_hint: "いまのターンを止めて一時停止の印を付けます。「再開」で続きから",
     stop_hint: "いまのターンを止めます", resume_hint: "止めたところから続けるようエージェントに頼みます",
     first_hint: "待っているほかのスレッドより先に始めます", later_hint: "待っているほかのスレッドを先にします",
@@ -168,6 +174,7 @@ async function refresh() {
     state.byId = new Map(data.items.map((i) => [i.id, i]));
     state.slots = data.slots || {};
     state.places = data.places || [];
+    if (!state.defaultsLoaded) { state.defaultsLoaded = true; window.ConsoleBackend.loadDefaults(); }
     state.lastSync = new Date();
     $("sync").className = "sync";
     $("sync").textContent = `${T.updated} ${state.lastSync.toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}`;
@@ -353,6 +360,7 @@ function renderNav() {
       class: "count" + (v.hot && counts[v.key] ? " hot" : ""), text: counts[v.key] || "",
     }))),
     window.ConsoleSlots.nav(),
+    window.ConsoleBackend.nav(),
     window.ConsoleNotify ? h("button", { class: "nav-notify" + (window.ConsoleNotify.isOn() ? " on" : ""),
       onclick: () => window.ConsoleNotify.toggle() },
       h("span", { text: window.ConsoleNotify.isOn() ? T.notify_on : T.notify_off })) : null,
