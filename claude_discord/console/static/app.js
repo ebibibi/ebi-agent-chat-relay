@@ -391,6 +391,8 @@ function renderList() {
 
 function rowNode({ item, depth, children }) {
   const meta = [];
+  const familyTag = window.ConsoleFamily.rowTag(item);
+  if (familyTag) meta.push(familyTag);
   // In Recent, name the list the item lives in now, unless its status already says so.
   if (state.view === "recent" && T[item.bucket] && T[item.bucket] !== T.st[item.status]) {
     meta.push(h("span", { class: "tag where", text: T[item.bucket] }));
@@ -452,6 +454,7 @@ function renderDetail() {
     $("d-drawer").replaceChildren(...drawerParts(item));
   }
   $("d-drawer").hidden = !state.drawerOpen;
+  window.ConsoleFamily.render(item);
   const msgs = $("msgs");
   if (item.thread_id) fillMessages(msgs);
   else msgs.replaceChildren(item.note
@@ -467,6 +470,7 @@ function buildDetail(pane, item, key) {
   const nodes = [
     h("div", { class: "d-head", id: "d-head" }),
     h("div", { class: "d-drawer", id: "d-drawer", hidden: true }),
+    h("section", { class: "family", id: "d-family", hidden: true, "aria-label": LANG === "ja" ? "親子スレッド" : "Thread family" }),
     h("div", { class: "msgs-wrap" }, msgs, jump),
     h("div", { class: "live-slot", id: "live-slot" }),
   ];
