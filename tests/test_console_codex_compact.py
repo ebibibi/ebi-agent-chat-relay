@@ -28,10 +28,14 @@ FAKE = textwrap.dedent(
                 out({"id": m["id"], "error": {"message": "no rollout found"}})
                 continue
             out({"method": "thread/status/changed", "params": {"status": {"type": "idle"}}})
-            out({"id": m["id"], "result": {"thread": {"id": m["params"]["threadId"]}}})
+            thread = {"id": m["params"]["threadId"]}
+            if mode in ("large", "oversized"):
+                size = 256 * 1024 if mode == "large" else 11 * 1024 * 1024
+                thread["turns"] = [{"text": "x" * size}]
+            out({"id": m["id"], "result": {"thread": thread}})
         elif m.get("method") == "thread/compact/start":
             out({"id": m["id"], "result": {}})
-            if mode == "ok":
+            if mode in ("ok", "large"):
                 item = {"type": "contextCompaction", "id": "c1"}
                 out({"method": "item/started", "params": {"item": item}})
                 out({"method": "item/completed", "params": {"item": item}})
@@ -51,6 +55,15 @@ def fake_codex(tmp_path: Path):
 
 async def test_compaction_completes(fake_codex) -> None:
     await compact_codex_session("01a1-2b", codex_command=fake_codex("ok"))
+
+
+async def test_large_resume_history_can_be_compacted(fake_codex) -> None:
+    await compact_codex_session("01a1-2b", codex_command=fake_codex("large"))
+
+
+async def test_oversized_response_is_reported(fake_codex) -> None:
+    with pytest.raises(CompactError, match="response exceeded"):
+        await compact_codex_session("01a1-2b", codex_command=fake_codex("oversized"))
 
 
 async def test_unknown_session_is_reported(fake_codex) -> None:
