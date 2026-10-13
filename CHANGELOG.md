@@ -63,6 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A token sign-in can add passkeys again** — in a browser signed in with the console token,
+  **🔑 Passkeys → Add a device** answered 401 because the passkey screen did not send the token (#979)
+
 - **Windows: console triage and Codex `/compact` start npm `.cmd` CLIs** (#937) — they are
   resolved to `node` + script (current cmd-shim wrappers included) and never run through
   `cmd.exe` with untrusted arguments.

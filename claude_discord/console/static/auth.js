@@ -62,6 +62,9 @@
   async function call(path, body, method = "POST") {
     const headers = { Accept: "application/json" };
     if (method !== "GET") { headers["X-Console-Request"] = "1"; headers["Content-Type"] = "application/json"; }
+    // A token sign-in has no session cookie; the token may manage passkeys too.
+    const token = localStorage.getItem("token");
+    if (token) headers.Authorization = `Bearer ${token}`;
     const res = await fetch(path, { method, headers, credentials: "same-origin",
       body: method === "GET" ? undefined : JSON.stringify(body || {}) });
     let data = null;
