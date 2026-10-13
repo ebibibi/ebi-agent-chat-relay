@@ -144,6 +144,16 @@ remaining. On a phone the strip wraps, so every backend stays visible.
   view of whether the profile is blocked.
 
 
+### Backend, model and effort
+
+The "🤖 backend · model · effort" line above the reply box opens a picker for that conversation:
+backend (Claude, Codex, local, AG-UI, pi), the models of the chosen backend (or a typed one) and
+effort levels. Each choice applies from the next turn; picking a backend redraws its own models and
+levels. The nav's "🤖 Default: …" opens the same picker for the setting new conversations start
+with (`GET /console/api/defaults`, `POST /console/api/defaults` with `{name: backend|model|effort,
+arg}`), validated like `/backend`, `/model` and `/effort`. A conversation's own choice wins over
+the default.
+
 ### Running work
 
 The nav shows "Running 2 / limit 4 · 1 queued". − / + change the limit (1–32) at once: raising

@@ -94,7 +94,7 @@ def effort_levels(backend: str) -> list[str]:
 
 async def catalog(
     settings: Any,
-    thread_key: int,
+    thread_key: int | None,
     skills: SkillLoader,
     models: Callable[[str], Awaitable[list[dict[str, str]]]] = model_choices,
 ) -> dict[str, Any]:
@@ -113,20 +113,24 @@ async def catalog(
     }
 
 
-async def run_command(settings: Any, thread_key: int, name: str, arg: str) -> CommandResult:
-    """Apply ``/backend``, ``/model`` or ``/effort`` to this conversation only."""
+async def run_command(settings: Any, thread_key: int | None, name: str, arg: str) -> CommandResult:
+    """Apply ``/backend``, ``/model`` or ``/effort`` to one conversation, or to the default.
+
+    *thread_key* None changes the global setting new conversations start with.
+    """
     arg = arg.strip()
+    scope = "for this conversation" if thread_key is not None else "as the default"
     backend = await settings.current_backend(thread_key)
     if name == "backend":
         if arg not in ALL_BACKENDS:
             raise CommandError(f"Unknown backend `{arg}`. Choose: {', '.join(ALL_BACKENDS)}.")
         await settings.set_backend(arg, thread_id=thread_key)
-        return CommandResult(f"Backend set to `{arg}` for this conversation.")
+        return CommandResult(f"Backend set to `{arg}` {scope}.")
     if name == "model":
         if not arg or len(arg) > 200 or any(c.isspace() for c in arg):
             raise CommandError("Give one model name, e.g. `/model opus`.")
         await settings.set_model(backend, arg, thread_id=thread_key)
-        return CommandResult(f"Model for `{backend}` set to `{arg}` for this conversation.")
+        return CommandResult(f"Model for `{backend}` set to `{arg}` {scope}.")
     if name == "effort":
         level = arg.lower()
         valid = VALID_EFFORTS.get(backend, frozenset())
@@ -134,7 +138,7 @@ async def run_command(settings: Any, thread_key: int, name: str, arg: str) -> Co
             choices = ", ".join(effort_levels(backend))
             raise CommandError(f"Unknown effort `{arg}` for `{backend}`. Choose: {choices}.")
         await settings.set_effort(backend, level, thread_id=thread_key)
-        return CommandResult(f"Effort for `{backend}` set to `{level}` for this conversation.")
+        return CommandResult(f"Effort for `{backend}` set to `{level}` {scope}.")
     raise CommandError(f"Unknown command `/{name}`.")
 
 

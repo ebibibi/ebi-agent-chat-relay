@@ -55,6 +55,7 @@ async def test_the_shell_is_served_with_security_headers(client) -> None:
     assert (await client.get("/static/focus.js")).status == 200
     assert (await client.get("/static/places.js")).status == 200
     assert (await client.get("/static/slots.js")).status == 200
+    assert (await client.get("/static/backend.js")).status == 200
     assert (await client.get("/static/preview.js")).status == 200
 
 
