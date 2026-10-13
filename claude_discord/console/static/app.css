@@ -79,6 +79,15 @@ button { cursor: pointer; }
    re-renders on every poll and an animation would replay each time. */
 .row.fresh { background: color-mix(in srgb, var(--accent) 7%, transparent); }
 .row.fresh.sel { background: var(--raise); }
+/* Pinned: what the human is working on now. Loud on purpose. */
+.group.pinned-group { color: var(--p1); font-size: 13px; letter-spacing: .02em; text-transform: none;
+  border-top: 2px solid var(--p1); background: color-mix(in srgb, var(--p1) 10%, transparent); padding-top: 8px; }
+.row.pinned { background: color-mix(in srgb, var(--p1) 12%, transparent); border-left: 4px solid var(--p1); }
+.row.pinned.sel { background: color-mix(in srgb, var(--p1) 22%, var(--raise)); }
+.row.pinned .title { font-weight: 700; }
+.row.pinned .title::after { content: " 📌"; }
+.detail .d-pin { flex: none; font-size: 12px; color: var(--dim); }
+.detail .d-pin.on { color: var(--p1); border-color: var(--p1); font-weight: 700; }
 .row.fresh .title { font-weight: 700; color: #fff; }
 .row.fresh .title::before { content: ""; display: inline-block; width: 7px; height: 7px; margin: 0 6px 1px 0;
   border-radius: 50%; background: var(--accent); vertical-align: middle; }
