@@ -98,7 +98,7 @@ def load_config() -> dict[str, str]:
 def headless_problems(frontends: tuple[str, ...], env: Mapping[str, str]) -> list[str]:
     """Why a deployment without Discord could not be reached, if it could not.
 
-    Without Discord the only ways in are the Relay Console (which needs the
+    Without Discord the only ways in are the Ebi AI Console (which needs the
     control plane's port, since it starts beside it) and Teams. A headless
     process with neither would run, schedule and answer no one.
     """

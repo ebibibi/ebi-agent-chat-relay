@@ -1,4 +1,4 @@
-"""AskUserQuestion options can be answered from the Relay Console."""
+"""AskUserQuestion options can be answered from the Ebi AI Console."""
 
 from __future__ import annotations
 

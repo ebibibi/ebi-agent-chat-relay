@@ -42,7 +42,7 @@ async def test_the_api_requires_authentication(client) -> None:
 async def test_the_shell_is_served_with_security_headers(client) -> None:
     response = await client.get("/")
     assert response.status == 200
-    assert "Relay Console" in await response.text()
+    assert "Ebi AI Console" in await response.text()
     csp = response.headers["Content-Security-Policy"]
     assert "frame-ancestors 'none'" in csp
     # Images attached in Discord threads load from Discord's CDN; nothing else does.

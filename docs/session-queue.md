@@ -37,7 +37,7 @@ Restarting the bot while sessions run used to mean watching for an idle moment t
 turns arriving, might never come. A reservation makes the moment happen:
 
 1. **Hold** — the queue stops starting runs. Running turns continue untouched; every new request
-   (chat, Relay Console, scheduler, `/api/spawn`) joins the queue instead of starting, and its
+   (chat, Ebi AI Console, scheduler, `/api/spawn`) joins the queue instead of starting, and its
    waiting message says a restart is reserved.
 2. **Restart** — once nothing is running, each queued run is saved with the prompt it was about to
    send and the bot restarts.
@@ -82,7 +82,7 @@ channel (inline replies, no thread) are not replayed.
 ## Limits
 
 - The queue lives in memory. An ordinary restart (without a reservation) keeps runs that were
-  queued for a slot — they are saved on shutdown and replayed — but a Relay Console reply waiting
+  queued for a slot — they are saved on shutdown and replayed — but a Ebi AI Console reply waiting
   behind its own conversation's running turn is not yet in the slot queue and is dropped.
 - A deferred thread can wait indefinitely while new runs keep arriving. Prioritize it if that
   happens.

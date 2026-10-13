@@ -1,4 +1,4 @@
-"""Relay Console — triage agent work by priority, tree and due date.
+"""Ebi AI Console — triage agent work by priority, tree and due date.
 
 The console is an API-first surface on its own listener. It overlays the
 threads ccdb already runs with what a human needs to manage them (priority,

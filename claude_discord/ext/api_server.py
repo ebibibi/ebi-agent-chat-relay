@@ -308,11 +308,11 @@ class ApiServer:
         self.attention_repo: HumanActivityRepository | None = None
         # Waits (POST /api/waits): wired by BridgeComponents; 503 until then.
         self.wait_repo: WaitRepository | None = None
-        # Everything setup_bridge built. The Relay Console reads its session
+        # Everything setup_bridge built. The Ebi AI Console reads its session
         # wiring (backend factory, settings, ledger) from here to run agents
         # in conversations of its own. None until apply_to_api_server.
         self.components: Any = None
-        # The Relay Console's own conversations (set when the console starts).
+        # The Ebi AI Console's own conversations (set when the console starts).
         # An agent running in one marks its outcome through the same
         # /api/threads/{id}/done|waiting|review|action as a chat thread.
         self.console_conversations: Any = None
@@ -531,7 +531,7 @@ class ApiServer:
         await site.start()
         logger.info("REST API started: http://%s:%d", self.host, self.port)
         await self._start_external_listener()
-        # Relay Console: its own listener, off unless CCDB_CONSOLE_PORT is set.
+        # Ebi AI Console: its own listener, off unless CCDB_CONSOLE_PORT is set.
         from ..console.server import maybe_start_console
 
         self._console = await maybe_start_console(self)

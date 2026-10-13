@@ -1228,7 +1228,7 @@ class TestPipelineThreadDeleted:
 
 
 class TestConsoleApproval:
-    """The approval gate offers an approve action the Relay Console can press."""
+    """The approval gate offers an approve action the Ebi AI Console can press."""
 
     def _make(self, bot: MagicMock) -> tuple[AutoUpgradeCog, MagicMock]:
         config = UpgradeConfig(

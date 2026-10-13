@@ -1,9 +1,13 @@
-# Relay Console
+# Ebi AI Console
 
-The Relay Console is a triage screen for the agent threads ccdb runs. It shows every thread
+The Ebi AI Console is a triage screen for the agent threads ccdb runs. It shows every thread
 sorted by whose move it is, with priority, due date, snooze, project and parent/child tree, and
 lets you reply, mark things done, or write down new work and hand it to an agent. It works on
 desktop and phone (add it to the home screen).
+
+It was called the Relay Console until v5. Only the name changed: the URLs (`/console/…`), the
+`CCDB_CONSOLE_*` settings, the `[console]` extra and the code keep the word `console`, so an
+existing setup keeps working as it is.
 
 The JSON API under `/console/api` is the contract. The bundled web client is one consumer of it.
 See [ADR-0010](adr/0010-add-an-api-first-console-on-its-own-listener.md) and, for sign-in,
@@ -151,7 +155,7 @@ A passkey is the device you hold plus your fingerprint, face or PIN, checked in 
 It cannot be phished, and it needs no account with anyone.
 
 1. Start ccdb. While no passkey is registered, the log shows a line like
-   `Relay Console setup code: K7QPM-3XW9D` (single use, valid 15 minutes).
+   `Ebi AI Console setup code: K7QPM-3XW9D` (single use, valid 15 minutes).
 2. Open the console and enter the code. The browser creates a passkey and you are signed in.
 3. To add a phone or another computer, open **🔑 Passkeys → Add a device** on a signed-in
    device. Enter the code it shows on the new device.

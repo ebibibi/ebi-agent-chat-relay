@@ -3,7 +3,7 @@
 A thread holds three kinds of message, and the console treats them differently:
 
 - ``human``: what a person wrote. Replies sent from the console are posted by
-  the bot and stay ``agent``: their "via Relay Console" footer is plain text
+  the bot and stay ``agent``: their "via Ebi AI Console" footer is plain text
   the agent could also write, so it must not decide who the author is.
 - ``agent``: what the agent says to the person — answers, questions, errors.
 - ``activity``: the relay's own bookkeeping — tool calls, thinking, session

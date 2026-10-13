@@ -1,4 +1,4 @@
-"""Pressing a Discord message's buttons from the Relay Console."""
+"""Pressing a Discord message's buttons from the Ebi AI Console."""
 
 from __future__ import annotations
 

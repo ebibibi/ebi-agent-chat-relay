@@ -77,7 +77,7 @@ window.ConsoleNotify = (() => {
       missed += fresh.length;
       titleFlag();
       if ("Notification" in window && Notification.permission === "granted") {
-        const n = new Notification("Relay Console", { body: label(first) + more, tag: `relay-${first.id}` });
+        const n = new Notification("Ebi AI Console", { body: label(first) + more, tag: `relay-${first.id}` });
         n.onclick = () => { window.focus(); openItem(first.id); n.close(); };
       }
     }

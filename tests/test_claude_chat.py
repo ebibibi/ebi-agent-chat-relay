@@ -911,7 +911,7 @@ class TestOnReady:
 
     @pytest.mark.asyncio
     async def test_on_ready_resumes_console_conversation(self) -> None:
-        """A Relay Console conversation has no Discord thread: resume it through the console."""
+        """A Ebi AI Console conversation has no Discord thread: resume it through the console."""
         from unittest.mock import AsyncMock, MagicMock
 
         from claude_discord.console.host import ConsoleSessionHost

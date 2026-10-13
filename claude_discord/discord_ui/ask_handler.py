@@ -127,7 +127,7 @@ async def collect_ask_answers(
 
 
 def _console_actions(q: AskQuestion, thread_id: int, msg: discord.Message) -> list[MessageAction]:
-    """The options as actions the Relay Console can press (single choice only).
+    """The options as actions the Ebi AI Console can press (single choice only).
 
     A multi-select or a free-text answer is still given by replying in text.
     """

@@ -649,7 +649,7 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
     return processor.session_id
 
 
-_PLATFORM_LABELS = {"discord": "Discord", "teams": "Teams", "console": "Relay Console"}
+_PLATFORM_LABELS = {"discord": "Discord", "teams": "Teams", "console": "Ebi AI Console"}
 
 
 def _platform_label(frontend: str) -> str:
@@ -661,7 +661,7 @@ async def _show_outcome(config: RunConfig, outcome: str | None) -> None:
     """Show how the turn ended on whatever the conversation lives in.
 
     A Discord thread gets the marker in its title. A surface that keeps its
-    own title (the Relay Console) exposes ``set_outcome``; any other surface
+    own title (the Ebi AI Console) exposes ``set_outcome``; any other surface
     has nowhere to show it.
     """
     if config.thread is not None:

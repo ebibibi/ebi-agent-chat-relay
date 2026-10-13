@@ -288,7 +288,7 @@ class ConsoleServer:
         await self._runner.setup()
         site = web.TCPSite(self._runner, self.host, self.port, reuse_address=True)
         await site.start()
-        logger.info("Relay Console started: http://%s:%d", self.host, self.port)
+        logger.info("Ebi AI Console started: http://%s:%d", self.host, self.port)
 
     def start_triage(self, ask: Callable[[str], Awaitable[str | None]], *, model: str) -> None:
         """Triage open items in the background with *ask* (one model call per item)."""
@@ -303,7 +303,7 @@ class ConsoleServer:
             registered_places=places.names if places is not None else None,
         )
         self._triager.start(self._board_items, TRIAGE_INTERVAL_SECONDS)
-        logger.info("Relay Console: automatic triage on (%s)", model)
+        logger.info("Ebi AI Console: automatic triage on (%s)", model)
 
     async def stop(self) -> None:
         if self._triager is not None:
@@ -683,7 +683,7 @@ class ConsoleServer:
         except WorkItemError as exc:
             return _error(str(exc), 400)
         schedule_thread_outcome(thread, None)
-        prompt = f"{text}\n\n-# 🖥️ via Relay Console ({who})"
+        prompt = f"{text}\n\n-# 🖥️ via Ebi AI Console ({who})"
         self._background(cog.deliver_relayed_message(thread, prompt, interrupt=False))
         logger.info("console: %s replied in thread %s", _q(who), thread.id)
         return web.json_response({"status": "delivered"}, status=202)
@@ -1088,7 +1088,7 @@ async def maybe_start_console(api_server: ApiServer) -> ConsoleServer | None:
     try:
         return await _start_console(api_server, raw_port)
     except Exception:
-        logger.exception("Relay Console NOT started")
+        logger.exception("Ebi AI Console NOT started")
         return None
 
 
@@ -1096,10 +1096,10 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
     config = ConsoleAuthConfig.from_env().effective()
     problems = config.problems()
     if problems:
-        logger.error("Relay Console NOT started: %s", "; ".join(problems))
+        logger.error("Ebi AI Console NOT started: %s", "; ".join(problems))
         return None
     if api_server.session_repo is None:
-        logger.error("Relay Console NOT started: the session repository is not wired")
+        logger.error("Ebi AI Console NOT started: the session repository is not wired")
         return None
     host = (os.getenv("CCDB_CONSOLE_HOST") or "127.0.0.1").strip()
     work_repo = WorkItemRepository(api_server.session_repo.db_path)
@@ -1163,7 +1163,7 @@ async def _build_session_host(
     settings = getattr(components, "backend_settings", None)
     ledger = getattr(components, "frontend_threads", None)
     if factory is None or settings is None or ledger is None:
-        logger.warning("Relay Console: no session wiring; starting work from the console is off")
+        logger.warning("Ebi AI Console: no session wiring; starting work from the console is off")
         return None
     bot = api_server.bot
     frontend = ConsoleFrontend(

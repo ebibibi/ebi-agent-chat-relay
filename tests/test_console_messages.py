@@ -78,7 +78,7 @@ def _message(content: str, *, bot: bool = True, **extra: object) -> SimpleNamesp
 
 def test_a_footer_in_bot_text_cannot_claim_a_human_author() -> None:
     # The agent can write this footer too, so it must not change kind or author.
-    out = serialize_message(_message("please retry\n\n-# 🖥️ via Relay Console (me@example.com)"))
+    out = serialize_message(_message("please retry\n\n-# 🖥️ via Ebi AI Console (me@example.com)"))
     assert out["kind"] == KIND_AGENT
     assert out["author"] == "Relay"
     assert out["content"].startswith("please retry")

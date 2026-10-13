@@ -1,4 +1,4 @@
-// Sign-in for the Relay Console: passkeys first, a token only when the server offers one.
+// Sign-in for the Ebi AI Console: passkeys first, a token only when the server offers one.
 // Loaded before app.js, which calls ConsoleAuth.showLogin() on a 401. Server data reaches
 // the page through textContent only.
 "use strict";
@@ -9,7 +9,7 @@
     || ((navigator.languages || [navigator.language || "en"]).some((l) => l.toLowerCase().startsWith("ja")) ? "ja" : "en"));
   const L = {
     en: {
-      title: "Sign in to Relay Console", signin: "Sign in with a passkey",
+      title: "Sign in to Ebi AI Console", signin: "Sign in with a passkey",
       setup: "First time here: enter the setup code from the ccdb log, then create a passkey on this device.",
       code: "Setup code", name: "Name for this device", create: "Create passkey",
       newcode: "Write a new setup code to the log", logged: "A new setup code is in the ccdb log",
@@ -20,7 +20,7 @@
       cancelled: "Cancelled", sso: (n) => `Sign in with ${n}`, or: "or",
     },
     ja: {
-      title: "Relay Console にサインイン", signin: "パスキーでサインイン",
+      title: "Ebi AI Console にサインイン", signin: "パスキーでサインイン",
       setup: "はじめての設定: ccdb のログに出ているセットアップコードを入れて、この端末にパスキーを作ります。",
       code: "セットアップコード", name: "この端末の名前", create: "パスキーを作成",
       newcode: "新しいセットアップコードをログに出す", logged: "ccdb のログに新しいセットアップコードを出しました",

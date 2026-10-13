@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 CODE_TTL = 15 * 60.0
 CHALLENGE_TTL = 5 * 60.0
 MAX_PENDING_CEREMONIES = 256
-RP_NAME = "Relay Console"
+RP_NAME = "Ebi AI Console"
 #: Every passkey belongs to the one owner of this console. A stable handle lets
 #: an authenticator replace its own earlier passkey instead of piling up copies.
 OWNER_HANDLE = b"ccdb-relay-console-owner"
@@ -113,7 +113,7 @@ class PasskeyService:
             return None
         code = self.issue_code(logged=True)
         logger.warning(
-            "Relay Console setup code: %s — open the console and enter it to register a "
+            "Ebi AI Console setup code: %s — open the console and enter it to register a "
             "passkey (single use, valid %d minutes)",
             code,
             int(CODE_TTL // 60),
@@ -178,7 +178,7 @@ class PasskeyService:
             rp_name=RP_NAME,
             user_id=OWNER_HANDLE,
             user_name="owner",
-            user_display_name="Relay Console owner",
+            user_display_name="Ebi AI Console owner",
             # Discoverable, so signing in needs no user name; user verification
             # required, so the passkey is a second factor and not just a key.
             authenticator_selection=AuthenticatorSelectionCriteria(
