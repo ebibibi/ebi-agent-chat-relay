@@ -211,6 +211,16 @@ async def test_the_recent_view_is_in_the_nav_and_on_g_u(client) -> None:
     assert 'u: "recent"' in script
 
 
+async def test_passkey_calls_carry_the_stored_token(client) -> None:
+    # A browser signed in with the token has no session cookie; without the
+    # header, Passkeys -> Add a device answers 401 (#979).
+    script = await (await client.get("/static/auth.js")).text()
+    call = script[script.index("async function call(") :]
+    call = call[: call.index("\n  }\n")]
+    assert 'localStorage.getItem("token")' in call
+    assert "headers.Authorization = `Bearer ${token}`" in call
+
+
 def test_log_values_cannot_forge_lines() -> None:
     from claude_discord.console.logsafe import q
 
