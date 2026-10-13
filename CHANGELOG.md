@@ -11,7 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Relay Console: Focus view and automatic triage** (#933) — a new default view answers "what
+- **The Relay Console is now the Ebi AI Console** — the web GUI of Ebi Agent Chat Relay has a
+  name of its own. Only the display name changed: URLs (`/console/…`), `CCDB_CONSOLE_*`
+  settings, the `[console]` extra and the API stay as they were.
+- **Ebi AI Console: Focus view and automatic triage** (#933) — a new default view answers "what
   do I do now?". A fast model reads each open thread with new activity and fills in what nobody
   set by hand: priority, a deadline the conversation names, why, the next step, whether that step
   can be done now or must wait (for what, until when), and whether it is bound to a place or
@@ -20,21 +23,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the cheapest model of the backend chosen with `/backend` (Haiku on Claude, the cheapest model in
   Codex's catalog on Codex) as a one-shot, tool-less call. A value a person sets always wins and is
   pinned. `CCDB_CONSOLE_TRIAGE=0` turns it off.
-- **Relay Console: several places at once** (#961) — the Focus view's "I am at" bar takes more
+- **Ebi AI Console: several places at once** (#961) — the Focus view's "I am at" bar takes more
   than one place (home and the work PC); work bound to any of them counts as here.
-- **Relay Console: places** (#933) — tag work that can only be done at home, at the office or on
+- **Ebi AI Console: places** (#933) — tag work that can only be done at home, at the office or on
   the work PC with the 📍 button, say where you are, and work bound elsewhere moves out of the
   way. Places are managed (add, rename, delete — every item follows) from the screen and
   `/console/api/places`.
-- **Relay Console: attach any file** (#950) — paste, drop or pick (📎) any file into a reply, not
+- **Ebi AI Console: attach any file** (#950) — paste, drop or pick (📎) any file into a reply, not
   only images; up to 10 per reply, 50 MB each (images 10 MB, still checked by their bytes). The
   agent gets each file by local path; the original name is kept, sanitised.
-- **Relay Console: context usage per thread** (#946) — each row shows how full the thread's
+- **Ebi AI Console: context usage per thread** (#946) — each row shows how full the thread's
   context window was after its last turn ("🧠 45%", amber from 70%, red from 90%), and the
   detail header shows used / window ("182k / 200k"), read from the session table.
-- **Relay Console: due dates on every row** — "Due 10/14 18:00 (in 2d)", highlighted within a day,
+- **Ebi AI Console: due dates on every row** — "Due 10/14 18:00 (in 2d)", highlighted within a day,
   "overdue" in red, "No due date" when none.
-- **Relay Console: everyday use** (#938) — resizable columns; the conversation keeps its room and
+- **Ebi AI Console: everyday use** (#938) — resizable columns; the conversation keeps its room and
   scroll position; chime, toast, unread marks and desktop notifications when something comes to
   you; images from chat threads and agents preview in place, and can be pasted into a reply;
   slash commands, skills and CLI built-ins autocomplete in the reply box, with a real `/compact`
@@ -42,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   undo; tool calls of console conversations are kept as a log behind the "⚙ Activity" button
   (#930).
 
-- **Relay Console: Recent view** (#927) — every item, finished ones included, newest activity
+- **Ebi AI Console: Recent view** (#927) — every item, finished ones included, newest activity
   first and grouped by day, with each row naming the list it lives in now. In the nav and on
   `g u`. See [docs/console.md](docs/console.md).
 
@@ -58,20 +61,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Windows: console triage and Codex `/compact` start npm `.cmd` CLIs** (#937) — they are
   resolved to `node` + script (current cmd-shim wrappers included) and never run through
   `cmd.exe` with untrusted arguments.
-- **Relay Console conversations resume after a bot restart.**
+- **Ebi AI Console conversations resume after a bot restart.**
 
 - **A turn queued at shutdown no longer loses the user's message** (#915) — it used to be resumed
   with the generic "bot restarted" prompt; it now replays the message it was waiting to send,
-  in Discord threads and Relay Console conversations alike.
+  in Discord threads and Ebi AI Console conversations alike.
 
-- **Relay Console: sign in with Google, Entra ID or any OIDC provider** (#894) — optional, next
+- **Ebi AI Console: sign in with Google, Entra ID or any OIDC provider** (#894) — optional, next
   to passkeys and without Cloudflare in front. Set `CCDB_CONSOLE_OIDC_ISSUER`, `_CLIENT_ID`,
   `_CLIENT_SECRET`, `CCDB_CONSOLE_ORIGIN` and `CCDB_CONSOLE_ALLOWED_EMAILS`. Authorization code
   flow with PKCE, browser-bound `state`, `nonce`, and ID-token verification against the issuer's
   keys. The provider must assert `email_verified: true`; taking an email off the allowlist ends
   its sessions at once.
 
-- **Passkey sign-in for the Relay Console** (#893) — the console now signs you in with a passkey
+- **Passkey sign-in for the Ebi AI Console** (#893) — the console now signs you in with a passkey
   (WebAuthn, user verification required) by default, so setting `CCDB_CONSOLE_PORT` alone gives
   phishing-resistant multi-factor sign-in with no third-party account. The first passkey is
   registered with a single-use setup code that ccdb writes to its log; more devices are added
@@ -79,25 +82,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stored). Cloudflare Access and `CCDB_CONSOLE_TOKEN` keep working unchanged. Requires the
   `[console]` extra, which now includes `webauthn`. See ADR-0012.
 
-- **Live view, Stop and file downloads for Relay Console conversations** — while a console
+- **Live view, Stop and file downloads for Ebi AI Console conversations** — while a console
   conversation runs, the detail view shows the tool calls, the answer as it streams and a Stop
   button (`GET /console/api/items/{id}/live`, `POST …/stop`). Files the agent delivers are kept
   next to the session database and downloadable from the conversation
   (`GET /console/api/files/…`, authenticated, path-checked). The file-delivery guidance in the
   system prompt now names the frontend the conversation is on instead of always saying Discord.
 
-- **Relay Console: captured work starts right away** (#879) — quick capture hands the item
+- **Ebi AI Console: captured work starts right away** (#879) — quick capture hands the item
   to an agent by default (`POST /console/api/items` with `start: true`). A checkbox next to
   the input, remembered per browser, turns it back into "just write it down".
 
 - **Run ccdb without Discord** (#891) — `CCDB_FRONTENDS` accepts `console`, and a list without
   `discord` (`console`, `console,teams`, `teams`) runs headless: no Discord login, no
   `DISCORD_BOT_TOKEN` or `DISCORD_CHANNEL_ID`. The scheduler and the wait watcher still run (a
-  headless bot's `wait_until_ready()` returns at once), and the Relay Console becomes the primary
+  headless bot's `wait_until_ready()` returns at once), and the Ebi AI Console becomes the primary
   frontend, so scheduled tasks open console conversations. A headless configuration nobody could
   reach is refused at startup.
 
-- **The Relay Console owns the conversations it starts** (#889) — starting written-down work from
+- **The Ebi AI Console owns the conversations it starts** (#889) — starting written-down work from
   the console used to open a Discord thread, so every console task also appeared in Discord and
   the console could not start work without a chat platform. It now runs in a conversation the
   console owns: a `ConsoleSurface` / `ConsoleFrontend` on the same frontend seam as Discord and
@@ -122,14 +125,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `backend` and `model` columns (auto-migrated); an unpinned task behaves exactly as before, which
   is what every task created before this does.
 
-- **Relay Console** (#870) — an API-first triage screen on its own listener
+- **Ebi AI Console** (#870) — an API-first triage screen on its own listener
   (`CCDB_CONSOLE_PORT`, off by default). Inbox of threads waiting on the human, running work,
   a project/parent tree, priority P0–P3, due dates, snooze, quick capture and "hand to an agent",
   reply and done from desktop or phone. Status is derived from existing markers, running turns
   and spawn lineage; only priority/due/snooze/project/parent live in the new `work_items` table.
   Always authenticated (Cloudflare Access JWT with an email allowlist, and/or a bearer token);
   refuses to start otherwise. See `docs/console.md` and ADR-0010.
-- **Relay Console: readable threads** — messages render as Markdown, the relay's own activity
+- **Ebi AI Console: readable threads** — messages render as Markdown, the relay's own activity
   (tool calls, status lines, automatic prompts) is hidden unless asked for, each column scrolls on
   its own, the reply box is larger, and quick capture takes a note under the title.
 - **Waits** (#854) — `POST /api/waits` lets a session end its turn (freeing its concurrency slot)

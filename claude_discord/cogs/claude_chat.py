@@ -1307,7 +1307,7 @@ class ClaudeChatCog(commands.Cog):
                 logger.error("Failed to resume session in thread %d", thread_id, exc_info=True)
 
     async def _resume_in_console(self, thread_id: int, prompt: str) -> bool:
-        """Resume a Relay Console conversation, which has no Discord thread to fetch.
+        """Resume a Ebi AI Console conversation, which has no Discord thread to fetch.
 
         Returns False when the console does not own *thread_id*, so the caller
         goes on to resume it in Discord.

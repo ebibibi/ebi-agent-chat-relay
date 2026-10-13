@@ -86,7 +86,7 @@ class ChoiceView(discord.ui.View):
             return (default,) if default is not None else None
 
     def console_actions(self, message: discord.Message) -> list[MessageAction]:
-        """The choices as actions the Relay Console can press.
+        """The choices as actions the Ebi AI Console can press.
 
         Single choice only: a multi-select needs a form, so the console
         answers those by replying in text as before.

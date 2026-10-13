@@ -1,4 +1,4 @@
-// Relay Console web client. No build step, no dependencies.
+// Ebi AI Console web client. No build step, no dependencies.
 // Every piece of server data reaches the page through textContent, never innerHTML
 // (message Markdown included: markdown.js builds elements, it does not parse HTML).
 "use strict";
@@ -288,7 +288,7 @@ function renderNav() {
   counts.focus = window.ConsoleFocus.count(state.items);
   const nav = $("nav");
   nav.replaceChildren(
-    h("div", { class: "brand", text: "Relay Console" }),
+    h("div", { class: "brand", text: "Ebi AI Console" }),
     ...VIEWS.map((v) => v.sep ? h("div", { class: "sep" }) : h("button", {
       class: state.view === v.key ? "active" : "",
       onclick: () => setView(v.key),
@@ -304,7 +304,7 @@ function renderNav() {
   );
   $("view-title").textContent = T[state.view];
   const hot = counts.me || 0;
-  document.title = hot ? `(${hot}) Relay Console` : "Relay Console";
+  document.title = hot ? `(${hot}) Ebi AI Console` : "Ebi AI Console";
 }
 
 function renderList() {

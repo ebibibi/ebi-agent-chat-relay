@@ -1,4 +1,4 @@
-// Discord-flavoured Markdown → DOM nodes for the Relay Console.
+// Discord-flavoured Markdown → DOM nodes for the Ebi AI Console.
 // Builds elements with createElement/textContent only — never innerHTML — so a
 // message can format itself but cannot inject markup. Links are http(s), plus /console/api/files/ downloads.
 "use strict";

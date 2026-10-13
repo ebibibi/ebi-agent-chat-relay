@@ -107,5 +107,5 @@ async def test_file_delivery_guidance_names_the_console() -> None:
 
     context = await _build_system_context(config)
 
-    assert "Relay Console cannot open local filesystem paths" in context
+    assert "Ebi AI Console cannot open local filesystem paths" in context
     assert "send files to Discord" not in context

@@ -490,7 +490,7 @@ class AutoUpgradeCog(commands.Cog):
         # Shared event — set by either the reaction loop or the button callback.
         approved = asyncio.Event()
 
-        # The Relay Console reads the thread but cannot react or click, so the
+        # The Ebi AI Console reads the thread but cannot react or click, so the
         # approval message (and every reminder) also offers an approve action.
         async def _approve_from_console(who: str) -> None:
             logger.info("Restart approved from the console by %s", who)
