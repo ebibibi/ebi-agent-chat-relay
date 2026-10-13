@@ -144,6 +144,25 @@ remaining. On a phone the strip wraps, so every backend stays visible.
   view of whether the profile is blocked.
 
 
+### Running work
+
+The nav shows "Running 2 / limit 4 · 1 queued". − / + change the limit (1–32) at once: raising
+it starts waiting runs, lowering it lets running ones finish first. A limit changed here is kept
+across restarts (`POST /console/api/slots` with `max`; stored in the settings table and applied
+on start).
+
+Each thread carries one-click controls for its state, on its row and in the detail header:
+
+| State | Controls |
+|---|---|
+| Running | ⏸ Pause — stop this turn and mark the thread paused; ■ Stop — stop this turn |
+| Paused | ▶ Resume — ask the agent to carry on from where it stopped, and clear the mark |
+| Waiting for a slot | ⏫ First — start before the others waiting; ⏬ Later — let them go first |
+
+Stop and Pause work for chat threads and console conversations alike: every run registers an
+interrupt with the slot it holds (`POST /console/api/items/{id}/stop`, `/pause`, `/resume`,
+`/queue` with `action: first|later`). The pause mark is stored on the item (`paused_at`).
+
 📌 in the detail header (or `p`) pins a thread as what you are working on now. Pinned threads
 open every list but Done under a highlighted "📌 Working on now" strip, newest pin first, and
 leave their usual place (the tree keeps them in place too). The pin is stored with the item

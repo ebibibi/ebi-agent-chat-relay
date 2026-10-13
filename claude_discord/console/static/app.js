@@ -10,7 +10,13 @@ const HISTORY = 100;
 
 const I18N = {
   en: {
-    focus: "🎯 Focus", focus_first: "Do this first", focus_next: "Then", focus_waiting: "⏳ Waiting", focus_elsewhere: "📍 Somewhere else", place_new: "New place", add: "Add", delete: "Delete", place_manage: "Manage places", place_hint: "Where this can only be done", place_count: (n) => `${n} open`, place_unlisted: "in use, not listed", place_unlisted_hint: "Used on items (often guessed by AI) but not on your list", place_manage_hint: "Renaming or deleting a place changes it on every item. A deleted place leaves its items doable anywhere.", place_none: "No places yet.", place_delete_confirm: (n, c) => `Remove "${n}" from ${c} open item(s)?`, here: "I am at:", here_hint: "Pick every place you are at; work bound to any of them counts as here", anywhere: "Anywhere", place: "Place", place_ph: "anywhere", no_due: "No due date", pinned_group: "📌 Working on now", pin: "Pin", unpin: "Pinned",
+    focus: "🎯 Focus", focus_first: "Do this first", focus_next: "Then", focus_waiting: "⏳ Waiting", focus_elsewhere: "📍 Somewhere else", place_new: "New place", add: "Add", delete: "Delete", place_manage: "Manage places", place_hint: "Where this can only be done", place_count: (n) => `${n} open`, place_unlisted: "in use, not listed", place_unlisted_hint: "Used on items (often guessed by AI) but not on your list", place_manage_hint: "Renaming or deleting a place changes it on every item. A deleted place leaves its items doable anywhere.", place_none: "No places yet.", place_delete_confirm: (n, c) => `Remove "${n}" from ${c} open item(s)?`, here: "I am at:", here_hint: "Pick every place you are at; work bound to any of them counts as here", anywhere: "Anywhere", place: "Place", place_ph: "anywhere", no_due: "No due date", pause: "Pause", stop: "Stop", resume: "Resume", first: "First", later: "Later",
+    paused: "paused", pause_hint: "Stop this turn now and mark the thread paused; Resume carries on",
+    stop_hint: "Stop this turn now", resume_hint: "Ask the agent to carry on from where it was paused",
+    first_hint: "Start this one before the others waiting", later_hint: "Let the others waiting go first",
+    paused_toast: "Paused", stopped_toast: "Stopping", resumed_toast: "Resumed",
+    slots_hint: "Threads running now / the most that may run at once", slots_up: "Allow one more at once",
+    slots_down: "Allow one fewer at once", slots_set: (n) => `Up to ${n} at once`, pinned_group: "📌 Working on now", pin: "Pin", unpin: "Pinned",
     pin_hint: "Pin as what you are working on now; pinned threads lead every list (p)", hide_done_off: "✅ Showing done", hide_done_on: "✅ Done hidden",
     hide_done_hint: "Hide or show finished items in every list (h)", hide_done_in_done: "The Done list always shows finished items", context_hint: (d) => `Context window used by the last turn: ${d}`, due_over: "overdue", due_in: (x) => `in ${x}`, u_min: "m", u_hour: "h", u_day: "d", focus_ready: "can do now", focus_from: (d) => `from ${d}`, ai_guess: "AI guess", ai_set: "set by AI",
     me: "Inbox", ai: "Running", todo: "To do", idle: "Idle", recent: "Recent", tree: "Tree", snoozed: "Snoozed", done: "Done",
@@ -20,7 +26,7 @@ const I18N = {
     activity_hint: "Show or hide tool calls, status lines and automatic prompts",
     notify_on: "🔔 Notifications on", notify_off: "🔕 Notifications off",
     jump: "↓ Latest", jump_new: (n) => `↓ ${n} new`, no_messages: "No messages yet.",
-    slots: (r, m, w) => `Slots ${r}/${m ?? "∞"}` + (w ? ` · ${w} queued` : ""),
+    slots: (r, m, w) => `Running ${r} / limit ${m ?? "∞"}` + (w ? ` · ${w} queued` : ""),
     priority: "Priority", due: "Due", snooze: "Snooze", project: "Project", parent: "Under",
     none: "—", reopen: "Reopen", finish: "Done", finish_confirm: "Click again to finish",
     finish_hint: "Mark this thread done (click twice; shortcut e). Undo right after, or Reopen any time.",
@@ -43,7 +49,13 @@ const I18N = {
            ["r", "reply"], ["/", "filter"], ["h", "hide / show done"], ["p", "pin / unpin (working on now)"], ["g then f/i/a/u/t/w/d", "go to a view"], ["?", "this help"]],
   },
   ja: {
-    focus: "🎯 今やること", focus_first: "まずこれ", focus_next: "次に", focus_waiting: "⏳ 待ち", focus_elsewhere: "📍 別の場所でやること", place_new: "新しい場所", add: "追加", delete: "削除", place_manage: "場所の管理", place_hint: "ここでしかできない場所・端末", place_count: (n) => `未完了 ${n}件`, place_unlisted: "未登録", place_unlisted_hint: "スレッドで使われているが一覧にない場所（多くはAIの推定）", place_manage_hint: "名前の変更・削除はすべてのスレッドに反映されます。削除した場所のスレッドは「どこでも」になります。", place_none: "まだ場所はありません。", place_delete_confirm: (n, c) => `「${n}」を未完了の ${c} 件から外しますか？`, here: "いまいる場所：", here_hint: "いまいる場所を全部選べます。どれかに当てはまるものを「ここでできる」とみなします", anywhere: "どこでも", place: "場所", place_ph: "どこでも", no_due: "期限なし", pinned_group: "📌 いまやってる", pin: "ピン留め", unpin: "ピン中",
+    focus: "🎯 今やること", focus_first: "まずこれ", focus_next: "次に", focus_waiting: "⏳ 待ち", focus_elsewhere: "📍 別の場所でやること", place_new: "新しい場所", add: "追加", delete: "削除", place_manage: "場所の管理", place_hint: "ここでしかできない場所・端末", place_count: (n) => `未完了 ${n}件`, place_unlisted: "未登録", place_unlisted_hint: "スレッドで使われているが一覧にない場所（多くはAIの推定）", place_manage_hint: "名前の変更・削除はすべてのスレッドに反映されます。削除した場所のスレッドは「どこでも」になります。", place_none: "まだ場所はありません。", place_delete_confirm: (n, c) => `「${n}」を未完了の ${c} 件から外しますか？`, here: "いまいる場所：", here_hint: "いまいる場所を全部選べます。どれかに当てはまるものを「ここでできる」とみなします", anywhere: "どこでも", place: "場所", place_ph: "どこでも", no_due: "期限なし", pause: "一時停止", stop: "停止", resume: "再開", first: "先に", later: "後回し",
+    paused: "一時停止中", pause_hint: "いまのターンを止めて一時停止の印を付けます。「再開」で続きから",
+    stop_hint: "いまのターンを止めます", resume_hint: "止めたところから続けるようエージェントに頼みます",
+    first_hint: "待っているほかのスレッドより先に始めます", later_hint: "待っているほかのスレッドを先にします",
+    paused_toast: "一時停止しました", stopped_toast: "停止しています", resumed_toast: "再開しました",
+    slots_hint: "いま実行中の数 / 同時に動かせる上限", slots_up: "同時に動かせる数を1つ増やす",
+    slots_down: "同時に動かせる数を1つ減らす", slots_set: (n) => `同時実行の上限を ${n} にしました`, pinned_group: "📌 いまやってる", pin: "ピン留め", unpin: "ピン中",
     pin_hint: "いまやってる目印。ピン留めしたスレッドはどの一覧でも一番上に出ます（p）", hide_done_off: "✅ 完了も表示", hide_done_on: "✅ 完了を隠す中",
     hide_done_hint: "完了したタスクを全部の一覧で隠す／表示する（h）", hide_done_in_done: "「完了」の一覧では常に表示します", context_hint: (d) => `直近のターンで使ったコンテキスト：${d}`, due_over: "超過", due_in: (x) => `あと${x}`, u_min: "分", u_hour: "時間", u_day: "日", focus_ready: "今すぐできる", focus_from: (d) => `${d}〜`, ai_guess: "AIの見立て", ai_set: "AIが推定",
     me: "受信箱", ai: "実行中", todo: "やること", idle: "止まっている", recent: "更新順", tree: "ツリー", snoozed: "スヌーズ中", done: "完了",
@@ -53,7 +65,7 @@ const I18N = {
     activity_hint: "ツール実行・状態表示・自動プロンプトの表示／非表示",
     notify_on: "🔔 通知オン", notify_off: "🔕 通知オフ",
     jump: "↓ 最新へ", jump_new: (n) => `↓ 新着 ${n}件`, no_messages: "まだメッセージはありません",
-    slots: (r, m, w) => `枠 ${r}/${m ?? "∞"}` + (w ? `・待ち ${w}` : ""),
+    slots: (r, m, w) => `実行中 ${r} / 上限 ${m ?? "∞"}` + (w ? `・待ち ${w}` : ""),
     priority: "優先度", due: "期限", snooze: "スヌーズ", project: "案件", parent: "親",
     none: "なし", reopen: "戻す", finish: "完了", finish_confirm: "もう一度押すと完了",
     finish_hint: "このスレッドを完了にする（2回押す。ショートカット e）。直後なら「元に戻す」、あとからでも「戻す」で復活できます",
@@ -340,7 +352,7 @@ function renderNav() {
     }, h("span", { text: T[v.key] }), h("span", {
       class: "count" + (v.hot && counts[v.key] ? " hot" : ""), text: counts[v.key] || "",
     }))),
-    h("div", { class: "slots", text: T.slots(state.slots.running ?? 0, state.slots.max, state.slots.waiting) }),
+    window.ConsoleSlots.nav(),
     window.ConsoleNotify ? h("button", { class: "nav-notify" + (window.ConsoleNotify.isOn() ? " on" : ""),
       onclick: () => window.ConsoleNotify.toggle() },
       h("span", { text: window.ConsoleNotify.isOn() ? T.notify_on : T.notify_off })) : null,
@@ -380,12 +392,15 @@ function rowNode({ item, depth, children }) {
   if (place) meta.push(place);
   meta.push(h("span", { class: item.running ? "live" : "", text: T.st[item.status] || item.status }));
   if (item.queued) meta.push(h("span", { text: T.queued }));
+  if (item.paused_at && !item.running) meta.push(h("span", { class: "tag paused", text: `⏸ ${T.paused}` }));
   if (item.last_activity_at) meta.push(h("span", { text: rel(item.last_activity_at) }));
   if (item.working_dir) meta.push(h("span", { text: item.working_dir.split("/").slice(-1)[0] }));
   const ctx = contextTag(item, false);
   if (ctx) meta.push(ctx);
   // A value the model filled in is marked, so a guess never passes for a decision.
-  const side = [h("span", { class: `pri p${item.priority}` + (item.priority_by === "ai" ? " ai" : ""),
+  const controls = window.ConsoleSlots.controls(item, true);
+  const side = [controls.length ? h("span", { class: "row-slot" }, ...controls) : null,
+    h("span", { class: `pri p${item.priority}` + (item.priority_by === "ai" ? " ai" : ""),
     title: item.priority_by === "ai" ? T.ai_set : null, text: `P${item.priority}` })];
   side.push(dueLabel(item));
   const twisty = children
@@ -488,6 +503,7 @@ function headParts(item) {
   parts.push(h("button", { class: "btn d-more" + (state.drawerOpen ? " on" : ""), type: "button",
     "aria-expanded": state.drawerOpen ? "true" : "false", onclick: toggleDrawer,
     text: `${state.drawerOpen ? "▴" : "▾"} ${T.details}` }));
+  parts.push(...window.ConsoleSlots.controls(item, false));
   parts.push(window.ConsoleFinish.button(item));
   return parts;
 }

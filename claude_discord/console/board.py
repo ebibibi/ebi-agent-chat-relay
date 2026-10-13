@@ -289,6 +289,7 @@ def _item(
         "project": overlay.project if overlay else None,
         "place": overlay.place if overlay else None,
         "pinned_at": overlay.pinned_at if overlay else None,
+        "paused_at": overlay.paused_at if overlay else None,
         "note": overlay.note if overlay else None,
         "parent_id": parent_id,
         "running": running,

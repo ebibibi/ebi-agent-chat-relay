@@ -36,6 +36,11 @@ from enum import IntEnum
 logger = logging.getLogger(__name__)
 
 
+#: Bounds for a limit changed at runtime (from a UI or the REST API).
+MIN_SLOTS = 1
+MAX_SLOTS = 32
+
+
 class SlotPriority(IntEnum):
     """Queue order. Higher starts first; equal priority keeps arrival order."""
 
@@ -115,6 +120,21 @@ class SessionSlotScheduler:
     @property
     def max_slots(self) -> int:
         return self._max_slots
+
+    def set_max_slots(self, value: int) -> None:
+        """Change the limit at runtime.
+
+        Raising it starts waiting runs at once; lowering it never interrupts a
+        running session — the extra ones simply finish before anyone new starts.
+        """
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("max_slots must be an integer")
+        if not MIN_SLOTS <= value <= MAX_SLOTS:
+            raise ValueError(f"max_slots must be {MIN_SLOTS}..{MAX_SLOTS}")
+        if value != self._max_slots:
+            logger.info("Slot limit: %d -> %d", self._max_slots, value)
+        self._max_slots = value
+        self._dispatch()
 
     @property
     def running_count(self) -> int:
@@ -277,6 +297,21 @@ class SessionSlotScheduler:
         logger.info("Slot queue: pausing thread %d", thread_key)
         await entry.on_pause()
         return entry
+
+    async def stop(self, thread_key: int) -> SlotEntry:
+        """Interrupt a running session for good: unlike pause, it is not re-queued."""
+        entry = self._find_running(thread_key)
+        if entry is None:
+            raise SlotActionError("not_running", "This thread is not running.")
+        if entry.on_pause is None:
+            raise SlotActionError("not_stoppable", "This run cannot be stopped.")
+        logger.info("Slot queue: stopping thread %d", thread_key)
+        await entry.on_pause()
+        return entry
+
+    def is_running(self, thread_key: int) -> bool:
+        """Whether *thread_key* holds a slot right now."""
+        return self._find_running(thread_key) is not None
 
     # ------------------------------------------------------------------
     # Introspection
