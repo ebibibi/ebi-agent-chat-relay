@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from claude_discord.cogs.notification_dispatch import NotificationDispatchCog
 from claude_discord.console.messages import (
     KIND_ACTIVITY,
     KIND_AGENT,
@@ -91,6 +92,23 @@ def test_embeds_are_serialized_with_their_colour() -> None:
     assert out["kind"] == KIND_ACTIVITY
     assert out["embeds"] == [{"title": "🔧 Bash", "description": "ls", "color": 1}]
     assert out["created_at"] == "2026-10-10T00:00:00+00:00"
+
+
+@pytest.mark.parametrize("title", [None, "Tenant setup reminder"])
+def test_delivered_scheduled_notifications_are_visible(title: str | None) -> None:
+    embed = NotificationDispatchCog._build_embed(
+        {"message": "Finish the remaining setup, then reply here.", "title": title}
+    )
+    # A delivered Discord card has no plain-text content. Existing history
+    # must become visible without sending the notification again.
+    out = serialize_message(_message("", embeds=[embed]))
+    assert out["kind"] == KIND_AGENT
+    assert out["embeds"][0]["description"] == "Finish the remaining setup, then reply here."
+
+
+def test_standard_api_notification_is_visible() -> None:
+    embeds = [{"title": "Notification", "description": "Please check this.", "color": 0x00BFFF}]
+    assert classify(is_bot=True, content="", embeds=embeds) == KIND_AGENT
 
 
 def test_a_stored_console_message_gets_a_kind() -> None:

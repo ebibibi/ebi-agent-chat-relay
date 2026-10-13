@@ -75,7 +75,11 @@ Each message carries a `kind`:
 |---|---|---|
 | `human` | What a person wrote in the chat (console replies are posted by the bot, so they show as `agent` with their footer) | Always |
 | `agent` | Answers, questions, errors and files from the agent | Always |
-| `activity` | The relay's own bookkeeping: tool calls, thinking, session start/finish embeds, `-#` status notes, the usage footer, notification pings, rename notices and automatic continuation prompts. A console conversation records one `-#` line per finished tool call | Only with the "⚙ Activity" button in the detail header |
+| `activity` | The relay's own bookkeeping: tool calls, thinking, session start/finish embeds, `-#` status notes, the usage footer, completion pings, rename notices and automatic continuation prompts. A console conversation records one `-#` line per finished tool call | Only with the "⚙ Activity" button in the detail header |
+
+Scheduled reminders and API notifications using the standard notification color appear in the
+normal conversation view, including cards delivered before the console was updated. A scheduled
+notification posts a reminder; it does not by itself start an agent turn.
 
 ### Attaching files
 
