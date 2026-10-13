@@ -7,7 +7,7 @@ A thread holds three kinds of message, and the console treats them differently:
   the agent could also write, so it must not decide who the author is.
 - ``agent``: what the agent says to the person — answers, questions, errors.
 - ``activity``: the relay's own bookkeeping — tool calls, thinking, session
-  start/finish embeds, status lines, notification pings, rename notices and
+  start/finish embeds, status lines, completion pings, rename notices and
   automatic continuation prompts. Hidden by default in the web client.
 
 The classification is a set of rules over what ccdb itself posts, so it lives
@@ -29,7 +29,9 @@ MAX_CONTENT_CHARS = 4000
 MAX_EMBED_TEXT_CHARS = 1000
 
 # Embed colours that carry something the person must read.
-_AGENT_EMBED_COLORS = frozenset({COLOR_ASK, COLOR_ERROR})
+# The API and NotificationDispatchCog use deep sky blue for notifications.
+# Include historical cards too: delivery succeeded even when the console hid them.
+_AGENT_EMBED_COLORS = frozenset({COLOR_ASK, COLOR_ERROR, 0x00BFFF})
 # "-# ..." is Discord subtext: ccdb uses it for every status note.
 _SUBTEXT = re.compile(r"^-# ")
 # "[WAIT FINISHED — automatic continuation]", "[MESSAGE FROM ANOTHER CLAUDE SESSION — …]".
