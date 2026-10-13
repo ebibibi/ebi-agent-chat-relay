@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > conversations — decide what to do now (the Focus view, with automatic triage by the cheapest model of
 > your backend), reply with files, pin what you are working on, and pause, resume or stop running
 > work. It is optional: nothing starts unless `CCDB_CONSOLE_PORT` is set. See
-> [docs/console.md](docs/console.md).
+> [docs/console.md](docs/console.md) and the
+> [v5.0.0 release notes](docs/releases/v5.0.0.md).
 >
 > The GUI will be updated rapidly from here on. **Scheduler integration** — managing scheduled
 > tasks from the console — comes next.
@@ -32,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Ebi AI Console: switch backend, model and effort with a picker** (#992) — click the
+  "🤖 backend · model · effort" line above the reply box, or the nav's default, and choose from
+  chips; `GET/POST /console/api/defaults` change the default for new conversations.
 - **The Relay Console is now the Ebi AI Console** — the web GUI of Ebi Agent Chat Relay has a
   name of its own. Only the display name changed: URLs (`/console/…`), `CCDB_CONSOLE_*`
   settings, the `[console]` extra and the API stay as they were.

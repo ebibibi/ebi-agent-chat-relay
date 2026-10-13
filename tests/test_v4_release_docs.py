@@ -48,7 +48,8 @@ def test_v4_release_artifacts_and_versions_are_in_sync() -> None:
     changelog = read("CHANGELOG.md")
     release_notes = read("docs/releases/v4.0.0.md")
 
-    assert current_version.startswith("4.")
+    # v4 set the multi-frontend boundary; later majors keep its artifacts.
+    assert int(current_version.split(".")[0]) >= 4
     assert f'name = "claude-code-discord-bridge"\nversion = "{current_version}"' in lock
     assert "## [4.0.0] - 2026-08-11" in changelog
     assert "# Ebi Agent Chat Relay 4.0.0" in release_notes
@@ -64,3 +65,16 @@ def test_v4_adr_supersedes_the_previous_release_classification() -> None:
     assert "superseded_by: ADR-0006" in old
     assert "supersedes: ADR-0005" in new
     assert "ADR-0006" in index
+
+
+def test_v5_release_notes_and_adr_describe_the_gui_boundary() -> None:
+    changelog = read("CHANGELOG.md")
+    notes = read("docs/releases/v5.0.0.md")
+    adr = read("docs/adr/0014-publish-the-ebi-ai-console-as-v5.md")
+
+    assert "## [5.0.0] - 2026-10-13" in changelog
+    assert "# Ebi Agent Chat Relay 5.0.0" in notes
+    for text in ("Ebi AI Console", "Compatibility", "CCDB_CONSOLE_PORT", "CCDB_CONSOLE_TRIAGE=0"):
+        assert text in notes
+    assert "id: ADR-0014" in adr
+    assert "ADR-0014" in read("docs/adr/_index.md")
