@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the work PC with the 📍 button, say where you are, and work bound elsewhere moves out of the
   way. Places are managed (add, rename, delete — every item follows) from the screen and
   `/console/api/places`.
+- **Ebi AI Console: control running work** (#984) — the nav shows running / limit with − / + to
+  change the concurrent-session limit on the spot (kept across restarts); threads get one-click
+  ⏸ Pause, ■ Stop, ▶ Resume, and ⏫ First / ⏬ Later while waiting for a slot.
 - **Ebi AI Console: pin what you are working on** (#978) — 📌 (or `p`) pins a thread; pinned
   threads lead every list under a highlighted "Working on now" strip, on every device.
 - **Ebi AI Console: hide finished items** (#972) — a header switch (or `h`) leaves done items out of

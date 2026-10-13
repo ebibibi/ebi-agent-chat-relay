@@ -130,6 +130,22 @@ _SECURITY_HEADERS = {
 }
 
 
+#: The thread a "Resume" button continues: a short instruction, not a new task.
+RESUME_PROMPT = (
+    "▶ Resumed from the console after a pause. Carry on from where you stopped; "
+    "if you were waiting on something, say what."
+)
+#: Where a limit changed from the console is kept (the settings table).
+SLOTS_SETTING = "console.max_sessions"
+
+
+def _thread_key(item_id: str) -> int | None:
+    """The thread key behind a ``t…`` item id, or None for a capture."""
+    if item_id.startswith("t") and item_id[1:].isdigit():
+        return int(item_id[1:])
+    return None
+
+
 def _listed(value: object) -> list[object]:
     """A JSON list field as a list; anything else that is set becomes one bad entry."""
     if value is None:
@@ -245,6 +261,10 @@ class ConsoleServer:
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/start", self.start_item)
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/live", self.live)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/stop", self.stop_item)
+        r.add_post(f"{API_PREFIX}/items/{{item_id}}/pause", self.pause_item)
+        r.add_post(f"{API_PREFIX}/items/{{item_id}}/resume", self.resume_item)
+        r.add_post(f"{API_PREFIX}/items/{{item_id}}/queue", self.queue_item)
+        r.add_post(f"{API_PREFIX}/slots", self.set_slots)
         r.add_get(f"{API_PREFIX}/files/{{key}}/{{token}}/{{name}}", self.file)
         if self.auth_routes is not None:
             self.auth_routes.register(r, API_PREFIX)
@@ -528,14 +548,112 @@ class ConsoleServer:
 
     # -- writes ------------------------------------------------------------
     async def stop_item(self, request: web.Request) -> web.Response:
-        """Stop the running turn of a console conversation, like the chat Stop button."""
-        key = await self._conversation_key(request.match_info["item_id"])
-        if key is None or self.sessions is None:
-            return _error("this item has no console conversation", 404)
-        if not await self.sessions.stop(key, request[IDENTITY]):
-            return _error("nothing is running", 409)
-        logger.info("console: %s stopped conversation %s", _q(request[IDENTITY]), key)
+        """Stop the item's running turn, like the chat Stop button."""
+        err = await self._halt(request.match_info["item_id"], request[IDENTITY])
+        if err is not None:
+            return err
+        logger.info(
+            "console: %s stopped %s", _q(request[IDENTITY]), _q(request.match_info["item_id"])
+        )
         return web.json_response({"status": "stopping"}, status=202)
+
+    async def _halt(self, item_id: str, who: str) -> web.Response | None:
+        """Interrupt the item's running turn; an error response, or None when it stops.
+
+        A console conversation stops through its live view (which notes it in
+        the transcript); a chat thread through the slot its run holds.
+        """
+        key = await self._conversation_key(item_id)
+        if key is not None and self.sessions is not None:
+            if not await self.sessions.stop(key, who):
+                return _error("nothing is running", 409)
+            return None
+        from ..session_slots import SlotActionError, get_session_slots
+
+        thread_key = _thread_key(item_id)
+        slots = get_session_slots()
+        if thread_key is None or slots is None:
+            return _error("nothing is running", 409)
+        try:
+            await slots.stop(thread_key)
+        except SlotActionError as exc:
+            return _error(str(exc), 409)
+        return None
+
+    async def pause_item(self, request: web.Request) -> web.Response:
+        """Stop the running turn and mark the item paused, to resume later."""
+        item_id = request.match_info["item_id"]
+        err = await self._halt(item_id, request[IDENTITY])
+        if err is not None:
+            return err
+        try:
+            await self.work_repo.update(item_id, {"paused": True})
+        except WorkItemError as exc:
+            return _error(str(exc), 400)
+        logger.info("console: %s paused %s", _q(request[IDENTITY]), _q(item_id))
+        return web.json_response({"status": "paused"}, status=202)
+
+    async def resume_item(self, request: web.Request) -> web.Response:
+        """Clear the pause mark and ask the agent to carry on where it stopped."""
+        item_id = request.match_info["item_id"]
+        try:
+            await self.work_repo.update(item_id, {"paused": False})
+        except WorkItemError as exc:
+            return _error(str(exc), 400)
+        logger.info("console: %s resumed %s", _q(request[IDENTITY]), _q(item_id))
+        return await self._deliver(item_id, RESUME_PROMPT, request[IDENTITY])
+
+    async def queue_item(self, request: web.Request) -> web.Response:
+        """Move a thread waiting for a slot: ``first`` (ahead) or ``later`` (behind)."""
+        from ..session_slots import SlotActionError, get_session_slots
+
+        body, err = await self._json(request)
+        if err:
+            return err
+        action = body.get("action")
+        thread_key = _thread_key(request.match_info["item_id"])
+        slots = get_session_slots()
+        if action not in ("first", "later"):
+            return _error("action must be first or later", 400)
+        if thread_key is None or slots is None:
+            return _error("this item is not waiting for a slot", 409)
+        try:
+            if action == "first":
+                slots.prioritize(thread_key)
+            else:
+                slots.defer(thread_key)
+        except SlotActionError as exc:
+            return _error(str(exc), 409)
+        return web.json_response({"status": "ok", "position": slots.position(thread_key)})
+
+    async def set_slots(self, request: web.Request) -> web.Response:
+        """Change the concurrent-session limit now; it is kept across restarts."""
+        from ..session_slots import get_session_slots
+
+        body, err = await self._json(request)
+        if err:
+            return err
+        slots = get_session_slots()
+        if slots is None:
+            return _error("no session limit is configured", 503)
+        value = body.get("max")
+        if isinstance(value, bool) or not isinstance(value, int):
+            return _error("max must be an integer", 400)
+        try:
+            slots.set_max_slots(value)
+        except ValueError as exc:
+            return _error(str(exc), 400)
+        settings = self._backend_settings()
+        repo = getattr(settings, "repo", None)
+        if repo is not None:
+            try:
+                await repo.set(SLOTS_SETTING, str(slots.max_slots))
+            except Exception:
+                logger.warning("console: could not keep the slot limit", exc_info=True)
+        logger.info(
+            "console: %s set the session limit to %d", _q(request[IDENTITY]), slots.max_slots
+        )
+        return web.json_response({"slots": self._slots()})
 
     async def press_action(self, request: web.Request) -> web.Response:
         """Press a button on a thread message, as clicking it in Discord would."""
@@ -1146,6 +1264,7 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
         places=places,
     )
     await console.start()
+    await _restore_slot_limit(api_server)
     if triage_ask is not None:
         console.start_triage(triage_ask, model=triage_ask.model)
     if passkeys is not None:
@@ -1204,6 +1323,24 @@ async def _build_session_host(
     # The wait watcher resumes a conversation after CI; it finds this one here.
     bot.console_sessions = host  # type: ignore[attr-defined]
     return host
+
+
+async def _restore_slot_limit(api_server: ApiServer) -> None:
+    """Apply a session limit changed from the console before the last restart."""
+    from ..session_slots import get_session_slots
+
+    slots = get_session_slots()
+    settings = getattr(api_server.components, "backend_settings", None)
+    repo = getattr(settings, "repo", None)
+    if slots is None or repo is None:
+        return
+    try:
+        raw = await repo.get(SLOTS_SETTING)
+        if raw:
+            slots.set_max_slots(int(raw))
+            logger.info("Ebi AI Console: session limit %d (set from the console)", slots.max_slots)
+    except Exception:
+        logger.warning("Ebi AI Console: ignoring the saved session limit", exc_info=True)
 
 
 def _triage_ask(api_server: ApiServer) -> BackendAsk | None:

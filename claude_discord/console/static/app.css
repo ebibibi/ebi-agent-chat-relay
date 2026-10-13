@@ -52,7 +52,17 @@ button { cursor: pointer; }
 .nav button.active { background: var(--raise); color: #fff; }
 .nav .count { color: var(--dim); font-variant-numeric: tabular-nums; }
 .nav .count.hot { color: var(--me); font-weight: 700; }
-.nav .slots { color: var(--dim); font-size: 12px; padding: 14px 10px 4px; }
+.nav .slots { color: var(--dim); font-size: 12px; padding: 14px 10px 4px; display: flex; align-items: center;
+  justify-content: space-between; gap: 6px; flex-wrap: wrap; }
+.nav .slots-steps { display: inline-flex; gap: 4px; }
+.nav .slots-step { padding: 0 8px; font-size: 14px; line-height: 20px; }
+.row .row-slot { display: inline-flex; gap: 4px; margin-bottom: 3px; }
+.slot-btn { font-size: 12px; padding: 1px 8px; }
+.row .slot-btn { padding: 0 6px; line-height: 18px; }
+.slot-btn.stop { color: var(--err); }
+.slot-btn.resume { color: var(--ai); border-color: color-mix(in srgb, var(--ai) 50%, var(--line)); }
+.tag.paused { color: var(--p1); border-color: color-mix(in srgb, var(--p1) 50%, var(--line)); }
+.detail .slot-btn { flex: none; }
 .nav .sep { height: 1px; background: var(--line); margin: 8px 6px; }
 
 .list-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); }

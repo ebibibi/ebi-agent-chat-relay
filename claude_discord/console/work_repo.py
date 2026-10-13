@@ -65,6 +65,7 @@ EDITABLE_FIELDS = (
     "state",
     "place",
     "pinned",
+    "paused",
 )
 
 
@@ -97,6 +98,8 @@ class WorkItem:
     place: str | None = None
     #: When a person pinned it as "working on now"; None when it is not pinned.
     pinned_at: str | None = None
+    #: When a person paused its run from the console; None when it is not paused.
+    paused_at: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -114,6 +117,7 @@ class WorkItem:
             "updated_at": self.updated_at,
             "place": self.place,
             "pinned_at": self.pinned_at,
+            "paused_at": self.paused_at,
         }
 
 
@@ -137,6 +141,7 @@ def _row_to_item(row: aiosqlite.Row) -> WorkItem:
         updated_at=row["updated_at"],
         place=row["place"],
         pinned_at=row["pinned_at"],
+        paused_at=row["paused_at"],
     )
 
 
@@ -202,6 +207,10 @@ def validate_changes(changes: dict[str, Any]) -> dict[str, Any]:
             if not isinstance(value, bool):
                 raise WorkItemError("pinned must be true or false")
             clean["pinned_at"] = _now() if value else None
+        elif field == "paused":
+            if not isinstance(value, bool):
+                raise WorkItemError("paused must be true or false")
+            clean["paused_at"] = _now() if value else None
         elif field == "parent_id":
             clean[field] = _optional_text(value, field, 64)
     return clean
@@ -222,6 +231,8 @@ class WorkItemRepository:
                 await db.execute("ALTER TABLE work_items ADD COLUMN place TEXT")
             if "pinned_at" not in have:
                 await db.execute("ALTER TABLE work_items ADD COLUMN pinned_at TEXT")
+            if "paused_at" not in have:
+                await db.execute("ALTER TABLE work_items ADD COLUMN paused_at TEXT")
             await db.commit()
 
     async def list_all(self) -> list[WorkItem]:
@@ -362,14 +373,14 @@ class WorkItemRepository:
     async def _upsert(db: aiosqlite.Connection, item: WorkItem) -> None:
         await db.execute(
             "INSERT INTO work_items (id, thread_id, title, note, parent_id, priority, due_at,"
-            " snoozed_until, project, state, created_at, updated_at, place, pinned_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " snoozed_until, project, state, created_at, updated_at, place, pinned_at,"
+            " paused_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(id) DO UPDATE SET title = excluded.title, note = excluded.note,"
             " parent_id = excluded.parent_id, priority = excluded.priority,"
             " due_at = excluded.due_at, snoozed_until = excluded.snoozed_until,"
             " project = excluded.project, state = excluded.state,"
             " updated_at = excluded.updated_at, place = excluded.place,"
-            " pinned_at = excluded.pinned_at",
+            " pinned_at = excluded.pinned_at, paused_at = excluded.paused_at",
             (
                 item.id,
                 item.thread_id,
@@ -385,5 +396,6 @@ class WorkItemRepository:
                 item.updated_at,
                 item.place,
                 item.pinned_at,
+                item.paused_at,
             ),
         )
