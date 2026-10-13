@@ -94,6 +94,12 @@ as downloads (`application/octet-stream`, `Content-Disposition: attachment`).
 The box for writing down new work takes attachments the same way; they travel in the item's
 note (`POST /console/api/items` with `files`), so an agent started from it gets the paths.
 
+Replies and new work longer than 4,000 characters automatically upload the full text as
+`message.txt`. The agent receives a short instruction to read that file, and the conversation
+keeps a downloadable link. Text is never truncated. This happens before sending JSON, so large
+pastes also avoid the JSON request size limit. The generated file uses one attachment slot and
+the same 50 MB file limit; a failed upload keeps the text in the input box for retry.
+
 ### Previewing files
 
 Files an agent delivers and files attached in chat threads open in place with 👁 Preview
