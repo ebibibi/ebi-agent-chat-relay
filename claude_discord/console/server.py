@@ -139,6 +139,11 @@ RESUME_PROMPT = (
 SLOTS_SETTING = "console.max_sessions"
 
 
+def _no_skills(backend: str) -> list[dict[str, str]]:
+    """The defaults picker lists no skills: they belong to a conversation."""
+    return []
+
+
 def _listed(value: object) -> list[object]:
     """A JSON list field as a list; anything else that is set becomes one bad entry."""
     if value is None:
@@ -234,6 +239,8 @@ class ConsoleServer:
         r.add_get(f"{API_PREFIX}/me", self.me)
         r.add_get(f"{API_PREFIX}/board", self.board)
         r.add_get(f"{API_PREFIX}/usage", self.usage_read)
+        r.add_get(f"{API_PREFIX}/defaults", self.defaults_read)
+        r.add_post(f"{API_PREFIX}/defaults", self.defaults_change)
         r.add_get(f"{API_PREFIX}/places", self.places_read)
         r.add_post(f"{API_PREFIX}/places", self.place_add)
         r.add_patch(f"{API_PREFIX}/places", self.place_rename)
@@ -843,6 +850,38 @@ class ConsoleServer:
             return err
         assert key is not None
         return web.json_response(await catalog(settings, key, self._skill_loader()))
+
+    async def defaults_read(self, request: web.Request) -> web.Response:
+        """The backend, model and effort new conversations start with, and the choices."""
+        settings = self._backend_settings()
+        if settings is None:
+            return _error("this deployment has no backend settings", 503)
+        return web.json_response(await catalog(settings, None, _no_skills))
+
+    async def defaults_change(self, request: web.Request) -> web.Response:
+        """Change the default backend, model or effort (``/backend`` etc. without a thread)."""
+        body, err = await self._json(request)
+        if err:
+            return err
+        settings = self._backend_settings()
+        if settings is None:
+            return _error("this deployment has no backend settings", 503)
+        name = str(body.get("name") or "").strip().lstrip("/")
+        arg = str(body.get("arg") or "")
+        if name not in {n for n, _ in CONTROL_COMMANDS}:
+            return _error("name must be backend, model or effort", 400)
+        if len(arg) > 200:
+            return _error("the value is too long", 400)
+        try:
+            result = await run_command(settings, None, name, arg)
+        except CommandError as exc:
+            return _error(str(exc), 400)
+        logger.info(
+            "console: %s set the default %s to %s", _q(request[IDENTITY]), _q(name), _q(arg.strip())
+        )
+        return web.json_response(
+            {"message": result.message, "catalog": await catalog(settings, None, _no_skills)}
+        )
 
     async def run_command(self, request: web.Request) -> web.Response:
         """Run a slash command typed into the reply box.
