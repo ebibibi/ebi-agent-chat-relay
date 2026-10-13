@@ -139,13 +139,6 @@ RESUME_PROMPT = (
 SLOTS_SETTING = "console.max_sessions"
 
 
-def _thread_key(item_id: str) -> int | None:
-    """The thread key behind a ``t…`` item id, or None for a capture."""
-    if item_id.startswith("t") and item_id[1:].isdigit():
-        return int(item_id[1:])
-    return None
-
-
 def _listed(value: object) -> list[object]:
     """A JSON list field as a list; anything else that is set becomes one bad entry."""
     if value is None:
@@ -570,9 +563,11 @@ class ConsoleServer:
             return None
         from ..session_slots import SlotActionError, get_session_slots
 
-        thread_key = _thread_key(item_id)
+        thread_key, err = await self._slot_key(item_id)
+        if err is not None:
+            return err
         slots = get_session_slots()
-        if thread_key is None or slots is None:
+        if slots is None:
             return _error("nothing is running", 409)
         try:
             await slots.stop(thread_key)
@@ -596,12 +591,15 @@ class ConsoleServer:
     async def resume_item(self, request: web.Request) -> web.Response:
         """Clear the pause mark and ask the agent to carry on where it stopped."""
         item_id = request.match_info["item_id"]
+        delivered = await self._deliver(item_id, RESUME_PROMPT, request[IDENTITY])
+        if delivered.status >= 400:
+            return delivered
         try:
             await self.work_repo.update(item_id, {"paused": False})
         except WorkItemError as exc:
             return _error(str(exc), 400)
         logger.info("console: %s resumed %s", _q(request[IDENTITY]), _q(item_id))
-        return await self._deliver(item_id, RESUME_PROMPT, request[IDENTITY])
+        return delivered
 
     async def queue_item(self, request: web.Request) -> web.Response:
         """Move a thread waiting for a slot: ``first`` (ahead) or ``later`` (behind)."""
@@ -611,11 +609,13 @@ class ConsoleServer:
         if err:
             return err
         action = body.get("action")
-        thread_key = _thread_key(request.match_info["item_id"])
-        slots = get_session_slots()
         if action not in ("first", "later"):
             return _error("action must be first or later", 400)
-        if thread_key is None or slots is None:
+        thread_key, err = await self._slot_key(request.match_info["item_id"])
+        if err is not None:
+            return err
+        slots = get_session_slots()
+        if slots is None:
             return _error("this item is not waiting for a slot", 409)
         try:
             if action == "first":
@@ -1072,6 +1072,20 @@ class ConsoleServer:
         ):
             return None, _error("unknown thread", 404)
         return thread, None
+
+    async def _slot_key(self, item_id: str) -> tuple[int, web.Response | None]:
+        """The thread key a slot action may act on, behind the same gate as reply and press.
+
+        A console conversation is the console's own; any other thread must be a
+        chat thread under a watched channel — never an arbitrary id a client sends.
+        """
+        key = await self._conversation_key(item_id)
+        if key is not None:
+            return key, None
+        thread, err = await self._thread_for(item_id)
+        if err is not None:
+            return 0, err
+        return int(thread.id), None
 
     async def _conversation_key(self, item_id: str) -> int | None:
         """The key of the console conversation behind *item_id*, if it is one."""
