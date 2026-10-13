@@ -144,8 +144,12 @@ remaining. On a phone the strip wraps, so every backend stays visible.
   view of whether the profile is blocked.
 
 
+"✅ Done hidden" in the list header (or `h`) leaves finished items out of every list — Recent and
+the tree included, and filtering does not bring them back. The Done list always shows them. The
+choice is remembered per browser.
+
 `j`/`k` move, `Enter` opens, `Esc` closes, `e` done, `1`–`4` priority P0–P3, `s` snooze until
-tomorrow 09:00, `c` write down work (the first line is the title; `Shift+Enter` adds note lines), `r` reply, `/` filter, `g` then `f`/`i`/`a`/`u`/`t`/`w`/`d` switches
+tomorrow 09:00, `c` write down work (the first line is the title; `Shift+Enter` adds note lines), `r` reply, `/` filter, `h` hide/show done, `g` then `f`/`i`/`a`/`u`/`t`/`w`/`d` switches
 view, `?` help. URLs carry the view and the open item (`/#me/t1234`), so a link can point at a
 single item.
 
