@@ -148,6 +148,13 @@
       const row = el("div", "live-files");
       for (const href of new Set(found)) {
         if (imageType(href)) row.append(thumbnail(href));
+        const P = window.ConsolePreview;
+        if (P && P.kind(fileName(href))) {
+          const look = el("button", "btn", `👁 ${P.label} ${fileName(href)}`);
+          look.type = "button";
+          look.addEventListener("click", () => P.open(fileName(href), () => fetchFile(href), () => download(href)));
+          row.append(look);
+        }
         const btn = el("button", "btn", `📎 ${L.download} ${fileName(href)}`);
         btn.type = "button";
         btn.addEventListener("click", () => download(href));

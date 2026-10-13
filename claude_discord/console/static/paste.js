@@ -11,8 +11,7 @@ window.ConsolePaste = (() => {
   const MAX_FILE = 50 * 1024 * 1024;
   const MAX_COUNT = 10;
   const pending = new Map(); // item id -> [{ url, name, size, preview }]
-  let tray = null;
-  let current = null;
+  const trays = new Map(); // item id -> its tray element
 
   const list = (id) => pending.get(id) || [];
   const isImage = (file) => IMAGE_TYPES.includes(file.type);
@@ -53,23 +52,24 @@ window.ConsolePaste = (() => {
       const entry = { url: null, name: file.name || "file", size: file.size,
         preview: isImage(file) ? await readPreview(file) : null };
       pending.set(id, [...list(id), entry]);
-      draw();
+      draw(id);
       try { entry.url = await upload(file); }
       catch (err) {
         pending.set(id, list(id).filter((e) => e !== entry));
         toast(`${T.attach_failed}: ${err.message}`);
       }
-      draw();
+      draw(id);
     }
   }
 
-  function draw() {
+  function draw(id) {
+    const tray = trays.get(id);
     if (!tray || !tray.isConnected) return;
-    const items = list(current);
+    const items = list(id);
     tray.hidden = !items.length;
     tray.replaceChildren(...items.map((entry) => {
       const remove = h("button", { class: "paste-x", type: "button", "aria-label": "remove", text: "✕",
-        onclick: () => { pending.set(current, list(current).filter((e) => e !== entry)); draw(); } });
+        onclick: () => { pending.set(id, list(id).filter((e) => e !== entry)); draw(id); } });
       if (entry.preview) {
         return h("div", { class: "paste-item" + (entry.url ? "" : " busy"), title: entry.name },
           h("img", { src: entry.preview, alt: entry.name }), remove);
@@ -85,9 +85,8 @@ window.ConsolePaste = (() => {
 
   // Wire the reply box of item *id*; *trayEl* shows what is waiting to be sent.
   function attach(box, id, trayEl) {
-    tray = trayEl;
-    current = id;
-    draw();
+    trays.set(id, trayEl);
+    draw(id);
     box.addEventListener("paste", (e) => {
       const files = filesOf(e.clipboardData && e.clipboardData.items);
       if (!files.length) return; // plain text pastes as usual
@@ -122,7 +121,7 @@ window.ConsolePaste = (() => {
     const items = list(id);
     return items.some((e) => !e.url) ? null : items.map((e) => e.url);
   }
-  function clear(id) { pending.delete(id); if (id === current) draw(); }
+  function clear(id) { pending.delete(id); draw(id); }
 
   return { attach, button, ready, clear };
 })();

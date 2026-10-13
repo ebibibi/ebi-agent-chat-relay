@@ -24,7 +24,9 @@
       <span id="sync" class="sync" aria-live="polite"></span>
     </header>
     <form id="capture" class="capture">
+      <div id="capture-tray" class="paste-tray capture-tray" hidden></div>
       <textarea id="capture-input" rows="1" autocomplete="off" maxlength="4200"></textarea>
+      <span id="capture-attach"></span>
       <label class="autostart"><input id="capture-start" type="checkbox"> <span id="capture-start-label"></span></label>
     </form>
     <ul id="list" class="list" role="listbox"></ul>
@@ -39,6 +41,7 @@
 <script src="/static/paste.js"></script>
 <script src="/static/slash.js"></script>
 <script src="/static/finish.js"></script>
+<script src="/static/preview.js"></script>
 <script src="/static/recent.js"></script>
 <script src="/static/places.js"></script>
 <script src="/static/focus.js"></script>

@@ -493,6 +493,26 @@ async def test_a_reply_hands_any_attachment_to_the_agent_by_path(env) -> None:
     assert not_a_list.status == 400
 
 
+async def test_files_attached_to_a_capture_reach_the_agent(env) -> None:
+    url = (await (await _upload(env, b"# spec", "text/markdown", "spec.md")).json())["url"]
+    created = await env.client.post(
+        "/console/api/items",
+        json={"title": "Read the spec", "note": "carefully", "files": [url], "start": True},
+        headers=WRITE,
+    )
+    assert created.status == 201
+    await _settle(env.host)
+    prompt = env.runs[-1].prompt
+    assert prompt.startswith("Read the spec\n\ncarefully")
+    assert "📎 Attached files" in prompt and "spec.md" in prompt
+    forged = await env.client.post(
+        "/console/api/items",
+        json={"title": "x", "files": ["/etc/passwd"]},
+        headers=WRITE,
+    )
+    assert forged.status == 400
+
+
 class FakeSettings:
     """BackendSettings, in memory: a thread override per key, defaulting to claude."""
 

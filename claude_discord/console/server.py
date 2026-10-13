@@ -119,7 +119,9 @@ _SECURITY_HEADERS = {
         # Discord's CDN is allowed for images only: attachments in chat threads preview inline.
         "default-src 'self'; img-src 'self' data: https://cdn.discordapp.com "
         "https://media.discordapp.net; style-src 'self'; script-src 'self'; "
-        "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+        # Discord's CDN is also readable (CORS "*") so a chat attachment can be previewed.
+        "connect-src 'self' https://cdn.discordapp.com https://media.discordapp.net; "
+        "frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
     ),
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
@@ -562,6 +564,12 @@ class ConsoleServer:
         start = body.pop("start", False)
         if not isinstance(start, bool):
             return _error("start must be a boolean", 400)
+        # Files attached while writing it down travel in the note, as a reply's would.
+        files, err = self._reply_files(_listed(body.pop("files", None)))
+        if err:
+            return err
+        if files:
+            body["note"] = with_attachments(str(body.get("note") or "").strip(), files)
         try:
             item = await self.work_repo.create_capture(body)
         except WorkItemError as exc:

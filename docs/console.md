@@ -87,6 +87,19 @@ kept as it came under a bare, sanitised version of its name, up to 50 MB. The re
 uploads (`files`), and the agent receives each one by local path. Uploads are served back only
 as downloads (`application/octet-stream`, `Content-Disposition: attachment`).
 
+The box for writing down new work takes attachments the same way; they travel in the item's
+note (`POST /console/api/items` with `files`), so an agent started from it gets the paths.
+
+### Previewing files
+
+Files an agent delivers and files attached in chat threads open in place with 👁 Preview
+instead of downloading, when they are text: Markdown is rendered (by the console's DOM-building
+renderer, never as HTML), HTML is rendered in an iframe with an empty `sandbox` (no scripts,
+forms, popups or same-origin access), CSV/TSV shows as a table, JSON pretty-printed, and other
+text (logs, code, YAML, …) as wrapped monospace. Source and Download are always one click away;
+a file over 2 MB shows its first 2 MB. Chat attachments are read from Discord's CDN, which the
+CSP allows for `connect-src` (read-only, CORS `*`).
+
 The open thread reloads with the board while a turn is running, and the list keeps your scroll
 position unless you were already at the bottom.
 
