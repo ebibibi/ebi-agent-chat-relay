@@ -39,6 +39,9 @@ threads and the console's own conversations — on one web screen, on desktop or
 - **Act without leaving the screen** — reply with any file attached, preview files in place, switch
   backend, model and effort with a picker, change the concurrent-session limit, and pause, resume
   or stop running work.
+- **Keep delegated work beside the parent conversation** — a collapsible panel shows child and
+  grandchild status, latest reports and completion counts. Inspect a child, then return to the
+  parent for decisions; direct child replies require an explicit choice.
 - **Optional** — nothing starts unless `CCDB_CONSOLE_PORT` is set, and Discord and Teams keep
   working exactly as before. With the console on, triage is on by default
   (`CCDB_CONSOLE_TRIAGE=0` turns it off).
@@ -464,6 +467,13 @@ On by default (`CCDB_ATTENTION_ENABLED=false` stops recording); every number is 
 ### Ebi AI Console — Triage Agent Work from Desktop or Phone
 
 An API-first triage screen on its own authenticated listener. The default **Focus** view answers "what do I do now?": a fast model (the cheapest one of the backend chosen with `/backend`, one-shot and tool-less) reads each open thread with new activity and fills in what nobody set by hand — priority, a deadline the conversation names, the next step, whether it can be done now or must wait, and whether it is bound to a place or device (📍 home, office, work PC). Only work you can do here and now ranks first; a value a person sets always wins and is pinned (`CCDB_CONSOLE_TRIAGE=0` turns triage off). Every thread is also sorted by whose move it is — **Inbox** (❓ / 👀 / 📋 / ⚠️: the ball is on you), **Running**, **To do**, **Idle**, a project/parent **Tree**, **Snoozed** and **Done**, plus a **Recent** view of every item (finished ones included) by last activity — with priority P0–P3, due dates and snooze, and each thread shows how full its context window was after its last turn (🧠 45%, amber from 70%, red from 90%) so a thread close to compaction is visible before it happens. Reply, mark done, or write down new work — quick capture hands it to an agent right away by default (a checkbox, remembered per browser, keeps it as a plain note) — and it runs in a conversation the console owns (no chat thread), on the same session runner, with its transcript in the session database and replies resuming the same session. Status is derived from what ccdb already knows (outcome markers, running turns, the slot queue, spawn lineage), so agents do nothing new; only priority/due/snooze/project/parent live in a new `work_items` table. Threads render as Markdown, with the relay's own activity (tool calls, status lines, automatic prompts) behind the "⚙ Activity" button. Columns resize, new work arriving for you chimes and can raise a desktop notification, images and text files (Markdown, sandboxed HTML, CSV, JSON, logs, code) preview in place instead of downloading, any file can be pasted, dropped or picked into a reply or into new work, and the reply box autocompletes slash commands and skills (with a real `/compact` for Codex conversations). The nav shows running / limit with − / + to change the concurrent-session limit on the spot (kept across restarts), and each thread carries one-click ⏸ Pause, ■ Stop and ▶ Resume, or ⏫ First / ⏬ Later while it waits for a slot. A picker above the reply box switches a conversation's backend, model and effort from its next turn, and the same picker in the nav sets the default new conversations start with. Keyboard-driven on desktop, installable to a phone's home screen.
+
+Parent conversations show a collapsible **Delegated work** panel with child and grandchild
+status, latest agent reports, and counts of running, attention-needed and completed tasks.
+Open a child to inspect it, use **Back to parent** for its immediate parent or **Main conversation**
+for the root, and send normal requests and decisions to the parent. Child replies are hidden until
+you choose **Reply directly to this child**. See the
+[console guide](docs/console.md#parent-conversations-and-delegated-work).
 
 Scheduled reminders and API notifications using the standard notification color appear in the
 normal conversation view, including cards delivered before this update; you do not need to enable
