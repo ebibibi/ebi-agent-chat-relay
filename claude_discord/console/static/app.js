@@ -10,7 +10,8 @@ const HISTORY = 100;
 
 const I18N = {
   en: {
-    focus: "🎯 Focus", focus_first: "Do this first", focus_next: "Then", focus_waiting: "⏳ Waiting", focus_elsewhere: "📍 Somewhere else", place_new: "New place", add: "Add", delete: "Delete", place_manage: "Manage places", place_hint: "Where this can only be done", place_count: (n) => `${n} open`, place_unlisted: "in use, not listed", place_unlisted_hint: "Used on items (often guessed by AI) but not on your list", place_manage_hint: "Renaming or deleting a place changes it on every item. A deleted place leaves its items doable anywhere.", place_none: "No places yet.", place_delete_confirm: (n, c) => `Remove "${n}" from ${c} open item(s)?`, here: "I am at:", here_hint: "Pick every place you are at; work bound to any of them counts as here", anywhere: "Anywhere", place: "Place", place_ph: "anywhere", no_due: "No due date", hide_done_off: "✅ Showing done", hide_done_on: "✅ Done hidden",
+    focus: "🎯 Focus", focus_first: "Do this first", focus_next: "Then", focus_waiting: "⏳ Waiting", focus_elsewhere: "📍 Somewhere else", place_new: "New place", add: "Add", delete: "Delete", place_manage: "Manage places", place_hint: "Where this can only be done", place_count: (n) => `${n} open`, place_unlisted: "in use, not listed", place_unlisted_hint: "Used on items (often guessed by AI) but not on your list", place_manage_hint: "Renaming or deleting a place changes it on every item. A deleted place leaves its items doable anywhere.", place_none: "No places yet.", place_delete_confirm: (n, c) => `Remove "${n}" from ${c} open item(s)?`, here: "I am at:", here_hint: "Pick every place you are at; work bound to any of them counts as here", anywhere: "Anywhere", place: "Place", place_ph: "anywhere", no_due: "No due date", pinned_group: "📌 Working on now", pin: "Pin", unpin: "Pinned",
+    pin_hint: "Pin as what you are working on now; pinned threads lead every list (p)", hide_done_off: "✅ Showing done", hide_done_on: "✅ Done hidden",
     hide_done_hint: "Hide or show finished items in every list (h)", hide_done_in_done: "The Done list always shows finished items", context_hint: (d) => `Context window used by the last turn: ${d}`, due_over: "overdue", due_in: (x) => `in ${x}`, u_min: "m", u_hour: "h", u_day: "d", focus_ready: "can do now", focus_from: (d) => `from ${d}`, ai_guess: "AI guess", ai_set: "set by AI",
     me: "Inbox", ai: "Running", todo: "To do", idle: "Idle", recent: "Recent", tree: "Tree", snoozed: "Snoozed", done: "Done",
     filter: "Filter…", capture: "+ Write down work, press Enter (c) — Shift+Enter for a note line", capture_ai: "+ Write down work, Enter hands it to AI (c) — Shift+Enter for a note line",
@@ -39,10 +40,11 @@ const I18N = {
           error: "failed", done: "done", someday: "someday", todo: "to do", idle: "idle" },
     help: [["j / k", "next / previous"], ["Enter", "open"], ["Esc", "close"], ["e", "done"],
            ["1–4", "priority P0–P3"], ["s", "snooze until tomorrow"], ["c", "write down work"],
-           ["r", "reply"], ["/", "filter"], ["h", "hide / show done"], ["g then f/i/a/u/t/w/d", "go to a view"], ["?", "this help"]],
+           ["r", "reply"], ["/", "filter"], ["h", "hide / show done"], ["p", "pin / unpin (working on now)"], ["g then f/i/a/u/t/w/d", "go to a view"], ["?", "this help"]],
   },
   ja: {
-    focus: "🎯 今やること", focus_first: "まずこれ", focus_next: "次に", focus_waiting: "⏳ 待ち", focus_elsewhere: "📍 別の場所でやること", place_new: "新しい場所", add: "追加", delete: "削除", place_manage: "場所の管理", place_hint: "ここでしかできない場所・端末", place_count: (n) => `未完了 ${n}件`, place_unlisted: "未登録", place_unlisted_hint: "スレッドで使われているが一覧にない場所（多くはAIの推定）", place_manage_hint: "名前の変更・削除はすべてのスレッドに反映されます。削除した場所のスレッドは「どこでも」になります。", place_none: "まだ場所はありません。", place_delete_confirm: (n, c) => `「${n}」を未完了の ${c} 件から外しますか？`, here: "いまいる場所：", here_hint: "いまいる場所を全部選べます。どれかに当てはまるものを「ここでできる」とみなします", anywhere: "どこでも", place: "場所", place_ph: "どこでも", no_due: "期限なし", hide_done_off: "✅ 完了も表示", hide_done_on: "✅ 完了を隠す中",
+    focus: "🎯 今やること", focus_first: "まずこれ", focus_next: "次に", focus_waiting: "⏳ 待ち", focus_elsewhere: "📍 別の場所でやること", place_new: "新しい場所", add: "追加", delete: "削除", place_manage: "場所の管理", place_hint: "ここでしかできない場所・端末", place_count: (n) => `未完了 ${n}件`, place_unlisted: "未登録", place_unlisted_hint: "スレッドで使われているが一覧にない場所（多くはAIの推定）", place_manage_hint: "名前の変更・削除はすべてのスレッドに反映されます。削除した場所のスレッドは「どこでも」になります。", place_none: "まだ場所はありません。", place_delete_confirm: (n, c) => `「${n}」を未完了の ${c} 件から外しますか？`, here: "いまいる場所：", here_hint: "いまいる場所を全部選べます。どれかに当てはまるものを「ここでできる」とみなします", anywhere: "どこでも", place: "場所", place_ph: "どこでも", no_due: "期限なし", pinned_group: "📌 いまやってる", pin: "ピン留め", unpin: "ピン中",
+    pin_hint: "いまやってる目印。ピン留めしたスレッドはどの一覧でも一番上に出ます（p）", hide_done_off: "✅ 完了も表示", hide_done_on: "✅ 完了を隠す中",
     hide_done_hint: "完了したタスクを全部の一覧で隠す／表示する（h）", hide_done_in_done: "「完了」の一覧では常に表示します", context_hint: (d) => `直近のターンで使ったコンテキスト：${d}`, due_over: "超過", due_in: (x) => `あと${x}`, u_min: "分", u_hour: "時間", u_day: "日", focus_ready: "今すぐできる", focus_from: (d) => `${d}〜`, ai_guess: "AIの見立て", ai_set: "AIが推定",
     me: "受信箱", ai: "実行中", todo: "やること", idle: "止まっている", recent: "更新順", tree: "ツリー", snoozed: "スヌーズ中", done: "完了",
     filter: "絞り込み…", capture: "＋ 思いついた仕事を書いて Enter（c）。Shift+Enter で改行してメモ", capture_ai: "＋ 思いついた仕事を書いて Enter → AIが着手（c）。Shift+Enter で改行してメモ",
@@ -71,7 +73,7 @@ const I18N = {
           error: "失敗", done: "完了", someday: "いつか", todo: "やること", idle: "止まっている" },
     help: [["j / k", "次 / 前"], ["Enter", "開く"], ["Esc", "閉じる"], ["e", "完了"],
            ["1〜4", "優先度 P0〜P3"], ["s", "明日までスヌーズ"], ["c", "仕事を書き留める"],
-           ["r", "返信"], ["/", "絞り込み"], ["h", "完了を隠す／表示"], ["g → f/i/a/u/t/w/d", "画面を移動"], ["?", "このヘルプ"]],
+           ["r", "返信"], ["/", "絞り込み"], ["h", "完了を隠す／表示"], ["p", "ピン留め／解除（いまやってる）"], ["g → f/i/a/u/t/w/d", "画面を移動"], ["?", "このヘルプ"]],
   },
 };
 // ?lang=ja|en pins the language; otherwise the browser's preference decides.
@@ -237,8 +239,23 @@ function matches(item) {
   const q = state.filter.toLowerCase();
   return [item.title, item.project, item.thread_name, item.working_dir].some((v) => v && v.toLowerCase().includes(q));
 }
+// Pinned items ("working on now") open every view but Done, newest pin first, and leave
+// their usual place so nothing is listed twice — except in the tree, whose shape needs them.
+const isPinned = (i) => Boolean(i.pinned_at) && i.bucket !== "done";
 function visibleRows() {
   const items = state.items.filter((i) => matches(i) && !(hidingDone() && i.bucket === "done"));
+  const pinned = state.view === "done" ? [] : items.filter(isPinned)
+    .sort((a, b) => (b.pinned_at || "").localeCompare(a.pinned_at || ""));
+  if (!pinned.length) return viewRows(items);
+  const rest = state.view === "tree" ? viewRows(items) : dropEmptyGroups(viewRows(items.filter((i) => !isPinned(i))));
+  return [{ group: T.pinned_group, cls: "group pinned-group" }, ...pinned.map((item) => ({ item, depth: 0 })), ...rest];
+}
+// A heading whose rows all moved to the pinned strip has nothing left under it.
+function dropEmptyGroups(rows) {
+  return rows.filter((r, i) => r.group === undefined ||
+    rows.slice(i + 1).find((n) => n.group !== undefined || n.item)?.item !== undefined);
+}
+function viewRows(items) {
   if (state.view === "tree") return treeRows(items.filter((i) => i.bucket !== "done"));
   if (state.view === "recent") return window.ConsoleRecent.rows(items);
   if (state.view === "focus") return window.ConsoleFocus.rows(items);
@@ -279,6 +296,11 @@ function treeRows(items) {
 
 // The Done view always shows its items; everywhere else the switch decides.
 function hidingDone() { return state.hideDone && state.view !== "done"; }
+async function togglePin(id) {
+  const item = state.byId.get(id);
+  if (!item) return;
+  await patch(id, { pinned: !item.pinned_at });
+}
 function setHideDone(on) {
   state.hideDone = on;
   localStorage.setItem("hideDone", on ? "1" : "0");
@@ -335,7 +357,7 @@ function renderList() {
   const list = $("list");
   const nodes = [];
   for (const row of rows) {
-    if (row.group !== undefined) { nodes.push(h("li", { class: "group", text: row.group })); continue; }
+    if (row.group !== undefined) { nodes.push(h("li", { class: row.cls || "group", text: row.group })); continue; }
     if (row.node) { nodes.push(row.node); continue; }
     nodes.push(rowNode(row));
   }
@@ -372,7 +394,7 @@ function rowNode({ item, depth, children }) {
     : (depth ? h("span", { class: "tw", text: "" }) : null);
   return h("li", {
     class: "row" + (state.selected === item.id ? " sel" : "") + (item.bucket === "done" ? " done" : "") +
-      (isUnread(item) ? " fresh" : ""),
+      (isUnread(item) ? " fresh" : "") + (isPinned(item) ? " pinned" : ""),
     role: "option", "aria-selected": state.selected === item.id ? "true" : "false",
     onclick: () => { state.selected = item.id; openItem(item.id); },
   },
@@ -456,6 +478,10 @@ function headParts(item) {
   if (!item.thread_id) parts.push(h("button", { class: "btn primary", onclick: () => startItem(item.id), text: T.start }));
   const ctx = contextTag(item, true);
   if (ctx) parts.push(ctx);
+  const pinned = Boolean(item.pinned_at);
+  parts.push(h("button", { class: "btn d-pin" + (pinned ? " on" : ""), type: "button", title: T.pin_hint,
+    "aria-pressed": pinned ? "true" : "false", onclick: () => togglePin(item.id),
+    text: pinned ? `📌 ${T.unpin}` : `📌 ${T.pin}` }));
   parts.push(window.ConsolePlaces.picker(item));
   // Tool calls and status lines: one click away, never folded into the drawer.
   if (item.thread_id) parts.push(activityToggle());
@@ -842,6 +868,7 @@ function wire() {
       case "k": case "ArrowUp": move(-1); break;
       case "Enter": if (id) openItem(id); break;
       case "e": if (id && state.byId.get(id)?.bucket !== "done") window.ConsoleFinish.finish(id); break;
+      case "p": if (id) togglePin(id); break;
       case "1": case "2": case "3": case "4": if (id) patch(id, { priority: Number(e.key) - 1 }); break;
       case "s": if (id) patch(id, { snoozed_until: snoozeTarget("tomorrow").toISOString() }); break;
       case "c": $("capture-input").focus(); break;

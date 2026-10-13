@@ -144,12 +144,17 @@ remaining. On a phone the strip wraps, so every backend stays visible.
   view of whether the profile is blocked.
 
 
+📌 in the detail header (or `p`) pins a thread as what you are working on now. Pinned threads
+open every list but Done under a highlighted "📌 Working on now" strip, newest pin first, and
+leave their usual place (the tree keeps them in place too). The pin is stored with the item
+(`PATCH /console/api/items/{id}` with `pinned: true|false`), so every device sees it.
+
 "✅ Done hidden" in the list header (or `h`) leaves finished items out of every list — Recent and
 the tree included, and filtering does not bring them back. The Done list always shows them. The
 choice is remembered per browser.
 
 `j`/`k` move, `Enter` opens, `Esc` closes, `e` done, `1`–`4` priority P0–P3, `s` snooze until
-tomorrow 09:00, `c` write down work (the first line is the title; `Shift+Enter` adds note lines), `r` reply, `/` filter, `h` hide/show done, `g` then `f`/`i`/`a`/`u`/`t`/`w`/`d` switches
+tomorrow 09:00, `c` write down work (the first line is the title; `Shift+Enter` adds note lines), `r` reply, `/` filter, `h` hide/show done, `p` pin, `g` then `f`/`i`/`a`/`u`/`t`/`w`/`d` switches
 view, `?` help. URLs carry the view and the open item (`/#me/t1234`), so a link can point at a
 single item.
 

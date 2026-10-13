@@ -134,3 +134,20 @@ async def test_a_table_from_before_places_gains_the_column(tmp_path) -> None:
     assert item.place is None
     updated = await repo.update("c1", {"place": " 事務所 "})
     assert updated.place == "事務所"
+
+
+async def test_pinning_records_when_and_unpinning_clears_it(repo) -> None:
+    item = await repo.create_capture({"title": "Ship it"})
+    assert item.pinned_at is None
+    pinned = await repo.update(item.id, {"pinned": True})
+    assert pinned.pinned_at is not None
+    assert (await repo.get(item.id)).pinned_at == pinned.pinned_at
+    unpinned = await repo.update(item.id, {"pinned": False})
+    assert unpinned.pinned_at is None
+    with pytest.raises(WorkItemError):
+        await repo.update(item.id, {"pinned": "yes"})
+
+
+async def test_a_thread_can_be_pinned_before_it_has_an_overlay(repo) -> None:
+    pinned = await repo.update("t42", {"pinned": True})
+    assert pinned.thread_id == 42 and pinned.pinned_at is not None
