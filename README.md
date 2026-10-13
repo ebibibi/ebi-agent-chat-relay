@@ -30,21 +30,21 @@ through the same factory in v4.
 
 ## What's new in v5
 
-Version 5 gives the relay **a GUI of its own: the Ebi AI Console** — a web screen, on desktop or
-phone, where you see every agent thread at once, decide what to do now, and act on it.
+Version 5 gives the relay **a GUI of its own: the Ebi AI Console**. Every agent thread — chat
+threads and the console's own conversations — on one web screen, on desktop or phone:
 
-- **Focus view** (the default) answers "what do I do now?". A fast model — the cheapest one of the
-  backend you run, one-shot and tool-less — fills in priority, a deadline, the next step, whether
-  it can be done now, and whether it is bound to a place. A value a person sets always wins.
-- **Act without leaving the screen**: reply with any file attached, preview files in place, switch
+- **Focus view** (the default) answers "what do I do now?". Automatic triage by the cheapest model
+  of your backend (Haiku on Claude, the cheapest catalog model on Codex) fills in priority, due
+  date, next step and place; a value a person sets always wins.
+- **Act without leaving the screen** — reply with any file attached, preview files in place, switch
   backend, model and effort with a picker, change the concurrent-session limit, and pause, resume
   or stop running work.
-- **Optional and additive**: nothing starts unless `CCDB_CONSOLE_PORT` is set, and Discord, Teams,
-  the backends, the REST API and the scheduler are unchanged. With the console enabled, automatic
-  triage is on by default; `CCDB_CONSOLE_TRIAGE=0` turns it off.
+- **Optional** — nothing starts unless `CCDB_CONSOLE_PORT` is set, and Discord and Teams keep
+  working exactly as before. With the console on, triage is on by default
+  (`CCDB_CONSOLE_TRIAGE=0` turns it off).
 
-See the [v5.0.0 release notes](docs/releases/v5.0.0.md), the [console guide](docs/console.md) and
-[ADR-0014](docs/adr/0014-publish-the-ebi-ai-console-as-v5.md). **Scheduler integration** comes next.
+See the [console guide](docs/console.md), the [v5.0.0 release notes](docs/releases/v5.0.0.md) and
+[ADR-0014](docs/adr/0014-publish-the-ebi-ai-console-as-v5.md). Scheduler integration comes next.
 
 ## What's new in v4
 
