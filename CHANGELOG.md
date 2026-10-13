@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the work PC with the 📍 button, say where you are, and work bound elsewhere moves out of the
   way. Places are managed (add, rename, delete — every item follows) from the screen and
   `/console/api/places`.
+- **Ebi AI Console: hide finished items** (#972) — a header switch (or `h`) leaves done items out of
+  every list but Done, remembered per browser.
 - **Ebi AI Console: preview files in place** (#969) — text, Markdown, HTML (sandboxed, no
   scripts), CSV, JSON, logs and code open in a viewer instead of downloading, for delivered files
   and chat attachments alike. Files can also be attached when writing down new work.

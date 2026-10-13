@@ -58,6 +58,9 @@ button { cursor: pointer; }
 .list-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); }
 .list-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
 .list-head h1 { font-size: 16px; margin: 0; white-space: nowrap; }
+.list-head .hide-done { flex: none; font-size: 12px; color: var(--dim); white-space: nowrap; }
+.list-head .hide-done.on { color: var(--text); border-color: var(--accent); }
+.list-head .hide-done:disabled { opacity: .45; cursor: default; }
 .filter { flex: 1; min-width: 60px; background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; }
 .sync { color: var(--dim); font-size: 12px; white-space: nowrap; }
 .sync.bad { color: var(--err); }
