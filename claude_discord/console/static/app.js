@@ -533,9 +533,15 @@ function messageNode(m) {
   for (const a of m.attachments || []) {
     const remote = /^https:\/\//.test(a.url);
     if (remote && isImage(a)) body.append(chatImage(a));
+    const P = window.ConsolePreview;
+    const look = remote && P && P.kind(a.filename)
+      ? h("button", { class: "btn file-look", type: "button", text: `👁 ${P.label}`,
+          onclick: () => P.open(a.filename, () => P.fetchBlob(a.url),
+            () => window.open(a.url, "_blank", "noopener,noreferrer")) })
+      : null;
     body.append(h("div", { class: "file" }, remote
       ? h("a", { href: a.url, target: "_blank", rel: "noopener noreferrer", text: `📎 ${a.filename}` })
-      : h("span", { text: `📎 ${a.filename}` })));
+      : h("span", { text: `📎 ${a.filename}` }), look));
   }
   if ((m.actions || []).length) body.append(actionRow(m));
   return h("div", { class: `msg ${kind}` },
@@ -722,8 +728,12 @@ async function capture(text) {
   const body = { title: first.trim().slice(0, 200), start };
   const note = rest.join("\n").trim();
   if (note) body.note = note;
+  const files = window.ConsolePaste.ready(CAPTURE);
+  if (files === null) { toast(T.paste_wait); return false; }
+  if (files.length) body.files = files;
   try {
     const data = await api("/items", { method: "POST", body });
+    window.ConsolePaste.clear(CAPTURE);
     const started = Boolean(data.item.thread_id);
     await refresh();
     // Show where it landed: Running once an agent has it, otherwise To do.
@@ -732,8 +742,11 @@ async function capture(text) {
     state.selected = data.item.id;
     renderList();
     toast(data.start_error || (started ? T.started : T.captured));
-  } catch (err) { toast(err.message); }
+  } catch (err) { toast(err.message); return false; }
+  return true;
 }
+// The capture box's attachments are kept under this key, apart from each item's reply.
+const CAPTURE = "__capture__";
 // Captured work goes straight to an agent unless the user turned that off.
 function autostart() { return localStorage.getItem("autostart") !== "0"; }
 function syncCapture() {
@@ -773,8 +786,11 @@ function wire() {
   const submitCapture = () => {
     const input = $("capture-input");
     const text = input.value.trim();
-    if (text) { capture(text); input.value = ""; grow(input); }
+    if (!text) return;
+    capture(text).then((ok) => { if (ok) { input.value = ""; grow(input); } });
   };
+  window.ConsolePaste.attach($("capture-input"), CAPTURE, $("capture-tray"));
+  $("capture-attach").replaceWith(window.ConsolePaste.button(CAPTURE));
   $("capture").addEventListener("submit", (e) => { e.preventDefault(); submitCapture(); });
   $("capture-input").addEventListener("input", (e) => grow(e.target));
   $("capture-input").addEventListener("keydown", (e) => {

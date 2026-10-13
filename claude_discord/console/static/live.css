@@ -17,6 +17,25 @@
 .file-thumb-wait { display: grid; place-items: center; width: 120px; height: 80px; font-size: 22px; }
 .lightbox { position: fixed; inset: 0; z-index: 30; background: rgb(0 0 0 / .85); display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 10px; padding: 16px; cursor: zoom-out; }
+.pv-shade { position: fixed; inset: 0; z-index: 30; background: rgb(0 0 0 / .7); display: grid; place-items: center; padding: 16px; }
+.pv-panel { width: min(1100px, 100%); height: min(88vh, 100%); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; display: flex; flex-direction: column; overflow: hidden; }
+.pv-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.pv-name { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-size { flex: none; font-size: 12px; }
+.pv-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+.pv-note { margin: 0; padding: 6px 12px; font-size: 12px; color: var(--p1); border-bottom: 1px solid var(--line); }
+.pv-doc { padding: 16px 22px; max-width: 900px; }
+.pv-pre { margin: 0; padding: 12px 16px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12.5px; line-height: 1.5; }
+.pv-frame { flex: 1; width: 100%; border: 0; background: #fff; }
+.pv-scroll { overflow: auto; padding: 8px 12px; }
+.pv-table { border-collapse: collapse; font-size: 12.5px; }
+.pv-table th, .pv-table td { border: 1px solid var(--line); padding: 3px 8px; text-align: left; vertical-align: top; }
+.pv-table th { background: var(--raise); position: sticky; top: 0; }
+.file-look { margin-left: 8px; font-size: 12px; padding: 1px 8px; }
+.capture { flex-wrap: wrap; }
+.capture-tray { flex: 1 0 100%; }
+.capture .attach-wrap .btn.attach { padding: 4px 8px; font-size: 14px; }
 .lightbox-bar { display: flex; align-items: center; gap: 8px; max-width: 100%; }
 .lightbox-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lightbox-img { max-width: 100%; max-height: calc(100% - 56px); object-fit: contain; cursor: default; border-radius: 4px; }

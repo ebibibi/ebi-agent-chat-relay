@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the work PC with the 📍 button, say where you are, and work bound elsewhere moves out of the
   way. Places are managed (add, rename, delete — every item follows) from the screen and
   `/console/api/places`.
+- **Ebi AI Console: preview files in place** (#969) — text, Markdown, HTML (sandboxed, no
+  scripts), CSV, JSON, logs and code open in a viewer instead of downloading, for delivered files
+  and chat attachments alike. Files can also be attached when writing down new work.
 - **Ebi AI Console: attach any file** (#950) — paste, drop or pick (📎) any file into a reply, not
   only images; up to 10 per reply, 50 MB each (images 10 MB, still checked by their bytes). The
   agent gets each file by local path; the original name is kept, sanitised.
