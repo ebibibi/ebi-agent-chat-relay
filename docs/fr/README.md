@@ -36,6 +36,27 @@ ccdb peut exécuter les CLI officielles Claude Code et Codex, un endpoint local 
 Codex, un agent AG-UI en HTTP/SSE, ou la CLI pi. Discord expose le changement de `/backend`
 à l'exécution ; en v4, Teams utilise le backend configuré via la même fabrique.
 
+## Nouveautés de la v5
+
+La version 5 dote le relais d'**une interface graphique propre : l'Ebi AI Console**, un écran web,
+sur ordinateur ou téléphone, où vous voyez tous les fils d'agents à la fois, décidez quoi faire
+maintenant et agissez.
+
+- **Vue Focus** (par défaut) répond à « que dois-je faire maintenant ? ». Un modèle rapide — le
+  moins cher du backend utilisé, en un seul appel et sans outils — renseigne la priorité,
+  l'échéance, la prochaine étape, si elle est faisable maintenant et si elle dépend d'un lieu. Une
+  valeur fixée par une personne l'emporte toujours.
+- **Agir sans quitter l'écran** : répondre avec n'importe quel fichier joint, prévisualiser les
+  fichiers sur place, changer de backend, de modèle et d'effort via un sélecteur, modifier la
+  limite de sessions simultanées, et mettre en pause, reprendre ou arrêter le travail en cours.
+- **Optionnelle et additive** : rien ne démarre tant que `CCDB_CONSOLE_PORT` n'est pas défini, et
+  Discord, Teams, les backends, l'API REST et le planificateur ne changent pas. Console activée, le
+  triage automatique est actif par défaut ; `CCDB_CONSOLE_TRIAGE=0` le désactive.
+
+Voir les [notes de version 5.0.0](../releases/v5.0.0.md), le [guide de la console](../console.md) et
+l'[ADR-0014](../adr/0014-publish-the-ebi-ai-console-as-v5.md) (en anglais). Prochaine étape :
+**l'intégration du planificateur**.
+
 ## Nouveautés de la v4
 
 La version 4 rend explicites deux choix indépendants : **où les gens discutent** et **quel

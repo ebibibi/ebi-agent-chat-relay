@@ -28,6 +28,24 @@ official Claude Code and Codex CLIs, a Codex-compatible local endpoint, an AG-UI
 or the pi CLI. Discord exposes runtime `/backend` switching; Teams uses the configured backend
 through the same factory in v4.
 
+## What's new in v5
+
+Version 5 gives the relay **a GUI of its own: the Ebi AI Console** — a web screen, on desktop or
+phone, where you see every agent thread at once, decide what to do now, and act on it.
+
+- **Focus view** (the default) answers "what do I do now?". A fast model — the cheapest one of the
+  backend you run, one-shot and tool-less — fills in priority, a deadline, the next step, whether
+  it can be done now, and whether it is bound to a place. A value a person sets always wins.
+- **Act without leaving the screen**: reply with any file attached, preview files in place, switch
+  backend, model and effort with a picker, change the concurrent-session limit, and pause, resume
+  or stop running work.
+- **Optional and additive**: nothing starts unless `CCDB_CONSOLE_PORT` is set, and Discord, Teams,
+  the backends, the REST API and the scheduler are unchanged. With the console enabled, automatic
+  triage is on by default; `CCDB_CONSOLE_TRIAGE=0` turns it off.
+
+See the [v5.0.0 release notes](docs/releases/v5.0.0.md), the [console guide](docs/console.md) and
+[ADR-0014](docs/adr/0014-publish-the-ebi-ai-console-as-v5.md). **Scheduler integration** comes next.
+
 ## What's new in v4
 
 Version 4 makes two independent choices explicit: **where people talk** and **which agent does the

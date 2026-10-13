@@ -36,6 +36,26 @@ executar as CLIs oficiais do Claude Code e do Codex, um endpoint local compatív
 um agente AG-UI via HTTP/SSE, ou a CLI do pi. O Discord expõe a troca de `/backend` em tempo
 de execução; no v4, o Teams usa o backend configurado através da mesma factory.
 
+## Novidades do v5
+
+A versão 5 dá ao relay **uma GUI própria: o Ebi AI Console**, uma tela web, no desktop ou no
+celular, onde você vê todas as threads de agentes de uma vez, decide o que fazer agora e age.
+
+- **Visão Focus** (a padrão) responde "o que eu faço agora?". Um modelo rápido — o mais barato do
+  backend que você usa, em uma única chamada e sem ferramentas — preenche prioridade, prazo,
+  próximo passo, se dá para fazer já e se depende de um lugar. Um valor definido por uma pessoa
+  sempre prevalece.
+- **Aja sem sair da tela**: responda anexando qualquer arquivo, visualize arquivos no lugar, troque
+  backend, modelo e effort com um seletor, ajuste o limite de sessões simultâneas e pause, retome
+  ou pare o trabalho em andamento.
+- **Opcional e aditivo**: nada inicia a menos que `CCDB_CONSOLE_PORT` esteja definido, e Discord,
+  Teams, os backends, a API REST e o agendador não mudam. Com o console ativado, a triagem
+  automática fica ligada por padrão; `CCDB_CONSOLE_TRIAGE=0` a desliga.
+
+Veja as [notas da versão 5.0.0](../releases/v5.0.0.md), o [guia do console](../console.md) e o
+[ADR-0014](../adr/0014-publish-the-ebi-ai-console-as-v5.md) (em inglês). A seguir vem a
+**integração com o agendador**.
+
 ## Novidades do v4
 
 A versão 4 torna explícitas duas escolhas independentes: **onde as pessoas conversam** e
