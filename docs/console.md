@@ -404,3 +404,16 @@ Threads that live in a chat platform still appear and can be replied to as befor
 - A console reply is posted by the bot, so it does not yet count in attention metering.
 - The board polls every 8 seconds; there is no push channel yet.
 - Archived threads come from the last 50 per watched channel, refreshed every two minutes.
+
+### Parent conversations and delegated work
+
+Opening a parent shows a collapsible **Delegated work** panel above its conversation. Child
+and grandchild cards show status and a short latest agent report, including finished tasks.
+The totals distinguish running work, work needing the parent's attention, and completed work.
+AI-suggested next steps are labelled as suggestions when no recent report is available.
+
+Click a child card to inspect its conversation. **Back to parent** returns to its immediate
+parent; **Main conversation** opens the root. Child replies are hidden by default: use
+**Reply directly to this child** when direct intervention is intended. Normal requests and
+decisions belong in the parent conversation, which coordinates its children. List rows also
+show the parent link or a completion count, even outside the tree view.

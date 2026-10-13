@@ -20,3 +20,4 @@ earlier ADR instead of rewriting its history.
 - [ADR-0012: Sign in to the console with passkeys by default](0012-sign-in-to-the-console-with-passkeys-by-default.md)
 - [ADR-0013: Keep the relay an interface layer; leave governance to an external control plane](0013-keep-the-relay-an-interface-layer.md)
 - [ADR-0014: Publish the Ebi AI Console as version 5](0014-publish-the-ebi-ai-console-as-v5.md)
+- [ADR-0015: Center thread families on the parent conversation](0015-center-thread-families-on-the-parent-conversation.md)
