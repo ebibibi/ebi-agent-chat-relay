@@ -1,6 +1,6 @@
 # Changelog
 
-Last updated: 2026-09-22
+Last updated: 2026-10-13
 
 All notable changes to this project will be documented in this file.
 
@@ -8,6 +8,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [5.0.0] - 2026-10-13
+
+> **Ebi AI Console — the GUI is here.** Ebi Agent Chat Relay now ships its own web GUI, the
+> **Ebi AI Console**: one screen to see every agent thread — chat threads and the console's own
+> conversations — decide what to do now (the Focus view, with automatic triage by the cheapest model of
+> your backend), reply with files, pin what you are working on, and pause, resume or stop running
+> work. It is optional: nothing starts unless `CCDB_CONSOLE_PORT` is set. See
+> [docs/console.md](docs/console.md).
+>
+> The GUI will be updated rapidly from here on. **Scheduler integration** — managing scheduled
+> tasks from the console — comes next.
+
+### Upgrade notes
+
+- The web GUI formerly called the Relay Console is now the **Ebi AI Console**. Only the name
+  changed: URLs (`/console/…`), `CCDB_CONSOLE_*` settings, the `[console]` extra and the API stay.
+- With the console enabled, **automatic triage is on by default**: one short, tool-less model call
+  per open thread with new activity (Haiku on Claude, the cheapest catalog model on Codex). Set
+  `CCDB_CONSOLE_TRIAGE=0` to turn it off.
+- The console's default view is now **Focus**.
 
 ### Added
 
