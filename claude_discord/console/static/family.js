@@ -6,14 +6,14 @@ window.ConsoleFamily = (() => {
     en: { title: 'Delegated work', parent: 'Parent conversation', back: 'Back to parent',
       root: 'Main conversation', hint: 'Talk to the parent; it coordinates the child threads.',
       childHint: 'This is a child thread. Send decisions and new requests to the parent.',
-      direct: 'Reply directly to this child', reply: 'Reply to the parent… (Ctrl+Enter to send)',
+      direct: 'Reply directly to this child', directReply: 'Direct reply to this child… (Ctrl+Enter to send)', reply: 'Reply to the parent… (Ctrl+Enter to send)',
       recent: 'Latest report', next: 'AI suggested next step', empty: 'No report yet',
       attention: 'Needs parent attention', details: 'View thread',
       counts: (c) => `${c.total} tasks · ${c.running} running · ${c.attention} need attention · ${c.done} done` },
     ja: { title: '子スレッドの作業', parent: '親との会話', back: '親との会話に戻る',
       root: 'メインの会話', hint: '依頼や判断は親へ。親が子スレッドの作業をまとめます。',
       childHint: '子スレッドを表示中です。判断や追加の依頼は親に伝えましょう。',
-      direct: 'この子に直接返信する', reply: '親に返信…（Ctrl+Enterで送信）',
+      direct: 'この子に直接返信する', directReply: 'この子に直接返信中…（Ctrl+Enterで送信）', reply: '親に返信…（Ctrl+Enterで送信）',
       recent: '最新の報告', next: 'AIが推定した次の作業', empty: 'まだ報告はありません',
       attention: '親の確認待ち', details: 'スレッドを見る',
       counts: (c) => `全${c.total}件 · 実行中 ${c.running} · 確認待ち ${c.attention} · 完了 ${c.done}` },
@@ -53,6 +53,33 @@ window.ConsoleFamily = (() => {
     }
     return {root, parent: byId.get(selected.parent_id) || null, rows, counts};
   }
+  // Keep each family at its first matching row's position. Include ancestors as
+  // context, but do not pull unrelated/filtered siblings into a selection range.
+  function groupRows(rows) {
+    const matching = new Set(rows.filter(r=>r.item).map(r=>r.item.id));
+    const emitted = new Set(), out = [];
+    for (const row of rows) {
+      if (!row.item) { out.push(row); continue; }
+      const family = model(state.items,row.item.id);
+      if (!family || emitted.has(family.root.id)) continue;
+      emitted.add(family.root.id);
+      const included = new Set([family.root.id]);
+      for (const {item} of family.rows) if (matching.has(item.id)) {
+        let current = item;
+        const seen = new Set();
+        while (current && !seen.has(current.id)) {
+          seen.add(current.id); included.add(current.id); current = state.byId.get(current.parent_id);
+        }
+      }
+      const entries = [{item:family.root,depth:0}, ...family.rows.map(r=>({...r,depth:r.depth+1}))];
+      for (const entry of entries) {
+        if (!included.has(entry.item.id)) continue;
+        // Tree already applied the collapse state; other lists always group matches.
+        out.push({...entry,children:state.view==='tree' ? state.items.filter(i=>i.parent_id===entry.item.id).length : 0});
+      }
+    }
+    return dropEmptyGroups(out);
+  }
   function excerpt(messages) {
     const report = [...messages].reverse().find(m =>
       (m.kind === 'agent' || (!m.kind && m.is_bot)) && m.content);
@@ -88,7 +115,7 @@ window.ConsoleFamily = (() => {
     // Default child inspection to read-only, with an explicit escape hatch.
     const form = reply && reply.closest('form');
     if (form) form.hidden = Boolean(child && state.directReply !== item.id);
-    if (reply) reply.placeholder = !child && family.rows.length ? L().reply : T.reply_ph;
+    if (reply) reply.placeholder = child ? L().directReply : family.rows.length ? L().reply : T.reply_ph;
     if (slot.hidden) { slot.replaceChildren(); delete slot.dataset.signature; return; }
     const signature = JSON.stringify([item.id, folded, state.directReply, family.root.title,
       family.rows.map(({item, depth}) => [item, depth, reports.get(item.id)])]);
@@ -100,7 +127,8 @@ window.ConsoleFamily = (() => {
     const rootButton = h('button', {class: 'btn family-parent', type: 'button',
       onclick: () => openItem(family.root.id), text: `${L().root}: ${family.root.title || family.root.id}`});
     const context = child ? h('div', {class: 'family-context'},
-      h('p', {class: 'dim', text: L().childHint}), rootButton,
+      h('p', {class: state.directReply === item.id ? 'family-direct-active' : 'dim',
+        text: state.directReply === item.id ? `${L().direct}: ${item.title || item.id}` : L().childHint}), rootButton,
       h('button', {class: 'btn', type: 'button', onclick: () => openItem(family.parent.id), text: L().back}),
       h('button', {class: 'btn family-direct', type: 'button',
         onclick: () => { state.directReply = item.id; renderDetail(); $('reply')?.focus(); }, text: L().direct}))
@@ -142,5 +170,5 @@ window.ConsoleFamily = (() => {
       title: L().counts(family.counts)});
     return null;
   }
-  return {model, excerpt, render, rowTag};
+  return {model, groupRows, excerpt, render, rowTag};
 })();

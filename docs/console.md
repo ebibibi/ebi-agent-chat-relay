@@ -185,7 +185,7 @@ interrupt with the slot it holds (`POST /console/api/items/{id}/stop`, `/pause`,
 
 📌 in the detail header (or `p`) pins a thread as what you are working on now. Pinned threads
 open every list but Done under a highlighted "📌 Working on now" strip, newest pin first, and
-leave their usual place (the tree keeps them in place too). The pin is stored with the item
+bring their family with them rather than duplicating it in the tree. The pin is stored with the item
 (`PATCH /console/api/items/{id}` with `pinned: true|false`), so every device sees it.
 
 "✅ Done hidden" in the list header (or `h`) leaves finished items out of every list — Recent and
@@ -417,7 +417,10 @@ Threads that live in a chat platform still appear and can be replied to as befor
 
 ### Parent conversations and delegated work
 
-Opening a parent shows a collapsible **Delegated work** panel above its conversation. Child
+Clicking either a parent or child in a list opens the root parent conversation.
+Every view groups matching family members under their parent, including ancestors for context.
+Each family stays at its first matching position; filters still limit which children appear.
+The detail view shows a collapsible **Delegated work** panel above the conversation. Child
 and grandchild cards show status and a short latest agent report, including finished tasks.
 The totals distinguish running work, work needing the parent's attention, and completed work.
 AI-suggested next steps are labelled as suggestions when no recent report is available.
@@ -426,7 +429,27 @@ Click a child card to inspect its conversation. **Back to parent** returns to it
 parent; **Main conversation** opens the root. Child replies are hidden by default: use
 **Reply directly to this child** when direct intervention is intended. Normal requests and
 decisions belong in the parent conversation, which coordinates its children. List rows also
-show the parent link or a completion count, even outside the tree view.
+show the parent link or a completion count, even outside the tree view. Direct child reply
+mode is clearly labelled and resets when leaving that child; its draft remains intact.
+
+Finishing a parent from the Console completes its descendants first, including grandchildren.
+The button shows the full completion count. A failed descendant leaves its ancestors open.
+The immediate Undo reopens only the items completed by that action. This is the web client's
+family action; the individual `/items/{id}/done` API still changes only that item.
+
+### Selecting and completing multiple threads
+
+Use a row's checkbox (or Ctrl/Cmd-click) to toggle an individual selection. Click a row and
+Shift-click another to select the inclusive range in the current displayed order; Shift-click
+also works on checkboxes. The toolbar shows selected and total completion counts, including
+all descendants of selected parents. Click **Complete selected** to finish that snapshot.
+
+Selections use thread IDs, so polling and reordering do not substitute other targets. A changed
+row order resets the range anchor. Filtering away selected rows clears those selections with
+a notice. **Clear selection** starts over. Failures remain listed by thread with a retry
+button; successful threads are removed from the selection. Failed targets remain explicit in
+the error list even if a filter hides their rows. Completion runs once per ID, descendants
+before parents, and does not affect unrelated families.
 
 ## Finding earlier work
 

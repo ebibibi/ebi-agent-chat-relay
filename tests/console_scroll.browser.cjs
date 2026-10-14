@@ -113,13 +113,14 @@ for (const width of [1440, 390]) {
       assert.equal((await position()).scroll, 0);
       assert.equal((await position()).title, 'Thread latest');
     });
-    await t.test('a pinned thread repeated in the tree keeps the correct occurrence visible', async () => {
+    await t.test('a pinned thread is listed once and keeps its position on refresh', async () => {
       items = items.map(i => i.id === '50' ? {...i,pinned_at:'2026-10-14T10:00:00Z'} : i);
       await page.evaluate(async () => { closeItem(); await refresh(); setView('tree'); });
       await page.evaluate(() => {
         const rows = document.querySelectorAll('[data-item-id="50"]');
         const list = $('list');
-        list.scrollTop += rows[1].getBoundingClientRect().top - list.getBoundingClientRect().top;
+        if (rows.length !== 1) throw new Error('Pinned family was duplicated');
+        list.scrollTop += rows[0].getBoundingClientRect().top - list.getBoundingClientRect().top;
       });
       const before = await position();
       await page.evaluate(() => refresh());

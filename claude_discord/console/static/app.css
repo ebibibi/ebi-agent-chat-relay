@@ -354,3 +354,15 @@ a.btn.primary { color: #0d1020; }
 .family-link { background: transparent; cursor: pointer; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.family-link:hover { color: var(--accent); border-color: var(--accent); }
 @media (max-width: 900px) { .family { max-height: 35%; } }
+
+/* Bulk selection is separate from the blue outline of the open conversation. */
+.row-select { display:flex; flex-direction:column; align-items:center; gap:3px; }
+.bulk-check { width:18px; height:18px; margin:0; cursor:pointer; accent-color:#e4bd72; }
+.row.bulk-selected { box-shadow:inset 5px 0 #e4bd72; background:#453b25; }
+.row.bulk-selected.sel { background:#203b65; }
+.bulk-bar { padding:7px 14px; border-bottom:1px solid var(--line); display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:12px; flex-shrink:0; }
+#bulk-count, #bulk-status { flex-basis:100%; overflow-wrap:anywhere; }
+#bulk-status:empty { display:none; }
+#bulk-errors { width:100%; margin:0; padding-left:18px; max-height:110px; overflow:auto; color:var(--err); overflow-wrap:anywhere; }
+
+.family-direct-active { color:#e4bd72; font-weight:700; }

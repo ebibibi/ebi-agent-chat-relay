@@ -263,6 +263,9 @@ function matches(item) {
 // their usual place so nothing is listed twice — except in the tree, whose shape needs them.
 const isPinned = (i) => Boolean(i.pinned_at) && i.bucket !== "done";
 function visibleRows() {
+  return window.ConsoleFamily.groupRows(ungroupedRows());
+}
+function ungroupedRows() {
   const items = state.items.filter((i) => matches(i) && !(hidingDone() && i.bucket === "done"));
   const pinned = state.view === "done" ? [] : items.filter(isPinned)
     .sort((a, b) => (b.pinned_at || "").localeCompare(a.pinned_at || ""));
@@ -376,6 +379,7 @@ function renderNav() {
 
 function renderList() {
   const rows = visibleRows();
+  window.ConsoleBulk?.sync(rows);
   const list = $("list");
   const top = list.scrollTop;
   const edge = list.getBoundingClientRect().top;
@@ -389,13 +393,14 @@ function renderList() {
   for (const row of rows) {
     if (row.group !== undefined) { nodes.push(h("li", { class: row.cls || "group", text: row.group })); continue; }
     if (row.node) { nodes.push(row.node); continue; }
-    const node = rowNode(row);
     const occurrence = occurrences.get(row.item.id) || 0;
+    const node = rowNode({...row, rowKey: `${row.item.id}:${occurrence}`});
     node.dataset.occurrence = String(occurrence);
     occurrences.set(row.item.id, occurrence + 1);
     nodes.push(node);
   }
   list.replaceChildren(...nodes);
+  window.ConsoleBulk?.toolbar();
   const empty = $("empty");
   empty.hidden = rows.length > 0;
   empty.textContent = T.empty;
@@ -411,7 +416,7 @@ function revealSelection() {
   if (sel) sel.scrollIntoView({ block: "nearest" });
 }
 
-function rowNode({ item, depth, children }) {
+function rowNode({ item, depth, children, rowKey }) {
   const meta = [];
   if (item.workspace_path) meta.push(h("span", {class:"tag",text:`🗂️ ${item.workspace_path}`}));
   const familyTag = window.ConsoleFamily.rowTag(item);
@@ -441,12 +446,16 @@ function rowNode({ item, depth, children }) {
         text: state.collapsed.has(item.id) ? "▸" : "▾" })
     : (depth ? h("span", { class: "tw", text: "" }) : null);
   return h("li", {
-    class: "row" + (state.selected === item.id ? " sel" : "") + (item.bucket === "done" ? " done" : "") +
+    class: "row" + (window.ConsoleBulk?.has(item.id) ? " bulk-selected" : "") + (state.selected === item.id ? " sel" : "") + (item.bucket === "done" ? " done" : "") +
       (isUnread(item) ? " fresh" : "") + (isPinned(item) ? " pinned" : ""),
     role: "option", "data-item-id": item.id, "aria-selected": state.selected === item.id ? "true" : "false",
-    onclick: () => { state.selected = item.id; openItem(item.id); },
+    onclick: (event) => {
+      if (window.ConsoleBulk?.click(event, item.id, rowKey)) return;
+      openItem(window.ConsoleFamily.model(state.items,item.id)?.root.id || item.id);
+    },
   },
-    h("span", { class: "st", title: T.st[item.status], text: STATUS_ICON[item.status] || "·" }),
+    h("span", {class:"row-select"}, window.ConsoleBulk?.checkbox(item,rowKey),
+      h("span", { class: "st", title: T.st[item.status], text: STATUS_ICON[item.status] || "·" })),
     h("div", { class: "main", style: depth ? { paddingLeft: `${depth * 18}px` } : null },
       h("div", { class: "title" }, twisty,
         state.selected === item.id ? h("span", {class:"selection-label",text: document.documentElement.lang === "ja" ? "▶ 選択中" : "▶ Selected"}) : null,
@@ -765,6 +774,7 @@ function toggleCollapse(id) {
   renderList();
 }
 async function openItem(id) {
+  if (state.open !== id) state.directReply = null;
   if (state.open !== id) state.unseen = 0;
   state.open = id;
   state.selected = id;
@@ -931,7 +941,7 @@ function wire() {
     switch (e.key) {
       case "j": case "ArrowDown": move(1); break;
       case "k": case "ArrowUp": move(-1); break;
-      case "Enter": if (id) openItem(id); break;
+      case "Enter": if (id) openItem(window.ConsoleFamily.model(state.items,id)?.root.id || id); break;
       case "e": if (id && state.byId.get(id)?.bucket !== "done") window.ConsoleFinish.finish(id); break;
       case "p": if (id) togglePin(id); break;
       case "1": case "2": case "3": case "4": if (id) patch(id, { priority: Number(e.key) - 1 }); break;
