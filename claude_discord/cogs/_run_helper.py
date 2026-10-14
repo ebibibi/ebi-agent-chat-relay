@@ -708,7 +708,7 @@ async def _acquire_slot(config: RunConfig, slots: SessionSlotScheduler) -> SlotE
         resumed_from_pause=config.resumed_from_pause,
         resume_prompt=config.prompt,
     )
-    if not slots.would_wait(priority):
+    if not slots.would_wait(priority, thread_key=thread_key):
         return await acquire_coro
 
     acquire = asyncio.ensure_future(acquire_coro)

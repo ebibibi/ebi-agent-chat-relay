@@ -1533,19 +1533,24 @@ class TestGlobalSessionSemaphore:
         runner.images = None
         runner.run = slow_gen
 
-        config = RunConfig(thread=thread, runner=runner, prompt="test")
+        configs = []
+        for key in (77777, 88888, 99999):
+            conversation = MagicMock(spec=discord.Thread)
+            conversation.id = key
+            conversation.send = AsyncMock(return_value=MagicMock(spec=discord.Message))
+            configs.append(RunConfig(thread=conversation, runner=runner, prompt="test"))
 
-        # Start 2 sessions that block on `gate`
-        t1 = asyncio.create_task(run_claude_with_config(config))
-        await started.wait()
+        # Start 2 different conversations that block on `gate`.
+        t1 = asyncio.create_task(run_claude_with_config(configs[0]))
+        await asyncio.wait_for(started.wait(), timeout=1)
         started.clear()
 
-        t2 = asyncio.create_task(run_claude_with_config(config))
-        await started.wait()
+        t2 = asyncio.create_task(run_claude_with_config(configs[1]))
+        await asyncio.wait_for(started.wait(), timeout=1)
         started.clear()
 
         # 3rd session should not start immediately
-        t3 = asyncio.create_task(run_claude_with_config(config))
+        t3 = asyncio.create_task(run_claude_with_config(configs[2]))
         await asyncio.sleep(0.05)
         assert not started.is_set(), "3rd session should be waiting for a semaphore slot"
 
