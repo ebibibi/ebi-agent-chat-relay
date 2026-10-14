@@ -527,3 +527,17 @@ Authenticated API routes:
 Mutations use the same authentication and CSRF checks as other Console actions. Workspace
 paths are relative to `02_Contexts`; arbitrary files and traversal are refused. A stale
 revision returns 409 so an Obsidian edit cannot be silently overwritten.
+
+### Customer reply drafts stay pending
+
+A drafted customer answer is still human work: reviewing and sending it are separate from
+creating the text or attachment. The agent's finishing instructions require review/action
+until delivery is evidenced and prohibit autonomous completion of Teams Channel Exporter
+threads, including later turns. Humans can explicitly complete them from the Console.
+
+The inbox classifier receives the current request as well as the final reply. Recognized
+Teams Channel Exporter request envelopes bypass model classification and stay waiting;
+other customer drafts are classified with an explicit instruction not to infer delivery.
+This preserves the exporter's final-reply-body-only format. Existing done markers are not
+changed retroactively, and the request-envelope check does not persist provenance across
+turns; the agent instruction covers that case.

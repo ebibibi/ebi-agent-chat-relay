@@ -172,7 +172,19 @@ def _build_done_marker_section(config: RunConfig) -> str | None:
         '  `curl -s -X POST "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/done"`\n'
         f"This prefixes the thread title with {marker}. Do NOT mark it when you are asking "
         "a question, waiting for a pipeline or a decision, or leaving work pending. "
-        "If the user replies later, the marker is removed automatically." + _waiting_marker_hint()
+        "If the user replies later, the marker is removed automatically.\n"
+        "Customer replies: Preparing a draft is NOT sending it to the customer. "
+        "Producing an answer, an attachment, or posting it in this AI conversation does not "
+        "prove external delivery. Keep the thread in review while the user checks the draft, "
+        "or action while they still need to send it. Do not infer completion from polished "
+        "customer-facing wording or the end of your turn. Require explicit evidence of "
+        "customer delivery and no remaining work before considering completion.\n"
+        "Teams Channel Exporter: imported/synced Teams reply-draft threads require human "
+        "completion. Never autonomously mark these threads done, even after generating "
+        "the final reply body or observing delivery; leave completion to the user's "
+        "explicit completion action. This also applies on later turns in the same thread. "
+        "Use review/action for pending human work. Keep status commentary outside the "
+        "customer-facing reply body." + _waiting_marker_hint()
     )
 
 

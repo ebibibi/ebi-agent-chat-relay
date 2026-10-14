@@ -208,3 +208,57 @@ async def test_refresh_inbox_without_entries_shows_no_inbox_section(repo):
     embed = channel.send.return_value.edit.call_args[1]["embed"]
     field_names = [f.name for f in embed.fields]
     assert not any("📬" in name for name in field_names)
+
+
+@pytest.mark.parametrize(
+    "request_text",
+    [
+        "Microsoft Teams のスレッドが、サーバー上に1発言1ファイルで同期されています。\n"
+        "返信ドラフトを作成してください。",
+        "[Teams Channel Exporter]\nPrepare the customer reply.",
+    ],
+)
+async def test_exporter_draft_stays_waiting_without_model_call(request_text):
+    from claude_discord.discord_ui.inbox_classifier import classify
+
+    with patch("asyncio.create_subprocess_exec") as mock_exec:
+        result = await classify(
+            "Thank you for your question. Here is the answer.", request_text=request_text
+        )
+    assert result == "waiting"
+    mock_exec.assert_not_called()
+
+
+async def test_classifier_receives_request_and_distinguishes_draft_from_delivery():
+    from claude_discord.discord_ui.inbox_classifier import classify
+
+    with patch("asyncio.create_subprocess_exec") as mock_exec:
+        proc = AsyncMock()
+        proc.communicate = AsyncMock(return_value=(b"waiting\n", b""))
+        mock_exec.return_value = proc
+        result = await classify(
+            "Here is the answer.", request_text="Draft a customer response; I will send it."
+        )
+    assert result == "waiting"
+    prompt = mock_exec.call_args.args[2]
+    assert "Draft a customer response; I will send it." in prompt
+    assert "Preparing a draft is NOT sending it to the customer" in prompt
+    assert "Teams Channel Exporter" in prompt
+
+
+async def test_inbox_helper_passes_request_context_and_keeps_exporter_visible(repo):
+    from claude_discord.cogs.event_processor import _classify_and_update_inbox
+
+    with patch("asyncio.create_subprocess_exec") as mock_exec:
+        await _classify_and_update_inbox(
+            thread_id=555,
+            last_text="Thank you for your question.",
+            last_message_url=None,
+            inbox_repo=repo,
+            dashboard=None,
+            claude_command="claude",
+            request_text="[Teams Channel Exporter] Prepare a reply.",
+        )
+    mock_exec.assert_not_called()
+    entries = await repo.list_all()
+    assert any(entry.thread_id == 555 and entry.status == "waiting" for entry in entries)
