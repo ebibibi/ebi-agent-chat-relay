@@ -38,7 +38,7 @@ vm.runInContext(fs.readFileSync('claude_discord/console/static/paste.js', 'utf8'
     },
     toast: () => {}, grow: () => {}, refresh: async () => {},
     setTimeout: () => {}, loadMessages: () => {}, renderList: () => {},
-    autostart: () => true, setView: () => {},
+    autostart: () => true, setView: () => {}, revealSelection: () => {},
     state: { drafts: { item: text }, view: 'ai' }, T: {},
   });
   context.window.ConsoleSlash = { run: async () => false };

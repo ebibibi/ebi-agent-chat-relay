@@ -8,9 +8,9 @@
   const FILES = "/console/api/files/";
   const lang = document.documentElement.lang === "ja" ? "ja" : "en";
   const L = {
-    en: { working: "Working…", stop: "Stop", stopping: "Stopping…", download: "Download",
+    en: { working: "Working…", download: "Download",
           failed: "Download failed" },
-    ja: { working: "作業中…", stop: "停止", stopping: "停止しています…", download: "ダウンロード",
+    ja: { working: "作業中…", download: "ダウンロード",
           failed: "ダウンロードできませんでした" },
   }[lang];
   const STATUS = { thinking: "💭", tool_read: "📖", tool_edit: "✏️", tool_command: "⌨️",
@@ -58,15 +58,7 @@
     });
     head.append(toggle);
     if (live.can_stop) {
-      const stop = el("button", "btn live-stop", L.stop);
-      stop.type = "button";
-      stop.addEventListener("click", async () => {
-        stop.disabled = true;
-        stop.textContent = L.stopping;
-        try { await api(`/items/${encodeURIComponent(id)}/stop`, { method: "POST", body: {} }); }
-        catch (err) { toast(err.message); }
-      });
-      head.append(stop);
+      head.append(window.ConsoleSlots.stopButton(id, false, "live-stop"));
     }
     const parts = [head];
     if (open) {

@@ -17,7 +17,7 @@ const I18N = {
     paused: "paused", pause_hint: "Stop this turn now and mark the thread paused; Resume carries on",
     stop_hint: "Stop this turn now", resume_hint: "Ask the agent to carry on from where it was paused",
     first_hint: "Start this one before the others waiting", later_hint: "Let the others waiting go first",
-    paused_toast: "Paused", stopped_toast: "Stopping", resumed_toast: "Resumed",
+    paused_toast: "Paused", stopping: "Stopping…", resumed_toast: "Resumed",
     slots_hint: "Threads running now / the most that may run at once", slots_up: "Allow one more at once",
     slots_down: "Allow one fewer at once", slots_set: (n) => `Up to ${n} at once`, pinned_group: "📌 Working on now", pin: "Pin", unpin: "Pinned",
     pin_hint: "Pin as what you are working on now; pinned threads lead every list (p)", hide_done_off: "✅ Showing done", hide_done_on: "✅ Done hidden",
@@ -59,7 +59,7 @@ const I18N = {
     paused: "一時停止中", pause_hint: "いまのターンを止めて一時停止の印を付けます。「再開」で続きから",
     stop_hint: "いまのターンを止めます", resume_hint: "止めたところから続けるようエージェントに頼みます",
     first_hint: "待っているほかのスレッドより先に始めます", later_hint: "待っているほかのスレッドを先にします",
-    paused_toast: "一時停止しました", stopped_toast: "停止しています", resumed_toast: "再開しました",
+    paused_toast: "一時停止しました", stopping: "停止中…", resumed_toast: "再開しました",
     slots_hint: "いま実行中の数 / 同時に動かせる上限", slots_up: "同時に動かせる数を1つ増やす",
     slots_down: "同時に動かせる数を1つ減らす", slots_set: (n) => `同時実行の上限を ${n} にしました`, pinned_group: "📌 いまやってる", pin: "ピン留め", unpin: "ピン中",
     pin_hint: "いまやってる目印。ピン留めしたスレッドはどの一覧でも一番上に出ます（p）", hide_done_off: "✅ 完了も表示", hide_done_on: "✅ 完了を隠す中",
@@ -172,6 +172,7 @@ async function refresh() {
     const data = await api("/board");
     state.items = data.items;
     state.byId = new Map(data.items.map((i) => [i.id, i]));
+    window.ConsoleSlots.onBoard(data.items);
     state.slots = data.slots || {};
     state.places = data.places || [];
     if (!state.defaultsLoaded) { state.defaultsLoaded = true; window.ConsoleBackend.loadDefaults(); }
@@ -375,6 +376,13 @@ function renderNav() {
 function renderList() {
   const rows = visibleRows();
   const list = $("list");
+  const top = list.scrollTop;
+  const edge = list.getBoundingClientRect().top;
+  // Anchor what the reader sees, not the selection (which may be far off-screen).
+  // Keeping only scrollTop would still jump when polling inserts/reorders rows above it.
+  const anchor = top > 0 && [...list.querySelectorAll(".row")]
+    .find((row) => row.getBoundingClientRect().bottom > edge);
+  const offset = anchor ? anchor.getBoundingClientRect().top - edge : 0;
   const nodes = [];
   for (const row of rows) {
     if (row.group !== undefined) { nodes.push(h("li", { class: row.cls || "group", text: row.group })); continue; }
@@ -385,7 +393,15 @@ function renderList() {
   const empty = $("empty");
   empty.hidden = rows.length > 0;
   empty.textContent = T.empty;
-  const sel = list.querySelector(".row.sel");
+  const restored = anchor && nodes.find((row) => row.dataset.itemId === anchor.dataset.itemId);
+  list.scrollTop = restored
+    ? list.scrollTop + restored.getBoundingClientRect().top - edge - offset
+    : top;
+}
+
+// Only intentional navigation may bring an off-screen selection into view.
+function revealSelection() {
+  const sel = $("list").querySelector(".row.sel");
   if (sel) sel.scrollIntoView({ block: "nearest" });
 }
 
@@ -420,7 +436,7 @@ function rowNode({ item, depth, children }) {
   return h("li", {
     class: "row" + (state.selected === item.id ? " sel" : "") + (item.bucket === "done" ? " done" : "") +
       (isUnread(item) ? " fresh" : "") + (isPinned(item) ? " pinned" : ""),
-    role: "option", "aria-selected": state.selected === item.id ? "true" : "false",
+    role: "option", "data-item-id": item.id, "aria-selected": state.selected === item.id ? "true" : "false",
     onclick: () => { state.selected = item.id; openItem(item.id); },
   },
     h("span", { class: "st", title: T.st[item.status], text: STATUS_ICON[item.status] || "·" }),
@@ -706,6 +722,7 @@ function setView(view) {
   const rows = visibleRows().filter((r) => r.item);
   state.selected = rows.length ? rows[0].item.id : null;
   render();
+  revealSelection();
 }
 // Unread, the way a mailbox means it: something happened in the thread after the
 // human last looked at it. "Last looked" is kept per item in this browser; items never
@@ -745,6 +762,7 @@ async function openItem(id) {
   markSeen(id);
   state.messagesFor = null;
   render();
+  revealSelection();
   const item = state.byId.get(id);
   if (!item || !item.thread_id) { state.messagesFor = id; state.messages = []; return; }
   await loadMessages(id);
@@ -822,6 +840,7 @@ async function capture(text) {
     else if (state.view !== "todo" && state.view !== "tree") setView("todo");
     state.selected = data.item.id;
     renderList();
+    revealSelection();
     toast(data.start_error || (started ? T.started : T.captured));
   } catch (err) { toast(err.message); return false; }
   return true;
@@ -841,7 +860,8 @@ function move(delta) {
   let i = rows.findIndex((r) => r.item.id === state.selected);
   i = i < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, i + delta));
   state.selected = rows[i].item.id;
-  if (state.open) openItem(state.selected); else renderList();
+  if (state.open) openItem(state.selected);
+  else { renderList(); revealSelection(); }
 }
 function showLogin() {
   window.ConsoleAuth.showLogin(refresh);
