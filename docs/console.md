@@ -13,6 +13,21 @@ The JSON API under `/console/api` is the contract. The bundled web client is one
 See [ADR-0010](adr/0010-add-an-api-first-console-on-its-own-listener.md) and, for sign-in,
 [ADR-0012](adr/0012-sign-in-to-the-console-with-passkeys-by-default.md).
 
+## On a phone
+
+The conversation keeps its composer at the bottom while earlier messages scroll independently.
+Its height follows the visible viewport when the software keyboard opens. Long drafts scroll
+inside the input, leaving room to read the conversation.
+
+The header keeps Back, Menu, a one-tap Stop while running, and **•••**. Open **•••** for
+completion, AI settings, links, pinning and task details. Child-task summaries and live activity
+start collapsed on mobile; tap their headings to expand them. Replying directly to a child
+still requires the explicit child-reply action.
+
+Changing lists from Menu returns to the list. Drafts and pending uploads survive returning to
+a conversation and rotating the screen. Bulk completion controls appear after selecting a row.
+Desktop controls retain their existing layout.
+
 ## Views
 
 | View | Shows |

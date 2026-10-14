@@ -86,7 +86,7 @@ window.ConsoleFamily = (() => {
     return report ? report.content.replace(/\s+/g, ' ').trim().slice(0, 240) : '';
   }
   const reports = new Map(), pending = new Set();
-  let folded = false;
+  let folded = false, mobileExpanded = false;
   function label(item) {
     return item.paused_at && !item.running ? T.paused : needsAttention(item) ? L().attention : item.queued ? T.queued : T.st[item.status] || item.status;
   }
@@ -116,11 +116,18 @@ window.ConsoleFamily = (() => {
     const form = reply && reply.closest('form');
     if (form) form.hidden = Boolean(child && state.directReply !== item.id);
     if (reply) reply.placeholder = child ? L().directReply : family.rows.length ? L().reply : T.reply_ph;
+    if (reply && matchMedia("(max-width: 900px)").matches) {
+      reply.placeholder = document.documentElement.lang === 'ja'
+        ? child ? 'この子に直接返信…' : family.rows.length ? '親に返信…' : '返信…'
+        : child ? 'Reply to this child…' : family.rows.length ? 'Reply to parent…' : 'Reply…';
+    }
     if (slot.hidden) { slot.replaceChildren(); delete slot.dataset.signature; return; }
-    const signature = JSON.stringify([item.id, folded, state.directReply, family.root.title,
+    const mobile = matchMedia("(max-width: 900px)").matches;
+    const collapsed = mobile ? !mobileExpanded : folded;
+    const signature = JSON.stringify([item.id, collapsed, state.directReply, family.root.title,
       family.rows.map(({item, depth}) => [item, depth, reports.get(item.id)])]);
     if (slot.dataset.signature === signature) {
-      if (!folded) loadReports(family.rows);
+      if (!collapsed) loadReports(family.rows);
       return;
     }
     slot.dataset.signature = signature;
@@ -134,14 +141,14 @@ window.ConsoleFamily = (() => {
         onclick: () => { state.directReply = item.id; renderDetail(); $('reply')?.focus(); }, text: L().direct}))
       : h('p', {class: 'dim family-hint', text: L().hint});
     const heading = h('button', {class: 'family-heading', type: 'button',
-      'aria-expanded': String(!folded), onclick: () => { folded = !folded; render(item); }},
-      h('strong', {text: `${folded ? '▸' : '▾'} ${L().title}`}),
+      'aria-expanded': String(!collapsed), onclick: () => { if (mobile) mobileExpanded = !mobileExpanded; else folded = !folded; render(item); }},
+      h('strong', {text: `${collapsed ? '▸' : '▾'} ${L().title}`}),
       h('span', {class: 'family-counts', text: L().counts(family.counts)}));
-    const list = h('ul', {class: 'family-tasks', hidden: folded}, ...family.rows.map(row => card(row, item.id)));
+    const list = h('ul', {class: 'family-tasks', hidden: collapsed}, ...family.rows.map(row => card(row, item.id)));
     const scroll = slot.querySelector('.family-tasks')?.scrollTop || 0;
     slot.replaceChildren(context, heading, list);
     list.scrollTop = scroll;
-    if (!folded) loadReports(family.rows);
+    if (!collapsed) loadReports(family.rows);
   }
   const version = (item) => `${item.last_activity_at || ''}|${item.status}|${Boolean(item.running)}`;
   async function loadReports(rows) {

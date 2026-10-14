@@ -63,6 +63,7 @@ for (const width of [1440,390]) test(`independent manager and child AI pickers a
   await route.fulfill({contentType:'application/json',body:JSON.stringify(route.request().method()==='POST'?{catalog}:catalog)});
  });
  await page.evaluate(()=>openItem('t100'));
+ if(width===390)await page.locator('.d-more').click();
  await page.locator('.team-child-ai').click();
  await page.locator('.backend-picker').getByRole('button',{name:'pi',exact:true}).click();
  await page.locator('.backend-picker').getByRole('button',{name:'provider/gpt-6.1-sol',exact:true}).click();
@@ -75,7 +76,7 @@ for (const width of [1440,390]) test(`independent manager and child AI pickers a
  await page.locator('.backend-picker').getByRole('button',{name:'Codex',exact:true}).click();
  await page.locator('.backend-picker button[aria-label=close]').click();
  assert.equal(configs.manager.backend,'codex');assert.equal(configs.child.backend,'pi');
- if(width===390)await page.locator('.detail-nav-toggle').click();
+ if(width===390){await page.locator('.mobile-tools-close').click();await page.locator('.detail-nav-toggle').click();}
  await page.locator('.nav-child-ai').click();
  await page.locator('.backend-picker').getByRole('button',{name:'pi',exact:true}).click();
  await page.locator('.backend-picker button[aria-label=close]').click();

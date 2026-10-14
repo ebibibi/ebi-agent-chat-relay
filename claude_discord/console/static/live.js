@@ -30,7 +30,7 @@
 
   // The panel lives in its own slot under the conversation, so it never covers the
   // messages it is reporting on. Open (the latest tool calls) unless folded to one line.
-  let open = localStorage.getItem("liveOpen") !== "0";
+  let open = localStorage.getItem("liveOpen") !== "0", mobileOpen = false;
 
   function draw(id, data) {
     last = { id, data };
@@ -38,21 +38,23 @@
     if (!box) return;
     const msgs = document.getElementById("msgs");
     const pinned = msgs && msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 80;
+    const mobile = matchMedia("(max-width: 900px)").matches;
+    const expanded = mobile ? mobileOpen : open;
     const live = data.live || {};
     const acts = live.activities || [];
     const latest = acts.length ? acts[acts.length - 1] : null;
     const head = el("div", "live-head");
     const toggle = el("button", "live-toggle");
     toggle.type = "button";
-    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
     toggle.append(
-      el("span", "live-caret", open ? "▾" : "▸"),
+      el("span", "live-caret", expanded ? "▾" : "▸"),
       el("span", "live-status", `${STATUS[live.status] || "⚙️"} ${L.working}`),
-      el("span", "live-latest", !open && latest ? `${latest.title}${latest.detail ? " — " + latest.detail : ""}` : ""),
+      el("span", "live-latest", !expanded && latest ? `${latest.title}${latest.detail ? " — " + latest.detail : ""}` : ""),
     );
     toggle.addEventListener("click", () => {
-      open = !open;
-      localStorage.setItem("liveOpen", open ? "1" : "0");
+      if (mobile) mobileOpen = !mobileOpen;
+      else {open = !open; localStorage.setItem("liveOpen", open ? "1" : "0");}
       if (last) draw(last.id, last.data);
     });
     head.append(toggle);
@@ -60,7 +62,7 @@
       head.append(window.ConsoleSlots.stopButton(id, false, "live-stop"));
     }
     const parts = [head];
-    if (open) {
+    if (expanded) {
       const list = el("ul", "live-acts");
       for (const a of acts.slice(-6)) {
         const mark = a.done ? (a.ok ? "✓" : "✗") : "…";

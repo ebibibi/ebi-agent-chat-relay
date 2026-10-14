@@ -484,10 +484,11 @@ function renderDetail() {
   const editing = active && active.matches("input:not([type=checkbox]), select") &&
     ($("d-head").contains(active) || $("d-drawer").contains(active));
   if (!editing) {
-    $("d-head").replaceChildren(...headParts(item));
-    $("d-drawer").replaceChildren(...drawerParts(item));
+    $("d-head").replaceChildren(...headParts(item).filter(Boolean));
+    $("d-drawer").replaceChildren(...drawerParts(item).filter(Boolean));
   }
   $("d-drawer").hidden = !state.drawerOpen;
+  window.ConsoleMobile.layout(item, !editing);
   window.ConsoleFamily.render(item);
   const msgs = $("msgs");
   if (item.thread_id) fillMessages(msgs);
@@ -738,6 +739,9 @@ function readHash() {
   if (item) { state.open = item; state.selected = item; }
 }
 function setView(view) {
+  if (matchMedia("(max-width: 900px)").matches) {
+    markSeen(state.open); state.open = null; state.drawerOpen = false;
+  }
   state.view = view;
   localStorage.setItem("view", view);
   $("nav").classList.remove("open");

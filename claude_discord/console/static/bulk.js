@@ -66,6 +66,7 @@ window.ConsoleBulk = (() => {
   }
   function toolbar() {
     const bar = $('bulk-bar'); if (!bar) return;
+    bar.dataset.active = String(Boolean(selected.size || busy || message || errors.size));
     const targets = window.ConsoleFinish.targets([...selected]);
     const count = ja()?`${selected.size}件選択・完了対象 ${targets.length}件（子を含む）`:
       `${selected.size} selected · ${targets.length} to complete (including children)`;
