@@ -40,7 +40,21 @@ for (const available of [false, true]) {
     await page.goto('http://console.test/');
     await loaded;
     if (!available) {
-      assert.equal(await page.locator('.nav-workspace').count(),0);
+      await page.locator('.workspace-offer').waitFor();
+      await page.locator('.workspace-offer button').first().click();
+      await page.locator('.ws-onboarding').waitFor();
+      const link = page.locator('.ws-purchase');
+      assert.equal(await link.getAttribute('href'),'https://note.com/ebibibi/n/n300772aeac93');
+      assert.match(await page.locator('.ws-onboarding').innerText(),/買い切り/);
+      assert.equal(writes.length,0);
+      await page.getByRole('button',{name:'閉じる',exact:true}).click();
+      await page.locator('.workspace-offer button').last().click();
+      assert.equal(await page.locator('.workspace-offer').count(),0);
+      await page.reload();
+      await page.locator('.nav-workspace').waitFor();
+      assert.equal(await page.locator('.workspace-offer').count(),0);
+      await page.locator('.nav-workspace').click();
+      assert.equal(await page.locator('.ws-onboarding').isVisible(),true);
       return;
     }
     await page.locator('.nav-workspace').click();

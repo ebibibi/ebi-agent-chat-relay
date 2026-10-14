@@ -25,3 +25,10 @@
   .ws-entries { width:auto; max-height:25vh; min-height:90px; border-right:0; border-bottom:1px solid var(--line); }
   .workspace-capture { flex-wrap:wrap; }
 }
+
+.workspace-offer { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.workspace-offer span { flex:1; min-width:150px; }
+.ws-onboarding { max-width:720px; height:auto; max-height:90vh; }
+.ws-onboarding .ws-content { line-height:1.7; }
+.ws-onboarding li { margin:8px 0; }
+.ws-purchase { display:inline-block; white-space:normal; margin:12px 0; }

@@ -541,3 +541,10 @@ other customer drafts are classified with an explicit instruction not to infer d
 This preserves the exporter's final-reply-body-only format. Existing done markers are not
 changed retroactively, and the request-envelope check does not persist provenance across
 turns; the agent instruction covers that case.
+
+### Discovering Workspace
+
+When no Workspace is configured, Console offers a dismissible introduction with an official
+purchase link. The menu entry remains available after dismissal. Configured installations
+show their tasks instead. The introduction makes no external requests until the user opens
+the sales link; it does not install or buy anything automatically.

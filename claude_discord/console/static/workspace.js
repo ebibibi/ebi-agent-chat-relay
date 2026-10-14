@@ -6,6 +6,8 @@ window.ConsoleWorkspace = (() => {
   let browsing = chosen;
   let panel;
   let busy = false;
+  let loaded = false;
+  const SALES_URL = "https://note.com/ebibibi/n/n300772aeac93";
   const lang = () => document.documentElement.lang === "ja";
   const L = () => lang() ? {
     title:"Ebi Workspace", pick:"コンテキスト・プロジェクト", auto:"自動で紐づけ", tasks:"タスク",
@@ -35,12 +37,19 @@ window.ConsoleWorkspace = (() => {
       box=h("div",{id:"workspace-capture",class:"workspace-capture"});
       $("capture").before(box);
     }
-    box.hidden=!data.available;
+    const offer = !data.available && loaded && localStorage.getItem("workspaceOfferDismissed") !== "1";
+    box.hidden=!data.available && !offer;
+    if (offer) box.replaceChildren(h("div",{class:"workspace-offer"},
+      h("span",{text:lang()?"会話をプロジェクト・タスクにつなげる — Ebi Workspace":"Connect conversations to projects and tasks — Ebi Workspace"}),
+      button(lang()?"詳しく見る":"Learn more",show),
+      button(lang()?"あとで":"Not now",()=>{localStorage.setItem("workspaceOfferDismissed","1");capturePicker();})));
+    else if (!data.available) box.replaceChildren();
     if (data.available) box.replaceChildren(h("span",{text:"🗂️ Ebi Workspace"}),selector(chosen,choose));
   }
   async function load() {
     try {
       data=await api("/workspace");
+      loaded=true;
       data.entries ||= [];
       if (!data.entries.some(e=>e.path===chosen)) chosen="";
       if (!data.entries.some(e=>e.path===browsing)) browsing=data.entries[0]?.path || "";
@@ -49,7 +58,7 @@ window.ConsoleWorkspace = (() => {
     } catch (err) { if (panel && !panel.hidden) toast(err.message); }
   }
   function nav() {
-    if (!data.available) return null;
+    if (!data.available) return loaded ? button(`🗂️ Ebi Workspace · ${lang()?"導入案内":"Discover"}`,show,"nav-workspace") : null;
     const count=data.entries.reduce((n,e)=>n+e.tasks.filter(t=>!t.done).length,0);
     return button(`🗂️ ${L().title} · ${count}`,show,"nav-workspace");
   }
@@ -65,6 +74,7 @@ window.ConsoleWorkspace = (() => {
   function hide() { if(panel) panel.hidden=true; }
   function draw() {
     if (!panel) return;
+    if (!data.available) { onboarding(); return; }
     const l=L();
     const old=panel.querySelector(".ws-content")?.scrollTop || 0;
     const menu=h("div",{class:"ws-entries"},...data.entries.map(e=>button(
@@ -91,6 +101,29 @@ window.ConsoleWorkspace = (() => {
     panel.replaceChildren(h("div",{class:"ws-shell"},h("header",{class:"ws-head"},
       h("h1",{text:l.title}),button(l.reload,load),button(l.close,hide)),h("div",{class:"ws-body"},menu,content)));
     content.scrollTop=old;
+  }
+  function onboarding() {
+    const ja=lang();
+    const features=ja ? [
+      "会話をコンテキストやプロジェクトに紐づけ、前回の続きから仕事を再開。",
+      "ObsidianのタスクをConsoleで確認・更新し、そのままAIに実行を依頼。",
+      "計画・記録・知識を手元のMarkdownに蓄積。人間とAIで同じ情報を使えます。",
+    ] : [
+      "Link conversations to contexts and projects, then resume where you left off.",
+      "Review and update Obsidian tasks in Console and ask AI to carry them out.",
+      "Keep plans, work logs and knowledge in local Markdown shared by you and your AI.",
+    ];
+    panel.replaceChildren(h("div",{class:"ws-shell ws-onboarding"},
+      h("header",{class:"ws-head"},h("h1",{text:"Ebi Workspace"}),button(L().close,hide)),
+      h("div",{class:"ws-content"},
+        h("h2",{text:ja?"会話の続きを、仕事の続きに。":"Turn ongoing conversations into ongoing work."}),
+        h("p",{text:ja?"Claude Code / CodexとObsidianをつなぐ、買い切りの有料プラグインです。Consoleとの連携で、会話と仕事の文脈を一緒に扱えます。":"A paid, one-time-purchase plugin connecting Claude Code / Codex with Obsidian. Console integration brings your conversations and work context together."}),
+        h("ul",{},...features.map(text=>h("li",{text}))),
+        h("a",{class:"btn ws-purchase",href:SALES_URL,target:"_blank",rel:"noopener noreferrer",
+          text:ja?"Ebi Workspaceの内容・購入方法を見る":"Explore Ebi Workspace and purchase options"}),
+        h("h3",{text:ja?"すでにお持ちの場合":"Already have Ebi Workspace?"}),
+        h("p",{text:ja?"Consoleを動かしている環境でWorkspaceをセットアップしてから、下のボタンで接続を確認してください。":"Set up Workspace in the environment running Console, then check the connection below."}),
+        button(ja?"接続を再確認":"Check connection",load))));
   }
   async function overview(selected, content) {
     try {
