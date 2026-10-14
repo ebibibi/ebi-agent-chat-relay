@@ -75,7 +75,8 @@ window.ConsoleFamily = (() => {
       for (const entry of entries) {
         if (!included.has(entry.item.id)) continue;
         // Tree already applied the collapse state; other lists always group matches.
-        out.push({...entry,children:state.view==='tree' ? state.items.filter(i=>i.parent_id===entry.item.id).length : 0});
+        out.push({...entry, family: family.rows.length ? family : null,
+          children:state.view==='tree' ? state.items.filter(i=>i.parent_id===entry.item.id).length : 0});
       }
     }
     return dropEmptyGroups(out);
@@ -177,5 +178,22 @@ window.ConsoleFamily = (() => {
       title: L().counts(family.counts)});
     return null;
   }
-  return {model, groupRows, excerpt, render, rowTag};
+  function listGroup(family, shown) {
+    const ja = document.documentElement.lang === 'ja';
+    const total = family.counts.total;
+    const count = ja ? `子スレッド ${total}件` : `${total} child threads`;
+    const visible = shown < total ? (ja ? ` · ${shown}/${total}件を表示` : ` · ${shown} of ${total} shown`) : '';
+    const name = family.root.title || family.root.id;
+    return h('li', {class:'thread-group', role:'presentation'},
+      h('div', {class:'thread-group-heading'},
+        h('span', {class:'thread-group-label', text:ja ? '親子グループ' : 'Group'}),
+        h('span', {class:'thread-group-count', text:count + visible})),
+      h('ul', {class:'thread-group-rows', role:'group', 'aria-label':`${name} · ${count}`}));
+  }
+  function roleTag(depth) {
+    const ja = document.documentElement.lang === 'ja';
+    const role = depth ? (ja ? '子' : 'Child') : (ja ? '親' : 'Parent');
+    return h('span', {class:'family-role', text:role + (depth > 1 ? (ja ? ` · ${depth}階層` : ` · level ${depth}`) : '')});
+  }
+  return {model, groupRows, excerpt, render, rowTag, listGroup, roleTag};
 })();

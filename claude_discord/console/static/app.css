@@ -371,3 +371,29 @@ button.family-link:hover { color: var(--accent); border-color: var(--accent); }
 
 .team-settings { display:flex; flex-wrap:wrap; gap:6px; padding:6px 12px; border-bottom:1px solid var(--line); }
 .team-settings .btn { white-space:normal; overflow-wrap:anywhere; font-size:12px; }
+
+/* A shared boundary and connector identify a family without borrowing selection blue. */
+.thread-group { list-style: none; margin: 9px 8px 13px; border: 1px solid #646c81;
+  border-radius: 10px; background: var(--bg); overflow: hidden; }
+.thread-group-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 10px;
+  padding: 7px 10px; background: #292d3b; border-bottom: 1px solid #646c81; font-size: 11px; }
+.thread-group-label { font-weight: 700; color: #e2dbf7; }
+.thread-group-count { color: #c0c3ce; }
+.thread-group-rows { list-style: none; padding: 0; margin: 0; }
+.thread-group .row { padding: 9px 9px; }
+.thread-group .row .title { white-space: normal; overflow-wrap: anywhere; display: -webkit-box;
+  -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.thread-group .row .tag { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.thread-group .family-root { background: #232632; border-bottom: 1px solid var(--line); }
+.thread-group .family-child .main { position: relative; }
+.thread-group .family-child .main::before { content: ''; position: absolute; left: 0; top: -9px;
+  bottom: -9px; border-left: 2px solid #73718a; pointer-events: none; }
+.thread-group .family-child:last-child .main::before { bottom: auto; height: 20px; }
+.thread-group .family-child .main::after { content: ''; position: absolute; left: 0; top: 10px;
+  width: 8px; border-top: 2px solid #73718a; pointer-events: none; }
+.family-role { display: inline-block; margin-right: 6px; padding: 0 4px; border-radius: 4px;
+  font-size: 10px; line-height: 17px; font-weight: 600; color: #d8cfea; background: #393345; vertical-align: 1px; white-space: nowrap; }
+.thread-group .family-root .family-role { color: #fff; background: #5b4b71; }
+.thread-group .row.sel { background: #203b65; }
+.thread-group .row.bulk-selected { background: #293d35; }
+.thread-group .row.sel.bulk-selected { background: #203b65; }

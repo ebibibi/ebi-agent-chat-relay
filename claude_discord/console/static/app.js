@@ -390,21 +390,30 @@ function renderList() {
   const offset = anchor ? anchor.getBoundingClientRect().top - edge : 0;
   const nodes = [];
   const occurrences = new Map();
+  let group = null;
   for (const row of rows) {
-    if (row.group !== undefined) { nodes.push(h("li", { class: row.cls || "group", text: row.group })); continue; }
-    if (row.node) { nodes.push(row.node); continue; }
+    if (row.group !== undefined) { group = null; nodes.push(h("li", { class: row.cls || "group", text: row.group })); continue; }
+    if (row.node) { group = null; nodes.push(row.node); continue; }
     const occurrence = occurrences.get(row.item.id) || 0;
     const node = rowNode({...row, rowKey: `${row.item.id}:${occurrence}`});
     node.dataset.occurrence = String(occurrence);
     occurrences.set(row.item.id, occurrence + 1);
-    nodes.push(node);
+    if (row.family) {
+      if (group?.id !== row.family.root.id) {
+        const shown = rows.filter(r => r.family?.root.id === row.family.root.id && r.depth > 0).length;
+        const card = window.ConsoleFamily.listGroup(row.family, shown);
+        nodes.push(card);
+        group = {id:row.family.root.id, list:card.querySelector('.thread-group-rows')};
+      }
+      group.list.append(node);
+    } else { group = null; nodes.push(node); }
   }
   list.replaceChildren(...nodes);
   window.ConsoleBulk?.toolbar();
   const empty = $("empty");
   empty.hidden = rows.length > 0;
   empty.textContent = T.empty;
-  const restored = anchor && nodes.find((row) => row.dataset.itemId === anchor.dataset.itemId && row.dataset.occurrence === anchor.dataset.occurrence);
+  const restored = anchor && [...list.querySelectorAll('.row')].find((row) => row.dataset.itemId === anchor.dataset.itemId && row.dataset.occurrence === anchor.dataset.occurrence);
   list.scrollTop = restored
     ? list.scrollTop + restored.getBoundingClientRect().top - edge - offset
     : top;
@@ -416,10 +425,10 @@ function revealSelection() {
   if (sel) sel.scrollIntoView({ block: "nearest" });
 }
 
-function rowNode({ item, depth, children, rowKey }) {
+function rowNode({ item, depth, children, rowKey, family }) {
   const meta = [];
   if (item.workspace_path) meta.push(h("span", {class:"tag",text:`🗂️ ${item.workspace_path}`}));
-  const familyTag = window.ConsoleFamily.rowTag(item);
+  const familyTag = family && depth > 1 ? h('span', {class:'tag', text:`↳ ${state.byId.get(item.parent_id)?.title || item.parent_id}`}) : null;
   if (familyTag) meta.push(familyTag);
   // In Recent, name the list the item lives in now, unless its status already says so.
   if (state.view === "recent" && T[item.bucket] && T[item.bucket] !== T.st[item.status]) {
@@ -446,7 +455,7 @@ function rowNode({ item, depth, children, rowKey }) {
         text: state.collapsed.has(item.id) ? "▸" : "▾" })
     : (depth ? h("span", { class: "tw", text: "" }) : null);
   return h("li", {
-    class: "row" + (window.ConsoleBulk?.has(item.id) ? " bulk-selected" : "") + (state.selected === item.id ? " sel" : "") + (item.bucket === "done" ? " done" : "") +
+    class: "row" + (family ? (depth ? " family-child" : " family-root") : "") + (window.ConsoleBulk?.has(item.id) ? " bulk-selected" : "") + (state.selected === item.id ? " sel" : "") + (item.bucket === "done" ? " done" : "") +
       (isUnread(item) ? " fresh" : "") + (isPinned(item) ? " pinned" : ""),
     role: "option", "data-item-id": item.id, "aria-selected": state.selected === item.id ? "true" : "false",
     onclick: (event) => {
@@ -456,8 +465,9 @@ function rowNode({ item, depth, children, rowKey }) {
   },
     h("span", {class:"row-select"}, window.ConsoleBulk?.checkbox(item,rowKey),
       h("span", { class: "st", title: T.st[item.status], text: STATUS_ICON[item.status] || "·" })),
-    h("div", { class: "main", style: depth ? { paddingLeft: `${depth * 18}px` } : null },
+    h("div", { class: "main", style: depth ? { paddingLeft: `${family ? Math.min(depth - 1, 2) * 10 + 12 : depth * 18}px` } : null },
       h("div", { class: "title" }, twisty,
+        family ? window.ConsoleFamily.roleTag(depth) : null,
         state.selected === item.id ? h("span", {class:"selection-label",text: document.documentElement.lang === "ja" ? "▶ 選択中" : "▶ Selected"}) : null,
         item.title || item.thread_name || item.id),
       h("div", { class: "meta" }, ...meta),

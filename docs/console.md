@@ -435,6 +435,10 @@ Threads that live in a chat platform still appear and can be replied to as befor
 Clicking either a parent or child in a list opens the root parent conversation.
 Every view groups matching family members under their parent, including ancestors for context.
 Each family stays at its first matching position; filters still limit which children appear.
+Families have a shared rounded border and a **Group** heading with the child-thread count.
+Parent/child labels and connecting lines distinguish the roles; deeper descendants also name
+their immediate parent. When filtering or folding hides children, the heading shows how many
+are visible out of the total. Standalone threads remain outside these group cards.
 The detail view shows a collapsible **Delegated work** panel above the conversation. Child
 and grandchild cards show status and a short latest agent report, including finished tasks.
 The totals distinguish running work, work needing the parent's attention, and completed work.
@@ -443,8 +447,7 @@ AI-suggested next steps are labelled as suggestions when no recent report is ava
 Click a child card to inspect its conversation. **Back to parent** returns to its immediate
 parent; **Main conversation** opens the root. Child replies are hidden by default: use
 **Reply directly to this child** when direct intervention is intended. Normal requests and
-decisions belong in the parent conversation, which coordinates its children. List rows also
-show the parent link or a completion count, even outside the tree view. Direct child reply
+decisions belong in the parent conversation, which coordinates its children. Direct child reply
 mode is clearly labelled and resets when leaving that child; its draft remains intact.
 
 Finishing a parent from the Console completes its descendants first, including grandchildren.

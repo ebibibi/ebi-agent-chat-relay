@@ -152,3 +152,57 @@ test('bulk toolbar and grouped rows fit desktop and mobile', async t => {
     if (process.env.CONSOLE_SCREENSHOT_DIR) await app.page.screenshot({path:`${process.env.CONSOLE_SCREENSHOT_DIR}/bulk-${width}.png`});
   }
 });
+
+test('family cards show boundaries, roles and filtered counts on narrow and wide lists', async t => {
+  const app = await setup(t,[fixture('parent'),fixture('child',{parent_id:'parent'}),
+    fixture('grandchild',{parent_id:'child'}),fixture('sibling',{parent_id:'parent'}),fixture('other')]);
+  const group = app.page.locator('.thread-group');
+  assert.equal(await group.count(),1);
+  assert.match(await group.locator('.thread-group-heading').innerText(),/Group.*3 child threads/s);
+  assert.equal(await app.row('parent').locator('.family-role').innerText(),'Parent');
+  assert.equal(await app.row('child').locator('.family-role').innerText(),'Child');
+  assert.equal(await app.row('grandchild').locator('.family-role').innerText(),'Child · level 2');
+  assert.equal(await app.row('other').locator('.family-role').count(),0);
+  assert.equal(await app.row('other').evaluate(n=>Boolean(n.closest('.thread-group'))),false);
+  assert.deepEqual(await group.locator('.row').evaluateAll(ns=>ns.map(n=>n.dataset.itemId)),['parent','child','grandchild','sibling']);
+  await app.page.locator('#filter').fill('Thread grandchild');
+  assert.match(await group.locator('.thread-group-heading').innerText(),/2 of 3 shown/);
+  assert.equal(await app.row('sibling').count(),0);
+  await app.page.locator('#filter').fill('');
+  for (const width of [1440,390,320]) {
+    await app.page.setViewportSize({width,height:844});
+    const bounds = await group.evaluate(n=>{const r=n.getBoundingClientRect(),s=getComputedStyle(n);return {width:r.width,border:parseFloat(s.borderTopWidth),overflow:n.scrollWidth>n.clientWidth};});
+    assert.ok(bounds.border>=1);
+    assert.equal(bounds.overflow,false);
+    assert.ok(await app.page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    if (process.env.CONSOLE_SCREENSHOT_DIR) await app.page.screenshot({path:`${process.env.CONSOLE_SCREENSHOT_DIR}/groups-${width}.png`});
+  }
+  await app.page.evaluate(()=>setView('tree'));
+  await app.row('parent').locator('.tw').click();
+  assert.equal(await group.locator('.row').count(),1);
+  assert.match(await group.locator('.thread-group-heading').innerText(),/0 of 3 shown/);
+  app.items = app.items.map(i=>({...i,title:i.id==='parent' ? 'お客様への回答をまとめる' :
+    i.id==='child' ? '調査結果を確認する' : i.id==='grandchild' ? '<img src=x onerror=alert(1)>' : '関連する作業を整理する'}));
+  await app.page.evaluate(async()=>{await refresh();setLanguage('ja');setView('idle');});
+  assert.match(await group.locator('.thread-group-heading').innerText(),/親子グループ.*子スレッド 3件/s);
+  assert.equal(await app.row('parent').locator('.family-role').innerText(),'親');
+  assert.equal(await app.row('child').locator('.family-role').innerText(),'子');
+  assert.equal(await group.locator('img').count(),0);
+  assert.match(await app.row('grandchild').innerText(),/<img src=x onerror=alert\(1\)>/);
+  assert.equal(await group.evaluate(n=>n.scrollWidth>n.clientWidth),false);
+  if (process.env.CONSOLE_SCREENSHOT_DIR) await app.page.screenshot({path:`${process.env.CONSOLE_SCREENSHOT_DIR}/groups-ja-320.png`});
+});
+
+test('refresh preserves a nested family row as the scroll anchor', async t => {
+  const items = Array.from({length:35},(_,n)=>[fixture(`p${n}`),fixture(`c${n}`,{parent_id:`p${n}`})]).flat();
+  const app = await setup(t,items);
+  const pos=()=>app.page.evaluate(()=>{const list=$('list'),edge=list.getBoundingClientRect().top;const row=[...list.querySelectorAll('.row')].find(n=>n.getBoundingClientRect().bottom>edge);return {id:row.dataset.itemId,offset:row.getBoundingClientRect().top-edge};});
+  await app.row('c20').evaluate(n=>{const list=document.querySelector('#list');list.scrollTop+=n.getBoundingClientRect().top-list.getBoundingClientRect().top+4;});
+  const before=await pos();
+  assert.equal(before.id,'c20');
+  app.items.unshift(fixture('new-parent'),fixture('new-child',{parent_id:'new-parent'}));
+  await app.page.evaluate(()=>refresh());
+  const after=await pos();
+  assert.equal(after.id,before.id);
+  assert.ok(Math.abs(after.offset-before.offset)<1);
+});
