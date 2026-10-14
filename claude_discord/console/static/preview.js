@@ -13,10 +13,10 @@ window.ConsolePreview = (() => {
   const STRINGS = {
     en: { preview: "Preview", source: "Source", rendered: "Rendered", download: "Download",
           cut: (n) => `Showing the first ${n} — download for the whole file`, failed: "Could not open the file",
-          rows: (n) => `first ${n} rows` },
+          copy: "Copy contents to clipboard", copying: "Copying…", copied: "Copied", copyFailed: "Could not copy contents", rows: (n) => `first ${n} rows` },
     ja: { preview: "プレビュー", source: "ソース", rendered: "表示", download: "ダウンロード",
           cut: (n) => `先頭 ${n} だけ表示しています。全体はダウンロードしてください`, failed: "ファイルを開けませんでした",
-          rows: (n) => `先頭 ${n} 行` },
+          copy: "内容をクリップボードにコピー", copying: "コピー中…", copied: "コピーしました", copyFailed: "コピーできませんでした", rows: (n) => `先頭 ${n} 行` },
   };
   const L = () => STRINGS[document.documentElement.lang === "ja" ? "ja" : "en"];
 
@@ -46,14 +46,41 @@ window.ConsolePreview = (() => {
   }
 
   // Text of a blob, cut at MAX_BYTES; UTF-8 first, Shift_JIS if UTF-8 is clearly wrong.
-  async function readText(blob) {
-    const cut = blob.size > MAX_BYTES;
+  async function readText(blob, limited = true) {
+    const cut = limited && blob.size > MAX_BYTES;
     const bytes = new Uint8Array(await (cut ? blob.slice(0, MAX_BYTES) : blob).arrayBuffer());
     let text = new TextDecoder("utf-8").decode(bytes);
     if ((text.match(/�/g) || []).length > 8) {
       try { text = new TextDecoder("shift_jis").decode(bytes); } catch { /* keep UTF-8 */ }
     }
     return { text: text.replace(/^﻿/, ""), cut };
+  }
+
+  function copyButton(load) {
+    const button = h("button", { class: "btn file-copy", type: "button", text: L().copy });
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+      button.textContent = L().copying;
+      try {
+        const text = load().then(blob => readText(blob, false)).then(data => data.text);
+        // Start the clipboard operation in the user gesture, including Safari's async fetch case.
+        if (navigator.clipboard?.write && window.ClipboardItem) {
+          await navigator.clipboard.write([new ClipboardItem({ "text/plain": text.then(value => new Blob([value], {type: "text/plain"})) })]);
+        } else if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(await text);
+        } else {
+          throw new Error("Clipboard API unavailable");
+        }
+        toast(L().copied);
+      } catch (err) { toast(`${L().copyFailed}: ${err.message}`); }
+      finally {
+        button.disabled = false;
+        button.removeAttribute("aria-busy");
+        button.textContent = L().copy;
+      }
+    });
+    return button;
   }
 
   function parseDelimited(text, sep) {
@@ -124,9 +151,9 @@ window.ConsolePreview = (() => {
     current = shade;
     document.addEventListener("keydown", onKey, true);
     document.body.append(shade);
-    let data;
+    let data, blob;
     try {
-      const blob = await load();
+      blob = await load();
       data = await readText(blob);
       data.size = blob.size;
     } catch (err) { close(); toast(`${L().failed}: ${err.message}`); return; }
@@ -136,7 +163,7 @@ window.ConsolePreview = (() => {
       body.replaceChildren(showSource ? pre(data.text) : rendered(k, data.text, name));
       if (data.cut) body.prepend(h("p", { class: "pv-note", text: L().cut(sizeText(MAX_BYTES)) }));
     };
-    const tools = [];
+    const tools = [copyButton(() => Promise.resolve(blob))];
     if (k === "markdown" || k === "html" || k === "csv" || k === "json") {
       const flip = h("button", { class: "btn", type: "button", text: L().source,
         onclick: () => { showSource = !showSource; flip.textContent = showSource ? L().rendered : L().source; draw(); } });
@@ -159,5 +186,5 @@ window.ConsolePreview = (() => {
     return res.blob();
   }
 
-  return { kind, open, fetchBlob, get label() { return L().preview; } };
+  return { kind, open, fetchBlob, copyButton, get label() { return L().preview; } };
 })();

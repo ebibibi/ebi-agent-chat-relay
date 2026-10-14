@@ -32,6 +32,23 @@ for (const width of [1440, 390]) {
     await page.goto('http://console.test/');
     await page.waitForFunction(() => state.items.length === 100);
     await page.evaluate(() => setView('idle'));
+    await t.test('selection stays distinct from unread and pinned states', async () => {
+      const selected = page.locator('.row.sel').first();
+      const unread = page.locator('.row.fresh:not(.sel)').first();
+      assert.equal(await selected.locator('.selection-label').count(), 1);
+      for (const extra of ['', 'fresh', 'pinned', 'fresh pinned']) {
+        const styles = await selected.evaluate((node, extra) => {
+          node.className = 'row sel ' + extra;
+          const css = getComputedStyle(node);
+          return { outline: css.outlineStyle, width: parseFloat(css.outlineWidth), background: css.backgroundColor };
+        }, extra);
+        assert.equal(styles.outline, 'solid');
+        assert.ok(styles.width >= 2);
+        if (await unread.count()) assert.notEqual(styles.background, await unread.evaluate(node => getComputedStyle(node).backgroundColor));
+      }
+      await page.evaluate(() => renderList());
+    });
+    if (process.env.CONSOLE_SCREENSHOT_DIR) await page.screenshot({path: `${process.env.CONSOLE_SCREENSHOT_DIR}/selection-${width}.png`});
     const position = () => page.evaluate(() => {
       const list = $('list');
       const top = list.getBoundingClientRect().top;
@@ -95,6 +112,18 @@ for (const width of [1440, 390]) {
       await page.evaluate(() => refresh());
       assert.equal((await position()).scroll, 0);
       assert.equal((await position()).title, 'Thread latest');
+    });
+    await t.test('a pinned thread repeated in the tree keeps the correct occurrence visible', async () => {
+      items = items.map(i => i.id === '50' ? {...i,pinned_at:'2026-10-14T10:00:00Z'} : i);
+      await page.evaluate(async () => { closeItem(); await refresh(); setView('tree'); });
+      await page.evaluate(() => {
+        const rows = document.querySelectorAll('[data-item-id="50"]');
+        const list = $('list');
+        list.scrollTop += rows[1].getBoundingClientRect().top - list.getBoundingClientRect().top;
+      });
+      const before = await position();
+      await page.evaluate(() => refresh());
+      assert.deepEqual(await position(), before);
     });
     assert.deepEqual(errors, []);
   });

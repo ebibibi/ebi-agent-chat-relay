@@ -134,8 +134,10 @@
   function addFileRows() {
     for (const body of document.querySelectorAll(".msg .body:not([data-files])")) {
       body.setAttribute("data-files", "");
-      const found = body.textContent.match(/\/console\/api\/files\/\d+\/[0-9a-f]{32}\/[^\s)\]]+/g)
-        || [...body.querySelectorAll(`a[href^="${FILES}"]`)].map((a) => a.getAttribute("href"));
+      const content = body.cloneNode(true);
+      content.querySelectorAll(".file").forEach(node => node.remove());
+      const links = [...body.querySelectorAll(`a[href^="${FILES}"]`)].map(a => a.getAttribute("href"));
+      const found = links.length ? links : (content.textContent.match(/\/console\/api\/files\/\d+\/[0-9a-f]{32}\/[^\s)\]]+/g) || []);
       if (!found.length) continue;
       const row = el("div", "live-files");
       for (const href of new Set(found)) {
@@ -145,7 +147,7 @@
           const look = el("button", "btn", `👁 ${P.label} ${fileName(href)}`);
           look.type = "button";
           look.addEventListener("click", () => P.open(fileName(href), () => fetchFile(href), () => download(href)));
-          row.append(look);
+          row.append(look, P.copyButton(() => fetchFile(href)));
         }
         const btn = el("button", "btn", `📎 ${L.download} ${fileName(href)}`);
         btn.type = "button";

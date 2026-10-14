@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import io
 import logging
 import os
 import tempfile
@@ -44,7 +45,7 @@ from ..database.lounge_repo import LoungeRepository
 from ..database.repository import SessionRecord, SessionRepository
 from ..database.resume_repo import PendingResumeRepository
 from ..database.settings_repo import SettingsRepository
-from ..discord_ui.chunker import chunk_message
+from ..discord_ui.chunker import DISCORD_MAX_CHARS, chunk_message
 from ..discord_ui.embeds import stopped_embed
 from ..discord_ui.file_sender import send_file_blobs
 from ..discord_ui.status import StatusManager
@@ -1127,11 +1128,16 @@ class ClaudeChatCog(commands.Cog):
                 current turn to finish — the right default, because a message
                 that preempts a turn can cost the receiver uncommitted work.
         """
-        chunks = chunk_message(text) or [text]
         try:
-            seed_message = await thread.send(chunks[0])
-            for chunk in chunks[1:]:
-                seed_message = await thread.send(chunk)
+            if len(text) > DISCORD_MAX_CHARS:
+                # A long URL must remain a single value, including in the visible transcript.
+                # The agent still receives the original text below, not the attachment notice.
+                seed_message = await thread.send(
+                    "📎 Full message attached as message.txt (kept intact).",
+                    file=discord.File(io.BytesIO(text.encode("utf-8")), filename="message.txt"),
+                )
+            else:
+                seed_message = await thread.send(text)
         except discord.NotFound:
             # api_server.py fires this via asyncio.create_task with nothing
             # awaiting the result, so an uncaught NotFound here would surface

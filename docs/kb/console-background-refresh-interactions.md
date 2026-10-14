@@ -19,7 +19,9 @@ The list and detail Stop controls awaited the server before displaying feedback.
 
 ## Resolution
 
-List rendering retains the first visible row and its viewport offset, falling back to the previous scroll offset if that row disappears. At the top, it stays at the top so new items remain visible. Only explicit navigation (keyboard movement, opening a thread, switching views, or capturing an item) reveals the selection.
+List rendering retains the first visible row, its occurrence within the list, and its viewport offset, falling back to the previous scroll offset if that row disappears. At the top, it stays at the top so new items remain visible. Only explicit navigation (keyboard movement, opening a thread, switching views, or capturing an item) reveals the selection.
+
+A pinned thread can also appear in its tree position. Restoring by thread ID alone selects the first occurrence and jumps back to the pinned section; include the occurrence when restoring the anchor. Selected rows use an outline and explicit label distinct from the unread dot.
 
 All Stop entry points use the same per-item pending state. Buttons immediately disable and display a stopping label or hourglass, with `aria-busy` and an accessible label. Repeated clicks do not create another request. A failed request shows the error and enables retry; an accepted request remains pending until the board reports that the item is no longer running or queued.
 

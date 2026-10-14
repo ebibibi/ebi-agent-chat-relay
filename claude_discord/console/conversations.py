@@ -162,6 +162,19 @@ class ConversationRepository:
             await db.commit()
             return int(cursor.lastrowid or 0)
 
+    async def search(self, query: str, limit: int = 50) -> list[dict[str, Any]]:
+        """Latest matching message per conversation; literal substring, including % and _."""
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            rows = await db.execute_fetchall(
+                "SELECT m.thread_key, m.content FROM console_messages m "
+                "JOIN (SELECT thread_key, MAX(id) AS id FROM console_messages "
+                "WHERE instr(lower(content), lower(?)) > 0 GROUP BY thread_key) hit "
+                "ON m.id = hit.id ORDER BY m.id DESC LIMIT ?",
+                (query, limit),
+            )
+        return [dict(row) for row in rows]
+
     async def history(self, thread_key: int, limit: int) -> list[ConsoleMessage]:
         """The latest *limit* messages, oldest first."""
         async with aiosqlite.connect(self._db_path) as db:

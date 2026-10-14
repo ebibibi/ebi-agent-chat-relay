@@ -61,4 +61,7 @@ vm.runInContext(fs.readFileSync('claude_discord/console/static/paste.js', 'utf8'
   assert.equal(await context.capture(text), true);
   assert.equal(apiCalls[1].body.files.length, 1);
   assert.ok(JSON.stringify(apiCalls[1].body).length < 4000);
+  const url = 'http://localhost/?code=' + 'synthetic'.repeat(300);
+  assert.equal(await context.capture(url), true);
+  assert.equal(apiCalls.at(-1).body.note, url);
 })().catch(err => { console.error(err); process.exitCode = 1; });

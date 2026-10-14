@@ -66,6 +66,7 @@ EDITABLE_FIELDS = (
     "place",
     "pinned",
     "paused",
+    "workspace_path",
 )
 
 
@@ -100,6 +101,8 @@ class WorkItem:
     pinned_at: str | None = None
     #: When a person paused its run from the console; None when it is not paused.
     paused_at: str | None = None
+    #: Relative context/project path in the explicitly configured Ebi Workspace.
+    workspace_path: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -118,6 +121,7 @@ class WorkItem:
             "place": self.place,
             "pinned_at": self.pinned_at,
             "paused_at": self.paused_at,
+            "workspace_path": self.workspace_path,
         }
 
 
@@ -142,6 +146,7 @@ def _row_to_item(row: aiosqlite.Row) -> WorkItem:
         place=row["place"],
         pinned_at=row["pinned_at"],
         paused_at=row["paused_at"],
+        workspace_path=row["workspace_path"],
     )
 
 
@@ -201,6 +206,8 @@ def validate_changes(changes: dict[str, Any]) -> dict[str, Any]:
             clean[field] = _optional_text(value, field, MAX_NOTE_CHARS)
         elif field == "project":
             clean[field] = _optional_text(value, field, MAX_PROJECT_CHARS)
+        elif field == "workspace_path":
+            clean[field] = _optional_text(value, field, 1000)
         elif field == "place":
             clean[field] = _optional_text(value, field, MAX_PLACE_CHARS)
         elif field == "pinned":
@@ -233,6 +240,8 @@ class WorkItemRepository:
                 await db.execute("ALTER TABLE work_items ADD COLUMN pinned_at TEXT")
             if "paused_at" not in have:
                 await db.execute("ALTER TABLE work_items ADD COLUMN paused_at TEXT")
+            if "workspace_path" not in have:
+                await db.execute("ALTER TABLE work_items ADD COLUMN workspace_path TEXT")
             await db.commit()
 
     async def list_all(self) -> list[WorkItem]:
@@ -269,6 +278,7 @@ class WorkItemRepository:
             created_at=now,
             updated_at=now,
             place=clean.get("place"),
+            workspace_path=clean.get("workspace_path"),
         )
         await self._check_parent(item.id, item.parent_id)
         await self._write(item)
@@ -374,13 +384,14 @@ class WorkItemRepository:
         await db.execute(
             "INSERT INTO work_items (id, thread_id, title, note, parent_id, priority, due_at,"
             " snoozed_until, project, state, created_at, updated_at, place, pinned_at,"
-            " paused_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " paused_at, workspace_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(id) DO UPDATE SET title = excluded.title, note = excluded.note,"
             " parent_id = excluded.parent_id, priority = excluded.priority,"
             " due_at = excluded.due_at, snoozed_until = excluded.snoozed_until,"
             " project = excluded.project, state = excluded.state,"
             " updated_at = excluded.updated_at, place = excluded.place,"
-            " pinned_at = excluded.pinned_at, paused_at = excluded.paused_at",
+            " pinned_at = excluded.pinned_at, paused_at = excluded.paused_at,"
+            " workspace_path = excluded.workspace_path",
             (
                 item.id,
                 item.thread_id,
@@ -397,5 +408,6 @@ class WorkItemRepository:
                 item.place,
                 item.pinned_at,
                 item.paused_at,
+                item.workspace_path,
             ),
         )

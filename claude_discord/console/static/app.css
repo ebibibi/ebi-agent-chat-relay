@@ -101,7 +101,7 @@ button.slash-now:hover { border-color: var(--accent); }
 .row.sel { background: var(--raise); border-left-color: var(--accent); }
 /* Unread, like a mail client: bold title, a dot, a faint tint. No motion — the list
    re-renders on every poll and an animation would replay each time. */
-.row.fresh { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.row.fresh { background: transparent; }
 .row.fresh.sel { background: var(--raise); }
 /* Pinned: what the human is working on now. Loud on purpose. */
 .group.pinned-group { color: var(--p1); font-size: 13px; letter-spacing: .02em; text-transform: none;
@@ -115,6 +115,14 @@ button.slash-now:hover { border-color: var(--accent); }
 .row.fresh .title { font-weight: 700; color: #fff; }
 .row.fresh .title::before { content: ""; display: inline-block; width: 7px; height: 7px; margin: 0 6px 1px 0;
   border-radius: 50%; background: var(--accent); vertical-align: middle; }
+/* Selection wins over unread and pinned state; inset outline never changes row size. */
+.row.sel, .row.fresh.sel, .row.pinned.sel {
+  background: #203b65; border-left-color: #9cbcff;
+  outline: 2px solid #9cbcff; outline-offset: -2px;
+}
+.selection-label { display:inline-block; margin-right:8px; padding:0 5px;
+  border-radius:3px; background:#b5cdff; color:#14243e; font-size:11px; font-weight:700; vertical-align:1px; }
+.row.fresh .title::before { background:var(--ai); }
 .nav .nav-notify { color: var(--dim); margin-top: 4px; }
 .nav .nav-notify.on { color: var(--text); }
 .toast.clickable { cursor: pointer; border-color: var(--me); }

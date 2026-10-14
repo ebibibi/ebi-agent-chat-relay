@@ -1,0 +1,11 @@
+.message-search { position:fixed; inset:0; z-index:70; background:#0009; padding:4vh 12px; display:grid; place-items:center; }
+.message-search[hidden] { display:none; }
+.search-shell { width:min(760px,100%); max-height:92vh; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px; display:flex; flex-direction:column; gap:12px; overflow:hidden; }
+.search-shell header,.search-shell form { display:flex; align-items:center; gap:12px; }
+.search-shell header h2 { flex:1; margin:0; font-size:18px; }
+.search-shell p { margin:0; }
+.search-shell input { min-width:0; flex:1; padding:10px; }
+.search-results { overflow:auto; display:flex; flex-direction:column; gap:10px; }
+.search-result { display:flex; flex-direction:column; align-items:flex-start; text-align:left; gap:8px; white-space:normal; overflow-wrap:anywhere; background:var(--bg); color:var(--text); padding:14px; border:1px solid var(--line); border-radius:8px; cursor:pointer; }
+.search-result:hover,.search-result:focus-visible { border-color:var(--accent); }
+@media(max-width:700px){ .list-head { flex-wrap:wrap; } #search-messages { font-size:12px; } }

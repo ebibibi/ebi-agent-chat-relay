@@ -1,0 +1,100 @@
+"""Authenticated Workspace tasks and context propagation into actual Console turns."""
+
+from __future__ import annotations
+
+from claude_discord.console.workspace import Workspace
+from tests.test_console_conversations import AUTH, WRITE, _settle
+from tests.test_console_conversations import env as conversation_env
+from tests.test_console_workspace import notes as workspace_notes
+
+env = conversation_env
+notes = workspace_notes
+
+
+async def test_workspace_is_optional_and_authenticated(env):
+    env.console.workspace = Workspace(None)
+    assert (await env.client.get("/console/api/workspace")).status == 401
+    response = await env.client.get("/console/api/workspace", headers=AUTH)
+    assert await response.json() == {"available": False, "entries": []}
+
+
+async def test_task_edit_conflict_and_csrf(env, notes):
+    env.console.workspace = Workspace(notes)
+    response = await env.client.get("/console/api/workspace", headers=AUTH)
+    entry = next(e for e in (await response.json())["entries"] if e["kind"] == "project")
+    payload = {
+        "path": entry["path"],
+        "revision": entry["revision"],
+        "line": entry["tasks"][0]["line"],
+        "done": True,
+    }
+    assert (
+        await env.client.patch("/console/api/workspace/tasks", json=payload, headers=AUTH)
+    ).status == 403
+    assert (
+        await env.client.patch("/console/api/workspace/tasks", json=payload, headers=WRITE)
+    ).status == 200
+    assert (
+        await env.client.patch("/console/api/workspace/tasks", json=payload, headers=WRITE)
+    ).status == 409
+
+
+async def test_start_reply_and_child_keep_workspace_association(env, notes):
+    env.console.workspace = Workspace(notes)
+    created = await env.client.post(
+        "/console/api/items",
+        headers=WRITE,
+        json={"title": "Ship it", "workspace_path": "Work/Client/Website", "start": True},
+    )
+    assert created.status == 201
+    item = (await created.json())["item"]
+    await _settle(env.host)
+    assert item["workspace_path"] == "Work/Client/Website"
+    assert str(notes / "02_Contexts/Work/Client/Website/status.md") in env.runs[-1].prompt
+    reply = await env.client.post(
+        f"/console/api/items/{item['id']}/reply", headers=WRITE, json={"text": "Continue"}
+    )
+    assert reply.status == 202
+    await _settle(env.host)
+    assert "Work/Client/Website" in env.runs[-1].prompt
+    child = await env.client.post(
+        "/console/api/items", headers=WRITE, json={"title": "Child task", "parent_id": item["id"]}
+    )
+    assert (await child.json())["item"]["workspace_path"] == "Work/Client/Website"
+    board = await env.client.get("/console/api/board", headers=AUTH)
+    assert any(
+        i.get("workspace_path") == "Work/Client/Website" for i in (await board.json())["items"]
+    )
+
+
+async def test_invalid_binding_and_document_paths_are_rejected(env, notes):
+    env.console.workspace = Workspace(notes)
+    response = await env.client.post(
+        "/console/api/items", headers=WRITE, json={"title": "Bad", "workspace_path": "../outside"}
+    )
+    assert response.status == 400
+    response = await env.client.get(
+        "/console/api/workspace/document",
+        headers=AUTH,
+        params={"path": "Work/Client", "name": "../../secret"},
+    )
+    assert response.status == 400
+
+
+async def test_run_original_task_checks_revision_and_keeps_it_open_until_work_succeeds(env, notes):
+    env.console.workspace = Workspace(notes)
+    entry = env.console.workspace.entry("Work/Client/Website")
+    payload = {
+        "path": entry["path"],
+        "revision": entry["revision"],
+        "line": entry["tasks"][0]["line"],
+    }
+    response = await env.client.post("/console/api/workspace/run", json=payload, headers=WRITE)
+    assert response.status == 201
+    await _settle(env.host)
+    assert "Ship it" in env.runs[-1].prompt
+    assert env.console.workspace.entry(entry["path"])["tasks"][0]["done"] is False
+    payload["revision"] = "stale"
+    assert (
+        await env.client.post("/console/api/workspace/run", json=payload, headers=WRITE)
+    ).status == 409

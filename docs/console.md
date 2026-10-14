@@ -110,8 +110,8 @@ text (logs, code, YAML, …) as wrapped monospace. Source and Download are alway
 a file over 2 MB shows its first 2 MB. Chat attachments are read from Discord's CDN, which the
 CSP allows for `connect-src` (read-only, CORS `*`).
 
-The open thread reloads with the board while a turn is running, and the list keeps your scroll
-position unless you were already at the bottom.
+The open thread reloads with the board while a turn is running. Background refreshes keep
+the list anchored to the row you are reading; they do not scroll back to the selected thread.
 
 In Recent, "activity" means the thread's last message (or, for work you wrote down, its last
 edit); changing priority or snooze does not move an item. Recent shows what the board already
@@ -427,3 +427,80 @@ parent; **Main conversation** opens the root. Child replies are hidden by defaul
 **Reply directly to this child** when direct intervention is intended. Normal requests and
 decisions belong in the parent conversation, which coordinates its children. List rows also
 show the parent link or a completion count, even outside the tree view.
+
+## Finding earlier work
+
+The instant filter searches board metadata. **Search messages** next to it also searches
+all saved Console messages (including messages older than the open thread's history window)
+and available local Claude transcripts. Results show a matching excerpt; selecting one opens
+the original conversation, including completed work. This search uses no AI calls.
+
+Transcript results must resolve to a Console conversation or a Discord thread under a watched
+channel. An older archived thread found this way is kept in the board's temporary discovery
+cache (up to 50 threads), so opening it survives the next refresh. Unrelated CLI transcripts
+are not exposed. Discord messages without a local Claude transcript, such as unrecorded chat
+or another backend's Discord history, are not covered; Console-owned conversations are covered
+regardless of backend. Results are capped at 50; use a more specific phrase for broad searches.
+A timed-out transcript scan shows a partial-results notice. `GET /console/api/search?q=…`
+is authenticated and accepts a literal query of 1–500 characters.
+
+Selected rows have a blue outline and a **Selected** marker. Unread rows use a green dot and
+bold title. Pinning keeps its pin symbol while selection keeps its own outline. Background
+refreshes preserve the visible row and its offset, including a thread repeated in a tree and
+its pinned section; only deliberate navigation reveals the selected row.
+
+## Copying file contents
+
+Text attachments have **Copy contents to clipboard** beside Preview/Download and in the
+preview toolbar. Copy uses the complete original source text, including everything past the
+2 MB preview cutoff; it does not copy the rendered HTML, formatted JSON or only the visible
+rows of a CSV. Copy shows immediate progress and a success or error message and remains
+retryable. Browser clipboard permission and a secure browser context are required. Binary
+files retain their existing download actions.
+
+Console replies relayed into Discord which exceed Discord's 2,000-character message limit
+are posted as one UTF-8 `message.txt` attachment. The agent receives the original complete
+prompt. A long URL is never split across two Discord messages. A long first line in a new
+capture is kept in its note even when its title is shortened.
+
+## Optional Ebi Workspace
+
+When Ebi Workspace has been explicitly configured and contains `02_Contexts`, Console shows
+an **Ebi Workspace** navigation entry and a context/project picker. No guessed default vault
+or installed plugin cache enables this integration. Detection order:
+
+1. `EBI_WORKSPACE_NOTES_FOLDER` or `CLAUDE_WORKSPACE_NOTES_FOLDER` environment variable.
+2. `${XDG_CONFIG_HOME:-~/.config}/ebi-workspace/notes-folder` (absolute path in the file).
+3. Those same variables in `~/.claude/settings.local.json` under `env`.
+
+The Workspace view reads project `status.md` next actions and context `single-actions.md`,
+including nested contexts. Add, rename or check a task to update its original Markdown;
+Console stores only the association (`workspace_path`), never a second task list. Updates
+preserve unrelated sections, check a content revision to refuse stale edits, replace files
+atomically, and record the change in the project's/context's log plus a link in the daily note.
+Archived, someday, hidden and symlinked directories are excluded.
+
+**Run with AI** starts a Console conversation associated with the task's context/project.
+Starting work does not mark the task complete. The agent receives the paths of the applicable
+Workspace instructions, source tasks and log and is instructed to read them and record the
+outcome. Replies and child work retain that association. **Start work here** chooses the
+context for the next capture; an existing conversation's picker can set its association too.
+
+Automatic association uses an unambiguous working directory inside the Workspace, a unique
+matching project name, a parent's association, or an explicitly labelled local repository in
+`overview.md` (`repository: /absolute/path`, `working_dir: /absolute/path`, or
+`- リポジトリ: ~/path`). It does not guess ownership from arbitrary message text. Conflicting
+or missing information remains unassociated for the user to select. Overview is available
+alongside tasks; task changes are immediately visible in Obsidian because both use the same files.
+
+Authenticated API routes:
+
+- `GET /console/api/workspace` — availability and contexts/projects/tasks with revisions.
+- `GET /console/api/workspace/document?path=…&name=…` — a supported Workspace document.
+- `POST /console/api/workspace/tasks` — add a task (`path`, `revision`, `text`).
+- `PATCH /console/api/workspace/tasks` — edit a task (`path`, `revision`, `line`, `text`/`done`).
+- `POST /console/api/workspace/run` — start the current open task (`path`, `revision`, `line`).
+
+Mutations use the same authentication and CSRF checks as other Console actions. Workspace
+paths are relative to `02_Contexts`; arbitrary files and traversal are refused. A stale
+revision returns 409 so an Obsidian edit cannot be silently overwritten.

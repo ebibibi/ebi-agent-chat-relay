@@ -151,3 +151,11 @@ async def test_pinning_records_when_and_unpinning_clears_it(repo) -> None:
 async def test_a_thread_can_be_pinned_before_it_has_an_overlay(repo) -> None:
     pinned = await repo.update("t42", {"pinned": True})
     assert pinned.thread_id == 42 and pinned.pinned_at is not None
+
+
+async def test_workspace_reference_survives_capture_to_thread(repo) -> None:
+    item = await repo.create_capture({"title": "Ship", "workspace_path": "Work/Client/Website"})
+    linked = await repo.attach_thread(item.id, 9021)
+    assert linked.workspace_path == "Work/Client/Website"
+    assert (await repo.get(linked.id)).as_dict()["workspace_path"] == "Work/Client/Website"
+    assert (await repo.update(linked.id, {"workspace_path": None})).workspace_path is None

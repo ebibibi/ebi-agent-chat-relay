@@ -336,3 +336,16 @@ async def test_delivery_to_a_deleted_thread_is_swallowed_with_a_warning(caplog) 
 
     cog._run_claude.assert_not_awaited()
     assert any(str(thread.id) in record.message for record in caplog.records)
+
+
+async def test_long_url_relay_is_one_attachment_and_one_unchanged_agent_input() -> None:
+    cog = _make_cog()
+    thread = _make_target_thread()
+    cog._run_claude = AsyncMock()
+    text = "http://localhost/?code=" + "synthetic-test-value-" * 130 + "&state=test"
+    await cog.deliver_relayed_message(thread, text, interrupt=False)
+    thread.send.assert_awaited_once()
+    sent = thread.send.call_args.kwargs["file"]
+    assert sent.filename == "message.txt"
+    assert sent.fp.getvalue().decode("utf-8") == text
+    assert cog._run_claude.call_args.args[2] == text

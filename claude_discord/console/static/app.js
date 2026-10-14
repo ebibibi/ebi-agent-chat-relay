@@ -257,7 +257,7 @@ function snoozeTarget(kind) {
 function matches(item) {
   if (!state.filter) return true;
   const q = state.filter.toLowerCase();
-  return [item.title, item.project, item.thread_name, item.working_dir].some((v) => v && v.toLowerCase().includes(q));
+  return [item.title, item.project, item.workspace_path, item.thread_name, item.working_dir].some((v) => v && v.toLowerCase().includes(q));
 }
 // Pinned items ("working on now") open every view but Done, newest pin first, and leave
 // their usual place so nothing is listed twice — except in the tree, whose shape needs them.
@@ -361,6 +361,7 @@ function renderNav() {
       class: "count" + (v.hot && counts[v.key] ? " hot" : ""), text: counts[v.key] || "",
     }))),
     window.ConsoleSlots.nav(),
+    window.ConsoleWorkspace.nav(),
     window.ConsoleBackend.nav(),
     window.ConsoleNotify ? h("button", { class: "nav-notify" + (window.ConsoleNotify.isOn() ? " on" : ""),
       onclick: () => window.ConsoleNotify.toggle() },
@@ -384,16 +385,21 @@ function renderList() {
     .find((row) => row.getBoundingClientRect().bottom > edge);
   const offset = anchor ? anchor.getBoundingClientRect().top - edge : 0;
   const nodes = [];
+  const occurrences = new Map();
   for (const row of rows) {
     if (row.group !== undefined) { nodes.push(h("li", { class: row.cls || "group", text: row.group })); continue; }
     if (row.node) { nodes.push(row.node); continue; }
-    nodes.push(rowNode(row));
+    const node = rowNode(row);
+    const occurrence = occurrences.get(row.item.id) || 0;
+    node.dataset.occurrence = String(occurrence);
+    occurrences.set(row.item.id, occurrence + 1);
+    nodes.push(node);
   }
   list.replaceChildren(...nodes);
   const empty = $("empty");
   empty.hidden = rows.length > 0;
   empty.textContent = T.empty;
-  const restored = anchor && nodes.find((row) => row.dataset.itemId === anchor.dataset.itemId);
+  const restored = anchor && nodes.find((row) => row.dataset.itemId === anchor.dataset.itemId && row.dataset.occurrence === anchor.dataset.occurrence);
   list.scrollTop = restored
     ? list.scrollTop + restored.getBoundingClientRect().top - edge - offset
     : top;
@@ -407,6 +413,7 @@ function revealSelection() {
 
 function rowNode({ item, depth, children }) {
   const meta = [];
+  if (item.workspace_path) meta.push(h("span", {class:"tag",text:`🗂️ ${item.workspace_path}`}));
   const familyTag = window.ConsoleFamily.rowTag(item);
   if (familyTag) meta.push(familyTag);
   // In Recent, name the list the item lives in now, unless its status already says so.
@@ -441,7 +448,9 @@ function rowNode({ item, depth, children }) {
   },
     h("span", { class: "st", title: T.st[item.status], text: STATUS_ICON[item.status] || "·" }),
     h("div", { class: "main", style: depth ? { paddingLeft: `${depth * 18}px` } : null },
-      h("div", { class: "title" }, twisty, item.title || item.thread_name || item.id),
+      h("div", { class: "title" }, twisty,
+        state.selected === item.id ? h("span", {class:"selection-label",text: document.documentElement.lang === "ja" ? "▶ 選択中" : "▶ Selected"}) : null,
+        item.title || item.thread_name || item.id),
       h("div", { class: "meta" }, ...meta),
       state.view === "focus" ? window.ConsoleFocus.note(item) : null),
     h("div", { class: "side" }, ...side),
@@ -526,6 +535,7 @@ function headParts(item) {
     "aria-pressed": pinned ? "true" : "false", onclick: () => togglePin(item.id),
     text: pinned ? `📌 ${T.unpin}` : `📌 ${T.pin}` }));
   parts.push(window.ConsolePlaces.picker(item));
+  parts.push(window.ConsoleWorkspace.picker(item));
   // Tool calls and status lines: one click away, never folded into the drawer.
   if (item.thread_id) parts.push(activityToggle());
   parts.push(h("button", { class: "btn d-more" + (state.drawerOpen ? " on" : ""), type: "button",
@@ -634,7 +644,7 @@ function messageNode(m) {
       : null;
     body.append(h("div", { class: "file" }, remote
       ? h("a", { href: a.url, target: "_blank", rel: "noopener noreferrer", text: `📎 ${a.filename}` })
-      : h("span", { text: `📎 ${a.filename}` }), look));
+      : h("span", { text: `📎 ${a.filename}` }), look, look ? P.copyButton(() => P.fetchBlob(a.url)) : null));
   }
   if ((m.actions || []).length) body.append(actionRow(m));
   return h("div", { class: `msg ${kind}` },
@@ -822,7 +832,9 @@ async function capture(text) {
   // First line is the title; anything after it is the note.
   const [first, ...rest] = text.split("\n");
   const body = { title: first.trim().slice(0, 200), start };
-  const note = rest.join("\n").trim();
+  const workspacePath = window.ConsoleWorkspace?.path();
+  if (workspacePath) body.workspace_path = workspacePath;
+  const note = first.trim().length > 200 ? text : rest.join("\n").trim();
   if (note) body.note = note;
   const files = window.ConsolePaste.ready(CAPTURE);
   if (files === null) { toast(T.paste_wait); return false; }
@@ -877,6 +889,7 @@ function showHelp(show) {
 // ---------------------------------------------------------------- wiring
 function wire() {
   $("filter").placeholder = T.filter;
+  window.ConsoleSearch?.wire();
   $("capture-start-label").textContent = T.autostart;
   syncCapture();
   $("capture-start").addEventListener("change", (e) => {
@@ -945,5 +958,6 @@ function wire() {
 
 readHash();
 wire();
+window.ConsoleWorkspace.load();
 render();
 refresh().then(() => { if (state.open) openItem(state.open); });

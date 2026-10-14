@@ -97,3 +97,22 @@ async def test_search_transcripts_python_fallback(tmp_path) -> None:
     _write_transcript(tmp_path / f"{_SID_A}.jsonl", [("user", "find me without grep")])
     hits = await search_transcripts(str(tmp_path), "without grep", limit=10, use_grep=False)
     assert [h.session_id for h in hits] == [_SID_A]
+
+
+async def test_cancelled_search_reaps_the_prefilter_process(monkeypatch) -> None:
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from claude_code_core.transcript_search import _grep_candidate_files
+
+    process = MagicMock()
+    process.returncode = None
+    process.communicate = AsyncMock(side_effect=asyncio.CancelledError)
+    process.wait = AsyncMock(return_value=0)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", AsyncMock(return_value=process))
+    import pytest
+
+    with pytest.raises(asyncio.CancelledError):
+        await _grep_candidate_files("/transcripts", "query")
+    process.kill.assert_called_once()
+    process.wait.assert_awaited_once()
