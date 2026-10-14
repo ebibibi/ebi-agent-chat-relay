@@ -308,6 +308,19 @@ async def _build_system_context(config: RunConfig) -> str | None:
         "asked to receive."
     )
 
+    parts.append(
+        "## Ebi AI Console thread links\n"
+        "When the user asks where an earlier conversation is, find it before linking. "
+        "The relay's GET $CCDB_API_URL/api/search?q=<URL-encoded keywords>&body=1 "
+        "can search saved session summaries and local Claude transcripts. "
+        "For Console navigation, return [thread title](/#focus/t<thread_id>) using the "
+        "actual thread_id from the search result (replace the placeholder). "
+        "If you have a Console work-item ID, use /#focus/<item_id> unchanged instead. "
+        "These relative links open inside Ebi AI Console; on Discord use the returned "
+        "deep_link as well when available. Never invent thread IDs or Console hostnames, "
+        "and never include authentication tokens in links. If nothing matches, say so."
+    )
+
     done_section = _build_done_marker_section(config)
     if done_section:
         parts.append(done_section)

@@ -12,7 +12,7 @@ const MD = (() => {
   const INLINE = new RegExp([
     /``([^`]+?)``|`([^`\n]+)`/.source,                                    // 1,2 code
     // The one same-origin target: a delivered file (live.js downloads it with the token).
-    /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+|\/console\/api\/files\/[^\s)]+)\)/.source, // 3,4 [text](url)
+    /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+|\/?#[a-z]+\/[A-Za-z0-9_-]+|\/console\/api\/files\/[^\s)]+)\)/.source, // 3,4 [text](url)
     /<(https?:\/\/[^\s>]+)>/.source,                                       // 5 <url>
     /(https?:\/\/[^\s<]*[^\s<.,:;"')\]!?*_~|])/.source,                   // 6 bare url
     /\*\*\*([^*][\s\S]*?)\*\*\*/.source,                                   // 7 bold italic
@@ -30,7 +30,7 @@ const MD = (() => {
   function link(href, label) {
     const a = el("a");
     a.href = href;
-    a.target = "_blank";
+    if (!window.ConsoleLinks?.route(href)) a.target = "_blank";
     a.rel = "noopener noreferrer";
     a.append(...(typeof label === "string" ? [text(label)] : label));
     return a;

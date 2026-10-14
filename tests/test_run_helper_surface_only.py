@@ -109,3 +109,11 @@ async def test_file_delivery_guidance_names_the_console() -> None:
 
     assert "Ebi AI Console cannot open local filesystem paths" in context
     assert "send files to Discord" not in context
+
+
+async def test_console_thread_link_guidance_uses_verified_search_ids() -> None:
+    config = RunConfig(surface=MemorySurface(), runner=_runner(), prompt="find earlier work")
+    context = await _build_system_context(config)
+    assert "[thread title](/#focus/t<thread_id>)" in context
+    assert "/api/search?q=" in context
+    assert "Never invent thread IDs" in context

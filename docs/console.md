@@ -548,3 +548,19 @@ When no Workspace is configured, Console offers a dismissible introduction with 
 purchase link. The menu entry remains available after dismissal. Configured installations
 show their tasks instead. The introduction makes no external requests until the user opens
 the sales link; it does not install or buy anything automatically.
+
+### Thread links
+
+Use **Copy thread link** in the conversation header to copy a shareable Console URL.
+The URL contains the work-item ID, without authentication parameters. Paste it into
+a message, or write `[thread title](/#focus/t123)` using the actual thread ID.
+Same-instance links open inside the current Console tab; browser Back/Forward work.
+A child link opens that child's family view with direct replies still opt-in.
+External links keep opening in a new tab. Missing or inaccessible targets show a
+notice rather than silently opening a different conversation. Links do not grant
+access: the recipient still needs access to this Console instance.
+
+Agents receive the link format and the existing `/api/search?q=…&body=1` lookup
+in their run context, with instructions to use verified IDs only. That search
+can find stored session summaries and local Claude transcripts; it does not make
+all external message histories searchable.

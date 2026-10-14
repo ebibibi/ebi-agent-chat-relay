@@ -535,6 +535,7 @@ function headParts(item) {
     h("button", { class: "icon-btn", "aria-label": "close", onclick: closeItem, text: "←" }),
     h("span", { class: "d-status", title: T.st[item.status], text: STATUS_ICON[item.status] || "·" }),
     title,
+    window.ConsoleLinks.button(item),
   ];
   if (!item.thread_id) parts.push(h("button", { class: "btn primary", onclick: () => startItem(item.id), text: T.start }));
   const ctx = contextTag(item, true);
@@ -968,6 +969,7 @@ function wire() {
 
 readHash();
 wire();
+window.ConsoleLinks.wire();
 window.ConsoleWorkspace.load();
 render();
 refresh().then(() => { if (state.open) openItem(state.open); });
