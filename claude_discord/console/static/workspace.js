@@ -8,6 +8,7 @@ window.ConsoleWorkspace = (() => {
   let busy = false;
   let loaded = false;
   const SALES_URL = "https://note.com/ebibibi/n/n300772aeac93";
+  const SALES_URL_EN = "https://note.com/ebibibi/n/nc327ab1de017";
   const lang = () => document.documentElement.lang === "ja";
   const L = () => lang() ? {
     title:"Ebi Workspace", pick:"コンテキスト・プロジェクト", auto:"自動で紐づけ", tasks:"タスク",
@@ -119,7 +120,7 @@ window.ConsoleWorkspace = (() => {
         h("h2",{text:ja?"会話の続きを、仕事の続きに。":"Turn ongoing conversations into ongoing work."}),
         h("p",{text:ja?"Claude Code / CodexとObsidianをつなぐ、買い切りの有料プラグインです。Consoleとの連携で、会話と仕事の文脈を一緒に扱えます。":"A paid, one-time-purchase plugin connecting Claude Code / Codex with Obsidian. Console integration brings your conversations and work context together."}),
         h("ul",{},...features.map(text=>h("li",{text}))),
-        h("a",{class:"btn ws-purchase",href:SALES_URL,target:"_blank",rel:"noopener noreferrer",
+        h("a",{class:"btn ws-purchase",href:ja?SALES_URL:SALES_URL_EN,target:"_blank",rel:"noopener noreferrer",
           text:ja?"Ebi Workspaceの内容・購入方法を見る":"Explore Ebi Workspace and purchase options"}),
         h("h3",{text:ja?"すでにお持ちの場合":"Already have Ebi Workspace?"}),
         h("p",{text:ja?"Consoleを動かしている環境でWorkspaceをセットアップしてから、下のボタンで接続を確認してください。":"Set up Workspace in the environment running Console, then check the connection below."}),

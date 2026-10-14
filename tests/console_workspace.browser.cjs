@@ -55,6 +55,9 @@ for (const available of [false, true]) {
       assert.equal(await page.locator('.workspace-offer').count(),0);
       await page.locator('.nav-workspace').click();
       assert.equal(await page.locator('.ws-onboarding').isVisible(),true);
+      await page.goto('http://console.test/?lang=en');
+      await page.locator('.nav-workspace').click();
+      assert.equal(await page.locator('.ws-purchase').getAttribute('href'),'https://note.com/ebibibi/n/nc327ab1de017');
       return;
     }
     await page.locator('.nav-workspace').click();
