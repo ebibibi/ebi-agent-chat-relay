@@ -39,3 +39,5 @@
 .lightbox-bar { display: flex; align-items: center; gap: 8px; max-width: 100%; }
 .lightbox-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lightbox-img { max-width: 100%; max-height: calc(100% - 56px); object-fit: contain; cursor: default; border-radius: 4px; }
+
+.pv-bar { flex-wrap: wrap; }

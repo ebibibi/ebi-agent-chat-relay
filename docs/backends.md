@@ -45,6 +45,32 @@ run together.
 Use `/model` and `/effort` to inspect or change backend-specific choices. Each backend remembers
 its own model and reasoning setting.
 
+## Manager and child AI in Console
+
+The sidebar's **Default** picker selects the AI for new conversations. **Default child AI**
+selects a separate backend, model and effort for delegated child threads. Both preferences
+persist across restarts.
+
+Inside a conversation, **Manager / this thread AI** changes that conversation's AI.
+**AI for future children** overrides the child defaults for that manager. For example,
+choose Claude Code for the manager and pi with a provider-qualified model for its children.
+The picker uses each backend's discovered catalog and also accepts a custom model ID.
+Backend installation, authentication and deployment safety gates still apply.
+
+Child settings resolve in this order: that manager's child overrides, global child defaults,
+ordinary global defaults, environment defaults. The manager's own thread overrides do not leak
+into child settings. When `POST /api/spawn` includes `parent_thread_id`, resolved choices are
+written to the new child before its first turn, including with `auto_start: false`. Changing
+child preferences affects future children; select an existing child to change its own AI.
+These settings govern relay child threads, not a CLI's internal subagents.
+
+Console endpoints (authenticated; writes also require `X-Console-Request: 1`):
+
+- `GET/POST /console/api/defaults/children`: global child preferences.
+- `GET/POST /console/api/items/{item_id}/children`: a manager's child preferences.
+- POST accepts the same `{ "name": "backend|model|effort", "arg": "value" }` commands
+  as the existing backend picker. GET returns its backend-specific model/effort catalog.
+
 ## Claude Code and Codex
 
 Install and authenticate the official CLI on the private session host before starting ccdb. The

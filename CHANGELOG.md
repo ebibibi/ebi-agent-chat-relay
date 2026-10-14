@@ -1,6 +1,6 @@
 # Changelog
 
-Last updated: 2026-10-13
+Last updated: 2026-10-15
 
 All notable changes to this project will be documented in this file.
 
@@ -8,6 +8,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [5.1.0] - 2026-10-15
+
+**Ebi Workspace meets the Console.** Browse project context and Markdown tasks, update them,
+and start AI work from the GUI. See the [5.1.0 release notes](docs/releases/v5.1.0.md).
+
+### Added
+
+- Detect explicitly configured Ebi Workspace installations; browse contexts/projects, read
+  overviews, add/edit/complete tasks, run a task with AI and associate conversations with projects.
+  Markdown remains the source of truth, with revision checks protecting concurrent edits.
+- Search message bodies across available Console/chat history and local transcripts, with
+  excerpts and links back to the matching thread.
+- Copy supported text-file contents from both attachment rows and the preview screen.
+- Copy and open Console thread links, including navigation from agent replies.
+- Select multiple threads with Shift/Ctrl/checkboxes and complete them together.
+- Group parent/child threads in bordered cards. Normal list navigation opens the parent;
+  direct child replies require an explicit choice. Parent completion includes descendants.
+- Configure manager and child backend/model/effort independently before spawning child work.
+- Switch Japanese/English in place while retaining drafts and attachments.
+- Discover Ebi Workspace through Japanese and English product links.
+
+### Changed
+
+- Mobile layouts keep the composer accessible while the conversation scrolls independently;
+  secondary controls move into a menu, with compact headers and keyboard viewport handling.
+- Current selection is visually distinct from unread state; polling preserves the visible
+  list anchor. Stop buttons acknowledge a pending request immediately.
+- Automatic completion guidance distinguishes a prepared response from confirmed delivery.
+  Threads identified in the current Teams Channel Exporter prompt must not auto-complete.
+
+### Fixed
+
+- Long pasted messages and URLs reach the agent intact through the long-input attachment path.
+- Codex compaction accepts bounded large resume responses instead of failing at 64 KiB.
+- Parent/child bulk completion keeps ancestors open when descendant completion fails.
 
 ## [5.0.0] - 2026-10-13
 

@@ -87,6 +87,44 @@ window.ConsoleBackend = (() => {
     };
   }
 
+  const teamText = () => document.documentElement.lang === "ja" ? {
+    manager: "親・マネージャーのAI", child: "これから作る子のAI", global: "子のAI（既定値）",
+    note: "今後このスレッドから作る子に適用します。作成済みの子の設定は変わりません。",
+    globalNote: "親ごとの指定がない場合に使います。バックエンドのインストール・認証が必要です。",
+  } : {
+    manager: "Manager / this thread AI", child: "AI for future children", global: "Default child AI",
+    note: "Applies to future children of this thread. Existing children keep their settings.",
+    globalNote: "Used unless a manager has its own child settings. The backend must be installed and authenticated.",
+  };
+
+  function childScope(id, onChange) {
+    const path = id ? `/items/${encodeURIComponent(id)}/children` : "/defaults/children";
+    return { title: id ? teamText().child : teamText().global,
+      note: id ? teamText().note : teamText().globalNote,
+      load: () => api(path),
+      apply: (name, arg) => api(path, {method: "POST", body: {name, arg}}), onChange };
+  }
+
+  function controls(item) {
+    if (!item.thread_id) return null;
+    const make = (cls, label, scope) => {
+      const btn = h("button", {class: `btn ${cls}`, type: "button", text: label,
+        onclick: e => { e.stopPropagation(); open(scope, btn); }});
+      scope.onChange = c => { btn.textContent = `${label}: ${summary(c)}`; };
+      scope.load().then(scope.onChange).catch(() => {});
+      return btn;
+    };
+    return h("div", {class: "team-settings"},
+      make("team-manager-ai", teamText().manager, forItem(item.id)),
+      make("team-child-ai", teamText().child, childScope(item.id)));
+  }
+
+  function childNav() {
+    const btn = h("button", {class: "nav-child-ai", type: "button", text: `🤖 ${teamText().global}`,
+      onclick: e => {e.stopPropagation(); open(childScope(null), btn);} });
+    return btn;
+  }
+
   // ------------------------------------------------------------ the default
   const defaultScope = {
     get title() { return T.bp_title_default; },
@@ -110,5 +148,5 @@ window.ConsoleBackend = (() => {
     return btn;
   }
 
-  return { open, forItem, nav, loadDefaults, summary };
+  return { open, forItem, nav, childNav, controls, loadDefaults, summary };
 })();

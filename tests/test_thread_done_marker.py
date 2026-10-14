@@ -263,3 +263,16 @@ async def test_prompt_omits_it_when_disabled(monkeypatch: pytest.MonkeyPatch) ->
         prompt="do it",
     )
     assert "/done" not in (await _build_system_context(config) or "")
+
+
+async def test_finishing_instructions_keep_customer_drafts_and_exporter_threads_open() -> None:
+    config = RunConfig(
+        surface=MemorySurface(capabilities=DISCORD_CAPABILITIES),
+        runner=_runner(8080),
+        prompt="Prepare a customer reply",
+    )
+    context = await _build_system_context(config)
+    assert "Preparing a draft is NOT sending it to the customer" in context
+    assert "Teams Channel Exporter" in context
+    assert "Never autonomously mark these threads done" in context
+    assert "review" in context and "action" in context

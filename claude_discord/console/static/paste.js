@@ -64,7 +64,7 @@ window.ConsolePaste = (() => {
 
   function draw(id) {
     const tray = trays.get(id);
-    if (!tray || !tray.isConnected) return;
+    if (!tray) return;
     const items = list(id);
     tray.hidden = !items.length;
     tray.replaceChildren(...items.map((entry) => {

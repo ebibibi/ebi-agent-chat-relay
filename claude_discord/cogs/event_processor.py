@@ -700,6 +700,7 @@ class EventProcessor:
                             inbox_repo=self._config.inbox_repo,
                             dashboard=self._config.inbox_dashboard,
                             claude_command=self._config.claude_command,
+                            request_text=self._config.prompt,
                         ),
                         name=f"inbox-classify-{self._config.surface.thread_key}",
                     )
@@ -1214,6 +1215,7 @@ async def _classify_and_update_inbox(
     inbox_repo: object,
     dashboard: object | None,
     claude_command: str,
+    request_text: str = "",
 ) -> None:
     """Classify the session's final message and persist the inbox entry.
 
@@ -1228,7 +1230,7 @@ async def _classify_and_update_inbox(
     assert isinstance(inbox_repo, ThreadInboxRepository)
 
     try:
-        result = await classify(last_text, claude_command=claude_command)
+        result = await classify(last_text, claude_command=claude_command, request_text=request_text)
         logger.debug("inbox classify thread_id=%d result=%s", thread_id, result)
 
         if result == "done":

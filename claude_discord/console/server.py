@@ -53,6 +53,7 @@ from .passkeys import PasskeyService
 from .places import PlaceError, PlaceRepository
 from .places import clean_name as clean_place
 from .ratelimit import RateLimiter
+from .search import SearchRoutes
 from .surface import apply_outcome
 from .triage import INTERVAL_SECONDS as TRIAGE_INTERVAL_SECONDS
 from .triage import (
@@ -77,6 +78,8 @@ from .work_repo import (
     WorkItemRepository,
     thread_item_id,
 )
+from .workspace import Workspace, WorkspaceError
+from .workspace_api import WorkspaceRoutes
 
 if TYPE_CHECKING:
     from ..ext.api_server import ApiServer
@@ -191,6 +194,7 @@ class ConsoleServer:
         #: Threads being compacted; a reply waits instead of racing the rewrite.
         self._compacting: set[int] = set()
         self.work_repo = work_repo
+        self.workspace = Workspace.discover()
         #: The model's priority and deadline guesses; None turns automatic triage off.
         self.triage = triage
         #: The managed list of places work can be bound to.
@@ -214,6 +218,7 @@ class ConsoleServer:
         )
         self._archive_cache: tuple[float, list[Any]] | None = None
         self._archive_lock = asyncio.Lock()
+        self._search_threads: dict[int, Any] = {}
         self._runner: web.AppRunner | None = None
         self._start_locks: dict[str, asyncio.Lock] = {}
         # Strong references: the loop keeps only weak ones to running tasks.
@@ -238,9 +243,19 @@ class ConsoleServer:
         r.add_get("/static/{name}", self.static)
         r.add_get(f"{API_PREFIX}/me", self.me)
         r.add_get(f"{API_PREFIX}/board", self.board)
+        r.add_get(f"{API_PREFIX}/search", SearchRoutes(self).search)
+        workspace_routes = WorkspaceRoutes(self)
+        r.add_get(f"{API_PREFIX}/workspace", workspace_routes.read)
+        r.add_get(f"{API_PREFIX}/workspace/document", workspace_routes.document)
+        r.add_post(f"{API_PREFIX}/workspace/tasks", workspace_routes.change)
+        r.add_patch(f"{API_PREFIX}/workspace/tasks", workspace_routes.change)
+        r.add_post(f"{API_PREFIX}/workspace/run", workspace_routes.run)
         r.add_get(f"{API_PREFIX}/usage", self.usage_read)
         r.add_get(f"{API_PREFIX}/defaults", self.defaults_read)
         r.add_post(f"{API_PREFIX}/defaults", self.defaults_change)
+        for path in ("/defaults/children", "/items/{item_id}/children"):
+            r.add_get(API_PREFIX + path, self.child_preferences)
+            r.add_post(API_PREFIX + path, self.child_preferences)
         r.add_get(f"{API_PREFIX}/places", self.places_read)
         r.add_post(f"{API_PREFIX}/places", self.place_add)
         r.add_patch(f"{API_PREFIX}/places", self.place_rename)
@@ -373,6 +388,8 @@ class ConsoleServer:
 
     async def board(self, request: web.Request) -> web.Response:
         items = await self._board_items()
+        if self.workspace.root is not None:
+            items = await asyncio.to_thread(self.workspace.bind_items, items)
         if self.triage is not None:
             try:
                 items = apply_triage(items, await self.triage.all())
@@ -686,6 +703,10 @@ class ConsoleServer:
         body, err = await self._json(request)
         if err:
             return err
+        try:
+            await self._workspace_changes(body)
+        except WorkspaceError as exc:
+            return _error(str(exc), 400)
         start = body.pop("start", False)
         if not isinstance(start, bool):
             return _error("start must be a boolean", 400)
@@ -720,6 +741,7 @@ class ConsoleServer:
         if err:
             return err
         try:
+            await self._workspace_changes(body)
             implicit = {
                 thread_item_id(child): thread_item_id(parent)
                 for child, parent in (await self._lineage()).items()
@@ -727,7 +749,7 @@ class ConsoleServer:
             item = await self.work_repo.update(
                 request.match_info["item_id"], body, implicit_parents=implicit
             )
-        except WorkItemError as exc:
+        except (WorkItemError, WorkspaceError) as exc:
             return _error(str(exc), 400)
         if self.places is not None and item.place:
             # A place typed on an item joins the managed list.
@@ -801,6 +823,10 @@ class ConsoleServer:
 
     async def _deliver(self, item_id: str, text: str, who: str) -> web.Response:
         """Queue *text* as the human's next message in the item's conversation."""
+        try:
+            text = await self._workspace_prompt(item_id, text)
+        except WorkspaceError as exc:
+            return _error(str(exc), 400)
         busy = _error("the conversation is being compacted; send again in a moment", 409)
         key = await self._conversation_key(item_id)
         if key is not None:
@@ -856,6 +882,36 @@ class ConsoleServer:
             return err
         assert key is not None
         return web.json_response(await catalog(settings, key, self._skill_loader()))
+
+    async def child_preferences(self, request: web.Request) -> web.Response:
+        """Select the AI for future children, globally or for one manager."""
+        settings = self._backend_settings()
+        if settings is None:
+            return _error("this deployment has no backend settings", 503)
+        settings = settings.for_children()
+        key = None
+        if "item_id" in request.match_info:
+            key, err = await self._command_key(request.match_info["item_id"])
+            if err:
+                return err
+        message = ""
+        if request.method == "POST":
+            body, err = await self._json(request)
+            if err:
+                return err
+            name = str(body.get("name") or "").strip().lstrip("/")
+            arg = str(body.get("arg") or "")
+            if name not in {n for n, _ in CONTROL_COMMANDS} or len(arg) > 200:
+                return _error("invalid child AI setting", 400)
+            try:
+                result = await run_command(settings, key, name, arg)
+            except CommandError as exc:
+                return _error(str(exc), 400)
+            message = result.message
+        choices = await catalog(settings, key, _no_skills)
+        return web.json_response(
+            {"message": message, "catalog": choices} if request.method == "POST" else choices
+        )
 
     async def defaults_read(self, request: web.Request) -> web.Response:
         """The backend, model and effort new conversations start with, and the choices."""
@@ -1050,6 +1106,10 @@ class ConsoleServer:
         prompt = "\n\n".join(p for p in (item.title, item.note, extra) if p)
         if self.sessions is None:
             return _error("the console cannot run agents in this deployment", 503)
+        try:
+            prompt = await self._workspace_prompt(item_id, prompt)
+        except WorkspaceError as exc:
+            return _error(str(exc), 400)
         prompt, err = await self._attach_long_text(prompt)
         if err:
             return err
@@ -1099,6 +1159,33 @@ class ConsoleServer:
             return _error("unknown conversation", 404)
         logger.info("console: %s replied in conversation %s", _q(who), thread_key)
         return web.json_response({"status": "delivered"}, status=202)
+
+    async def _workspace_changes(self, body: dict[str, Any]) -> None:
+        if "workspace_path" in body:
+            if body["workspace_path"] is not None:
+                await asyncio.to_thread(self.workspace.entry, body["workspace_path"])
+            return
+        if self.workspace.root is None:
+            return
+        if body.get("parent_id") or body.get("project"):
+            items = await self._board_items()
+            candidate = {**body, "id": "__new_workspace_item__"}
+            bound = await asyncio.to_thread(self.workspace.bind_items, [*items, candidate])
+            if bound[-1].get("workspace_path"):
+                body["workspace_path"] = bound[-1]["workspace_path"]
+
+    async def _workspace_prompt(self, item_id: str, text: str) -> str:
+        if self.workspace.root is None:
+            return text
+        item = await self.work_repo.get(item_id)
+        path = item.workspace_path if item else None
+        if not path:
+            items = await self._board_items()
+            bound = await asyncio.to_thread(self.workspace.bind_items, items)
+            path = next((i.get("workspace_path") for i in bound if i["id"] == item_id), None)
+            if path:
+                await self.work_repo.update(item_id, {"workspace_path": path})
+        return await asyncio.to_thread(self.workspace.prompt, path, text) if path else text
 
     # -- helpers -----------------------------------------------------------
     async def _json(self, request: web.Request) -> tuple[dict[str, Any], web.Response | None]:
@@ -1186,7 +1273,11 @@ class ConsoleServer:
     async def _thread_snapshots(self) -> list[ThreadSnapshot]:
         import discord
 
-        threads: dict[int, Any] = {}
+        threads: dict[int, Any] = {
+            key: thread
+            for key, thread in self._search_threads.items()
+            if thread.parent_id in self._watched_channel_ids()
+        }
         channels = []
         for channel_id in self._watched_channel_ids():
             channel = self.api.bot.get_channel(channel_id)

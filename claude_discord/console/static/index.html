@@ -11,16 +11,26 @@
 <link rel="stylesheet" href="/static/app.css">
 <link rel="stylesheet" href="/static/usage.css">
 <link rel="stylesheet" href="/static/live.css">
+<link rel="stylesheet" href="/static/workspace.css">
+<link rel="stylesheet" href="/static/search.css">
+<link rel="stylesheet" href="/static/mobile.css">
 </head>
 <body>
 <header id="usage" class="usage" aria-label="Backend usage" hidden></header>
 <div id="app" class="app">
-  <nav id="nav" class="nav" aria-label="Views"></nav>
+  <nav id="nav" class="nav" aria-label="Views">
+    <div class="brand">Ebi AI Console</div>
+    <label class="language-picker" for="language-select">🌐 日本語 / English
+      <select id="language-select"><option value="ja">日本語</option><option value="en">English</option></select>
+    </label>
+    <div id="nav-views"></div>
+  </nav>
   <main class="list-pane">
     <header class="list-head">
       <button id="nav-toggle" class="icon-btn only-narrow" aria-label="Menu">☰</button>
       <h1 id="view-title"></h1>
       <input id="filter" class="filter" type="search" autocomplete="off">
+      <button id="search-messages" class="btn" type="button"></button>
       <button id="hide-done" class="btn hide-done" type="button" aria-pressed="false"></button>
       <span id="sync" class="sync" aria-live="polite"></span>
     </header>
@@ -30,18 +40,21 @@
       <span id="capture-attach"></span>
       <label class="autostart"><input id="capture-start" type="checkbox"> <span id="capture-start-label"></span></label>
     </form>
+    <div id="bulk-bar" class="bulk-bar"></div>
     <ul id="list" class="list" role="listbox"></ul>
     <p id="empty" class="empty" hidden></p>
   </main>
   <section id="detail" class="detail" hidden aria-label="Detail"></section>
 </div>
 <div id="help" class="help" hidden></div>
+<script src="/static/links.js"></script>
 <script src="/static/markdown.js"></script>
 <script src="/static/auth.js"></script>
 <script src="/static/notify.js"></script>
 <script src="/static/paste.js"></script>
 <script src="/static/slash.js"></script>
 <script src="/static/finish.js"></script>
+<script src="/static/bulk.js"></script>
 <script src="/static/preview.js"></script>
 <script src="/static/recent.js"></script>
 <script src="/static/backend.js"></script>
@@ -49,6 +62,9 @@
 <script src="/static/places.js"></script>
 <script src="/static/focus.js"></script>
 <script src="/static/family.js"></script>
+<script src="/static/workspace.js"></script>
+<script src="/static/search.js"></script>
+<script src="/static/mobile.js"></script>
 <script src="/static/app.js"></script>
 <script src="/static/resize.js"></script>
 <script src="/static/usage.js"></script>

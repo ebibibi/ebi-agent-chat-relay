@@ -13,6 +13,21 @@ The JSON API under `/console/api` is the contract. The bundled web client is one
 See [ADR-0010](adr/0010-add-an-api-first-console-on-its-own-listener.md) and, for sign-in,
 [ADR-0012](adr/0012-sign-in-to-the-console-with-passkeys-by-default.md).
 
+## On a phone
+
+The conversation keeps its composer at the bottom while earlier messages scroll independently.
+Its height follows the visible viewport when the software keyboard opens. Long drafts scroll
+inside the input, leaving room to read the conversation.
+
+The header keeps Back, Menu, a one-tap Stop while running, and **•••**. Open **•••** for
+completion, AI settings, links, pinning and task details. Child-task summaries and live activity
+start collapsed on mobile; tap their headings to expand them. Replying directly to a child
+still requires the explicit child-reply action.
+
+Changing lists from Menu returns to the list. Drafts and pending uploads survive returning to
+a conversation and rotating the screen. Bulk completion controls appear after selecting a row.
+Desktop controls retain their existing layout.
+
 ## Views
 
 | View | Shows |
@@ -110,8 +125,8 @@ text (logs, code, YAML, …) as wrapped monospace. Source and Download are alway
 a file over 2 MB shows its first 2 MB. Chat attachments are read from Discord's CDN, which the
 CSP allows for `connect-src` (read-only, CORS `*`).
 
-The open thread reloads with the board while a turn is running, and the list keeps your scroll
-position unless you were already at the bottom.
+The open thread reloads with the board while a turn is running. Background refreshes keep
+the list anchored to the row you are reading; they do not scroll back to the selected thread.
 
 In Recent, "activity" means the thread's last message (or, for work you wrote down, its last
 edit); changing priority or snooze does not move an item. Recent shows what the board already
@@ -185,7 +200,7 @@ interrupt with the slot it holds (`POST /console/api/items/{id}/stop`, `/pause`,
 
 📌 in the detail header (or `p`) pins a thread as what you are working on now. Pinned threads
 open every list but Done under a highlighted "📌 Working on now" strip, newest pin first, and
-leave their usual place (the tree keeps them in place too). The pin is stored with the item
+bring their family with them rather than duplicating it in the tree. The pin is stored with the item
 (`PATCH /console/api/items/{id}` with `pinned: true|false`), so every device sees it.
 
 "✅ Done hidden" in the list header (or `h`) leaves finished items out of every list — Recent and
@@ -417,7 +432,14 @@ Threads that live in a chat platform still appear and can be replied to as befor
 
 ### Parent conversations and delegated work
 
-Opening a parent shows a collapsible **Delegated work** panel above its conversation. Child
+Clicking either a parent or child in a list opens the root parent conversation.
+Every view groups matching family members under their parent, including ancestors for context.
+Each family stays at its first matching position; filters still limit which children appear.
+Families have a shared rounded border and a **Group** heading with the child-thread count.
+Parent/child labels and connecting lines distinguish the roles; deeper descendants also name
+their immediate parent. When filtering or folding hides children, the heading shows how many
+are visible out of the total. Standalone threads remain outside these group cards.
+The detail view shows a collapsible **Delegated work** panel above the conversation. Child
 and grandchild cards show status and a short latest agent report, including finished tasks.
 The totals distinguish running work, work needing the parent's attention, and completed work.
 AI-suggested next steps are labelled as suggestions when no recent report is available.
@@ -425,5 +447,138 @@ AI-suggested next steps are labelled as suggestions when no recent report is ava
 Click a child card to inspect its conversation. **Back to parent** returns to its immediate
 parent; **Main conversation** opens the root. Child replies are hidden by default: use
 **Reply directly to this child** when direct intervention is intended. Normal requests and
-decisions belong in the parent conversation, which coordinates its children. List rows also
-show the parent link or a completion count, even outside the tree view.
+decisions belong in the parent conversation, which coordinates its children. Direct child reply
+mode is clearly labelled and resets when leaving that child; its draft remains intact.
+
+Finishing a parent from the Console completes its descendants first, including grandchildren.
+The button shows the full completion count. A failed descendant leaves its ancestors open.
+The immediate Undo reopens only the items completed by that action. This is the web client's
+family action; the individual `/items/{id}/done` API still changes only that item.
+
+### Selecting and completing multiple threads
+
+Use a row's checkbox (or Ctrl/Cmd-click) to toggle an individual selection. Click a row and
+Shift-click another to select the inclusive range in the current displayed order; Shift-click
+also works on checkboxes. The toolbar shows selected and total completion counts, including
+all descendants of selected parents. Click **Complete selected** to finish that snapshot.
+
+Selections use thread IDs, so polling and reordering do not substitute other targets. A changed
+row order resets the range anchor. Filtering away selected rows clears those selections with
+a notice. **Clear selection** starts over. Failures remain listed by thread with a retry
+button; successful threads are removed from the selection. Failed targets remain explicit in
+the error list even if a filter hides their rows. Completion runs once per ID, descendants
+before parents, and does not affect unrelated families.
+
+## Finding earlier work
+
+The instant filter searches board metadata. **Search messages** next to it also searches
+all saved Console messages (including messages older than the open thread's history window)
+and available local Claude transcripts. Results show a matching excerpt; selecting one opens
+the original conversation, including completed work. This search uses no AI calls.
+
+Transcript results must resolve to a Console conversation or a Discord thread under a watched
+channel. An older archived thread found this way is kept in the board's temporary discovery
+cache (up to 50 threads), so opening it survives the next refresh. Unrelated CLI transcripts
+are not exposed. Discord messages without a local Claude transcript, such as unrecorded chat
+or another backend's Discord history, are not covered; Console-owned conversations are covered
+regardless of backend. Results are capped at 50; use a more specific phrase for broad searches.
+A timed-out transcript scan shows a partial-results notice. `GET /console/api/search?q=…`
+is authenticated and accepts a literal query of 1–500 characters.
+
+Selected rows have a blue outline and a **Selected** marker. Unread rows use a green dot and
+bold title. Pinning keeps its pin symbol while selection keeps its own outline. Background
+refreshes preserve the visible row and its offset, including a thread repeated in a tree and
+its pinned section; only deliberate navigation reveals the selected row.
+
+## Copying file contents
+
+Text attachments have **Copy contents to clipboard** beside Preview/Download and in the
+preview toolbar. Copy uses the complete original source text, including everything past the
+2 MB preview cutoff; it does not copy the rendered HTML, formatted JSON or only the visible
+rows of a CSV. Copy shows immediate progress and a success or error message and remains
+retryable. Browser clipboard permission and a secure browser context are required. Binary
+files retain their existing download actions.
+
+Console replies relayed into Discord which exceed Discord's 2,000-character message limit
+are posted as one UTF-8 `message.txt` attachment. The agent receives the original complete
+prompt. A long URL is never split across two Discord messages. A long first line in a new
+capture is kept in its note even when its title is shortened.
+
+## Optional Ebi Workspace
+
+When Ebi Workspace has been explicitly configured and contains `02_Contexts`, Console shows
+an **Ebi Workspace** navigation entry and a context/project picker. No guessed default vault
+or installed plugin cache enables this integration. Detection order:
+
+1. `EBI_WORKSPACE_NOTES_FOLDER` or `CLAUDE_WORKSPACE_NOTES_FOLDER` environment variable.
+2. `${XDG_CONFIG_HOME:-~/.config}/ebi-workspace/notes-folder` (absolute path in the file).
+3. Those same variables in `~/.claude/settings.local.json` under `env`.
+
+The Workspace view reads project `status.md` next actions and context `single-actions.md`,
+including nested contexts. Add, rename or check a task to update its original Markdown;
+Console stores only the association (`workspace_path`), never a second task list. Updates
+preserve unrelated sections, check a content revision to refuse stale edits, replace files
+atomically, and record the change in the project's/context's log plus a link in the daily note.
+Archived, someday, hidden and symlinked directories are excluded.
+
+**Run with AI** starts a Console conversation associated with the task's context/project.
+Starting work does not mark the task complete. The agent receives the paths of the applicable
+Workspace instructions, source tasks and log and is instructed to read them and record the
+outcome. Replies and child work retain that association. **Start work here** chooses the
+context for the next capture; an existing conversation's picker can set its association too.
+
+Automatic association uses an unambiguous working directory inside the Workspace, a unique
+matching project name, a parent's association, or an explicitly labelled local repository in
+`overview.md` (`repository: /absolute/path`, `working_dir: /absolute/path`, or
+`- リポジトリ: ~/path`). It does not guess ownership from arbitrary message text. Conflicting
+or missing information remains unassociated for the user to select. Overview is available
+alongside tasks; task changes are immediately visible in Obsidian because both use the same files.
+
+Authenticated API routes:
+
+- `GET /console/api/workspace` — availability and contexts/projects/tasks with revisions.
+- `GET /console/api/workspace/document?path=…&name=…` — a supported Workspace document.
+- `POST /console/api/workspace/tasks` — add a task (`path`, `revision`, `text`).
+- `PATCH /console/api/workspace/tasks` — edit a task (`path`, `revision`, `line`, `text`/`done`).
+- `POST /console/api/workspace/run` — start the current open task (`path`, `revision`, `line`).
+
+Mutations use the same authentication and CSRF checks as other Console actions. Workspace
+paths are relative to `02_Contexts`; arbitrary files and traversal are refused. A stale
+revision returns 409 so an Obsidian edit cannot be silently overwritten.
+
+### Customer reply drafts stay pending
+
+A drafted customer answer is still human work: reviewing and sending it are separate from
+creating the text or attachment. The agent's finishing instructions require review/action
+until delivery is evidenced and prohibit autonomous completion of Teams Channel Exporter
+threads, including later turns. Humans can explicitly complete them from the Console.
+
+The inbox classifier receives the current request as well as the final reply. Recognized
+Teams Channel Exporter request envelopes bypass model classification and stay waiting;
+other customer drafts are classified with an explicit instruction not to infer delivery.
+This preserves the exporter's final-reply-body-only format. Existing done markers are not
+changed retroactively, and the request-envelope check does not persist provenance across
+turns; the agent instruction covers that case.
+
+### Discovering Workspace
+
+When no Workspace is configured, Console offers a dismissible introduction with an official
+purchase link. The menu entry remains available after dismissal. Configured installations
+show their tasks instead. The introduction makes no external requests until the user opens
+the sales link; it does not install or buy anything automatically.
+
+### Thread links
+
+Use **Copy thread link** in the conversation header to copy a shareable Console URL.
+The URL contains the work-item ID, without authentication parameters. Paste it into
+a message, or write `[thread title](/#focus/t123)` using the actual thread ID.
+Same-instance links open inside the current Console tab; browser Back/Forward work.
+A child link opens that child's family view with direct replies still opt-in.
+External links keep opening in a new tab. Missing or inaccessible targets show a
+notice rather than silently opening a different conversation. Links do not grant
+access: the recipient still needs access to this Console instance.
+
+Agents receive the link format and the existing `/api/search?q=…&body=1` lookup
+in their run context, with instructions to use verified IDs only. That search
+can find stored session summaries and local Claude transcripts; it does not make
+all external message histories searchable.

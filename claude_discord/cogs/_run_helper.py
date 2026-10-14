@@ -172,7 +172,19 @@ def _build_done_marker_section(config: RunConfig) -> str | None:
         '  `curl -s -X POST "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/done"`\n'
         f"This prefixes the thread title with {marker}. Do NOT mark it when you are asking "
         "a question, waiting for a pipeline or a decision, or leaving work pending. "
-        "If the user replies later, the marker is removed automatically." + _waiting_marker_hint()
+        "If the user replies later, the marker is removed automatically.\n"
+        "Customer replies: Preparing a draft is NOT sending it to the customer. "
+        "Producing an answer, an attachment, or posting it in this AI conversation does not "
+        "prove external delivery. Keep the thread in review while the user checks the draft, "
+        "or action while they still need to send it. Do not infer completion from polished "
+        "customer-facing wording or the end of your turn. Require explicit evidence of "
+        "customer delivery and no remaining work before considering completion.\n"
+        "Teams Channel Exporter: imported/synced Teams reply-draft threads require human "
+        "completion. Never autonomously mark these threads done, even after generating "
+        "the final reply body or observing delivery; leave completion to the user's "
+        "explicit completion action. This also applies on later turns in the same thread. "
+        "Use review/action for pending human work. Keep status commentary outside the "
+        "customer-facing reply body." + _waiting_marker_hint()
     )
 
 
@@ -294,6 +306,29 @@ async def _build_system_context(config: RunConfig) -> str | None:
         "written deliverable, save the final text as a Markdown file and append "
         "that file path here. Otherwise, only include files the user explicitly "
         "asked to receive."
+    )
+
+    parts.append(
+        "## Ebi AI Console thread links\n"
+        "When the user asks where an earlier conversation is, find it before linking. "
+        "The relay's GET $CCDB_API_URL/api/search?q=<URL-encoded keywords>&body=1 "
+        "can search saved session summaries and local Claude transcripts. "
+        "For Console navigation, return [thread title](/#focus/t<thread_id>) using the "
+        "actual thread_id from the search result (replace the placeholder). "
+        "If you have a Console work-item ID, use /#focus/<item_id> unchanged instead. "
+        "These relative links open inside Ebi AI Console; on Discord use the returned "
+        "deep_link as well when available. Never invent thread IDs or Console hostnames, "
+        "and never include authentication tokens in links. If nothing matches, say so."
+    )
+
+    parts.append(
+        "## Delegated child thread AI\n"
+        "When creating an authorized child thread via POST $CCDB_API_URL/api/spawn, "
+        f"include parent_thread_id: {config.surface.thread_key}. "
+        "The relay applies the user's saved child AI preferences (backend, model, effort) "
+        "before the first turn. Do not switch the child to your own backend or model. "
+        "These settings govern relay child threads, not a backend's native subagents. "
+        "Creating a child thread still requires authorization to delegate."
     )
 
     done_section = _build_done_marker_section(config)

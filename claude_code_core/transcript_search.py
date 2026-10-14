@@ -19,6 +19,7 @@ import asyncio
 import json
 import re
 from collections.abc import Iterator
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -164,7 +165,14 @@ async def _grep_candidate_files(
     except (FileNotFoundError, OSError):
         return None
 
-    stdout, _ = await proc.communicate()
+    try:
+        stdout, _ = await proc.communicate()
+    except asyncio.CancelledError:
+        if proc.returncode is None:
+            with suppress(ProcessLookupError):
+                proc.kill()
+        await proc.wait()
+        raise
     # grep exit codes: 0 = matches, 1 = no matches, 2 = error.
     if proc.returncode not in (0, 1):
         return None

@@ -46,6 +46,8 @@ button { cursor: pointer; }
 
 .nav { background: var(--panel); border-right: 1px solid var(--line); padding: 12px 8px; overflow-y: auto; }
 .nav .brand { font-weight: 700; padding: 4px 10px 12px; letter-spacing: .02em; }
+.language-picker { display: flex; flex-direction: column; gap: 6px; padding: 0 10px 12px; font-size: 12px; color: var(--dim); }
+.language-picker select { width: 100%; min-height: 32px; }
 .nav button { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px;
   background: none; border: 0; border-radius: 6px; padding: 7px 10px; text-align: left; }
 .nav button:hover { background: var(--raise); }
@@ -101,7 +103,7 @@ button.slash-now:hover { border-color: var(--accent); }
 .row.sel { background: var(--raise); border-left-color: var(--accent); }
 /* Unread, like a mail client: bold title, a dot, a faint tint. No motion — the list
    re-renders on every poll and an animation would replay each time. */
-.row.fresh { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.row.fresh { background: transparent; }
 .row.fresh.sel { background: var(--raise); }
 /* Pinned: what the human is working on now. Loud on purpose. */
 .group.pinned-group { color: var(--p1); font-size: 13px; letter-spacing: .02em; text-transform: none;
@@ -115,6 +117,14 @@ button.slash-now:hover { border-color: var(--accent); }
 .row.fresh .title { font-weight: 700; color: #fff; }
 .row.fresh .title::before { content: ""; display: inline-block; width: 7px; height: 7px; margin: 0 6px 1px 0;
   border-radius: 50%; background: var(--accent); vertical-align: middle; }
+/* Selection wins over unread and pinned state; inset outline never changes row size. */
+.row.sel, .row.fresh.sel, .row.pinned.sel {
+  background: #203b65; border-left-color: #9cbcff;
+  outline: 2px solid #9cbcff; outline-offset: -2px;
+}
+.selection-label { display:inline-block; margin-right:8px; padding:0 5px;
+  border-radius:3px; background:#b5cdff; color:#14243e; font-size:11px; font-weight:700; vertical-align:1px; }
+.row.fresh .title::before { background:var(--ai); }
 .nav .nav-notify { color: var(--dim); margin-top: 4px; }
 .nav .nav-notify.on { color: var(--text); }
 .toast.clickable { cursor: pointer; border-color: var(--me); }
@@ -346,3 +356,44 @@ a.btn.primary { color: #0d1020; }
 .family-link { background: transparent; cursor: pointer; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.family-link:hover { color: var(--accent); border-color: var(--accent); }
 @media (max-width: 900px) { .family { max-height: 35%; } }
+
+/* Bulk selection is separate from the blue outline of the open conversation. */
+.row-select { display:flex; flex-direction:column; align-items:center; gap:3px; }
+.bulk-check { width:18px; height:18px; margin:0; cursor:pointer; accent-color:#e4bd72; }
+.row.bulk-selected { box-shadow:inset 5px 0 #e4bd72; background:#453b25; }
+.row.bulk-selected.sel { background:#203b65; }
+.bulk-bar { padding:7px 14px; border-bottom:1px solid var(--line); display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:12px; flex-shrink:0; }
+#bulk-count, #bulk-status { flex-basis:100%; overflow-wrap:anywhere; }
+#bulk-status:empty { display:none; }
+#bulk-errors { width:100%; margin:0; padding-left:18px; max-height:110px; overflow:auto; color:var(--err); overflow-wrap:anywhere; }
+
+.family-direct-active { color:#e4bd72; font-weight:700; }
+
+.team-settings { display:flex; flex-wrap:wrap; gap:6px; padding:6px 12px; border-bottom:1px solid var(--line); }
+.team-settings .btn { white-space:normal; overflow-wrap:anywhere; font-size:12px; }
+
+/* A shared boundary and connector identify a family without borrowing selection blue. */
+.thread-group { list-style: none; margin: 9px 8px 13px; border: 1px solid #646c81;
+  border-radius: 10px; background: var(--bg); overflow: hidden; }
+.thread-group-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 10px;
+  padding: 7px 10px; background: #292d3b; border-bottom: 1px solid #646c81; font-size: 11px; }
+.thread-group-label { font-weight: 700; color: #e2dbf7; }
+.thread-group-count { color: #c0c3ce; }
+.thread-group-rows { list-style: none; padding: 0; margin: 0; }
+.thread-group .row { padding: 9px 9px; }
+.thread-group .row .title { white-space: normal; overflow-wrap: anywhere; display: -webkit-box;
+  -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.thread-group .row .tag { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.thread-group .family-root { background: #232632; border-bottom: 1px solid var(--line); }
+.thread-group .family-child .main { position: relative; }
+.thread-group .family-child .main::before { content: ''; position: absolute; left: 0; top: -9px;
+  bottom: -9px; border-left: 2px solid #73718a; pointer-events: none; }
+.thread-group .family-child:last-child .main::before { bottom: auto; height: 20px; }
+.thread-group .family-child .main::after { content: ''; position: absolute; left: 0; top: 10px;
+  width: 8px; border-top: 2px solid #73718a; pointer-events: none; }
+.family-role { display: inline-block; margin-right: 6px; padding: 0 4px; border-radius: 4px;
+  font-size: 10px; line-height: 17px; font-weight: 600; color: #d8cfea; background: #393345; vertical-align: 1px; white-space: nowrap; }
+.thread-group .family-root .family-role { color: #fff; background: #5b4b71; }
+.thread-group .row.sel { background: #203b65; }
+.thread-group .row.bulk-selected { background: #293d35; }
+.thread-group .row.sel.bulk-selected { background: #203b65; }

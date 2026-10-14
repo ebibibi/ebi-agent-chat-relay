@@ -17,7 +17,7 @@ const I18N = {
     paused: "paused", pause_hint: "Stop this turn now and mark the thread paused; Resume carries on",
     stop_hint: "Stop this turn now", resume_hint: "Ask the agent to carry on from where it was paused",
     first_hint: "Start this one before the others waiting", later_hint: "Let the others waiting go first",
-    paused_toast: "Paused", stopped_toast: "Stopping", resumed_toast: "Resumed",
+    paused_toast: "Paused", stopping: "Stopping…", resumed_toast: "Resumed",
     slots_hint: "Threads running now / the most that may run at once", slots_up: "Allow one more at once",
     slots_down: "Allow one fewer at once", slots_set: (n) => `Up to ${n} at once`, pinned_group: "📌 Working on now", pin: "Pin", unpin: "Pinned",
     pin_hint: "Pin as what you are working on now; pinned threads lead every list (p)", hide_done_off: "✅ Showing done", hide_done_on: "✅ Done hidden",
@@ -59,7 +59,7 @@ const I18N = {
     paused: "一時停止中", pause_hint: "いまのターンを止めて一時停止の印を付けます。「再開」で続きから",
     stop_hint: "いまのターンを止めます", resume_hint: "止めたところから続けるようエージェントに頼みます",
     first_hint: "待っているほかのスレッドより先に始めます", later_hint: "待っているほかのスレッドを先にします",
-    paused_toast: "一時停止しました", stopped_toast: "停止しています", resumed_toast: "再開しました",
+    paused_toast: "一時停止しました", stopping: "停止中…", resumed_toast: "再開しました",
     slots_hint: "いま実行中の数 / 同時に動かせる上限", slots_up: "同時に動かせる数を1つ増やす",
     slots_down: "同時に動かせる数を1つ減らす", slots_set: (n) => `同時実行の上限を ${n} にしました`, pinned_group: "📌 いまやってる", pin: "ピン留め", unpin: "ピン中",
     pin_hint: "いまやってる目印。ピン留めしたスレッドはどの一覧でも一番上に出ます（p）", hide_done_off: "✅ 完了も表示", hide_done_on: "✅ 完了を隠す中",
@@ -95,14 +95,14 @@ const I18N = {
   },
 };
 // ?lang=ja|en pins the language; otherwise the browser's preference decides.
-const LANG = (() => {
+let LANG = (() => {
   const pinned = new URLSearchParams(location.search).get("lang");
-  if (pinned && I18N[pinned]) localStorage.setItem("lang", pinned);
+  if (["ja", "en"].includes(pinned)) localStorage.setItem("lang", pinned);
   const chosen = localStorage.getItem("lang");
-  if (chosen && I18N[chosen]) return chosen;
+  if (["ja", "en"].includes(chosen)) return chosen;
   return (navigator.languages || [navigator.language || "en"]).some((l) => l.toLowerCase().startsWith("ja")) ? "ja" : "en";
 })();
-const T = I18N[LANG];
+let T = I18N[LANG];
 document.documentElement.lang = LANG;
 
 const STATUS_ICON = { running: "⚙️", waiting: "❓", review: "👀", action: "📋", error: "⚠️",
@@ -172,6 +172,7 @@ async function refresh() {
     const data = await api("/board");
     state.items = data.items;
     state.byId = new Map(data.items.map((i) => [i.id, i]));
+    window.ConsoleSlots.onBoard(data.items);
     state.slots = data.slots || {};
     state.places = data.places || [];
     if (!state.defaultsLoaded) { state.defaultsLoaded = true; window.ConsoleBackend.loadDefaults(); }
@@ -256,12 +257,15 @@ function snoozeTarget(kind) {
 function matches(item) {
   if (!state.filter) return true;
   const q = state.filter.toLowerCase();
-  return [item.title, item.project, item.thread_name, item.working_dir].some((v) => v && v.toLowerCase().includes(q));
+  return [item.title, item.project, item.workspace_path, item.thread_name, item.working_dir].some((v) => v && v.toLowerCase().includes(q));
 }
 // Pinned items ("working on now") open every view but Done, newest pin first, and leave
 // their usual place so nothing is listed twice — except in the tree, whose shape needs them.
 const isPinned = (i) => Boolean(i.pinned_at) && i.bucket !== "done";
 function visibleRows() {
+  return window.ConsoleFamily.groupRows(ungroupedRows());
+}
+function ungroupedRows() {
   const items = state.items.filter((i) => matches(i) && !(hidingDone() && i.bucket === "done"));
   const pinned = state.view === "done" ? [] : items.filter(isPinned)
     .sort((a, b) => (b.pinned_at || "").localeCompare(a.pinned_at || ""));
@@ -350,9 +354,8 @@ function renderNav() {
   for (const i of state.items) counts[i.bucket] = (counts[i.bucket] || 0) + 1;
   counts.tree = state.items.filter((i) => i.bucket !== "done").length;
   counts.focus = window.ConsoleFocus.count(state.items);
-  const nav = $("nav");
+  const nav = $("nav-views");
   nav.replaceChildren(
-    h("div", { class: "brand", text: "Ebi AI Console" }),
     ...VIEWS.map((v) => v.sep ? h("div", { class: "sep" }) : h("button", {
       class: state.view === v.key ? "active" : "",
       onclick: () => setView(v.key),
@@ -360,7 +363,9 @@ function renderNav() {
       class: "count" + (v.hot && counts[v.key] ? " hot" : ""), text: counts[v.key] || "",
     }))),
     window.ConsoleSlots.nav(),
+    window.ConsoleWorkspace.nav(),
     window.ConsoleBackend.nav(),
+    window.ConsoleBackend.childNav(),
     window.ConsoleNotify ? h("button", { class: "nav-notify" + (window.ConsoleNotify.isOn() ? " on" : ""),
       onclick: () => window.ConsoleNotify.toggle() },
       h("span", { text: window.ConsoleNotify.isOn() ? T.notify_on : T.notify_off })) : null,
@@ -374,24 +379,56 @@ function renderNav() {
 
 function renderList() {
   const rows = visibleRows();
+  window.ConsoleBulk?.sync(rows);
   const list = $("list");
+  const top = list.scrollTop;
+  const edge = list.getBoundingClientRect().top;
+  // Anchor what the reader sees, not the selection (which may be far off-screen).
+  // Keeping only scrollTop would still jump when polling inserts/reorders rows above it.
+  const anchor = top > 0 && [...list.querySelectorAll(".row")]
+    .find((row) => row.getBoundingClientRect().bottom > edge);
+  const offset = anchor ? anchor.getBoundingClientRect().top - edge : 0;
   const nodes = [];
+  const occurrences = new Map();
+  let group = null;
   for (const row of rows) {
-    if (row.group !== undefined) { nodes.push(h("li", { class: row.cls || "group", text: row.group })); continue; }
-    if (row.node) { nodes.push(row.node); continue; }
-    nodes.push(rowNode(row));
+    if (row.group !== undefined) { group = null; nodes.push(h("li", { class: row.cls || "group", text: row.group })); continue; }
+    if (row.node) { group = null; nodes.push(row.node); continue; }
+    const occurrence = occurrences.get(row.item.id) || 0;
+    const node = rowNode({...row, rowKey: `${row.item.id}:${occurrence}`});
+    node.dataset.occurrence = String(occurrence);
+    occurrences.set(row.item.id, occurrence + 1);
+    if (row.family) {
+      if (group?.id !== row.family.root.id) {
+        const shown = rows.filter(r => r.family?.root.id === row.family.root.id && r.depth > 0).length;
+        const card = window.ConsoleFamily.listGroup(row.family, shown);
+        nodes.push(card);
+        group = {id:row.family.root.id, list:card.querySelector('.thread-group-rows')};
+      }
+      group.list.append(node);
+    } else { group = null; nodes.push(node); }
   }
   list.replaceChildren(...nodes);
+  window.ConsoleBulk?.toolbar();
   const empty = $("empty");
   empty.hidden = rows.length > 0;
   empty.textContent = T.empty;
-  const sel = list.querySelector(".row.sel");
+  const restored = anchor && [...list.querySelectorAll('.row')].find((row) => row.dataset.itemId === anchor.dataset.itemId && row.dataset.occurrence === anchor.dataset.occurrence);
+  list.scrollTop = restored
+    ? list.scrollTop + restored.getBoundingClientRect().top - edge - offset
+    : top;
+}
+
+// Only intentional navigation may bring an off-screen selection into view.
+function revealSelection() {
+  const sel = $("list").querySelector(".row.sel");
   if (sel) sel.scrollIntoView({ block: "nearest" });
 }
 
-function rowNode({ item, depth, children }) {
+function rowNode({ item, depth, children, rowKey, family }) {
   const meta = [];
-  const familyTag = window.ConsoleFamily.rowTag(item);
+  if (item.workspace_path) meta.push(h("span", {class:"tag",text:`🗂️ ${item.workspace_path}`}));
+  const familyTag = family && depth > 1 ? h('span', {class:'tag', text:`↳ ${state.byId.get(item.parent_id)?.title || item.parent_id}`}) : null;
   if (familyTag) meta.push(familyTag);
   // In Recent, name the list the item lives in now, unless its status already says so.
   if (state.view === "recent" && T[item.bucket] && T[item.bucket] !== T.st[item.status]) {
@@ -418,14 +455,21 @@ function rowNode({ item, depth, children }) {
         text: state.collapsed.has(item.id) ? "▸" : "▾" })
     : (depth ? h("span", { class: "tw", text: "" }) : null);
   return h("li", {
-    class: "row" + (state.selected === item.id ? " sel" : "") + (item.bucket === "done" ? " done" : "") +
+    class: "row" + (family ? (depth ? " family-child" : " family-root") : "") + (window.ConsoleBulk?.has(item.id) ? " bulk-selected" : "") + (state.selected === item.id ? " sel" : "") + (item.bucket === "done" ? " done" : "") +
       (isUnread(item) ? " fresh" : "") + (isPinned(item) ? " pinned" : ""),
-    role: "option", "aria-selected": state.selected === item.id ? "true" : "false",
-    onclick: () => { state.selected = item.id; openItem(item.id); },
+    role: "option", "data-item-id": item.id, "aria-selected": state.selected === item.id ? "true" : "false",
+    onclick: (event) => {
+      if (window.ConsoleBulk?.click(event, item.id, rowKey)) return;
+      openItem(window.ConsoleFamily.model(state.items,item.id)?.root.id || item.id);
+    },
   },
-    h("span", { class: "st", title: T.st[item.status], text: STATUS_ICON[item.status] || "·" }),
-    h("div", { class: "main", style: depth ? { paddingLeft: `${depth * 18}px` } : null },
-      h("div", { class: "title" }, twisty, item.title || item.thread_name || item.id),
+    h("span", {class:"row-select"}, window.ConsoleBulk?.checkbox(item,rowKey),
+      h("span", { class: "st", title: T.st[item.status], text: STATUS_ICON[item.status] || "·" })),
+    h("div", { class: "main", style: depth ? { paddingLeft: `${family ? Math.min(depth - 1, 2) * 10 + 12 : depth * 18}px` } : null },
+      h("div", { class: "title" }, twisty,
+        family ? window.ConsoleFamily.roleTag(depth) : null,
+        state.selected === item.id ? h("span", {class:"selection-label",text: document.documentElement.lang === "ja" ? "▶ 選択中" : "▶ Selected"}) : null,
+        item.title || item.thread_name || item.id),
       h("div", { class: "meta" }, ...meta),
       state.view === "focus" ? window.ConsoleFocus.note(item) : null),
     h("div", { class: "side" }, ...side),
@@ -442,7 +486,7 @@ function renderDetail() {
   $("app").classList.toggle("no-detail", !item);
   pane.hidden = !item;
   if (!item) { pane.replaceChildren(); delete pane.dataset.item; return; }
-  const key = `${item.id}|${item.thread_id ? 1 : 0}`;
+  const key = `${item.id}|${item.thread_id ? 1 : 0}|${LANG}`;
   if (pane.dataset.item !== key || !$("msgs")) buildDetail(pane, item, key);
 
   // Leave the header alone while one of its fields is being edited.
@@ -450,10 +494,11 @@ function renderDetail() {
   const editing = active && active.matches("input:not([type=checkbox]), select") &&
     ($("d-head").contains(active) || $("d-drawer").contains(active));
   if (!editing) {
-    $("d-head").replaceChildren(...headParts(item));
-    $("d-drawer").replaceChildren(...drawerParts(item));
+    $("d-head").replaceChildren(...headParts(item).filter(Boolean));
+    $("d-drawer").replaceChildren(...drawerParts(item).filter(Boolean));
   }
   $("d-drawer").hidden = !state.drawerOpen;
+  window.ConsoleMobile.layout(item, !editing);
   window.ConsoleFamily.render(item);
   const msgs = $("msgs");
   if (item.thread_id) fillMessages(msgs);
@@ -470,6 +515,7 @@ function buildDetail(pane, item, key) {
   const nodes = [
     h("div", { class: "d-head", id: "d-head" }),
     h("div", { class: "d-drawer", id: "d-drawer", hidden: true }),
+    window.ConsoleBackend.controls(item),
     h("section", { class: "family", id: "d-family", hidden: true, "aria-label": LANG === "ja" ? "親子スレッド" : "Thread family" }),
     h("div", { class: "msgs-wrap" }, msgs, jump),
     h("div", { class: "live-slot", id: "live-slot" }),
@@ -491,7 +537,7 @@ function buildDetail(pane, item, key) {
     window.ConsoleSlash.attach(box, item.id, meta);
     requestAnimationFrame(() => grow(box));
   }
-  pane.replaceChildren(...nodes);
+  pane.replaceChildren(...nodes.filter(Boolean));
 }
 
 function headParts(item) {
@@ -501,6 +547,8 @@ function headParts(item) {
     h("button", { class: "icon-btn", "aria-label": "close", onclick: closeItem, text: "←" }),
     h("span", { class: "d-status", title: T.st[item.status], text: STATUS_ICON[item.status] || "·" }),
     title,
+    h("button", { class: "icon-btn only-narrow detail-nav-toggle", "aria-label": "Menu", onclick: () => $("nav").classList.toggle("open"), text: "☰" }),
+    window.ConsoleLinks.button(item),
   ];
   if (!item.thread_id) parts.push(h("button", { class: "btn primary", onclick: () => startItem(item.id), text: T.start }));
   const ctx = contextTag(item, true);
@@ -510,6 +558,7 @@ function headParts(item) {
     "aria-pressed": pinned ? "true" : "false", onclick: () => togglePin(item.id),
     text: pinned ? `📌 ${T.unpin}` : `📌 ${T.pin}` }));
   parts.push(window.ConsolePlaces.picker(item));
+  parts.push(window.ConsoleWorkspace.picker(item));
   // Tool calls and status lines: one click away, never folded into the drawer.
   if (item.thread_id) parts.push(activityToggle());
   parts.push(h("button", { class: "btn d-more" + (state.drawerOpen ? " on" : ""), type: "button",
@@ -618,7 +667,7 @@ function messageNode(m) {
       : null;
     body.append(h("div", { class: "file" }, remote
       ? h("a", { href: a.url, target: "_blank", rel: "noopener noreferrer", text: `📎 ${a.filename}` })
-      : h("span", { text: `📎 ${a.filename}` }), look));
+      : h("span", { text: `📎 ${a.filename}` }), look, look ? P.copyButton(() => P.fetchBlob(a.url)) : null));
   }
   if ((m.actions || []).length) body.append(actionRow(m));
   return h("div", { class: `msg ${kind}` },
@@ -700,12 +749,16 @@ function readHash() {
   if (item) { state.open = item; state.selected = item; }
 }
 function setView(view) {
+  if (matchMedia("(max-width: 900px)").matches) {
+    markSeen(state.open); state.open = null; state.drawerOpen = false;
+  }
   state.view = view;
   localStorage.setItem("view", view);
   $("nav").classList.remove("open");
   const rows = visibleRows().filter((r) => r.item);
   state.selected = rows.length ? rows[0].item.id : null;
   render();
+  revealSelection();
 }
 // Unread, the way a mailbox means it: something happened in the thread after the
 // human last looked at it. "Last looked" is kept per item in this browser; items never
@@ -738,6 +791,7 @@ function toggleCollapse(id) {
   renderList();
 }
 async function openItem(id) {
+  if (state.open !== id) state.directReply = null;
   if (state.open !== id) state.unseen = 0;
   state.open = id;
   state.selected = id;
@@ -745,6 +799,7 @@ async function openItem(id) {
   markSeen(id);
   state.messagesFor = null;
   render();
+  revealSelection();
   const item = state.byId.get(id);
   if (!item || !item.thread_id) { state.messagesFor = id; state.messages = []; return; }
   await loadMessages(id);
@@ -804,7 +859,9 @@ async function capture(text) {
   // First line is the title; anything after it is the note.
   const [first, ...rest] = text.split("\n");
   const body = { title: first.trim().slice(0, 200), start };
-  const note = rest.join("\n").trim();
+  const workspacePath = window.ConsoleWorkspace?.path();
+  if (workspacePath) body.workspace_path = workspacePath;
+  const note = first.trim().length > 200 ? text : rest.join("\n").trim();
   if (note) body.note = note;
   const files = window.ConsolePaste.ready(CAPTURE);
   if (files === null) { toast(T.paste_wait); return false; }
@@ -822,6 +879,7 @@ async function capture(text) {
     else if (state.view !== "todo" && state.view !== "tree") setView("todo");
     state.selected = data.item.id;
     renderList();
+    revealSelection();
     toast(data.start_error || (started ? T.started : T.captured));
   } catch (err) { toast(err.message); return false; }
   return true;
@@ -841,7 +899,8 @@ function move(delta) {
   let i = rows.findIndex((r) => r.item.id === state.selected);
   i = i < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, i + delta));
   state.selected = rows[i].item.id;
-  if (state.open) openItem(state.selected); else renderList();
+  if (state.open) openItem(state.selected);
+  else { renderList(); revealSelection(); }
 }
 function showLogin() {
   window.ConsoleAuth.showLogin(refresh);
@@ -855,8 +914,32 @@ function showHelp(show) {
 }
 
 // ---------------------------------------------------------------- wiring
-function wire() {
+function setLanguage(language) {
+  if (!["ja", "en"].includes(language) || language === LANG) return;
+  const messageScroll = $("msgs")?.scrollTop || 0;
+  $("nav").classList.remove("open");
+  LANG = language;
+  T = I18N[LANG];
+  localStorage.setItem("lang", LANG);
+  document.documentElement.lang = LANG;
+  const url = new URL(location.href);
+  url.searchParams.set("lang", LANG);
+  history.replaceState(null, "", url);
   $("filter").placeholder = T.filter;
+  $("capture-start-label").textContent = T.autostart;
+  syncCapture();
+  const attach = $("capture").querySelector(".attach");
+  attach.title = T.attach_hint;
+  attach.setAttribute("aria-label", T.attach_hint);
+  render();
+  if ($("msgs")) $("msgs").scrollTop = messageScroll;
+  window.dispatchEvent(new Event("console-language-change"));
+}
+function wire() {
+  $("language-select").value = LANG;
+  $("language-select").addEventListener("change", e => setLanguage(e.target.value));
+  $("filter").placeholder = T.filter;
+  window.ConsoleSearch?.wire();
   $("capture-start-label").textContent = T.autostart;
   syncCapture();
   $("capture-start").addEventListener("change", (e) => {
@@ -898,7 +981,7 @@ function wire() {
     switch (e.key) {
       case "j": case "ArrowDown": move(1); break;
       case "k": case "ArrowUp": move(-1); break;
-      case "Enter": if (id) openItem(id); break;
+      case "Enter": if (id) openItem(window.ConsoleFamily.model(state.items,id)?.root.id || id); break;
       case "e": if (id && state.byId.get(id)?.bucket !== "done") window.ConsoleFinish.finish(id); break;
       case "p": if (id) togglePin(id); break;
       case "1": case "2": case "3": case "4": if (id) patch(id, { priority: Number(e.key) - 1 }); break;
@@ -925,5 +1008,7 @@ function wire() {
 
 readHash();
 wire();
+window.ConsoleLinks.wire();
+window.ConsoleWorkspace.load();
 render();
 refresh().then(() => { if (state.open) openItem(state.open); });

@@ -1,0 +1,34 @@
+.workspace-capture { display:flex; gap:8px; align-items:center; padding:6px 14px; font-size:12px; border-bottom:1px solid var(--line); }
+.workspace-picker { min-width:0; max-width:320px; flex:1; background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px; }
+.workspace-panel { position:fixed; inset:0; z-index:50; background:#0009; padding:3vh 3vw; display:flex; align-items:center; justify-content:center; }
+.workspace-panel[hidden], .workspace-capture[hidden] { display:none; }
+.ws-shell { width:min(1100px,100%); height:90vh; background:var(--bg); border:1px solid var(--line); border-radius:12px; display:flex; flex-direction:column; overflow:hidden; }
+.ws-head { display:flex; gap:8px; align-items:center; padding:12px 16px; border-bottom:1px solid var(--line); }
+.ws-head h1 { font-size:18px; margin:0; flex:1; }
+.ws-body { display:flex; flex:1; min-height:0; }
+.ws-entries { width:30%; min-width:160px; overflow:auto; border-right:1px solid var(--line); padding:8px; }
+.ws-entry { display:block; width:100%; text-align:left; padding:9px; border:0; border-radius:5px; background:transparent; color:var(--text); overflow-wrap:anywhere; cursor:pointer; }
+.ws-entry.on { background:var(--raise); border-left:3px solid var(--accent); }
+.ws-content { flex:1; min-width:0; overflow:auto; padding:16px; }
+.ws-content h2 { font-size:17px; overflow-wrap:anywhere; }
+.ws-task { display:flex; gap:8px; align-items:center; padding:10px 0; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+.ws-task-text { flex:1; min-width:120px; overflow-wrap:anywhere; white-space:pre-wrap; }
+.ws-task.done .ws-task-text { opacity:.55; text-decoration:line-through; }
+.ws-add, .ws-edit { display:flex; gap:6px; width:100%; margin-top:12px; }
+.ws-add input, .ws-edit input { flex:1; min-width:0; padding:8px; background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:5px; }
+.ws-overview pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+.ws-related { display:block; margin:6px 0; text-align:left; }
+@media(max-width:640px) {
+  .workspace-panel { padding:0; }
+  .ws-shell { height:100dvh; border-radius:0; }
+  .ws-body { flex-direction:column; }
+  .ws-entries { width:auto; max-height:25vh; min-height:90px; border-right:0; border-bottom:1px solid var(--line); }
+  .workspace-capture { flex-wrap:wrap; }
+}
+
+.workspace-offer { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.workspace-offer span { flex:1; min-width:150px; }
+.ws-onboarding { max-width:720px; height:auto; max-height:90vh; }
+.ws-onboarding .ws-content { line-height:1.7; }
+.ws-onboarding li { margin:8px 0; }
+.ws-purchase { display:inline-block; white-space:normal; margin:12px 0; }

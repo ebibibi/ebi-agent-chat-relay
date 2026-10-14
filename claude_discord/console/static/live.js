@@ -6,13 +6,12 @@
 (() => {
   const TICK_MS = 2000;
   const FILES = "/console/api/files/";
-  const lang = document.documentElement.lang === "ja" ? "ja" : "en";
-  const L = {
-    en: { working: "Working…", stop: "Stop", stopping: "Stopping…", download: "Download",
+  const L = new Proxy({
+    en: { working: "Working…", download: "Download",
           failed: "Download failed" },
-    ja: { working: "作業中…", stop: "停止", stopping: "停止しています…", download: "ダウンロード",
+    ja: { working: "作業中…", download: "ダウンロード",
           failed: "ダウンロードできませんでした" },
-  }[lang];
+  }, {get: (strings, key) => strings[document.documentElement.lang === "ja" ? "ja" : "en"][key]});
   const STATUS = { thinking: "💭", tool_read: "📖", tool_edit: "✏️", tool_command: "⌨️",
     tool_web: "🌐", tool_other: "🔧", hook: "🪝", compacting: "🗜️", stalled_soft: "⏳",
     stalled_hard: "⚠️" };
@@ -31,7 +30,7 @@
 
   // The panel lives in its own slot under the conversation, so it never covers the
   // messages it is reporting on. Open (the latest tool calls) unless folded to one line.
-  let open = localStorage.getItem("liveOpen") !== "0";
+  let open = localStorage.getItem("liveOpen") !== "0", mobileOpen = false;
 
   function draw(id, data) {
     last = { id, data };
@@ -39,37 +38,31 @@
     if (!box) return;
     const msgs = document.getElementById("msgs");
     const pinned = msgs && msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 80;
+    const mobile = matchMedia("(max-width: 900px)").matches;
+    const expanded = mobile ? mobileOpen : open;
     const live = data.live || {};
     const acts = live.activities || [];
     const latest = acts.length ? acts[acts.length - 1] : null;
     const head = el("div", "live-head");
     const toggle = el("button", "live-toggle");
     toggle.type = "button";
-    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
     toggle.append(
-      el("span", "live-caret", open ? "▾" : "▸"),
+      el("span", "live-caret", expanded ? "▾" : "▸"),
       el("span", "live-status", `${STATUS[live.status] || "⚙️"} ${L.working}`),
-      el("span", "live-latest", !open && latest ? `${latest.title}${latest.detail ? " — " + latest.detail : ""}` : ""),
+      el("span", "live-latest", !expanded && latest ? `${latest.title}${latest.detail ? " — " + latest.detail : ""}` : ""),
     );
     toggle.addEventListener("click", () => {
-      open = !open;
-      localStorage.setItem("liveOpen", open ? "1" : "0");
+      if (mobile) mobileOpen = !mobileOpen;
+      else {open = !open; localStorage.setItem("liveOpen", open ? "1" : "0");}
       if (last) draw(last.id, last.data);
     });
     head.append(toggle);
     if (live.can_stop) {
-      const stop = el("button", "btn live-stop", L.stop);
-      stop.type = "button";
-      stop.addEventListener("click", async () => {
-        stop.disabled = true;
-        stop.textContent = L.stopping;
-        try { await api(`/items/${encodeURIComponent(id)}/stop`, { method: "POST", body: {} }); }
-        catch (err) { toast(err.message); }
-      });
-      head.append(stop);
+      head.append(window.ConsoleSlots.stopButton(id, false, "live-stop"));
     }
     const parts = [head];
-    if (open) {
+    if (expanded) {
       const list = el("ul", "live-acts");
       for (const a of acts.slice(-6)) {
         const mark = a.done ? (a.ok ? "✓" : "✗") : "…";
@@ -142,8 +135,10 @@
   function addFileRows() {
     for (const body of document.querySelectorAll(".msg .body:not([data-files])")) {
       body.setAttribute("data-files", "");
-      const found = body.textContent.match(/\/console\/api\/files\/\d+\/[0-9a-f]{32}\/[^\s)\]]+/g)
-        || [...body.querySelectorAll(`a[href^="${FILES}"]`)].map((a) => a.getAttribute("href"));
+      const content = body.cloneNode(true);
+      content.querySelectorAll(".file").forEach(node => node.remove());
+      const links = [...body.querySelectorAll(`a[href^="${FILES}"]`)].map(a => a.getAttribute("href"));
+      const found = links.length ? links : (content.textContent.match(/\/console\/api\/files\/\d+\/[0-9a-f]{32}\/[^\s)\]]+/g) || []);
       if (!found.length) continue;
       const row = el("div", "live-files");
       for (const href of new Set(found)) {
@@ -153,7 +148,7 @@
           const look = el("button", "btn", `👁 ${P.label} ${fileName(href)}`);
           look.type = "button";
           look.addEventListener("click", () => P.open(fileName(href), () => fetchFile(href), () => download(href)));
-          row.append(look);
+          row.append(look, P.copyButton(() => fetchFile(href)));
         }
         const btn = el("button", "btn", `📎 ${L.download} ${fileName(href)}`);
         btn.type = "button";

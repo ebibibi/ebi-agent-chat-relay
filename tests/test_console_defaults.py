@@ -82,3 +82,37 @@ async def test_bad_default_changes_are_400(env) -> None:
     ):
         res = await client.post("/console/api/defaults", json=body, headers=WRITE)
         assert res.status == 400, body
+
+
+async def test_child_defaults_have_separate_catalog_and_validation(env):
+    client, settings = env
+    url = "/console/api/defaults/children"
+    assert (await client.get(url)).status == 401
+    for name, arg in [("backend", "pi"), ("model", "provider/gpt-6.1-sol"), ("effort", "high")]:
+        res = await client.post(url, json={"name": name, "arg": arg}, headers=WRITE)
+        assert res.status == 200
+    data = await (await client.get(url, headers=AUTH)).json()
+    assert data["backend"] == "pi"
+    assert data["model"] == "provider/gpt-6.1-sol"
+    assert await settings.current_backend() == "claude"
+    res = await client.post(url, json={"name": "backend", "arg": "bogus"}, headers=WRITE)
+    assert res.status == 400
+
+
+async def test_manager_child_override_does_not_change_siblings(env, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    client, settings = env
+    resolve = AsyncMock(return_value=(123, None))
+    monkeypatch.setattr(ConsoleServer, "_command_key", resolve)
+    url = "/console/api/items/t123/children"
+    res = await client.post(url, json={"name": "backend", "arg": "pi"}, headers=AUTH)
+    assert res.status == 403
+    res = await client.post(url, json={"name": "backend", "arg": "pi"}, headers=WRITE)
+    assert res.status == 200
+    resolve.assert_awaited_with("t123")
+    assert await settings.for_children().current_backend(123) == "pi"
+    assert await settings.for_children().current_backend(124) == "claude"
+    assert await settings.current_backend(123) == "claude"
+    data = await (await client.get(url, headers=AUTH)).json()
+    assert data["backend"] == "pi"

@@ -29,6 +29,8 @@ from claude_code_core.runner import resolve_cli_argv
 logger = logging.getLogger(__name__)
 
 COMPACT_TIMEOUT_SECONDS = 300.0
+# thread/resume includes history; use the same bound as the Codex exec runner.
+_RPC_LINE_LIMIT = 10 * 1024 * 1024
 _SESSION_ID = re.compile(r"^[a-f0-9\-]+$")
 _RESUME_ID = 2
 _COMPACT_ID = 3
@@ -61,7 +63,10 @@ async def _exchange(proc: asyncio.subprocess.Process, session_id: str) -> None:
     await proc.stdin.drain()
     started = False
     while True:
-        line = await proc.stdout.readline()
+        try:
+            line = await proc.stdout.readline()
+        except ValueError as exc:
+            raise CompactError("Codex response exceeded the 10 MiB compaction limit") from exc
         if not line:
             raise CompactError("Codex stopped before the compaction finished")
         try:
@@ -114,6 +119,7 @@ async def compact_codex_session(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
             env=env,
+            limit=_RPC_LINE_LIMIT,
         )
     except (OSError, ValueError) as exc:
         raise CompactError(f"could not start Codex: {exc}") from exc

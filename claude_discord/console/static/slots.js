@@ -6,6 +6,58 @@
 "use strict";
 
 window.ConsoleSlots = (() => {
+  const stopping = new Set();
+  const stopRequests = new Set();
+
+  function syncStopButtons() {
+    for (const button of document.querySelectorAll("[data-stop-id]")) {
+      const busy = stopping.has(button.dataset.stopId);
+      button.disabled = busy;
+      button.setAttribute("aria-busy", String(busy));
+      button.title = busy ? T.stopping : T.stop_hint;
+      button.setAttribute("aria-label", button.title);
+      button.textContent = button.dataset.compact === "true"
+        ? (busy ? "⏳" : "■") : (busy ? T.stopping : `■ ${T.stop}`);
+    }
+  }
+
+  async function stop(itemId) {
+    if (stopping.has(itemId)) return;
+    stopping.add(itemId);
+    stopRequests.add(itemId);
+    syncStopButtons();
+    try {
+      await api(`/items/${encodeURIComponent(itemId)}/stop`, { method: "POST", body: {} });
+    } catch (err) {
+      stopping.delete(itemId);
+      toast(err.message);
+    } finally {
+      stopRequests.delete(itemId);
+      syncStopButtons();
+    }
+    await refresh();
+  }
+
+  // A 202 acknowledges the request; keep feedback until the board confirms it stopped.
+  function onBoard(items) {
+    for (const itemId of stopping) {
+      const item = items.find((i) => i.id === itemId);
+      if (!stopRequests.has(itemId) && !item?.running && !item?.queued) stopping.delete(itemId);
+    }
+    syncStopButtons();
+  }
+
+  function stopButton(itemId, compact = false, cls = "slot-btn stop") {
+    const busy = stopping.has(itemId);
+    return h("button", {
+      class: `btn ${cls}`, type: "button", "data-stop-id": itemId, "data-compact": String(compact),
+      disabled: busy, "aria-busy": String(busy),
+      title: busy ? T.stopping : T.stop_hint, "aria-label": busy ? T.stopping : T.stop_hint,
+      text: compact ? (busy ? "⏳" : "■") : (busy ? T.stopping : `■ ${T.stop}`),
+      onclick: (e) => { e.stopPropagation(); stop(itemId); },
+    });
+  }
+
   async function post(path, body, done) {
     try {
       const data = await api(path, { method: "POST", body: body || {} });
@@ -44,7 +96,7 @@ window.ConsoleSlots = (() => {
     const out = [];
     if (item.running) {
       out.push(b("pause", "⏸", T.pause, T.pause_hint, () => post(`/items/${id(item)}/pause`, {}, T.paused_toast)));
-      out.push(b("stop", "■", T.stop, T.stop_hint, () => post(`/items/${id(item)}/stop`, {}, T.stopped_toast)));
+      out.push(stopButton(item.id, compact));
     } else if (item.queued) {
       out.push(b("first", "⏫", T.first, T.first_hint, () => post(`/items/${id(item)}/queue`, { action: "first" })));
       out.push(b("later", "⏬", T.later, T.later_hint, () => post(`/items/${id(item)}/queue`, { action: "later" })));
@@ -54,5 +106,5 @@ window.ConsoleSlots = (() => {
     return out;
   }
 
-  return { nav, controls, setLimit };
+  return { nav, controls, setLimit, stopButton, onBoard };
 })();
