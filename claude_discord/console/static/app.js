@@ -95,14 +95,14 @@ const I18N = {
   },
 };
 // ?lang=ja|en pins the language; otherwise the browser's preference decides.
-const LANG = (() => {
+let LANG = (() => {
   const pinned = new URLSearchParams(location.search).get("lang");
-  if (pinned && I18N[pinned]) localStorage.setItem("lang", pinned);
+  if (["ja", "en"].includes(pinned)) localStorage.setItem("lang", pinned);
   const chosen = localStorage.getItem("lang");
-  if (chosen && I18N[chosen]) return chosen;
+  if (["ja", "en"].includes(chosen)) return chosen;
   return (navigator.languages || [navigator.language || "en"]).some((l) => l.toLowerCase().startsWith("ja")) ? "ja" : "en";
 })();
-const T = I18N[LANG];
+let T = I18N[LANG];
 document.documentElement.lang = LANG;
 
 const STATUS_ICON = { running: "⚙️", waiting: "❓", review: "👀", action: "📋", error: "⚠️",
@@ -354,9 +354,8 @@ function renderNav() {
   for (const i of state.items) counts[i.bucket] = (counts[i.bucket] || 0) + 1;
   counts.tree = state.items.filter((i) => i.bucket !== "done").length;
   counts.focus = window.ConsoleFocus.count(state.items);
-  const nav = $("nav");
+  const nav = $("nav-views");
   nav.replaceChildren(
-    h("div", { class: "brand", text: "Ebi AI Console" }),
     ...VIEWS.map((v) => v.sep ? h("div", { class: "sep" }) : h("button", {
       class: state.view === v.key ? "active" : "",
       onclick: () => setView(v.key),
@@ -366,6 +365,7 @@ function renderNav() {
     window.ConsoleSlots.nav(),
     window.ConsoleWorkspace.nav(),
     window.ConsoleBackend.nav(),
+    window.ConsoleBackend.childNav(),
     window.ConsoleNotify ? h("button", { class: "nav-notify" + (window.ConsoleNotify.isOn() ? " on" : ""),
       onclick: () => window.ConsoleNotify.toggle() },
       h("span", { text: window.ConsoleNotify.isOn() ? T.notify_on : T.notify_off })) : null,
@@ -476,7 +476,7 @@ function renderDetail() {
   $("app").classList.toggle("no-detail", !item);
   pane.hidden = !item;
   if (!item) { pane.replaceChildren(); delete pane.dataset.item; return; }
-  const key = `${item.id}|${item.thread_id ? 1 : 0}`;
+  const key = `${item.id}|${item.thread_id ? 1 : 0}|${LANG}`;
   if (pane.dataset.item !== key || !$("msgs")) buildDetail(pane, item, key);
 
   // Leave the header alone while one of its fields is being edited.
@@ -504,6 +504,7 @@ function buildDetail(pane, item, key) {
   const nodes = [
     h("div", { class: "d-head", id: "d-head" }),
     h("div", { class: "d-drawer", id: "d-drawer", hidden: true }),
+    window.ConsoleBackend.controls(item),
     h("section", { class: "family", id: "d-family", hidden: true, "aria-label": LANG === "ja" ? "親子スレッド" : "Thread family" }),
     h("div", { class: "msgs-wrap" }, msgs, jump),
     h("div", { class: "live-slot", id: "live-slot" }),
@@ -525,7 +526,7 @@ function buildDetail(pane, item, key) {
     window.ConsoleSlash.attach(box, item.id, meta);
     requestAnimationFrame(() => grow(box));
   }
-  pane.replaceChildren(...nodes);
+  pane.replaceChildren(...nodes.filter(Boolean));
 }
 
 function headParts(item) {
@@ -535,6 +536,7 @@ function headParts(item) {
     h("button", { class: "icon-btn", "aria-label": "close", onclick: closeItem, text: "←" }),
     h("span", { class: "d-status", title: T.st[item.status], text: STATUS_ICON[item.status] || "·" }),
     title,
+    h("button", { class: "icon-btn only-narrow detail-nav-toggle", "aria-label": "Menu", onclick: () => $("nav").classList.toggle("open"), text: "☰" }),
     window.ConsoleLinks.button(item),
   ];
   if (!item.thread_id) parts.push(h("button", { class: "btn primary", onclick: () => startItem(item.id), text: T.start }));
@@ -898,7 +900,30 @@ function showHelp(show) {
 }
 
 // ---------------------------------------------------------------- wiring
+function setLanguage(language) {
+  if (!["ja", "en"].includes(language) || language === LANG) return;
+  const messageScroll = $("msgs")?.scrollTop || 0;
+  $("nav").classList.remove("open");
+  LANG = language;
+  T = I18N[LANG];
+  localStorage.setItem("lang", LANG);
+  document.documentElement.lang = LANG;
+  const url = new URL(location.href);
+  url.searchParams.set("lang", LANG);
+  history.replaceState(null, "", url);
+  $("filter").placeholder = T.filter;
+  $("capture-start-label").textContent = T.autostart;
+  syncCapture();
+  const attach = $("capture").querySelector(".attach");
+  attach.title = T.attach_hint;
+  attach.setAttribute("aria-label", T.attach_hint);
+  render();
+  if ($("msgs")) $("msgs").scrollTop = messageScroll;
+  window.dispatchEvent(new Event("console-language-change"));
+}
 function wire() {
+  $("language-select").value = LANG;
+  $("language-select").addEventListener("change", e => setLanguage(e.target.value));
   $("filter").placeholder = T.filter;
   window.ConsoleSearch?.wire();
   $("capture-start-label").textContent = T.autostart;

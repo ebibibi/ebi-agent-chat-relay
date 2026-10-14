@@ -120,8 +120,10 @@ window.ConsoleWorkspace = (() => {
         h("h2",{text:ja?"会話の続きを、仕事の続きに。":"Turn ongoing conversations into ongoing work."}),
         h("p",{text:ja?"Claude Code / CodexとObsidianをつなぐ、買い切りの有料プラグインです。Consoleとの連携で、会話と仕事の文脈を一緒に扱えます。":"A paid, one-time-purchase plugin connecting Claude Code / Codex with Obsidian. Console integration brings your conversations and work context together."}),
         h("ul",{},...features.map(text=>h("li",{text}))),
-        h("a",{class:"btn ws-purchase",href:ja?SALES_URL:SALES_URL_EN,target:"_blank",rel:"noopener noreferrer",
-          text:ja?"Ebi Workspaceの内容・購入方法を見る":"Explore Ebi Workspace and purchase options"}),
+        h("p",{text:ja?"内容・購入方法を見る":"Explore Ebi Workspace and purchase options"}),
+        h("a",{class:"btn ws-purchase",href:SALES_URL,target:"_blank",rel:"noopener noreferrer",text:"日本語版"}),
+        " ",
+        h("a",{class:"btn ws-purchase",href:SALES_URL_EN,target:"_blank",rel:"noopener noreferrer",text:"English edition"}),
         h("h3",{text:ja?"すでにお持ちの場合":"Already have Ebi Workspace?"}),
         h("p",{text:ja?"Consoleを動かしている環境でWorkspaceをセットアップしてから、下のボタンで接続を確認してください。":"Set up Workspace in the environment running Console, then check the connection below."}),
         button(ja?"接続を再確認":"Check connection",load))));
@@ -176,5 +178,6 @@ window.ConsoleWorkspace = (() => {
     if(!data.available)return null;
     return selector(item.workspace_path||"",path=>patch(item.id,{workspace_path:path||null}));
   }
+  window.addEventListener("console-language-change",capturePicker);
   return {load,nav,picker,path:()=>chosen||null};
 })();

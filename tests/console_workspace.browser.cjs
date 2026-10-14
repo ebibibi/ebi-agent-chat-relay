@@ -44,7 +44,7 @@ for (const available of [false, true]) {
       await page.locator('.workspace-offer button').first().click();
       await page.locator('.ws-onboarding').waitFor();
       const link = page.locator('.ws-purchase');
-      assert.equal(await link.getAttribute('href'),'https://note.com/ebibibi/n/n300772aeac93');
+      assert.deepEqual(await link.evaluateAll(nodes=>nodes.map(n=>n.getAttribute('href'))),['https://note.com/ebibibi/n/n300772aeac93','https://note.com/ebibibi/n/nc327ab1de017']);
       assert.match(await page.locator('.ws-onboarding').innerText(),/買い切り/);
       assert.equal(writes.length,0);
       await page.getByRole('button',{name:'閉じる',exact:true}).click();
@@ -57,7 +57,7 @@ for (const available of [false, true]) {
       assert.equal(await page.locator('.ws-onboarding').isVisible(),true);
       await page.goto('http://console.test/?lang=en');
       await page.locator('.nav-workspace').click();
-      assert.equal(await page.locator('.ws-purchase').getAttribute('href'),'https://note.com/ebibibi/n/nc327ab1de017');
+      assert.deepEqual(await page.locator('.ws-purchase').evaluateAll(nodes=>nodes.map(n=>n.getAttribute('href'))),['https://note.com/ebibibi/n/n300772aeac93','https://note.com/ebibibi/n/nc327ab1de017']);
       return;
     }
     await page.locator('.nav-workspace').click();

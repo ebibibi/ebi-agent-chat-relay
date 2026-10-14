@@ -276,3 +276,61 @@ class TestSessionViewsLineage:
         assert view["parent_thread_id"] is None
         assert view["family"] is None
         assert view["children"] == []
+
+
+async def test_child_backend_is_set_before_first_run(tmp_path):
+    import asyncio
+
+    from claude_discord.backend_settings import BackendSettings
+    from claude_discord.database.settings_repo import SettingsRepository
+
+    db = str(tmp_path / "child.db")
+    await init_db(db)
+    settings = BackendSettings(
+        SettingsRepository(db),
+        env_backend="claude",
+        env_model_for_claude="opus",
+        env_model_for_codex="",
+    )
+    await settings.for_children().set_backend("pi", thread_id=PARENT_ID)
+    await settings.for_children().set_model("pi", "provider/gpt-6.1-sol", thread_id=PARENT_ID)
+    await settings.for_children().set_effort("pi", "high", thread_id=PARENT_ID)
+    cog, channel, _ = _cog_with_parent()
+    cog._backend_settings = settings
+    ran = asyncio.Event()
+
+    async def run(*args, **kwargs):
+        assert await settings.current_backend(42) == "pi"
+        assert await settings.current_model("pi", 42) == "provider/gpt-6.1-sol"
+        assert await settings.current_effort("pi", 42) == "high"
+        ran.set()
+
+    cog._run_claude = run
+    await cog.spawn_session(channel, "work", parent_thread_id=PARENT_ID)
+    await asyncio.wait_for(ran.wait(), 2)
+    assert await settings.current_backend(PARENT_ID) == "claude"
+    await settings.for_children().set_backend("codex", thread_id=PARENT_ID)
+    assert await settings.current_backend(42) == "pi"
+
+
+async def test_paused_child_keeps_preselected_backend_until_started(tmp_path):
+    from claude_discord.backend_settings import BackendSettings
+    from claude_discord.database.settings_repo import SettingsRepository
+
+    db = str(tmp_path / "child.db")
+    await init_db(db)
+    settings = BackendSettings(
+        SettingsRepository(db),
+        env_backend="claude",
+        env_model_for_claude="opus",
+        env_model_for_codex="",
+    )
+    await settings.for_children().set_backend("codex")
+    await settings.for_children().set_model("codex", "custom-model")
+    cog, channel, _ = _cog_with_parent()
+    cog._backend_settings = settings
+    cog._run_claude = AsyncMock()
+    await cog.spawn_session(channel, "work", parent_thread_id=PARENT_ID, auto_start=False)
+    cog._run_claude.assert_not_called()
+    assert await settings.current_backend(42) == "codex"
+    assert await settings.current_model("codex", 42) == "custom-model"

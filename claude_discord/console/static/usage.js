@@ -5,19 +5,19 @@
 (() => {
   const POLL_MS = 60000;
   const TICK_MS = 20000;
-  const lang = document.documentElement.lang === "ja" ? "ja" : "en";
-  const L = {
+  const L = new Proxy({
     en: { back: "back", reset: "reset", unavailable: "usage unavailable", nodata: "no usage yet",
           credits: (n) => `${n} resets`, resetsAt: "resets", d: "d", h: "h", m: "m",
           out: (at, left) => `⛔ back ${at} (${left})` },
     ja: { back: "復活", reset: "リセット済", unavailable: "取得できません", nodata: "まだ記録なし",
           credits: (n) => `リセット券 ${n}`, resetsAt: "リセット", d: "日", h: "時間", m: "分",
           out: (at, left) => `⛔ 復活 ${at}（あと${left}）` },
-  }[lang];
+  }, {get: (strings, key) => strings[document.documentElement.lang === "ja" ? "ja" : "en"][key]});
   const NAMES = { claude: "Claude", codex: "Codex", pi: "pi", local: "Local", agui: "AG-UI" };
-  const WEEK = lang === "ja" ? "週" : "7d";
-  const WINDOWS = { five_hour: "5h", seven_day: WEEK,
-    seven_day_opus: `${WEEK} Opus`, seven_day_sonnet: `${WEEK} Sonnet` };
+  const WINDOWS = new Proxy({}, {get: (_, key) => {
+    const week = document.documentElement.lang === "ja" ? "週" : "7d";
+    return {five_hour:"5h",seven_day:week,seven_day_opus:`${week} Opus`,seven_day_sonnet:`${week} Sonnet`}[key];
+  }});
 
   const strip = document.getElementById("usage");
   if (!strip) return;
@@ -49,7 +49,7 @@
     if (at.toDateString() !== new Date().toDateString()) {
       Object.assign(opts, { month: "numeric", day: "numeric", weekday: "short" });
     }
-    return at.toLocaleString(lang, opts);
+    return at.toLocaleString(document.documentElement.lang, opts);
   }
 
   function windowChip(w) {
@@ -111,5 +111,6 @@
     if (!document.hidden) { load(); poll = setInterval(load, POLL_MS); tick = setInterval(render, TICK_MS); }
   });
   window.addEventListener("resize", render);
+  window.addEventListener("console-language-change", render);
   load();
 })();

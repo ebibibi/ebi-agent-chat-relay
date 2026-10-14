@@ -54,5 +54,10 @@ window.ConsoleSearch = (() => {
   function wire(){
     const button=$('search-messages');button.textContent=L().label;button.addEventListener('click',show);
   }
+  window.addEventListener('console-language-change',()=>{
+    sequence++;
+    panel?.remove(); panel=null;
+    $('search-messages').textContent=L().label;
+  });
   return {wire};
 })();

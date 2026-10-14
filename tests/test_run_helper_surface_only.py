@@ -117,3 +117,11 @@ async def test_console_thread_link_guidance_uses_verified_search_ids() -> None:
     assert "[thread title](/#focus/t<thread_id>)" in context
     assert "/api/search?q=" in context
     assert "Never invent thread IDs" in context
+
+
+async def test_delegation_guidance_preserves_preselected_child_ai() -> None:
+    config = RunConfig(surface=MemorySurface(), runner=_runner(), prompt="delegate work")
+    context = await _build_system_context(config)
+    assert "parent_thread_id" in context
+    assert "child AI preferences" in context
+    assert "native subagents" in context

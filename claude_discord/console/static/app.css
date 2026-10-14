@@ -46,6 +46,8 @@ button { cursor: pointer; }
 
 .nav { background: var(--panel); border-right: 1px solid var(--line); padding: 12px 8px; overflow-y: auto; }
 .nav .brand { font-weight: 700; padding: 4px 10px 12px; letter-spacing: .02em; }
+.language-picker { display: flex; flex-direction: column; gap: 6px; padding: 0 10px 12px; font-size: 12px; color: var(--dim); }
+.language-picker select { width: 100%; min-height: 32px; }
 .nav button { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px;
   background: none; border: 0; border-radius: 6px; padding: 7px 10px; text-align: left; }
 .nav button:hover { background: var(--raise); }
@@ -366,3 +368,6 @@ button.family-link:hover { color: var(--accent); border-color: var(--accent); }
 #bulk-errors { width:100%; margin:0; padding-left:18px; max-height:110px; overflow:auto; color:var(--err); overflow-wrap:anywhere; }
 
 .family-direct-active { color:#e4bd72; font-weight:700; }
+
+.team-settings { display:flex; flex-wrap:wrap; gap:6px; padding:6px 12px; border-bottom:1px solid var(--line); }
+.team-settings .btn { white-space:normal; overflow-wrap:anywhere; font-size:12px; }

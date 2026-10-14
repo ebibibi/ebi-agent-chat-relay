@@ -253,6 +253,9 @@ class ConsoleServer:
         r.add_get(f"{API_PREFIX}/usage", self.usage_read)
         r.add_get(f"{API_PREFIX}/defaults", self.defaults_read)
         r.add_post(f"{API_PREFIX}/defaults", self.defaults_change)
+        for path in ("/defaults/children", "/items/{item_id}/children"):
+            r.add_get(API_PREFIX + path, self.child_preferences)
+            r.add_post(API_PREFIX + path, self.child_preferences)
         r.add_get(f"{API_PREFIX}/places", self.places_read)
         r.add_post(f"{API_PREFIX}/places", self.place_add)
         r.add_patch(f"{API_PREFIX}/places", self.place_rename)
@@ -879,6 +882,36 @@ class ConsoleServer:
             return err
         assert key is not None
         return web.json_response(await catalog(settings, key, self._skill_loader()))
+
+    async def child_preferences(self, request: web.Request) -> web.Response:
+        """Select the AI for future children, globally or for one manager."""
+        settings = self._backend_settings()
+        if settings is None:
+            return _error("this deployment has no backend settings", 503)
+        settings = settings.for_children()
+        key = None
+        if "item_id" in request.match_info:
+            key, err = await self._command_key(request.match_info["item_id"])
+            if err:
+                return err
+        message = ""
+        if request.method == "POST":
+            body, err = await self._json(request)
+            if err:
+                return err
+            name = str(body.get("name") or "").strip().lstrip("/")
+            arg = str(body.get("arg") or "")
+            if name not in {n for n, _ in CONTROL_COMMANDS} or len(arg) > 200:
+                return _error("invalid child AI setting", 400)
+            try:
+                result = await run_command(settings, key, name, arg)
+            except CommandError as exc:
+                return _error(str(exc), 400)
+            message = result.message
+        choices = await catalog(settings, key, _no_skills)
+        return web.json_response(
+            {"message": message, "catalog": choices} if request.method == "POST" else choices
+        )
 
     async def defaults_read(self, request: web.Request) -> web.Response:
         """The backend, model and effort new conversations start with, and the choices."""

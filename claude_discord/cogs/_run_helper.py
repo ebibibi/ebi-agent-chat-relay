@@ -321,6 +321,16 @@ async def _build_system_context(config: RunConfig) -> str | None:
         "and never include authentication tokens in links. If nothing matches, say so."
     )
 
+    parts.append(
+        "## Delegated child thread AI\n"
+        "When creating an authorized child thread via POST $CCDB_API_URL/api/spawn, "
+        f"include parent_thread_id: {config.surface.thread_key}. "
+        "The relay applies the user's saved child AI preferences (backend, model, effort) "
+        "before the first turn. Do not switch the child to your own backend or model. "
+        "These settings govern relay child threads, not a backend's native subagents. "
+        "Creating a child thread still requires authorization to delegate."
+    )
+
     done_section = _build_done_marker_section(config)
     if done_section:
         parts.append(done_section)

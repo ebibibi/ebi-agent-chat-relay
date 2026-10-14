@@ -268,3 +268,27 @@ class TestPiEnvModel:
         await s.set_model("pi", "ollama/gpt-oss:120b", thread_id=42)
         assert await s.current_model("pi", 42) == "ollama/gpt-oss:120b"
         assert await s.current_model("pi") == "anthropic/claude-opus-5"
+
+
+async def test_child_preferences_are_independent_persistent_and_scoped():
+    repo, _ = await _new_repo()
+    settings = BackendSettings(
+        repo, env_backend="claude", env_model_for_claude="opus", env_model_for_codex=""
+    )
+    child = settings.for_children()
+    assert await child.current_backend(10) == "claude"
+    await settings.set_backend("codex", thread_id=10)
+    await child.set_backend("pi")
+    await child.set_model("pi", "provider/gpt-6.1-sol")
+    await child.set_effort("pi", "high")
+    await child.set_backend("claude", thread_id=20)
+    await child.set_model("claude", "sonnet", thread_id=20)
+    restored = settings.for_children()
+    assert await settings.current_backend(10) == "codex"
+    assert await settings.current_backend() == "claude"
+    assert await restored.current_backend(10) == "pi"
+    assert await restored.current_model("pi", 10) == "provider/gpt-6.1-sol"
+    assert await restored.current_effort("pi", 10) == "high"
+    assert await restored.current_backend(20) == "claude"
+    assert await restored.current_model("claude", 20) == "sonnet"
+    assert await settings.current_model("claude", 20) == "opus"

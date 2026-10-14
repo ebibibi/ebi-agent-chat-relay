@@ -59,8 +59,10 @@ for (const width of [1440, 390]) {
     await t.test('repeated refreshes do not pull a wheel scroll back to the selection', async () => {
       await page.locator('#list').hover();
       for (let i = 0; i < 3; i++) {
+        const target = (await position()).scroll + 480;
         await page.mouse.wheel(0, 480);
-        await page.waitForTimeout(100);
+        // wheel() queues a compositor event; wait for it, not a wall-clock guess.
+        await page.waitForFunction(target => $('list').scrollTop === target, target);
         const before = await position();
         assert.ok(before.scroll > 300);
         await page.evaluate(() => refresh());

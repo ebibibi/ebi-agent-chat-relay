@@ -5,9 +5,7 @@
 
 (() => {
   const AUTH = "/console/api/auth";
-  const lang = (localStorage.getItem("lang")
-    || ((navigator.languages || [navigator.language || "en"]).some((l) => l.toLowerCase().startsWith("ja")) ? "ja" : "en"));
-  const L = {
+  const L = new Proxy({
     en: {
       title: "Sign in to Ebi AI Console", signin: "Sign in with a passkey",
       setup: "First time here: enter the setup code from the ccdb log, then create a passkey on this device.",
@@ -30,7 +28,7 @@
       remove: "削除", signout: "サインアウト", lastused: "最終利用", never: "未使用", close: "閉じる",
       cancelled: "キャンセルしました", sso: (n) => `${n} でサインイン`, or: "または",
     },
-  }[lang === "ja" ? "ja" : "en"];
+  }, {get: (strings, key) => strings[document.documentElement.lang === "ja" ? "ja" : "en"][key]});
 
   // ------------------------------------------------------------ base64url <-> bytes
   const toBytes = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4)), (c) => c.charCodeAt(0));
@@ -222,5 +220,5 @@
     load();
   }
 
-  window.ConsoleAuth = { showLogin, showDevices, label: L.devices };
+  window.ConsoleAuth = { showLogin, showDevices, get label() { return L.devices; } };
 })();

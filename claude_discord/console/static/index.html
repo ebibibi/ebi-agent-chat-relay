@@ -17,7 +17,13 @@
 <body>
 <header id="usage" class="usage" aria-label="Backend usage" hidden></header>
 <div id="app" class="app">
-  <nav id="nav" class="nav" aria-label="Views"></nav>
+  <nav id="nav" class="nav" aria-label="Views">
+    <div class="brand">Ebi AI Console</div>
+    <label class="language-picker" for="language-select">🌐 日本語 / English
+      <select id="language-select"><option value="ja">日本語</option><option value="en">English</option></select>
+    </label>
+    <div id="nav-views"></div>
+  </nav>
   <main class="list-pane">
     <header class="list-head">
       <button id="nav-toggle" class="icon-btn only-narrow" aria-label="Menu">☰</button>

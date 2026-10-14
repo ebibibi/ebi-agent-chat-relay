@@ -1056,6 +1056,17 @@ class ClaudeChatCog(commands.Cog):
         Returns:
             The newly created :class:`discord.Thread`.
         """
+        # Resolve before creating the thread and persist before scheduling its first turn.
+        # A manager's own backend is independent from its child preferences.
+        child_ai = None
+        if parent_thread_id is not None and self._backend_settings is not None:
+            settings = self._backend_settings.for_children()
+            backend = await settings.current_backend(parent_thread_id)
+            child_ai = (
+                backend,
+                await settings.current_model(backend, parent_thread_id),
+                await settings.current_effort(backend, parent_thread_id),
+            )
         raw_name = thread_name or prompt
         name = (
             mark_spawned_thread_name(raw_name, parent_thread_id=parent_thread_id)
@@ -1067,6 +1078,13 @@ class ClaudeChatCog(commands.Cog):
             type=discord.ChannelType.public_thread,
             auto_archive_duration=THREAD_AUTO_ARCHIVE_MINUTES,
         )
+        if child_ai is not None and self._backend_settings is not None:
+            backend, model, effort = child_ai
+            await self._backend_settings.set_backend(backend, thread_id=thread.id)
+            if model:
+                await self._backend_settings.set_model(backend, model, thread_id=thread.id)
+            if effort:
+                await self._backend_settings.set_effort(backend, effort, thread_id=thread.id)
         # Added before the seed message so the requester sees the thread from its
         # first line, not after Claude has already been talking to itself.
         if invite_user_id:

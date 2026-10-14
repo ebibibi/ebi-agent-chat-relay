@@ -6,13 +6,12 @@
 (() => {
   const TICK_MS = 2000;
   const FILES = "/console/api/files/";
-  const lang = document.documentElement.lang === "ja" ? "ja" : "en";
-  const L = {
+  const L = new Proxy({
     en: { working: "Working…", download: "Download",
           failed: "Download failed" },
     ja: { working: "作業中…", download: "ダウンロード",
           failed: "ダウンロードできませんでした" },
-  }[lang];
+  }, {get: (strings, key) => strings[document.documentElement.lang === "ja" ? "ja" : "en"][key]});
   const STATUS = { thinking: "💭", tool_read: "📖", tool_edit: "✏️", tool_command: "⌨️",
     tool_web: "🌐", tool_other: "🔧", hook: "🪝", compacting: "🗜️", stalled_soft: "⏳",
     stalled_hard: "⚠️" };

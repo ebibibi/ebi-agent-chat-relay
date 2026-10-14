@@ -12,10 +12,8 @@ Resolution order for any field:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from .database.settings_repo import SettingsRepository
+from .database.settings_repo import SettingsRepository
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +52,22 @@ def session_is_resumable(stored_backend: str | None, current_backend: str) -> bo
     return stored_backend == current_backend
 
 
+class _ChildSettingsRepository(SettingsRepository):
+    """Separate preferences for future children; ordinary global defaults are fallback."""
+
+    async def get(self, key: str, *, default: str | None = None) -> str | None:
+        value = await super().get("children." + key)
+        if value is None and ".global" in key:
+            value = await super().get(key)
+        return value if value is not None else default
+
+    async def set(self, key: str, value: str) -> None:
+        await super().set("children." + key, value)
+
+    async def delete(self, key: str) -> bool:
+        return await super().delete("children." + key)
+
+
 class BackendSettings:
     """Thin wrapper around SettingsRepository that resolves backend/model."""
 
@@ -84,6 +98,16 @@ class BackendSettings:
             # still means "let pi decide".
             "pi": env_model_for_pi or "",
         }
+
+    def for_children(self) -> BackendSettings:
+        """Preferences for future children, scoped by the manager's thread ID."""
+        return BackendSettings(
+            _ChildSettingsRepository(self.repo.db_path),
+            env_backend=self._env_backend,
+            env_model_for_claude=self._env_model["claude"],
+            env_model_for_codex=self._env_model["codex"],
+            env_model_for_pi=self._env_model["pi"],
+        )
 
     # ── Resolution ──────────────────────────────────────────
 
