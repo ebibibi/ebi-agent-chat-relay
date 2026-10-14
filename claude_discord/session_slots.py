@@ -166,11 +166,17 @@ class SessionSlotScheduler:
     # Acquire / release
     # ------------------------------------------------------------------
 
-    def would_wait(self, priority: SlotPriority = SlotPriority.NORMAL) -> bool:
+    def would_wait(
+        self, priority: SlotPriority = SlotPriority.NORMAL, *, thread_key: int | None = None
+    ) -> bool:
         """True if a new run with ``priority`` could not start right now."""
         if self._held or len(self._running) >= self._max_slots:
             return True
-        return any(w.priority >= priority for w in self._waiting)
+        if thread_key is not None and self.is_running(thread_key):
+            return True
+        return any(
+            w.priority >= priority and not self.is_running(w.thread_key) for w in self._waiting
+        )
 
     async def acquire(
         self,
@@ -223,7 +229,14 @@ class SessionSlotScheduler:
         if self._held:
             return
         while len(self._running) < self._max_slots and self._waiting:
-            nxt = self._ordered_waiting()[0]
+            # Different entry points (e.g. chat and scheduler) can submit the
+            # same conversation. Never give its CLI session two writers, and
+            # let unrelated conversations pass a blocked follow-up.
+            nxt = next(
+                (e for e in self._ordered_waiting() if not self.is_running(e.thread_key)), None
+            )
+            if nxt is None:
+                return
             self._waiting.remove(nxt)
             nxt.running = True
             nxt.started_at = time.time()

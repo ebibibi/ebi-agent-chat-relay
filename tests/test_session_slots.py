@@ -154,3 +154,72 @@ async def test_snapshot_lists_running_then_queue_order() -> None:
         ("2", "waiting", 2),
     ]
     assert snap[1]["priority"] == "prioritized"
+
+
+async def test_same_conversation_waits_while_other_conversations_can_start() -> None:
+    slots = SessionSlotScheduler(3)
+    first = await slots.acquire(1)
+    followup = await _queued(slots, 1)
+    unrelated = await _queued(slots, 2)
+    try:
+        assert not followup.done()
+        assert unrelated.done()
+        assert slots.running_count == 2
+        slots.release(first)
+        second = await asyncio.wait_for(followup, timeout=1)
+        assert second.running
+        slots.release(second)
+    finally:
+        followup.cancel()
+        unrelated.cancel()
+        await asyncio.gather(followup, unrelated, return_exceptions=True)
+
+
+async def test_prioritized_same_conversation_still_waits_after_limit_increase() -> None:
+    slots = SessionSlotScheduler(1)
+    first = await slots.acquire(1)
+    followup = await _queued(slots, 1)
+    unrelated = await _queued(slots, 2)
+    try:
+        slots.prioritize(1)
+        slots.set_max_slots(3)
+        await asyncio.sleep(0)
+        assert not followup.done()
+        assert unrelated.done()
+        slots.release(first)
+        assert (await asyncio.wait_for(followup, timeout=1)).running
+    finally:
+        followup.cancel()
+        unrelated.cancel()
+        await asyncio.gather(followup, unrelated, return_exceptions=True)
+
+
+async def test_cancel_same_conversation_waiter_preserves_running_owner() -> None:
+    slots = SessionSlotScheduler(3)
+    first = await slots.acquire(1)
+    cancelled = await _queued(slots, 1)
+    successor = await _queued(slots, 1)
+    try:
+        cancelled.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cancelled
+        assert slots.is_running(1)
+        assert slots.running_count == 1
+        assert not successor.done()
+        slots.release(first)
+        assert (await asyncio.wait_for(successor, timeout=1)).running
+    finally:
+        successor.cancel()
+        await asyncio.gather(successor, return_exceptions=True)
+
+
+async def test_wait_prediction_accounts_for_conversation_exclusivity() -> None:
+    slots = SessionSlotScheduler(3)
+    await slots.acquire(1)
+    followup = await _queued(slots, 1)
+    try:
+        assert slots.would_wait(thread_key=1)
+        assert not slots.would_wait(thread_key=2)
+    finally:
+        followup.cancel()
+        await asyncio.gather(followup, return_exceptions=True)
