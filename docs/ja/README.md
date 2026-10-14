@@ -52,7 +52,19 @@ Version 5 では、リレーに**専用の GUI「Ebi AI Console」**が加わり
   これまでどおり動作します。コンソールを有効にするとトリアージは既定で有効です
   （`CCDB_CONSOLE_TRIAGE=0` で無効化）。
 
-詳しくは[コンソールガイド](../console.md)、[v5.0.0 リリースノート](../releases/v5.0.0.md)、
+**Version 5.1 では、Workspace 連携と会話管理の機能が加わりました:**
+
+- **Ebi Workspace のタスク** — コンテキストやプロジェクトを一覧し、概要を読み、タスクを追加・編集・完了に
+  できるほか、タスクから AI の作業を開始できます。正本はプロジェクトの `status.md` とコンテキストの
+  `single-actions.md` のままです。リビジョンの検証により、古い内容に基づく編集を拒否します。
+- **メッセージ検索** — 利用可能な会話履歴やローカルのトランスクリプトから本文を検索し、
+  抜粋と該当スレッドへのリンクを表示します。AI 呼び出しは不要です。
+- **スレッドの親子関係を管理** — 親と子のバックエンド・モデル・effort を独立して設定でき、
+  複数のスレッドを選択してまとめて完了にできます。親の完了には子孫スレッドも含まれます。
+- **デスクトップとモバイルの操作** — テキストファイルの内容やスレッドのリンクをコピーでき、
+  下書きや添付を保持したまま日本語と英語を切り替えられます。モバイルでは入力欄を操作しやすい位置に保ちます。
+
+詳しくは[コンソールガイド](../console.md)、[v5.1.0 リリースノート](../releases/v5.1.0.md)、
 [ADR-0014](../adr/0014-publish-the-ebi-ai-console-as-v5.md) を参照してください。次はスケジューラとの統合です。
 
 ## v4 の新機能
@@ -1158,6 +1170,7 @@ CHAT_ONLY_CHANNEL_IDS=444,555
 | `CCDB_CONSOLE_TRIAGE` | `0` でコンソールの[自動トリアージ](../console.md#automatic-triage)（高速なモデルによる優先度・期日・次の一手・場所の推定）を無効化する | `1` |
 | `CCDB_CONSOLE_TRIAGE_MODEL` | Claude バックエンドでのトリアージに使うモデル（`claude --model`） | `haiku` |
 | `CCDB_CONSOLE_TRIAGE_CODEX_MODEL` | Codex バックエンドでのトリアージに使うモデル（`codex exec -m`） | (Codex のカタログで最も安いモデル) |
+| `EBI_WORKSPACE_NOTES_FOLDER` | 任意の [Console の Workspace 連携](../console.md#optional-ebi-workspace)に使用する notes-folder の絶対パス。`02_Contexts` が必要です。`CLAUDE_WORKSPACE_NOTES_FOLDER` も利用できます。未設定の場合は `${XDG_CONFIG_HOME:-~/.config}/ebi-workspace/notes-folder`、次に `~/.claude/settings.local.json` の `env` 内の同じ変数を確認します。既定の Vault を推測して有効にすることはありません | （オプション） |
 
 ### パーミッションモード — `-p` モードで動作するもの
 

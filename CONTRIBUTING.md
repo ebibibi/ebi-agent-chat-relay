@@ -175,6 +175,7 @@ unreadable path falls back to a generic prompt rather than dropping the work.
 - `claude_discord/cogs/` — Discord.py Cogs (chat, skill command, webhook trigger, auto-upgrade)
 - `claude_discord/database/` — SQLite session and notification persistence
 - `claude_discord/discord_ui/` — Discord UI components (status, chunker, embeds)
+- `claude_discord/console/` — Authenticated Console API, conversation storage, message search and optional Workspace integration; `static/` contains the web client. See the [console guide](docs/console.md)
 - `claude_discord/ext/` — Optional extensions (REST API server — requires aiohttp)
 - `tests/` — pytest test suite
 

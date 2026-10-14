@@ -46,7 +46,19 @@ threads and the console's own conversations — on one web screen, on desktop or
   working exactly as before. With the console on, triage is on by default
   (`CCDB_CONSOLE_TRIAGE=0` turns it off).
 
-See the [console guide](docs/console.md), the [v5.0.0 release notes](docs/releases/v5.0.0.md) and
+**Version 5.1 adds Workspace integration and more ways to manage conversations:**
+
+- **Ebi Workspace tasks** — browse contexts and projects, read overviews, add/edit/complete
+  tasks, and start AI work from a task. Project `status.md` and context `single-actions.md`
+  remain the source of truth; revision checks reject stale edits.
+- **Search messages** — find text in available conversation history and local transcripts,
+  with excerpts and links back to the matching thread, without AI calls.
+- **Manage thread families** — configure manager and child backend/model/effort independently,
+  and select multiple threads to complete together. Completing a parent includes descendants.
+- **Desktop and mobile controls** — copy text-file contents and thread links, switch
+  Japanese/English without losing drafts or attachments, and keep the mobile composer accessible.
+
+See the [console guide](docs/console.md), the [v5.1.0 release notes](docs/releases/v5.1.0.md) and
 [ADR-0014](docs/adr/0014-publish-the-ebi-ai-console-as-v5.md). Scheduler integration comes next.
 
 ## What's new in v4
@@ -1145,6 +1157,7 @@ for idle deadlines, attachment retries, credentials and startup rollback.
 | `CCDB_CONSOLE_TRIAGE` | `0` turns off the console's [automatic triage](docs/console.md#automatic-triage) (priority, due date, next step and place guessed by a fast model) | `1` |
 | `CCDB_CONSOLE_TRIAGE_MODEL` | Model for triage on the Claude backend (`claude --model`) | `haiku` |
 | `CCDB_CONSOLE_TRIAGE_CODEX_MODEL` | Model for triage on the Codex backend (`codex exec -m`) | (cheapest in Codex's catalog) |
+| `EBI_WORKSPACE_NOTES_FOLDER` | Absolute notes-folder path for optional [Console Workspace integration](docs/console.md#optional-ebi-workspace); must contain `02_Contexts`. Also accepts `CLAUDE_WORKSPACE_NOTES_FOLDER`. When unset, checks `${XDG_CONFIG_HOME:-~/.config}/ebi-workspace/notes-folder`, then the same variables under `env` in `~/.claude/settings.local.json`. No guessed default vault | (optional) |
 
 ### Permission Modes — What Works in `-p` Mode
 
