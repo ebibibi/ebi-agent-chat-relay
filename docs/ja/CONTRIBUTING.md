@@ -178,6 +178,7 @@ Discord の自動アーカイブ期間はスレッド作成時に確定し、既
 - `claude_discord/cogs/` — Discord.py の Cog（chat、skill コマンド、webhook トリガー、自動アップグレード）
 - `claude_discord/database/` — SQLite セッションおよび通知の永続化
 - `claude_discord/discord_ui/` — Discord UI コンポーネント（status、chunker、embeds）
+- `claude_discord/console/` — 認証付き Console API、会話の保存、メッセージ検索、任意の Workspace 連携。`static/` に Web クライアントを配置。[コンソールガイド](../console.md)を参照
 - `claude_discord/ext/` — オプション拡張（REST API サーバー — aiohttp が必要）
 - `tests/` — pytest テストスイート
 
