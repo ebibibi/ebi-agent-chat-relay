@@ -307,35 +307,42 @@ class Workspace:
         candidate = Path(match[1].strip().strip('"')).expanduser()
         return candidate.resolve() if candidate.is_absolute() and candidate.is_dir() else None
 
+    def _bind_directory(
+        self,
+        here: Path,
+        entries: list[dict[str, Any]],
+        repositories: dict[str, Path | None],
+    ) -> str | None:
+        """The entry a working directory belongs to: inside its folder, else its repository."""
+        if self.root is None:
+            return None
+        base = self.root / "02_Contexts"
+        matches = [e["path"] for e in entries if here.is_relative_to(base / e["path"])]
+        if matches:
+            return max(matches, key=len)
+        repository_matches = [
+            path
+            for path, repository in repositories.items()
+            if repository and here.is_relative_to(repository)
+        ]
+        return repository_matches[0] if len(repository_matches) == 1 else None
+
     def bind_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         entries = self.snapshot()["entries"]
         paths = {e["path"] for e in entries}
         repositories = {e["path"]: self._repository(e["path"]) for e in entries}
         result = [dict(i) for i in items]
         by_id = {i["id"]: i for i in result}
+        # Hundreds of items share a few working directories; bind each one once.
+        by_cwd: dict[str, str | None] = {}
         for item in result:
             explicit = item.get("workspace_path")
             if explicit in paths:
                 continue
-            item["workspace_path"] = None
             cwd = item.get("working_dir")
-            matches = []
-            if cwd and self.root:
-                matches = [
-                    e["path"]
-                    for e in entries
-                    if Path(cwd).resolve().is_relative_to(self.root / "02_Contexts" / e["path"])
-                ]
-            if matches:
-                item["workspace_path"] = max(matches, key=len)
-            else:
-                repository_matches = [
-                    path
-                    for path, repository in repositories.items()
-                    if cwd and repository and Path(cwd).resolve().is_relative_to(repository)
-                ]
-                if len(repository_matches) == 1:
-                    item["workspace_path"] = repository_matches[0]
+            if cwd and cwd not in by_cwd:
+                by_cwd[cwd] = self._bind_directory(Path(cwd).resolve(), entries, repositories)
+            item["workspace_path"] = by_cwd[cwd] if cwd else None
             if not item["workspace_path"] and item.get("project"):
                 matches = [e["path"] for e in entries if item["project"] in (e["path"], e["name"])]
                 if len(matches) == 1:
