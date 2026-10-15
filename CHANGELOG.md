@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Console: every text box now behaves the same — `Enter` inserts a newline and `Ctrl+Enter`
+  (`Cmd+Enter` on macOS) sends. The capture box gains a Send button for touch devices (#1056).
+
+### Fixed
+
+- Console: repeated `Ctrl+Enter` or Send clicks no longer post the same reply or capture twice
+  while the first send is in flight (#1056).
+
 ## [5.1.0] - 2026-10-15
 
 **Ebi Workspace meets the Console.** Browse project context and Markdown tasks, update them,

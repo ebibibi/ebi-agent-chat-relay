@@ -23,7 +23,7 @@ const I18N = {
     pin_hint: "Pin as what you are working on now; pinned threads lead every list (p)", hide_done_off: "✅ Showing done", hide_done_on: "✅ Done hidden",
     hide_done_hint: "Hide or show finished items in every list (h)", hide_done_in_done: "The Done list always shows finished items", context_hint: (d) => `Context window used by the last turn: ${d}`, due_over: "overdue", due_in: (x) => `in ${x}`, u_min: "m", u_hour: "h", u_day: "d", focus_ready: "can do now", focus_from: (d) => `from ${d}`, ai_guess: "AI guess", ai_set: "set by AI",
     me: "Inbox", ai: "Running", todo: "To do", idle: "Idle", recent: "Recent", tree: "Tree", snoozed: "Snoozed", done: "Done",
-    filter: "Filter…", capture: "+ Write down work, press Enter (c) — Shift+Enter for a note line", capture_ai: "+ Write down work, Enter hands it to AI (c) — Shift+Enter for a note line",
+    filter: "Filter…", capture: "+ Write down work, Ctrl+Enter to add (c) — lines after the first become a note", capture_ai: "+ Write down work, Ctrl+Enter hands it to AI (c) — lines after the first become a note",
     autostart: "AI starts right away", empty: "Nothing here. 🎉",
     activity: (n) => `⚙ Activity (${n})`, details: "Details",
     activity_hint: "Show or hide tool calls, status lines and automatic prompts",
@@ -65,7 +65,7 @@ const I18N = {
     pin_hint: "いまやってる目印。ピン留めしたスレッドはどの一覧でも一番上に出ます（p）", hide_done_off: "✅ 完了も表示", hide_done_on: "✅ 完了を隠す中",
     hide_done_hint: "完了したタスクを全部の一覧で隠す／表示する（h）", hide_done_in_done: "「完了」の一覧では常に表示します", context_hint: (d) => `直近のターンで使ったコンテキスト：${d}`, due_over: "超過", due_in: (x) => `あと${x}`, u_min: "分", u_hour: "時間", u_day: "日", focus_ready: "今すぐできる", focus_from: (d) => `${d}〜`, ai_guess: "AIの見立て", ai_set: "AIが推定",
     me: "受信箱", ai: "実行中", todo: "やること", idle: "止まっている", recent: "更新順", tree: "ツリー", snoozed: "スヌーズ中", done: "完了",
-    filter: "絞り込み…", capture: "＋ 思いついた仕事を書いて Enter（c）。Shift+Enter で改行してメモ", capture_ai: "＋ 思いついた仕事を書いて Enter → AIが着手（c）。Shift+Enter で改行してメモ",
+    filter: "絞り込み…", capture: "＋ 思いついた仕事を書いて Ctrl+Enter（c）。2行目以降はメモ", capture_ai: "＋ 思いついた仕事を書いて Ctrl+Enter → AIが着手（c）。2行目以降はメモ",
     autostart: "AIがすぐ着手", empty: "ここには何もありません 🎉",
     activity: (n) => `⚙ 内部の動き（${n}）`, details: "詳細",
     activity_hint: "ツール実行・状態表示・自動プロンプトの表示／非表示",
@@ -524,7 +524,7 @@ function buildDetail(pane, item, key) {
     // Drafts survive the refresh and switching between items.
     const box = h("textarea", { id: "reply", placeholder: T.reply_ph, rows: 3,
       oninput: (e) => { state.drafts[item.id] = e.target.value; grow(e.target); },
-      onkeydown: (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendReply(item.id, box); } } });
+      onkeydown: (e) => { if (isSendKey(e)) { e.preventDefault(); sendReply(item.id, box); } } });
     const tray = h("div", { class: "paste-tray", hidden: true });
     const meta = h("div", { class: "reply-meta", hidden: true });
     const form = h("form", { class: "reply", onsubmit: (e) => { e.preventDefault(); sendReply(item.id, box); } },
@@ -820,11 +820,17 @@ async function patch(id, changes) {
   try { await api(`/items/${encodeURIComponent(id)}`, { method: "PATCH", body: changes }); toast(T.saved); await refresh(); }
   catch (err) { toast(err.message); }
 }
+// Every text box sends on Ctrl/Cmd+Enter; a plain Enter is always a newline.
+const isSendKey = (e) => e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.isComposing;
+// Items with a send in flight: repeated Ctrl+Enter or clicks must not post the text twice.
+const sending = new Set();
 async function sendReply(id, box) {
+  if (sending.has(id)) return;
   const text = box.value.trim();
   const files = window.ConsolePaste.ready(id);
   if (files === null) { toast(T.paste_wait); return; }
   if (!text && !files.length) return;
+  sending.add(id);
   box.disabled = true;
   try {
     // "/backend codex", "/model opus", "/kb-save …": a command, not a reply.
@@ -844,7 +850,7 @@ async function sendReply(id, box) {
     await refresh();
     setTimeout(() => loadMessages(id), 1500);
   } catch (err) { toast(err.message); }
-  finally { box.disabled = false; box.focus(); }
+  finally { sending.delete(id); box.disabled = false; box.focus(); }
 }
 async function startItem(id) {
   try {
@@ -891,6 +897,7 @@ function autostart() { return localStorage.getItem("autostart") !== "0"; }
 function syncCapture() {
   $("capture-start").checked = autostart();
   $("capture-input").placeholder = autostart() ? T.capture_ai : T.capture;
+  $("capture-send").textContent = T.send;
 }
 
 function move(delta) {
@@ -951,15 +958,17 @@ function wire() {
   const submitCapture = () => {
     const input = $("capture-input");
     const text = input.value.trim();
-    if (!text) return;
-    capture(text).then((ok) => { if (ok) { input.value = ""; grow(input); } });
+    if (!text || sending.has(CAPTURE)) return;
+    sending.add(CAPTURE);
+    capture(text).then((ok) => { if (ok) { input.value = ""; grow(input); } })
+      .finally(() => sending.delete(CAPTURE));
   };
   window.ConsolePaste.attach($("capture-input"), CAPTURE, $("capture-tray"));
   $("capture-attach").replaceWith(window.ConsolePaste.button(CAPTURE));
   $("capture").addEventListener("submit", (e) => { e.preventDefault(); submitCapture(); });
   $("capture-input").addEventListener("input", (e) => grow(e.target));
   $("capture-input").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); submitCapture(); }
+    if (isSendKey(e)) { e.preventDefault(); submitCapture(); }
   });
   $("nav-toggle").addEventListener("click", () => $("nav").classList.toggle("open"));
   $("help").addEventListener("click", () => { if ($("help").dataset.mode !== "login") showHelp(false); });
