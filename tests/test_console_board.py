@@ -8,6 +8,7 @@ import pytest
 
 from claude_discord.console.board import (
     BUCKET_AI,
+    BUCKET_CANDIDATE,
     BUCKET_DONE,
     BUCKET_IDLE,
     BUCKET_ME,
@@ -61,7 +62,9 @@ def board(threads=(), overlays=(), lineage=None, running=frozenset()):
         ("👀 Draft ready", "review", BUCKET_ME),
         ("📋 Approve in portal", "action", BUCKET_ME),
         ("⚠️ Build broke", "error", BUCKET_ME),
-        ("✅ Shipped", "done", BUCKET_DONE),
+        ("🏁 Shipped", "candidate", BUCKET_CANDIDATE),
+        # A ✅ an agent left before candidates existed: still only a proposal.
+        ("✅ Shipped", "candidate", BUCKET_CANDIDATE),
         ("Still talking", "idle", BUCKET_IDLE),
     ],
 )
@@ -121,7 +124,7 @@ def test_overdue_is_flagged_only_for_open_work() -> None:
         threads=[ThreadSnapshot(1, "❓ late"), ThreadSnapshot(2, "✅ late but done")],
         overlays=[
             overlay("t1", due_at="2026-10-09T00:00:00Z"),
-            overlay("t2", due_at="2026-10-09T00:00:00Z"),
+            overlay("t2", due_at="2026-10-09T00:00:00Z", state="done"),
         ],
     )
     assert items["t1"]["overdue"] is True
@@ -190,3 +193,21 @@ def test_context_usage_comes_from_the_session_table() -> None:
     assert items["t1"]["context"] == {"used": 90_000, "window": 200_000, "pct": 45}
     assert items["t2"]["context"]["pct"] == 100  # an over-full report is capped
     assert items["t3"]["context"] is None and items["t4"]["context"] is None
+
+
+def test_only_a_human_verdict_makes_an_item_done() -> None:
+    """The agent's marker proposes; the human's Done (the overlay) decides."""
+    items = board(
+        threads=[ThreadSnapshot(1, "🏁 Proposed"), ThreadSnapshot(2, "✅ Confirmed")],
+        overlays=[overlay("t2", state="done")],
+    )
+    assert (items["t1"]["status"], items["t1"]["bucket"]) == ("candidate", BUCKET_CANDIDATE)
+    assert (items["t2"]["status"], items["t2"]["bucket"]) == ("done", BUCKET_DONE)
+
+
+def test_a_snoozed_candidate_is_snoozed() -> None:
+    item = board(
+        threads=[ThreadSnapshot(1, "🏁 Proposed")],
+        overlays=[overlay("t1", snoozed_until="2026-10-11T00:00:00Z")],
+    )["t1"]
+    assert (item["status"], item["bucket"]) == ("candidate", BUCKET_SNOOZED)

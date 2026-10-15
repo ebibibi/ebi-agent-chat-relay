@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Only a human finishes work.** An agent's `POST /api/threads/{id}/done` (and the new
+  `/candidate`) now marks a 🏁 completion candidate instead of ✅ Done. Candidates stay listed in
+  the console's new "Done?" view until a human confirms them; legacy ✅ titles without a human
+  verdict are treated as candidates too (#1048).
+
+### Added
+
+- Console status chips: narrow any list to the statuses you pick (your reply, to review, your
+  task, completion candidates, …) (#1048).
+
 ## [5.1.0] - 2026-10-15
 
 **Ebi Workspace meets the Console.** Browse project context and Markdown tasks, update them,

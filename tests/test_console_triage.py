@@ -135,6 +135,7 @@ def test_focus_ranks_the_humans_move_priority_and_deadline() -> None:
     for gone in (
         _item(status="running", bucket="ai"),
         _item(status="done", bucket="done"),
+        _item(status="candidate", bucket="candidate"),
         _item(bucket="snoozed"),
     ):
         assert focus_score(gone, now=NOW) is None
