@@ -49,11 +49,31 @@ maintenant et agissez.
 - **Agir sans quitter l'écran** : répondre avec n'importe quel fichier joint, prévisualiser les
   fichiers sur place, changer de backend, de modèle et d'effort via un sélecteur, modifier la
   limite de sessions simultanées, et mettre en pause, reprendre ou arrêter le travail en cours.
+- **Garder le travail délégué à côté de la conversation parente** : un panneau repliable affiche
+  l'état des enfants et petits-enfants, les derniers rapports et le nombre de tâches terminées.
+  Inspectez un enfant, puis revenez au parent pour décider ; répondre directement à un enfant
+  demande un choix explicite.
 - **Optionnelle et additive** : rien ne démarre tant que `CCDB_CONSOLE_PORT` n'est pas défini, et
   Discord, Teams, les backends, l'API REST et le planificateur ne changent pas. Console activée, le
   triage automatique est actif par défaut ; `CCDB_CONSOLE_TRIAGE=0` le désactive.
 
-Voir les [notes de version 5.0.0](../releases/v5.0.0.md), le [guide de la console](../console.md) et
+**La version 5.1 ajoute l'intégration Workspace et de nouvelles façons de gérer les conversations :**
+
+- **Tâches Ebi Workspace** : parcourir les contextes et les projets, lire les vues d'ensemble,
+  ajouter, modifier et terminer des tâches, et lancer un travail d'IA depuis une tâche. Le
+  `status.md` du projet et le `single-actions.md` du contexte restent la source de vérité ; des
+  contrôles de révision rejettent les modifications obsolètes.
+- **Recherche de messages** : retrouver du texte dans l'historique des conversations disponible et
+  dans les transcriptions locales, avec des extraits et des liens vers le fil correspondant, sans
+  appel à l'IA.
+- **Gérer les familles de fils** : configurer séparément le backend, le modèle et l'effort du
+  gestionnaire et des enfants, et sélectionner plusieurs fils pour les terminer ensemble. Terminer
+  un parent inclut ses descendants.
+- **Contrôles sur ordinateur et mobile** : copier le contenu des fichiers texte et les liens des
+  fils, passer du japonais à l'anglais sans perdre brouillons ni pièces jointes, et garder la zone
+  de saisie mobile accessible.
+
+Voir les [notes de version 5.1.0](../releases/v5.1.0.md), le [guide de la console](../console.md) et
 l'[ADR-0014](../adr/0014-publish-the-ebi-ai-console-as-v5.md) (en anglais). Prochaine étape :
 **l'intégration du planificateur**.
 
