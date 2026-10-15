@@ -536,6 +536,8 @@ All four commands persist to SQLite via `SettingsRepository`, so the choice surv
 2. It extracts a bounded transcript of user and assistant text. System/developer instructions, hidden reasoning, tool calls/results, and image payloads are excluded.
 3. It starts a native session in the new backend and prepends that transcript to the first new user message. The new session ID then replaces the old mapping normally.
 
+Scheduled follow-ups that post into an existing thread (tasks registered with `thread_id`, `ScheduleWakeup`) apply the same check: if the thread's session was created by a different backend than the one the run uses, the scheduler starts a fresh session with the transcript handed over instead of resuming an ID the CLI cannot find. A resume the CLI rejects is never saved back to the thread, so one failed run cannot mislabel the session for every later turn.
+
 If the local JSONL is missing or unreadable, ccdb safely degrades to a fresh session and logs the missing handoff. Records written before ccdb tracked backend ownership keep the legacy resume behaviour because their source backend cannot be identified reliably.
 
 Visual cues so you never forget which one you're talking to:
