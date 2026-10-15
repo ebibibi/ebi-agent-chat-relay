@@ -4,7 +4,7 @@ title: Console background refresh interrupts scrolling and Stop feedback
 symptom: The thread list jumps to the selected row; Stop appears unresponsive or loses pending feedback.
 status: solved
 date: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-15
 component: [console-client]
 tags: [scroll, polling, stop]
 scope: context
@@ -27,6 +27,35 @@ All Stop entry points use the same per-item pending state. Buttons immediately d
 
 ## Regression checks
 
+### Task capture appears unresponsive and creates duplicate conversations
+
+The capture form previously kept its draft editable until creation, startup and board
+refresh finished. Every Enter keydown or form submission entered `capture()` again,
+including during long-message attachment preparation before the first API request.
+
+Lock the shared capture entry point synchronously before its first `await`, show a
+persistent localized `role="status"` indicator, and mark the form `aria-busy`. Keep
+the draft read-only and disable attachment/options controls until `finally` unlocks
+them. Block paste/drop while pending so newly added files cannot be cleared with the
+submitted batch. Failed uploads/requests retain the draft and attachment tray for retry.
+Once the server accepts creation, a later render failure must still consume the draft;
+otherwise the UI offers an already-created task for resubmission.
+
+This prevents accidental repeated submissions from the same form. It does not compare
+task titles globally or deduplicate independent clients or retries after a lost HTTP response.
+
+```sh
+node --test tests/console_capture.test.cjs
+node tests/console_capture.browser.cjs
+```
+
+The browser check delays creation and exercises Enter repetition, form submission,
+immediate visible feedback, retained drafts, failure/retry, Shift+Enter and IME composition
+at phone and desktop widths. The dependency-free tests also delay attachment preparation
+and exercise upload/HTTP failures and accepted requests followed by rendering errors.
+
+### Scrolling and Stop
+
 With Playwright and its Chromium installed:
 
 ```sh
@@ -39,3 +68,4 @@ The tests load the actual static client with intercepted API fixtures; they do n
 
 - [Issue #1023](https://github.com/ebibibi/ebi-agent-chat-relay/issues/1023)
 - [Issue #1024](https://github.com/ebibibi/ebi-agent-chat-relay/issues/1024)
+- [Issue #1045](https://github.com/ebibibi/ebi-agent-chat-relay/issues/1045)

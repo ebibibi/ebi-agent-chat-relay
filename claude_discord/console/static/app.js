@@ -42,7 +42,7 @@ const I18N = {
       model: "Choose the model for the current backend", effort: "Set the reasoning effort",
       compact: "Summarize the conversation to free up context", context: "Show context window usage", cost: "Show token usage and cost" }, send: "Send", hour: "1h", tomorrow: "Tomorrow", week: "Next week",
     pressed: (l) => `Pressed: ${l}`,
-    clear: "Clear", loading: "Loading…", sent: "Sent — the agent will pick it up", started: "Started", captured: "Added to To do",
+    clear: "Clear", loading: "Loading…", capturing: "Adding task…", sent: "Sent — the agent will pick it up", started: "Started", captured: "Added to To do",
     today: "Today", yesterday: "Yesterday",
     saved: "Saved", offline: "offline", updated: "updated", no_project: "No project", queued: "queued",
     st: { running: "running", waiting: "waiting for you", review: "to review", action: "your task",
@@ -84,7 +84,7 @@ const I18N = {
       model: "今のバックエンドのモデルを選ぶ", effort: "推論の強さ（effort）を設定する",
       compact: "ここまでの会話を要約してコンテキストを空ける", context: "コンテキストの使用量を見る", cost: "トークン使用量と料金を見る" }, send: "送信", hour: "1時間", tomorrow: "明日", week: "来週",
     pressed: (l) => `押しました: ${l}`,
-    clear: "解除", loading: "読み込み中…", sent: "送りました。エージェントが拾います", started: "スレッドを開始しました", captured: "「やること」に追加しました",
+    clear: "解除", loading: "読み込み中…", capturing: "タスクを登録中…", sent: "送りました。エージェントが拾います", started: "スレッドを開始しました", captured: "「やること」に追加しました",
     today: "今日", yesterday: "昨日",
     saved: "保存しました", offline: "接続できません", updated: "更新", no_project: "案件なし", queued: "待ち",
     st: { running: "実行中", waiting: "あなたの返事待ち", review: "確認待ち", action: "あなたの作業",
@@ -869,23 +869,36 @@ async function startItem(id) {
     openItem(data.item.id);
   } catch (err) { toast(err.message); }
 }
+// Capture submission is locked before the first await, including attachment preparation.
+let capturePending = false;
+function setCapturePending(pending) {
+  capturePending = pending;
+  $("capture").setAttribute("aria-busy", String(pending));
+  $("capture-input").readOnly = pending;
+  $("capture-status").textContent = pending ? T.capturing : "";
+  for (const control of $("capture").querySelectorAll("button, input, select")) control.disabled = pending;
+}
 async function capture(text) {
-  const start = autostart();
-  // First line is the title; anything after it is the note.
-  const [first, ...rest] = text.split("\n");
-  const body = { title: first.trim().slice(0, 200), start };
-  const workspacePath = window.ConsoleWorkspace?.path();
-  if (workspacePath) body.workspace_path = workspacePath;
-  const note = first.trim().length > 200 ? text : rest.join("\n").trim();
-  if (note) body.note = note;
-  const files = window.ConsolePaste.ready(CAPTURE);
-  if (files === null) { toast(T.paste_wait); return false; }
-  if (files.length) body.files = files;
+  if (capturePending) return false;
+  setCapturePending(true);
+  let accepted = false;
   try {
+    const start = autostart();
+    // First line is the title; anything after it is the note.
+    const [first, ...rest] = text.split("\n");
+    const body = { title: first.trim().slice(0, 200), start };
+    const workspacePath = window.ConsoleWorkspace?.path();
+    if (workspacePath) body.workspace_path = workspacePath;
+    const note = first.trim().length > 200 ? text : rest.join("\n").trim();
+    if (note) body.note = note;
+    const files = window.ConsolePaste.ready(CAPTURE);
+    if (files === null) { toast(T.paste_wait); return false; }
+    if (files.length) body.files = files;
     const prepared = await window.ConsolePaste.prepareText(text, files);
     if (prepared.text !== text) body.note = prepared.text;
     if (prepared.files.length) body.files = prepared.files;
     const data = await api("/items", { method: "POST", body });
+    accepted = true;
     window.ConsolePaste.clear(CAPTURE);
     const started = Boolean(data.item.thread_id);
     await refresh();
@@ -896,8 +909,9 @@ async function capture(text) {
     renderList();
     revealSelection();
     toast(data.start_error || (started ? T.started : T.captured));
-  } catch (err) { toast(err.message); return false; }
-  return true;
+    return true;
+  } catch (err) { toast(err.message); return accepted; }
+  finally { setCapturePending(false); }
 }
 // The capture box's attachments are kept under this key, apart from each item's reply.
 const CAPTURE = "__capture__";
@@ -945,6 +959,7 @@ function setLanguage(language) {
   $("capture-start-label").textContent = T.autostart;
   syncCapture();
   const attach = $("capture").querySelector(".attach");
+  if (capturePending) $("capture-status").textContent = T.capturing;
   attach.title = T.attach_hint;
   attach.setAttribute("aria-label", T.attach_hint);
   render();
@@ -967,14 +982,16 @@ function wire() {
   const submitCapture = () => {
     const input = $("capture-input");
     const text = input.value.trim();
-    if (!text || sending.has(CAPTURE)) return;
-    sending.add(CAPTURE);
-    capture(text).then((ok) => { if (ok) { input.value = ""; grow(input); } })
-      .finally(() => sending.delete(CAPTURE));
+    if (!text) return;
+    capture(text).then((ok) => { if (ok) { input.value = ""; grow(input); } });
   };
   window.ConsolePaste.attach($("capture-input"), CAPTURE, $("capture-tray"));
   $("capture-attach").replaceWith(window.ConsolePaste.button(CAPTURE));
   $("capture").addEventListener("submit", (e) => { e.preventDefault(); submitCapture(); });
+  // Do not let a drop/paste add files to the pending submission's attachment tray.
+  for (const type of ["drop", "paste"]) $("capture").addEventListener(type, (e) => {
+    if (capturePending) { e.preventDefault(); e.stopImmediatePropagation(); }
+  }, true);
   $("capture-input").addEventListener("input", (e) => grow(e.target));
   $("capture-input").addEventListener("keydown", (e) => {
     if (isSendKey(e)) { e.preventDefault(); submitCapture(); }
