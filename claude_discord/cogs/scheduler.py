@@ -22,9 +22,12 @@ from discord.ext import commands, tasks
 
 from claude_code_core.frontend import ConversationSurface, Notice, NoticeLevel
 
+from ..backend_settings import session_is_resumable
+from ..cross_backend_handoff import ConversationHistoryReader, carry_history_across_backends
 from ..frontend import DiscordFrontend
 from ..scheduled_marker import ScheduledThreadMarker
 from ._run_helper import run_claude_with_config
+from .event_processor import _backend_name_from_runner
 from .headless_backend import build_headless_runner
 from .run_config import RunConfig
 
@@ -34,7 +37,7 @@ if TYPE_CHECKING:
 
     from ..backend_factory import BackendFactory
     from ..backend_settings import BackendSettings
-    from ..database.repository import SessionRepository
+    from ..database.repository import SessionRecord, SessionRepository
     from ..database.task_repo import TaskRepository
     from ..database.wait_repo import WaitRepository
 
@@ -64,6 +67,7 @@ class SchedulerCog(commands.Cog):
         backend_settings: BackendSettings | None = None,
         frontend: SessionFrontend | None = None,
         wait_repo: WaitRepository | None = None,
+        conversation_history: ConversationHistoryReader | None = None,
     ) -> None:
         self.bot = bot
         # Threads with an active wait (/api/waits) will also be posted into
@@ -75,6 +79,9 @@ class SchedulerCog(commands.Cog):
         self.session_repo = session_repo
         self.backend_factory = backend_factory
         self.backend_settings = backend_settings
+        # Reads the old transcript when a follow-up runs on a different backend
+        # than the one that created the thread's session.
+        self._conversation_history = conversation_history or ConversationHistoryReader()
         # Where scheduled runs are posted. Defaults to Discord so an existing
         # deployment needs no wiring; a Teams deployment passes its own and
         # this Cog does not change.
@@ -163,6 +170,33 @@ class SchedulerCog(commands.Cog):
     async def _before_master_loop(self) -> None:
         await self.bot.wait_until_ready()
 
+    async def _prepare_resume(
+        self, record: SessionRecord, runner: SessionBackend, prompt: str
+    ) -> tuple[str | None, str]:
+        """Return the (session_id, prompt) to run a follow-up with.
+
+        Claude and Codex keep separate session stores. If the global backend
+        was switched after the thread's session was created, resuming it makes
+        the CLI exit instantly ("No conversation found") on every scheduled
+        run. Start fresh instead, carrying the old transcript as text — the
+        same handoff ClaudeChatCog does for a human reply.
+        """
+        current = _backend_name_from_runner(runner)
+        if session_is_resumable(record.backend, current):
+            return record.session_id, prompt
+        logger.info(
+            "SchedulerCog: thread %d session %s was created by %s but this run uses %s "
+            "— starting a fresh session with the transcript handed over",
+            record.thread_id,
+            record.session_id,
+            record.backend,
+            current,
+        )
+        handoff = await carry_history_across_backends(
+            self._conversation_history, record, current, prompt
+        )
+        return None, handoff
+
     async def _run_task(self, task: dict) -> None:
         """Execute a single scheduled task in a Discord thread.
 
@@ -177,6 +211,7 @@ class SchedulerCog(commands.Cog):
         try:
             thread_id = task.get("thread_id")
             session_id: str | None = None
+            record: SessionRecord | None = None
             surface: ConversationSurface | None = None
 
             if thread_id:
@@ -219,13 +254,17 @@ class SchedulerCog(commands.Cog):
                 model_override=task.get("model"),
             )
 
+            prompt: str = task["prompt"]
+            if record is not None and session_id is not None:
+                session_id, prompt = await self._prepare_resume(record, cloned, prompt)
+
             registry = getattr(self.bot, "session_registry", None)
             await run_claude_with_config(
                 RunConfig(
                     surface=surface,
                     runner=cloned,
                     repo=self.session_repo,
-                    prompt=task["prompt"],
+                    prompt=prompt,
                     session_id=session_id,
                     registry=registry,
                     backend_settings=self.backend_settings,
