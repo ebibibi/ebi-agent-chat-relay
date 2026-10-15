@@ -390,6 +390,10 @@ curl "$CCDB_API_URL/api/ingest/ab12…" -H "Authorization: Bearer $CCDB_INGEST_T
 
 The endpoint is opt-in: with no `ingest_token` configured, `POST` responds `503`. When result retrieval is unavailable, `POST` simply omits `result_id` and `GET /api/ingest/{id}` returns `503` — the spawn behaviour is otherwise unchanged. The request body and attachments are **not** persisted in the result store (only status, the final text, and the thread id); results are capped at 200 rows.
 
+#### Teams reply drafts start at P0
+
+A request from the Teams Channel Exporter (recognised by its fixed request envelope, see `claude_discord/teams_exporter.py`) is a reply someone in Teams is waiting for. Its thread is put on the console board at **P0** as soon as it is spawned — written as the item's own priority, so triage leaves it alone and you can still lower it — and it is never classified "done" by a model. Without the console this is a no-op.
+
 #### Zip bundles are expanded on arrival
 
 A client can pack a whole thread's files into one `.zip` to stay under the 20-attachment / 50 MB request caps: ccdb extracts it into a sibling `<name>_files/` directory and gives the session the member paths instead of the archive, so the prompt stays paths-only and the session reads what it needs. Extraction is bounded (5000 members, 200 MB uncompressed) and skips any member that would escape its directory.
