@@ -9,12 +9,13 @@ from pathlib import Path
 import pytest
 
 
-def test_console_family_client() -> None:
+@pytest.mark.parametrize("script", ["console_family.test.cjs", "console_capture.test.cjs"])
+def test_console_client_models(script: str) -> None:
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node is not installed")
     result = subprocess.run(
-        [node, "--test", "tests/console_family.test.cjs"],
+        [node, "--test", f"tests/{script}"],
         cwd=Path(__file__).resolve().parents[1],
         capture_output=True,
         text=True,

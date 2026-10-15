@@ -31,7 +31,12 @@ vm.runInContext(fs.readFileSync('claude_discord/console/static/paste.js', 'utf8'
   await assert.rejects(prepare(text, []), /upload failed/);
   // Run the actual reply/capture entry points: failed uploads must keep drafts.
   const apiCalls = [];
+  const captureElements = {
+    capture: { setAttribute: () => {}, querySelectorAll: () => [] },
+    'capture-input': {}, 'capture-status': {},
+  };
   Object.assign(context, {
+    $: id => captureElements[id],
     api: async (url, options) => {
       apiCalls.push({ url, body: options.body });
       return { item: { id: 'new', thread_id: 1 } };
@@ -44,7 +49,7 @@ vm.runInContext(fs.readFileSync('claude_discord/console/static/paste.js', 'utf8'
   context.window.ConsoleSlash = { run: async () => false };
   const app = fs.readFileSync('claude_discord/console/static/app.js', 'utf8');
   vm.runInContext(app.slice(app.indexOf('const isSendKey'), app.indexOf('async function startItem(')), context);
-  vm.runInContext(app.slice(app.indexOf('async function capture('), app.indexOf('// Captured work goes')), context);
+  vm.runInContext(app.slice(app.indexOf('// Capture submission'), app.indexOf('// Captured work goes')), context);
   const box = { value: text, focus: () => {} };
   await context.sendReply('item', box);
   assert.equal(box.value, text);

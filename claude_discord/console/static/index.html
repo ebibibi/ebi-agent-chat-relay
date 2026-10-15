@@ -36,11 +36,12 @@
     </header>
     <form id="capture" class="capture">
       <div id="capture-tray" class="paste-tray capture-tray" hidden></div>
-      <textarea id="capture-input" rows="1" autocomplete="off" maxlength="4200"></textarea>
+      <textarea id="capture-input" rows="1" autocomplete="off" maxlength="4200" aria-describedby="capture-status"></textarea>
       <span id="capture-attach"></span>
       <button id="capture-send" class="btn primary" type="submit"></button>
       <label class="autostart"><input id="capture-start" type="checkbox"> <span id="capture-start-label"></span></label>
     </form>
+    <span id="capture-status" class="capture-status" role="status" aria-live="polite"></span>
     <div id="bulk-bar" class="bulk-bar"></div>
     <ul id="list" class="list" role="listbox"></ul>
     <p id="empty" class="empty" hidden></p>

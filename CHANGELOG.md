@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Console: repeated `Ctrl+Enter` or Send clicks no longer post the same reply or capture twice
   while the first send is in flight (#1056).
+- Console: a new task shows "Adding task…" the moment it is sent and locks the capture box
+  (including attachment preparation) until it is created, so a slow phone connection no
+  longer looks unresponsive. A failed capture keeps the draft and attachments (#1045).
 
 ## [5.1.0] - 2026-10-15
 

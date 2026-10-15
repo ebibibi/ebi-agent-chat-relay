@@ -398,3 +398,7 @@ button.family-link:hover { color: var(--accent); border-color: var(--accent); }
 .thread-group .row.sel { background: #203b65; }
 .thread-group .row.bulk-selected { background: #293d35; }
 .thread-group .row.sel.bulk-selected { background: #203b65; }
+.capture-status { color: var(--accent); font-size: .85rem; padding: 4px 14px; }
+.capture-status:empty { display: none; }
+.capture[aria-busy="true"] { opacity: .8; }
+.capture[aria-busy="true"] textarea { cursor: progress; }
