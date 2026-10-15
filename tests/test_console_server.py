@@ -69,6 +69,27 @@ async def test_mutations_require_the_csrf_header(client) -> None:
     assert response.status == 403
 
 
+async def test_a_large_board_is_sent_gzipped_when_the_browser_accepts_it(client) -> None:
+    # The board is polled every few seconds; uncompressed it reached ~400 KB.
+    for n in range(20):
+        title = f"Plan the long Sunday errand list number {n}"
+        await client.post("/console/api/items", json={"title": title}, headers=WRITE)
+
+    gzipped = await client.get("/console/api/board", headers={**AUTH, "Accept-Encoding": "gzip"})
+    assert gzipped.headers.get("Content-Encoding") == "gzip"
+    assert len((await gzipped.json())["items"]) == 20
+
+    plain = await client.get("/console/api/board", headers={**AUTH, "Accept-Encoding": "identity"})
+    assert "Content-Encoding" not in plain.headers
+    assert len((await plain.json())["items"]) == 20
+
+
+async def test_small_responses_are_not_compressed(client) -> None:
+    response = await client.get("/console/api/board", headers={"Accept-Encoding": "gzip"})
+    assert response.status == 401
+    assert "Content-Encoding" not in response.headers
+
+
 async def test_capture_then_board_then_patch(client) -> None:
     created = await client.post("/console/api/items", json={"title": "Plan Sunday"}, headers=WRITE)
     assert created.status == 201
