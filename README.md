@@ -676,7 +676,7 @@ The operator sets the default and an allowlist in the environment (`CCDB_EXECUTI
 - **DrainAware restart** — Waits for active sessions to finish before restarting
 - **Reserved restart** — `POST /api/restart` holds the session queue, lets running turns finish, restarts once nothing is running (via `CCDB_RESTART_COMMAND`, or by closing the bot for its supervisor to restart), then replays everything that was queued in order; `GET` shows the state, `DELETE` cancels. See [docs/session-queue.md](docs/session-queue.md)
 - **Auto-resume marking** — Active sessions are automatically marked for resume on any shutdown (upgrade restart via `AutoUpgradeCog`, or any other shutdown via `ClaudeChatCog.cog_unload()`); on restart Claude reports its previous state and re-confirms with the user before resuming any implementation work
-- **Restart approval** — Optional gate to confirm upgrades; approve via ✅ reaction in the upgrade thread or via button posted to the parent channel; the button re-posts itself at the bottom as new messages arrive so it stays visible
+- **Restart approval** — Optional gate to confirm upgrades; approve via ✅ reaction in the upgrade thread or via button posted to the parent channel; the button re-posts itself at the bottom as new messages arrive so it stays visible; if the bot shuts down while the prompt is still waiting, the button is removed and the thread is told the request is no longer pending (run `/upgrade` again to apply the release)
 - **Manual upgrade trigger** — `/upgrade` slash command lets authorised users trigger the upgrade pipeline directly from Discord (opt-in via `slash_command_enabled=True`)
 
 ### Session Management
