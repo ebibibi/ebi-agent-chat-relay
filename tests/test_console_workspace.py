@@ -191,3 +191,22 @@ def test_update_rechecks_revision_after_reading_task_content(notes, monkeypatch)
     monkeypatch.setattr(module, "_read", changed_after_entry)
     with pytest.raises(WorkspaceConflictError):
         ws.update_task(entry["path"], entry["tasks"][0]["line"], entry["revision"], done=True)
+
+
+def test_binding_resolves_each_working_directory_once(notes, monkeypatch):
+    """The board binds every item on each poll; resolving per item per entry made it slow."""
+    (notes / "02_Contexts/Work/Client/Website/src").mkdir()
+    cwd = str(notes / "02_Contexts/Work/Client/Website/src")
+    items = [{"id": str(n), "working_dir": cwd} for n in range(20)]
+    real_resolve = Path.resolve
+    calls = []
+
+    def counting_resolve(self, *args, **kwargs):
+        if str(self) == cwd:
+            calls.append(self)
+        return real_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", counting_resolve)
+    bound = Workspace(notes).bind_items(items)
+    assert {i["workspace_path"] for i in bound} == {"Work/Client/Website"}
+    assert len(calls) == 1
