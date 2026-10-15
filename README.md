@@ -360,7 +360,7 @@ ln -s "$PWD/skills/relay-thread-manager" ~/.codex/skills/relay-thread-manager   
 
 Then ask a thread to "split this across three worker threads and report back".
 
-When a thread's work is fully finished, the agent tells the user the thread can be closed and calls `POST /api/threads/{thread_id}/done`, which prefixes the title with **✅** — the channel list then shows at a glance which threads are safe to close. A new human reply removes the marker automatically. `CCDB_DONE_THREAD_MARKER` changes `✅` (empty disables the marker and the instruction).
+When a thread's work looks finished, the agent tells the user the thread can be closed and calls `POST /api/threads/{thread_id}/candidate` (the older `/done` does the same), which prefixes the title with **🏁** — a completion candidate. It is a proposal, not a verdict: only a human closes the work (✅, Done in the console), so an agent's guess never makes an unfinished request disappear from the list. A new human reply removes the marker automatically. `CCDB_CANDIDATE_THREAD_MARKER` changes `🏁` (empty disables the marker and the instruction); `CCDB_DONE_THREAD_MARKER` changes the human's `✅`.
 
 A thread that a scheduled task will post into later — a follow-up registered with `thread_id`, or a `ScheduleWakeup` — carries **⏰** at the front of its title for as long as the task is waiting, so a thread that will resume on its own no longer looks abandoned. The scheduler reconciles the marker from the task table every tick: it disappears when a one-shot fires or the task is disabled or deleted, sits behind `✅` when both apply, and survives an automatic retitle. Threads with an active wait (`POST /api/waits`) carry the same **⏰** until the wait finishes or is cancelled. `CCDB_SCHEDULED_THREAD_MARKER` changes `⏰` (empty disables it).
 
@@ -1452,7 +1452,8 @@ uv sync --extra api
 | GET | `/api/waits` | Active waits with their last probe result (optional `thread_id`) |
 | DELETE | `/api/waits/{id}` | Cancel a wait (with `thread_id`, only if that thread owns it) |
 | POST | `/api/threads/{thread_id}/message` | Relay a message from one session to another (`text`, `from_thread`, `mode`, `hop`) |
-| POST | `/api/threads/{thread_id}/done` | Mark a thread as ready to close (prefixes the title with `✅`; idempotent) |
+| POST | `/api/threads/{thread_id}/candidate` | Propose closing a thread: a completion candidate (prefixes the title with `🏁`; idempotent). Only a human marks it done |
+| POST | `/api/threads/{thread_id}/done` | Same as `/candidate`, kept for existing prompts |
 | POST | `/api/threads/{thread_id}/waiting` | Mark a thread as waiting on the human (prefixes the title with `❓`, replacing `✅`/`⚠️`; removed on the next human reply; idempotent) |
 | POST | `/api/threads/{thread_id}/review` | Mark a thread as having a deliverable for the human to review (prefixes the title with `👀`, replacing any other outcome marker; removed on the next human reply; idempotent) |
 | POST | `/api/threads/{thread_id}/action` | Mark a thread as waiting on a task the human must do outside the chat — a todo (prefixes the title with `📋`, replacing any other outcome marker; removed on the next human reply; idempotent) |

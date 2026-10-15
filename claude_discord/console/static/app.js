@@ -19,10 +19,10 @@ const I18N = {
     first_hint: "Start this one before the others waiting", later_hint: "Let the others waiting go first",
     paused_toast: "Paused", stopping: "Stopping…", resumed_toast: "Resumed",
     slots_hint: "Threads running now / the most that may run at once", slots_up: "Allow one more at once",
-    slots_down: "Allow one fewer at once", slots_set: (n) => `Up to ${n} at once`, pinned_group: "📌 Working on now", pin: "Pin", unpin: "Pinned",
+    slots_down: "Allow one fewer at once", slots_set: (n) => `Up to ${n} at once`, pinned_group: "📌 Working on now", status_filter: "Status:", status_all: "All", pin: "Pin", unpin: "Pinned",
     pin_hint: "Pin as what you are working on now; pinned threads lead every list (p)", hide_done_off: "✅ Showing done", hide_done_on: "✅ Done hidden",
     hide_done_hint: "Hide or show finished items in every list (h)", hide_done_in_done: "The Done list always shows finished items", context_hint: (d) => `Context window used by the last turn: ${d}`, due_over: "overdue", due_in: (x) => `in ${x}`, u_min: "m", u_hour: "h", u_day: "d", focus_ready: "can do now", focus_from: (d) => `from ${d}`, ai_guess: "AI guess", ai_set: "set by AI",
-    me: "Inbox", ai: "Running", todo: "To do", idle: "Idle", recent: "Recent", tree: "Tree", snoozed: "Snoozed", done: "Done",
+    me: "Inbox", candidate: "Done?", ai: "Running", todo: "To do", idle: "Idle", recent: "Recent", tree: "Tree", snoozed: "Snoozed", done: "Done",
     filter: "Filter…", capture: "+ Write down work, Ctrl+Enter to add (c) — lines after the first become a note", capture_ai: "+ Write down work, Ctrl+Enter hands it to AI (c) — lines after the first become a note",
     autostart: "AI starts right away", empty: "Nothing here. 🎉",
     activity: (n) => `⚙ Activity (${n})`, details: "Details",
@@ -46,10 +46,10 @@ const I18N = {
     today: "Today", yesterday: "Yesterday",
     saved: "Saved", offline: "offline", updated: "updated", no_project: "No project", queued: "queued",
     st: { running: "running", waiting: "waiting for you", review: "to review", action: "your task",
-          error: "failed", done: "done", someday: "someday", todo: "to do", idle: "idle" },
+          error: "failed", candidate: "done? (AI thinks so)", done: "done", someday: "someday", todo: "to do", idle: "idle" },
     help: [["j / k", "next / previous"], ["Enter", "open"], ["Esc", "close"], ["e", "done"],
            ["1–4", "priority P0–P3"], ["s", "snooze until tomorrow"], ["c", "write down work"],
-           ["r", "reply"], ["/", "filter"], ["h", "hide / show done"], ["p", "pin / unpin (working on now)"], ["g then f/i/a/u/t/w/d", "go to a view"], ["?", "this help"]],
+           ["r", "reply"], ["/", "filter"], ["h", "hide / show done"], ["p", "pin / unpin (working on now)"], ["g then f/i/c/a/u/t/w/d", "go to a view"], ["?", "this help"]],
   },
   ja: {
     focus: "🎯 今やること", focus_first: "まずこれ", focus_next: "次に", focus_waiting: "⏳ 待ち", focus_elsewhere: "📍 別の場所でやること", place_new: "新しい場所", add: "追加", delete: "削除", place_manage: "場所の管理", place_hint: "ここでしかできない場所・端末", place_count: (n) => `未完了 ${n}件`, place_unlisted: "未登録", place_unlisted_hint: "スレッドで使われているが一覧にない場所（多くはAIの推定）", place_manage_hint: "名前の変更・削除はすべてのスレッドに反映されます。削除した場所のスレッドは「どこでも」になります。", place_none: "まだ場所はありません。", place_delete_confirm: (n, c) => `「${n}」を未完了の ${c} 件から外しますか？`, here: "いまいる場所：", here_hint: "いまいる場所を全部選べます。どれかに当てはまるものを「ここでできる」とみなします", anywhere: "どこでも", place: "場所", place_ph: "どこでも", no_due: "期限なし", bp_backend: "バックエンド", bp_model: "モデル", bp_effort: "思考の深さ",
@@ -61,10 +61,10 @@ const I18N = {
     first_hint: "待っているほかのスレッドより先に始めます", later_hint: "待っているほかのスレッドを先にします",
     paused_toast: "一時停止しました", stopping: "停止中…", resumed_toast: "再開しました",
     slots_hint: "いま実行中の数 / 同時に動かせる上限", slots_up: "同時に動かせる数を1つ増やす",
-    slots_down: "同時に動かせる数を1つ減らす", slots_set: (n) => `同時実行の上限を ${n} にしました`, pinned_group: "📌 いまやってる", pin: "ピン留め", unpin: "ピン中",
+    slots_down: "同時に動かせる数を1つ減らす", slots_set: (n) => `同時実行の上限を ${n} にしました`, pinned_group: "📌 いまやってる", status_filter: "ステータス：", status_all: "すべて", pin: "ピン留め", unpin: "ピン中",
     pin_hint: "いまやってる目印。ピン留めしたスレッドはどの一覧でも一番上に出ます（p）", hide_done_off: "✅ 完了も表示", hide_done_on: "✅ 完了を隠す中",
     hide_done_hint: "完了したタスクを全部の一覧で隠す／表示する（h）", hide_done_in_done: "「完了」の一覧では常に表示します", context_hint: (d) => `直近のターンで使ったコンテキスト：${d}`, due_over: "超過", due_in: (x) => `あと${x}`, u_min: "分", u_hour: "時間", u_day: "日", focus_ready: "今すぐできる", focus_from: (d) => `${d}〜`, ai_guess: "AIの見立て", ai_set: "AIが推定",
-    me: "受信箱", ai: "実行中", todo: "やること", idle: "止まっている", recent: "更新順", tree: "ツリー", snoozed: "スヌーズ中", done: "完了",
+    me: "受信箱", candidate: "完了候補", ai: "実行中", todo: "やること", idle: "止まっている", recent: "更新順", tree: "ツリー", snoozed: "スヌーズ中", done: "完了",
     filter: "絞り込み…", capture: "＋ 思いついた仕事を書いて Ctrl+Enter（c）。2行目以降はメモ", capture_ai: "＋ 思いついた仕事を書いて Ctrl+Enter → AIが着手（c）。2行目以降はメモ",
     autostart: "AIがすぐ着手", empty: "ここには何もありません 🎉",
     activity: (n) => `⚙ 内部の動き（${n}）`, details: "詳細",
@@ -88,10 +88,10 @@ const I18N = {
     today: "今日", yesterday: "昨日",
     saved: "保存しました", offline: "接続できません", updated: "更新", no_project: "案件なし", queued: "待ち",
     st: { running: "実行中", waiting: "あなたの返事待ち", review: "確認待ち", action: "あなたの作業",
-          error: "失敗", done: "完了", someday: "いつか", todo: "やること", idle: "止まっている" },
+          error: "失敗", candidate: "完了候補（AI判断）", done: "完了", someday: "いつか", todo: "やること", idle: "止まっている" },
     help: [["j / k", "次 / 前"], ["Enter", "開く"], ["Esc", "閉じる"], ["e", "完了"],
            ["1〜4", "優先度 P0〜P3"], ["s", "明日までスヌーズ"], ["c", "仕事を書き留める"],
-           ["r", "返信"], ["/", "絞り込み"], ["h", "完了を隠す／表示"], ["p", "ピン留め／解除（いまやってる）"], ["g → f/i/a/u/t/w/d", "画面を移動"], ["?", "このヘルプ"]],
+           ["r", "返信"], ["/", "絞り込み"], ["h", "完了を隠す／表示"], ["p", "ピン留め／解除（いまやってる）"], ["g → f/i/c/a/u/t/w/d", "画面を移動"], ["?", "このヘルプ"]],
   },
 };
 // ?lang=ja|en pins the language; otherwise the browser's preference decides.
@@ -106,12 +106,12 @@ let T = I18N[LANG];
 document.documentElement.lang = LANG;
 
 const STATUS_ICON = { running: "⚙️", waiting: "❓", review: "👀", action: "📋", error: "⚠️",
-  done: "✅", someday: "💤", todo: "○", idle: "·" };
+  candidate: "🏁", done: "✅", someday: "💤", todo: "○", idle: "·" };
 const VIEWS = [
-  { key: "focus", hot: true }, { key: "me", hot: true }, { key: "ai" }, { key: "todo" }, { key: "idle" },
+  { key: "focus", hot: true }, { key: "me", hot: true }, { key: "candidate" }, { key: "ai" }, { key: "todo" }, { key: "idle" },
   { sep: true }, { key: "recent" }, { key: "tree" }, { key: "snoozed" }, { key: "done" },
 ];
-const VIEW_KEYS = { f: "focus", i: "me", a: "ai", u: "recent", t: "tree", w: "todo", d: "done" };
+const VIEW_KEYS = { f: "focus", i: "me", c: "candidate", a: "ai", u: "recent", t: "tree", w: "todo", d: "done" };
 
 const state = {
   items: [], byId: new Map(), slots: {}, view: localStorage.getItem("view") || "focus",
@@ -265,8 +265,17 @@ const isPinned = (i) => Boolean(i.pinned_at) && i.bucket !== "done";
 function visibleRows() {
   return window.ConsoleFamily.groupRows(ungroupedRows());
 }
+// The status chips sit on top of every view and narrow it; they count the view as it is
+// before narrowing, so switching one on never hides the others it offers.
 function ungroupedRows() {
   const items = state.items.filter((i) => matches(i) && !(hidingDone() && i.bucket === "done"));
+  const SF = window.ConsoleStatusFilter;
+  const all = pinnedFirst(items);
+  const bar = SF.bar(all);
+  const rows = SF.active() ? pinnedFirst(SF.apply(items)) : all;
+  return bar ? [{ node: bar }, ...rows] : rows;
+}
+function pinnedFirst(items) {
   const pinned = state.view === "done" ? [] : items.filter(isPinned)
     .sort((a, b) => (b.pinned_at || "").localeCompare(a.pinned_at || ""));
   if (!pinned.length) return viewRows(items);
@@ -411,7 +420,7 @@ function renderList() {
   list.replaceChildren(...nodes);
   window.ConsoleBulk?.toolbar();
   const empty = $("empty");
-  empty.hidden = rows.length > 0;
+  empty.hidden = rows.some((r) => r.item);
   empty.textContent = T.empty;
   const restored = anchor && [...list.querySelectorAll('.row')].find((row) => row.dataset.itemId === anchor.dataset.itemId && row.dataset.occurrence === anchor.dataset.occurrence);
   list.scrollTop = restored

@@ -39,7 +39,7 @@ from ..backend_settings import BackendSettings, session_is_resumable
 from ..claude.rewind import find_session_jsonl, parse_user_turns
 from ..claude.types import ImageData
 from ..concurrency import SessionRegistry
-from ..cross_backend_handoff import ConversationHistoryReader, build_handoff_prompt
+from ..cross_backend_handoff import ConversationHistoryReader, carry_history_across_backends
 from ..database.ask_repo import PendingAskRepository
 from ..database.lounge_repo import LoungeRepository
 from ..database.repository import SessionRecord, SessionRepository
@@ -1568,34 +1568,10 @@ class ClaudeChatCog(commands.Cog):
         if session_is_resumable(record.backend, current):
             return session_id, prompt
 
-        transcript = await asyncio.to_thread(
-            self._conversation_history.read,
-            record.backend,
-            record.session_id,
+        handoff = await carry_history_across_backends(
+            self._conversation_history, record, current, prompt
         )
-        if not transcript:
-            logger.warning(
-                "No file-backed transcript found for cross-backend handoff: "
-                "thread=%d backend=%s session=%s",
-                thread.id,
-                record.backend,
-                record.session_id,
-            )
-            return None, prompt
-
-        logger.info(
-            "Injecting cross-backend transcript: thread=%d %s->%s chars=%d",
-            thread.id,
-            record.backend,
-            current,
-            len(transcript),
-        )
-        return None, build_handoff_prompt(
-            source_backend=record.backend,
-            target_backend=current,
-            transcript=transcript,
-            current_prompt=prompt,
-        )
+        return None, handoff
 
     async def _build_prompt_and_images(
         self, message: discord.Message

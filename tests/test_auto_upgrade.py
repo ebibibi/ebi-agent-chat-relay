@@ -1284,3 +1284,85 @@ class TestConsoleApproval:
         await cog._wait_for_approval(MagicMock(), thread)
 
         assert message_actions.for_message(555, 777) == []
+
+
+class TestUnloadWhileWaiting:
+    """A restart while approval is pending must not leave a dead prompt behind."""
+
+    def _make(self, bot: MagicMock) -> tuple[AutoUpgradeCog, MagicMock, MagicMock]:
+        config = UpgradeConfig(
+            package_name="pkg",
+            restart_command=["true"],
+            working_dir="/tmp",
+            restart_approval=True,
+        )
+        cog = AutoUpgradeCog(bot=bot, config=config)
+        parent = MagicMock()
+        button_msg = MagicMock()
+        button_msg.delete = AsyncMock()
+        parent.send = AsyncMock(return_value=button_msg)
+        thread = MagicMock(spec=discord.Thread)
+        thread.id = 556
+        thread.parent = parent
+        approval_msg = MagicMock()
+        approval_msg.id = 778
+        approval_msg.add_reaction = AsyncMock()
+        thread.send = AsyncMock(return_value=approval_msg)
+        bot.user = MagicMock()
+        bot.user.id = 1
+
+        async def hang(*args, **kwargs):
+            await asyncio.sleep(60)
+
+        bot.wait_for = AsyncMock(side_effect=hang)
+        return cog, thread, button_msg
+
+    @pytest.mark.asyncio
+    async def test_unload_closes_pending_prompt(self, bot: MagicMock) -> None:
+        from claude_discord.message_actions import message_actions
+
+        cog, thread, button_msg = self._make(bot)
+        task = asyncio.create_task(cog._wait_for_approval(MagicMock(), thread))
+        for _ in range(5):
+            await asyncio.sleep(0)
+        assert message_actions.for_message(556, 778) != []
+
+        await cog.cog_unload()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        notes = [c.args[0] for c in thread.send.call_args_list if c.args]
+        assert any("no longer waiting" in n for n in notes)
+        button_msg.delete.assert_awaited()
+        assert message_actions.for_message(556, 778) == []
+
+    @pytest.mark.asyncio
+    async def test_unload_without_pending_posts_nothing(self, bot: MagicMock) -> None:
+        cog, thread, _ = self._make(bot)
+        await cog.cog_unload()
+        thread.send.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_approved_prompt_is_not_closed_on_unload(self, bot: MagicMock) -> None:
+        cog, thread, _ = self._make(bot)
+        bot.wait_for = AsyncMock(return_value=MagicMock(message_id=778, emoji="✅", user_id=42))
+        await cog._wait_for_approval(MagicMock(), thread)
+        thread.send.reset_mock()
+
+        await cog.cog_unload()
+
+        thread.send.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_unload_survives_deleted_thread(self, bot: MagicMock) -> None:
+        cog, thread, _ = self._make(bot)
+        task = asyncio.create_task(cog._wait_for_approval(MagicMock(), thread))
+        for _ in range(5):
+            await asyncio.sleep(0)
+        thread.send = AsyncMock(side_effect=discord.NotFound(MagicMock(status=404), "gone"))
+
+        await cog.cog_unload()  # must not raise
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task

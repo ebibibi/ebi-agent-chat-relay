@@ -34,12 +34,17 @@ Desktop controls retain their existing layout.
 |---|---|
 | **Focus** (default) | What you can do now, across every list. Importance (priority first, P0 above P1 whatever else is true; then how close the deadline is; then whose move it is) and readiness are separate axes: only work you can act on right now ranks under "Do this first" and "Then"; anything waiting for a time, a person or a job goes under "⏳ Waiting", soonest first, and moves up once the time it named has come. Each row shows the next step and why it ranks there. Work bound to a place or device (📍 home, office, work PC) is tagged; pick where you are in the bar above the list — one place or several, matched with OR — and work bound to none of them moves to "📍 Somewhere else". Set an item's place with the 📍 button in its header (pick one, Anywhere, or type a new one); add, rename and delete places under "⚙ Manage places" — a rename or delete reaches every item. Work an agent is doing, finished, parked and snoozed items are left out. Reachable with `g f` |
 | **Inbox** | The ball is on you: ❓ waiting for an answer, 👀 something to review, 📋 a task only you can do, ⚠️ a failed turn |
+| **Done?** | 🏁 Completion candidates: the agent believes the work is finished. Only you close an item — confirm it with Done (`e`) and it moves to Done; until then it stays listed and is never hidden by "✅ Done hidden". Reachable with `g c` |
 | **Running** | A turn is in flight (or queued for a slot) |
 | **To do** | Work you wrote down that no agent has yet |
 | **Idle** | The agent stopped without saying whose move it is |
 | **Tree** | Everything open, grouped by project, children under their parent |
 | **Recent** | Every item, finished ones included, newest activity first, grouped by day. Each row names the list it lives in now, so a thread that moved from Running to Done is still easy to find |
-| **Snoozed / Done** | Hidden until the snooze ends / finished |
+| **Snoozed / Done** | Hidden until the snooze ends / finished — by you: an agent's marker never moves an item here |
+
+The status chips above every list narrow it to the statuses you pick — ❓ your reply, 👀 to
+review, 📋 your task, 🏁 completion candidates, and so on; several at once match with OR, "All"
+clears them. Each chip counts what the current list holds, and the choice is remembered per browser.
 
 Each thread also shows how full its context window was after its last turn — 🧠 and a percentage
 on the row (amber from 70%, red from 90%), used / window tokens in the detail header — so a
@@ -208,7 +213,7 @@ the tree included, and filtering does not bring them back. The Done list always 
 choice is remembered per browser.
 
 `j`/`k` move, `Enter` opens, `Esc` closes, `e` done, `1`–`4` priority P0–P3, `s` snooze until
-tomorrow 09:00, `c` write down work (the first line is the title, further lines become a note; `Ctrl+Enter` adds it — in every text box `Enter` is a newline and `Ctrl+Enter` sends), `r` reply, `/` filter, `h` hide/show done, `p` pin, `g` then `f`/`i`/`a`/`u`/`t`/`w`/`d` switches
+tomorrow 09:00, `c` write down work (the first line is the title, further lines become a note; `Ctrl+Enter` adds it — in every text box `Enter` is a newline and `Ctrl+Enter` sends), `r` reply, `/` filter, `h` hide/show done, `p` pin, `g` then `f`/`i`/`c`/`a`/`u`/`t`/`w`/`d` switches
 view, `?` help. URLs carry the view and the open item (`/#me/t1234`), so a link can point at a
 single item.
 
@@ -408,8 +413,9 @@ owns, through the same session runner, backends, slots and resume logic as Disco
 session database (`console_conversations`, `console_messages`).
 
 - A reply continues the same session. If a turn is running, the reply waits for it.
-- The agent marks the outcome with the usual `/api/threads/$DISCORD_THREAD_ID/done` (and
-  `waiting`, `review`, `action`); the board shows it like a thread's marker.
+- The agent marks the outcome with the usual `/api/threads/$DISCORD_THREAD_ID/candidate` (and
+  `waiting`, `review`, `action`); the board shows it like a thread's marker. A candidate is only
+  a proposal: the item reaches Done when you mark it done.
 - When the agent asks a question (AskUserQuestion), the question appears in the conversation and
   the item moves to the Inbox. Answer it with a reply.
 - While a turn runs, the detail view shows it live: the tool calls, the answer as it is written,

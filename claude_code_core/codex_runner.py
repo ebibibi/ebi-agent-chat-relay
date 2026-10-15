@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 
 from .account_pool import AccountBinding
 from .child_env import STRIPPED_ENV_KEYS
+from .codex_transcript import codex_message_from_line
 from .execution import ExecutionRefusedError, carry_execution_mode, prepare_launch, refusal_event
 from .types import (
     ImageData,
@@ -256,25 +257,13 @@ def _text_transcript_from_rollout(session_id: str, env: dict[str, str]) -> str:
     try:
         with rollout.open(encoding="utf-8") as stream:
             for line in stream:
-                # Image/tool records can be several megabytes. Reject them
-                # before JSON parsing and retain only lightweight event_msg text.
-                if '"event_msg"' not in line:
+                # Image/tool records can be several megabytes; the parser
+                # rejects them before JSON parsing.
+                message = codex_message_from_line(line)
+                if message is None:
                     continue
-                if '"user_message"' not in line and '"agent_message"' not in line:
-                    continue
-                try:
-                    record = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                payload = record.get("payload", {})
-                event_type = payload.get("type")
-                message = payload.get("message")
-                if event_type not in {"user_message", "agent_message"} or not isinstance(
-                    message, str
-                ):
-                    continue
-                role = "User" if event_type == "user_message" else "Assistant"
-                messages.append((role, message[:_RECOVERY_MESSAGE_CHARS]))
+                role, text = message
+                messages.append((role, text[:_RECOVERY_MESSAGE_CHARS]))
                 if role == "Assistant":
                     last_assistant_index = len(messages) - 1
     except OSError:

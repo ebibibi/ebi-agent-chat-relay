@@ -31,6 +31,13 @@ logger = logging.getLogger(__name__)
 # Default timeout for each subprocess step (seconds).
 _STEP_TIMEOUT = 120
 
+# Posted when the bot shuts down while a prompt is still waiting for approval.
+_ABANDONED_NOTE = (
+    "⏹️ The bot restarted before this was approved, so this request is no longer "
+    "waiting — reacting ✅ above does nothing now. Run `/upgrade` if the new release "
+    "still needs to be applied."
+)
+
 
 class UpgradeApprovalView(discord.ui.View):
     """A Discord View with a single approval button for upgrade/restart gates.
@@ -105,6 +112,15 @@ class UpgradeApprovalView(discord.ui.View):
         await interaction.response.edit_message(view=self)
         self._event.set()
         self.stop()
+
+
+@dataclass(frozen=True)
+class _PendingApproval:
+    """An approval prompt whose waiter has not returned yet."""
+
+    thread: discord.Thread
+    offered: list[int]
+    button: Callable[[], discord.Message | None]
 
 
 @dataclass(frozen=True)
@@ -186,6 +202,28 @@ class AutoUpgradeCog(commands.Cog):
         self._drain_timeout = drain_timeout
         self._drain_poll_interval = drain_poll_interval
         self._lock = asyncio.Lock()
+        # Approval prompts still waiting, by thread id. Lives in memory like the
+        # wait itself, so cog_unload can say the prompt is dead before it is.
+        self._pending: dict[int, _PendingApproval] = {}
+
+    async def cog_unload(self) -> None:
+        """Close every approval prompt that the shutdown is about to orphan.
+
+        The wait is an in-memory coroutine: once the process exits, the ✅
+        reaction, the channel button and the console action all lead nowhere,
+        while the thread still reads as if it is waiting.
+        """
+        pending, self._pending = list(self._pending.values()), {}
+        for entry in pending:
+            message_actions.clear(*entry.offered)
+            button = entry.button()
+            if button is not None:
+                with contextlib.suppress(discord.HTTPException):
+                    await button.delete()
+            try:
+                await entry.thread.send(_ABANDONED_NOTE)
+            except discord.HTTPException:
+                logger.info("Could not close approval prompt in thread %d", entry.thread.id)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
@@ -559,6 +597,11 @@ class AutoUpgradeCog(commands.Cog):
 
         reaction_task = asyncio.create_task(_watch_reaction())
         button_task = asyncio.create_task(_watch_button())
+        self._pending[thread.id] = _PendingApproval(
+            thread=thread,
+            offered=offered,
+            button=lambda: (view._message if view is not None else None) or channel_msg,
+        )
 
         try:
             done, pending = await asyncio.wait(
@@ -566,6 +609,7 @@ class AutoUpgradeCog(commands.Cog):
                 return_when=asyncio.FIRST_COMPLETED,
             )
         finally:
+            self._pending.pop(thread.id, None)
             message_actions.clear(*offered)
 
         for task in pending:

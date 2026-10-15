@@ -1,7 +1,8 @@
-"""The "ready to close" thread marker (issue #769).
+"""The "ready to close" thread marker (issue #769, #1048).
 
-The agent marks a finished thread via ``POST /api/threads/{id}/done``; a human
-reply clears it; a retitle never carries it forward.
+The agent proposes closing a finished thread via ``POST /api/threads/{id}/done``
+(or ``/candidate``), which marks it a completion candidate — only a human marks
+it done. A human reply clears the marker; a retitle never carries it forward.
 """
 
 from __future__ import annotations
@@ -24,6 +25,8 @@ from claude_discord.database.notification_repo import NotificationRepository
 from claude_discord.discord_ui.chunker import DISCORD_CAPABILITIES
 from claude_discord.ext.api_server import ApiServer
 from claude_discord.thread_marker import (
+    CANDIDATE_MARKER_ENV_VAR,
+    DEFAULT_CANDIDATE_MARKER,
     DEFAULT_DONE_MARKER,
     DEFAULT_SPAWN_MARKER,
     DONE_MARKER_ENV_VAR,
@@ -35,6 +38,7 @@ from claude_discord.thread_marker import (
 )
 
 DONE = DEFAULT_DONE_MARKER
+CANDIDATE = DEFAULT_CANDIDATE_MARKER
 
 
 @pytest.fixture(autouse=True)
@@ -132,20 +136,24 @@ async def api_client(bot: MagicMock):
     os.unlink(path)
 
 
-async def test_endpoint_marks_the_thread(api_client: TestClient, bot: MagicMock) -> None:
+@pytest.mark.parametrize("path", ["done", "candidate"])
+async def test_endpoint_marks_a_completion_candidate_not_done(
+    api_client: TestClient, bot: MagicMock, path: str
+) -> None:
+    """An agent can only propose closing: ✅ (done) is the human's to set."""
     thread = _thread("Fix the build")
     bot.get_channel.return_value = thread
 
-    resp = await api_client.post("/api/threads/42/done")
+    resp = await api_client.post(f"/api/threads/42/{path}")
 
     assert resp.status == 200
     body = await resp.json()
-    assert body == {"status": "marked", "thread_name": f"{DONE} Fix the build"}
-    thread.edit.assert_awaited_once_with(name=f"{DONE} Fix the build")
+    assert body == {"status": "marked", "thread_name": f"{CANDIDATE} Fix the build"}
+    thread.edit.assert_awaited_once_with(name=f"{CANDIDATE} Fix the build")
 
 
 async def test_endpoint_does_not_rename_twice(api_client: TestClient, bot: MagicMock) -> None:
-    thread = _thread(f"{DONE} Fix the build")
+    thread = _thread(f"{CANDIDATE} Fix the build")
     bot.get_channel.return_value = thread
 
     resp = await api_client.post("/api/threads/42/done")
@@ -230,15 +238,17 @@ def _runner(api_port: int | None) -> MagicMock:
     return runner
 
 
-async def test_prompt_explains_the_done_endpoint() -> None:
+async def test_prompt_explains_the_candidate_endpoint() -> None:
     config = RunConfig(
         surface=MemorySurface(capabilities=DISCORD_CAPABILITIES),
         runner=_runner(8080),
         prompt="do it",
     )
     context = await _build_system_context(config)
-    assert "/api/threads/$DISCORD_THREAD_ID/done" in context
-    assert DONE in context
+    assert "/api/threads/$DISCORD_THREAD_ID/candidate" in context
+    assert CANDIDATE in context
+    assert "only the user can do" in context
+    assert "/api/threads/$DISCORD_THREAD_ID/done" not in context
 
 
 async def test_prompt_omits_it_without_the_api() -> None:
@@ -247,22 +257,22 @@ async def test_prompt_omits_it_without_the_api() -> None:
         runner=_runner(None),
         prompt="do it",
     )
-    assert "/done" not in (await _build_system_context(config) or "")
+    assert "/candidate" not in (await _build_system_context(config) or "")
 
 
 async def test_prompt_omits_it_where_threads_cannot_be_renamed() -> None:
     config = RunConfig(surface=MemorySurface(), runner=_runner(8080), prompt="do it")
-    assert "/done" not in (await _build_system_context(config) or "")
+    assert "/candidate" not in (await _build_system_context(config) or "")
 
 
 async def test_prompt_omits_it_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(DONE_MARKER_ENV_VAR, "")
+    monkeypatch.setenv(CANDIDATE_MARKER_ENV_VAR, "")
     config = RunConfig(
         surface=MemorySurface(capabilities=DISCORD_CAPABILITIES),
         runner=_runner(8080),
         prompt="do it",
     )
-    assert "/done" not in (await _build_system_context(config) or "")
+    assert "/candidate" not in (await _build_system_context(config) or "")
 
 
 async def test_finishing_instructions_keep_customer_drafts_and_exporter_threads_open() -> None:

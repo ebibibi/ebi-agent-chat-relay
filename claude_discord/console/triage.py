@@ -58,7 +58,8 @@ MAX_PLACE_CHARS = 40
 MAX_KNOWN_PLACES = 20
 
 #: Statuses that are not work to triage.
-_SKIP_STATUSES = frozenset({"done", "someday", "running"})
+#: A completion candidate waits only for the human to confirm it, so it is not ranked either.
+_SKIP_STATUSES = frozenset({"done", "candidate", "someday", "running"})
 #: Statuses where the next move is the human's.
 _HUMAN_STATUSES = frozenset({"waiting", "review", "action", "error"})
 

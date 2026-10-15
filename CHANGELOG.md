@@ -11,8 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Only a human finishes work.** An agent's `POST /api/threads/{id}/done` (and the new
+  `/candidate`) now marks a 🏁 completion candidate instead of ✅ Done. Candidates stay listed in
+  the console's new "Done?" view until a human confirms them; legacy ✅ titles without a human
+  verdict are treated as candidates too (#1048).
 - Console: every text box now behaves the same — `Enter` inserts a newline and `Ctrl+Enter`
   (`Cmd+Enter` on macOS) sends. The capture box gains a Send button for touch devices (#1056).
+
+### Added
+
+- Console status chips: narrow any list to the statuses you pick (your reply, to review, your
+  task, completion candidates, …) (#1048).
 
 ### Fixed
 
