@@ -8,6 +8,7 @@ always yields the same code) and restraint (a fan-out renames the parent once).
 
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -147,6 +148,7 @@ class TestSpawnSessionLineage:
             thread = await cog.spawn_session(
                 channel, "Do the thing", agent_spawned=True, parent_thread_id=PARENT_ID
             )
+        await asyncio.gather(*cog._background_tasks)
         parent.edit.assert_awaited_once()
         assert parent.edit.await_args.kwargs["name"] == (
             f"{DEFAULT_PARENT_MARKER}{family_code(PARENT_ID)} Nightly triage"
@@ -186,6 +188,26 @@ class TestSpawnSessionLineage:
             )
         assert thread is channel.create_thread.return_value
         parent.send.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_rate_limited_rename_does_not_hold_the_spawn(self) -> None:
+        """discord.py sleeps out a 429 instead of raising, for up to ten minutes."""
+        cog, channel, parent = _cog_with_parent()
+
+        async def sleep_out_the_limit(**_: object) -> None:
+            await asyncio.Event().wait()
+
+        parent.edit = AsyncMock(side_effect=sleep_out_the_limit)
+        with patch.object(cog, "_run_claude", new=AsyncMock()):
+            thread = await asyncio.wait_for(
+                cog.spawn_session(
+                    channel, "Do the thing", agent_spawned=True, parent_thread_id=PARENT_ID
+                ),
+                timeout=1,
+            )
+        assert thread is channel.create_thread.return_value
+        for task in cog._background_tasks:
+            task.cancel()
 
 
 class TestLineageRepository:

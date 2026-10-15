@@ -981,13 +981,19 @@ class ClaudeChatCog(commands.Cog):
 
         tagged = mark_parent_thread_name(parent.name, parent_thread_id)
         if tagged != parent.name:
-            with contextlib.suppress(Exception):
-                await parent.edit(name=tagged)
+            # In the background: discord.py sleeps out a rename 429 (up to ten
+            # minutes) instead of raising, and /api/spawn would wait with it.
+            self._spawn_background(self._rename_quietly(parent, tagged))
         code = family_code(parent_thread_id)
         with contextlib.suppress(Exception):
             await parent.send(f"-# \u2937 spawned {thread.mention}")
         with contextlib.suppress(Exception):
             await thread.send(f"-# \u21b3 {code} \u2014 spawned by {parent.mention}")
+
+    @staticmethod
+    async def _rename_quietly(thread: discord.Thread, name: str) -> None:
+        with contextlib.suppress(Exception):
+            await thread.edit(name=name)
 
     async def spawn_session(
         self,
