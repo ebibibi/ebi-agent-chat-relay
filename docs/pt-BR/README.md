@@ -48,11 +48,30 @@ celular, onde você vê todas as threads de agentes de uma vez, decide o que faz
 - **Aja sem sair da tela**: responda anexando qualquer arquivo, visualize arquivos no lugar, troque
   backend, modelo e effort com um seletor, ajuste o limite de sessões simultâneas e pause, retome
   ou pare o trabalho em andamento.
+- **Mantenha o trabalho delegado ao lado da conversa principal**: um painel recolhível mostra o
+  status de filhos e netos, os relatórios mais recentes e as contagens de tarefas concluídas.
+  Inspecione um filho e volte à conversa pai para decidir; responder diretamente a um filho exige
+  uma escolha explícita.
 - **Opcional e aditivo**: nada inicia a menos que `CCDB_CONSOLE_PORT` esteja definido, e Discord,
   Teams, os backends, a API REST e o agendador não mudam. Com o console ativado, a triagem
   automática fica ligada por padrão; `CCDB_CONSOLE_TRIAGE=0` a desliga.
 
-Veja as [notas da versão 5.0.0](../releases/v5.0.0.md), o [guia do console](../console.md) e o
+**A versão 5.1 adiciona a integração com o Workspace e mais formas de gerenciar conversas:**
+
+- **Tarefas do Ebi Workspace**: navegue por contextos e projetos, leia visões gerais, adicione,
+  edite e conclua tarefas, e inicie trabalho de IA a partir de uma tarefa. O `status.md` do
+  projeto e o `single-actions.md` do contexto continuam sendo a fonte da verdade; verificações de
+  revisão rejeitam edições desatualizadas.
+- **Busca de mensagens**: encontre texto no histórico de conversas disponível e nas transcrições
+  locais, com trechos e links para a thread correspondente, sem chamadas de IA.
+- **Gerencie famílias de threads**: configure separadamente backend, modelo e effort do gerente e
+  dos filhos, e selecione várias threads para concluir juntas. Concluir um pai inclui os
+  descendentes.
+- **Controles no desktop e no celular**: copie o conteúdo de arquivos de texto e links de threads,
+  alterne entre japonês e inglês sem perder rascunhos ou anexos, e mantenha o editor acessível no
+  celular.
+
+Veja as [notas da versão 5.1.0](../releases/v5.1.0.md), o [guia do console](../console.md) e o
 [ADR-0014](../adr/0014-publish-the-ebi-ai-console-as-v5.md) (em inglês). A seguir vem a
 **integração com o agendador**.
 

@@ -48,11 +48,30 @@ móvil, donde ves todos los hilos de agentes a la vez, decides qué hacer ahora 
 - **Actúa sin salir de la pantalla**: responde adjuntando cualquier archivo, previsualiza archivos
   en el sitio, cambia backend, modelo y effort con un selector, ajusta el límite de sesiones
   concurrentes y pausa, reanuda o detén el trabajo en curso.
+- **Mantén el trabajo delegado junto a la conversación principal**: un panel plegable muestra el
+  estado de hijos y nietos, los últimos informes y los recuentos de tareas completadas. Revisa un
+  hijo y vuelve a la conversación padre para decidir; responder directamente a un hijo requiere
+  elegirlo de forma explícita.
 - **Opcional y aditiva**: no arranca nada salvo que se defina `CCDB_CONSOLE_PORT`, y Discord, Teams,
   los backends, la API REST y el planificador no cambian. Con la consola activada, el triaje
   automático está activo por defecto; `CCDB_CONSOLE_TRIAGE=0` lo desactiva.
 
-Consulta las [notas de la versión 5.0.0](../releases/v5.0.0.md), la [guía de la consola](../console.md)
+**La versión 5.1 añade la integración con Workspace y más formas de gestionar conversaciones:**
+
+- **Tareas de Ebi Workspace**: explora contextos y proyectos, lee resúmenes, añade, edita y
+  completa tareas, e inicia trabajo de IA desde una tarea. El `status.md` del proyecto y el
+  `single-actions.md` del contexto siguen siendo la fuente de verdad; las comprobaciones de
+  revisión rechazan ediciones obsoletas.
+- **Búsqueda de mensajes**: encuentra texto en el historial de conversaciones disponible y en las
+  transcripciones locales, con extractos y enlaces al hilo correspondiente, sin llamadas a la IA.
+- **Gestión de familias de hilos**: configura por separado el backend, el modelo y el effort del
+  gestor y de los hijos, y selecciona varios hilos para completarlos a la vez. Completar un padre
+  incluye a sus descendientes.
+- **Controles de escritorio y móvil**: copia el contenido de archivos de texto y los enlaces de los
+  hilos, cambia entre japonés e inglés sin perder borradores ni adjuntos, y mantén accesible el
+  editor en el móvil.
+
+Consulta las [notas de la versión 5.1.0](../releases/v5.1.0.md), la [guía de la consola](../console.md)
 y el [ADR-0014](../adr/0014-publish-the-ebi-ai-console-as-v5.md) (en inglés). Lo siguiente es la
 **integración con el planificador**.
 
