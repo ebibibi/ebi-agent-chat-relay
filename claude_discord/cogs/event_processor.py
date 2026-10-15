@@ -204,6 +204,9 @@ class EventProcessor:
 
         # Guards against duplicate embeds/messages in the same run.
         self._session_start_sent: bool = False
+        # True once the CLI confirmed a live session (a SYSTEM event with a
+        # session_id). A run that errors before that never opened a session.
+        self._session_opened: bool = False
         self._assistant_text_sent: bool = False
 
         # Outstanding approval/input prompts. Held so the garbage collector
@@ -413,6 +416,7 @@ class EventProcessor:
             return
 
         self._state.session_id = event.session_id
+        self._session_opened = True
         if self._config.repo:
             wd = getattr(self._config.runner, "working_dir", None)
             # For new sessions, save the prompt as the summary so /resume can display it.
@@ -705,7 +709,12 @@ class EventProcessor:
                         name=f"inbox-classify-{self._config.surface.thread_key}",
                     )
 
-        if event.session_id:
+        # A resume the CLI rejected ("No conversation found") still echoes the
+        # requested ID in its error RESULT. Saving it would stamp this runner's
+        # backend onto another backend's session ID, and every later turn would
+        # then trust the wrong tag and fail the same way. Only persist IDs the
+        # CLI actually opened.
+        if event.session_id and (self._session_opened or not event.error):
             if self._config.repo:
                 await self._config.repo.save(
                     self._config.surface.thread_key,

@@ -480,3 +480,73 @@ class TestSchedulerCogFollowUp:
         assert run_config.session_id == "existing-session-id-abc"
 
         os.unlink(session_db_path)
+
+
+class TestFollowupAcrossBackends:
+    """A follow-up must not hand another backend's session ID to --resume."""
+
+    async def _run_followup(
+        self, repo: TaskRepository, tmp_path, stored_backend: str
+    ) -> tuple[MagicMock, MagicMock]:
+        import discord
+
+        from claude_discord.database.models import init_db
+
+        session_db = str(tmp_path / "sessions.db")
+        await init_db(session_db)
+        session_repo = SessionRepository(session_db)
+        await session_repo.save(
+            777777, "01a1359d-codex-rollout", "/home/ebi", backend=stored_backend
+        )
+
+        task_id = await repo.create(
+            name="bp-daily-checkin",
+            prompt="Daily check-in",
+            interval_seconds=86400,
+            channel_id=99,
+            thread_id=777777,
+        )
+        task = await repo.get(task_id)
+
+        mock_thread = AsyncMock(spec=discord.Thread)
+        mock_thread.send = AsyncMock()
+        bot = _make_bot()
+        bot.get_channel = MagicMock(
+            side_effect=lambda cid: {
+                99: MagicMock(spec=discord.TextChannel),
+                777777: mock_thread,
+            }.get(cid)
+        )
+        reader = MagicMock()
+        reader.read.return_value = "User:\nmorning BP 137/87"
+
+        # The base runner is a MagicMock, which maps to the "claude" backend.
+        cog = SchedulerCog(
+            bot,
+            _make_runner(),
+            repo=repo,
+            session_repo=session_repo,
+            conversation_history=reader,
+        )
+        with patch(
+            "claude_discord.cogs.scheduler.run_claude_with_config", new_callable=AsyncMock
+        ) as mock_run:
+            await cog._run_task(task)
+        return mock_run.call_args[0][0], reader
+
+    async def test_codex_session_is_not_resumed_by_claude(
+        self, repo: TaskRepository, tmp_path
+    ) -> None:
+        run_config, reader = await self._run_followup(repo, tmp_path, "codex")
+
+        assert run_config.session_id is None
+        reader.read.assert_called_once_with("codex", "01a1359d-codex-rollout")
+        assert "morning BP 137/87" in run_config.prompt
+        assert run_config.prompt.endswith("Daily check-in")
+
+    async def test_same_backend_session_is_resumed(self, repo: TaskRepository, tmp_path) -> None:
+        run_config, reader = await self._run_followup(repo, tmp_path, "claude")
+
+        assert run_config.session_id == "01a1359d-codex-rollout"
+        assert run_config.prompt == "Daily check-in"
+        reader.read.assert_not_called()

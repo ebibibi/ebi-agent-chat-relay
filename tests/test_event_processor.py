@@ -1697,3 +1697,61 @@ class TestUserActionMentions:
         thread.send.assert_called_once()
         assert "<@42>" in _posted_mentions(thread)
         await p.cancel_prompts()
+
+
+class TestRejectedResumeIsNotPersisted:
+    """A resume the CLI rejected must not re-tag the stored session."""
+
+    @pytest.mark.asyncio
+    async def test_error_before_any_session_does_not_save(
+        self, thread: MagicMock, runner: MagicMock
+    ) -> None:
+        """`claude --resume <codex id>` echoes the ID in an error RESULT.
+
+        Saving it would stamp backend="claude" on a Codex rollout ID, after
+        which every backend check trusts the wrong tag and the thread stays
+        dead.
+        """
+        repo = MagicMock()
+        repo.save = AsyncMock()
+        config = _make_config(thread, runner, repo=repo, session_id="codex-rollout")
+        p = EventProcessor(config)
+
+        await p.process(
+            _make_result_event(
+                session_id="codex-rollout",
+                error="No conversation found with session ID: codex-rollout",
+            )
+        )
+
+        repo.save.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_error_after_session_opened_still_saves(
+        self, thread: MagicMock, runner: MagicMock
+    ) -> None:
+        """A turn that failed mid-way did open a real session — keep it."""
+        repo = MagicMock()
+        repo.save = AsyncMock()
+        config = _make_config(thread, runner, repo=repo)
+        p = EventProcessor(config)
+
+        await p.process(StreamEvent(message_type=MessageType.SYSTEM, session_id="s1"))
+        repo.save.reset_mock()
+        await p.process(_make_result_event(session_id="s1", error="API 529"))
+
+        repo.save.assert_called_once()
+        assert repo.save.call_args.args[1] == "s1"
+
+    @pytest.mark.asyncio
+    async def test_successful_result_without_system_event_still_saves(
+        self, thread: MagicMock, runner: MagicMock
+    ) -> None:
+        repo = MagicMock()
+        repo.save = AsyncMock()
+        config = _make_config(thread, runner, repo=repo)
+        p = EventProcessor(config)
+
+        await p.process(_make_result_event(session_id="s2"))
+
+        repo.save.assert_called_once()
