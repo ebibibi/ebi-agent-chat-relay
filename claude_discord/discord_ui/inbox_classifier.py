@@ -18,6 +18,8 @@ import asyncio
 import logging
 from typing import Literal
 
+from ..teams_exporter import is_reply_draft_request
+
 logger = logging.getLogger(__name__)
 
 ClassifyResult = Literal["waiting", "done", "ambiguous"]
@@ -63,14 +65,7 @@ async def classify(
     """
     # The exporter deliberately asks for a reply body without any status text.
     # Its known request envelope is stronger evidence than a model's final-word guess.
-    if any(
-        marker in request_text.casefold()
-        for marker in (
-            "microsoft teams のスレッドが、サーバー上に1発言1ファイルで同期されています",
-            "[teams channel exporter]",
-            "source: teams channel exporter",
-        )
-    ):
+    if is_reply_draft_request(request_text):
         return "waiting"
     if not last_text.strip():
         return "ambiguous"
