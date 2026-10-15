@@ -209,7 +209,7 @@ wheels = [
 
 [[package]]
 name = "claude-code-discord-bridge"
-version = "5.1.1"
+version = "5.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
