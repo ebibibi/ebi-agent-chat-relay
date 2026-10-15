@@ -158,6 +158,32 @@ def _error(message: str, status: int) -> web.Response:
     return web.json_response({"error": message}, status=status)
 
 
+_COMPRESSIBLE = frozenset(
+    {"application/json", "text/html", "text/css", "text/javascript", "application/javascript"}
+)
+# Below this a gzip header and the CPU cost outweigh what is saved.
+_COMPRESS_MIN_BYTES = 1024
+
+
+def _compress(request: web.Request, response: web.StreamResponse) -> None:
+    """Gzip a text response the browser can take compressed.
+
+    The board is polled every few seconds and runs to hundreds of kilobytes of
+    JSON; compressed it is roughly a ninth of that, which is what a phone on a
+    slow link actually feels.
+    """
+    if not isinstance(response, web.Response) or response.prepared:
+        return
+    if response.content_type not in _COMPRESSIBLE:
+        return
+    body = response.body
+    if not isinstance(body, bytes | bytearray) or len(body) < _COMPRESS_MIN_BYTES:
+        return
+    if "gzip" not in request.headers.get("Accept-Encoding", "").lower():
+        return
+    response.enable_compression(web.ContentCoding.gzip)
+
+
 def _iso(value: Any) -> str | None:
     if value is None or not hasattr(value, "astimezone"):
         return None
@@ -294,6 +320,7 @@ class ConsoleServer:
         response = await self._guarded(request, handler)
         for name, value in _SECURITY_HEADERS.items():
             response.headers.setdefault(name, value)
+        _compress(request, response)
         return response
 
     async def _guarded(

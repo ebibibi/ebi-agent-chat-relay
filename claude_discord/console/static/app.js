@@ -6,6 +6,7 @@
 const API = "/console/api";
 const POLL_MS = 8000;
 const POLL_HIDDEN_MS = 30000;
+const STALE_RENDER_MS = 60000;
 const HISTORY = 100;
 
 const I18N = {
@@ -116,7 +117,7 @@ const VIEW_KEYS = { f: "focus", i: "me", c: "candidate", a: "ai", u: "recent", t
 const state = {
   items: [], byId: new Map(), slots: {}, view: localStorage.getItem("view") || "focus",
   selected: null, open: null, filter: "", collapsed: new Set(JSON.parse(localStorage.getItem("collapsed") || "[]")),
-  messages: [], lastSync: null, pendingG: false, drafts: {},
+  messages: [], lastSync: null, boardSig: "", renderedAt: 0, pendingG: false, drafts: {},
   // The relay's own tool calls, status lines and automatic prompts stay hidden unless asked for.
   showActivity: localStorage.getItem("showActivity") === "1",
   // Finished items left out of every list but Done. Remembered per browser.
@@ -170,15 +171,24 @@ async function api(path, { method = "GET", body } = {}) {
 async function refresh() {
   try {
     const data = await api("/board");
+    // An unchanged poll redraws nothing: rebuilding hundreds of rows every few
+    // seconds is what makes a phone stutter. Relative times still tick once a minute.
+    const sig = JSON.stringify([data.items, data.slots, data.places]);
+    // A search hit pushed into state.items locally still gets reconciled as before.
+    const unchanged = sig === state.boardSig && state.items.length === data.items.length
+      && Date.now() - state.renderedAt < STALE_RENDER_MS;
+    state.boardSig = sig;
+    state.lastSync = new Date();
+    $("sync").className = "sync";
+    $("sync").textContent = `${T.updated} ${state.lastSync.toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}`;
+    if (unchanged) return;
+    state.renderedAt = Date.now();
     state.items = data.items;
     state.byId = new Map(data.items.map((i) => [i.id, i]));
     window.ConsoleSlots.onBoard(data.items);
     state.slots = data.slots || {};
     state.places = data.places || [];
     if (!state.defaultsLoaded) { state.defaultsLoaded = true; window.ConsoleBackend.loadDefaults(); }
-    state.lastSync = new Date();
-    $("sync").className = "sync";
-    $("sync").textContent = `${T.updated} ${state.lastSync.toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}`;
     if (state.open && !state.byId.has(state.open)) state.open = null;
     // Whatever is on screen is being read.
     if (state.open && !document.hidden) markSeen(state.open);
@@ -1036,7 +1046,8 @@ function wire() {
   let timer = setInterval(refresh, POLL_MS);
   document.addEventListener("visibilitychange", () => {
     clearInterval(timer);
-    if (!document.hidden) refresh();
+    // Coming back always redraws, so the item on screen is marked read again.
+    if (!document.hidden) { state.boardSig = ""; refresh(); }
     timer = setInterval(refresh, document.hidden ? POLL_HIDDEN_MS : POLL_MS);
   });
 }
