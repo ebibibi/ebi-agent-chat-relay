@@ -19,6 +19,7 @@ from typing import Any
 from ..backend_settings import session_is_resumable
 from ..cogs._run_helper import run_claude_with_config
 from ..cogs.run_config import RunConfig
+from ..cross_backend_handoff import ConversationHistoryReader, carry_history_across_backends
 from ..execution_settings import apply_thread_execution_mode
 from ..thread_marker import OUTCOME_ERROR
 from .conversations import CONSOLE_FRONTEND
@@ -43,8 +44,10 @@ class ConsoleSessionHost:
         usage_repo: Any = None,
         registry: Any = None,
         worktree_manager: Any = None,
+        conversation_history: ConversationHistoryReader | None = None,
     ) -> None:
         self.frontend = frontend
+        self._conversation_history = conversation_history or ConversationHistoryReader()
         self._session_repo = session_repo
         self._factory = backend_factory
         self._settings = backend_settings
@@ -146,6 +149,12 @@ class ConsoleSessionHost:
             session_id = record.session_id
             if record.working_dir:
                 runner.working_dir = record.working_dir
+        else:
+            # A new backend cannot resume the old session natively; carry its
+            # text so the conversation continues instead of starting blank.
+            prompt = await carry_history_across_backends(
+                self._conversation_history, record, backend, prompt
+            )
 
         effort = await self._settings.current_effort(backend, thread_key)
         if effort is not None and hasattr(runner, "effort"):

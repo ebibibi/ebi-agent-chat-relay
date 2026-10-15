@@ -8,11 +8,15 @@ system/developer messages, reasoning, tool calls, tool results, and images.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import re
 from pathlib import Path
+from typing import Any
+
+from claude_code_core.codex_transcript import codex_message_from_line
 
 logger = logging.getLogger(__name__)
 
@@ -120,25 +124,11 @@ class ConversationHistoryReader:
         try:
             with path.open(encoding="utf-8", errors="replace") as stream:
                 for line in stream:
-                    if len(line) > _MAX_JSONL_LINE_CHARS or '"event_msg"' not in line:
+                    if len(line) > _MAX_JSONL_LINE_CHARS:
                         continue
-                    try:
-                        record = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if record.get("type") != "event_msg":
-                        continue
-                    payload = record.get("payload", {})
-                    event_type = payload.get("type")
-                    content = payload.get("message")
-                    if event_type not in {"user_message", "agent_message"} or not isinstance(
-                        content, str
-                    ):
-                        continue
-                    content = content.strip()
-                    if content:
-                        role = "User" if event_type == "user_message" else "Assistant"
-                        messages.append((role, content))
+                    message = codex_message_from_line(line)
+                    if message is not None:
+                        messages.append(message)
         except OSError:
             logger.warning("Could not read Codex transcript for handoff", exc_info=True)
         return messages
@@ -194,4 +184,40 @@ def build_handoff_prompt(
         f"{transcript}\n\n"
         "Current user message:\n"
         f"{current_prompt}"
+    )
+
+
+async def carry_history_across_backends(
+    reader: ConversationHistoryReader,
+    record: Any,
+    current_backend: str,
+    prompt: str,
+) -> str:
+    """Return *prompt*, prefixed with the old transcript when the backend changed.
+
+    *record* is the thread's stored session (``backend`` / ``session_id``).
+    Callers use this only when that session cannot be resumed natively by
+    *current_backend*; without a readable transcript the prompt is unchanged.
+    """
+    if record is None or not record.backend or not record.session_id:
+        return prompt
+    transcript = await asyncio.to_thread(reader.read, record.backend, record.session_id)
+    if not transcript:
+        logger.warning(
+            "No file-backed transcript found for cross-backend handoff: backend=%s session=%s",
+            record.backend,
+            record.session_id,
+        )
+        return prompt
+    logger.info(
+        "Injecting cross-backend transcript: %s->%s chars=%d",
+        record.backend,
+        current_backend,
+        len(transcript),
+    )
+    return build_handoff_prompt(
+        source_backend=record.backend,
+        target_backend=current_backend,
+        transcript=transcript,
+        current_prompt=prompt,
     )
