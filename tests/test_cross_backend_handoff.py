@@ -90,6 +90,55 @@ class TestConversationHistoryReader:
 
         assert reader.read("codex", session_id) == "User:\n依頼\n\nAssistant:\n対応したよ"
 
+    def test_reads_current_codex_item_completed_messages(self, tmp_path: Path) -> None:
+        session_id = "01a079d0-351b-7a72-8d88-527a380ae9f8"
+        rollout = tmp_path / "sessions" / "2026" / "09" / "07" / f"rollout-x-{session_id}.jsonl"
+        _write_jsonl(
+            rollout,
+            [
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "# AGENTS.md instructions"}],
+                    },
+                },
+                {
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "item_completed",
+                        "item": {
+                            "type": "UserMessage",
+                            "content": [{"type": "text", "text": "test", "text_elements": []}],
+                        },
+                    },
+                },
+                {
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "item_completed",
+                        "item": {"type": "Reasoning", "summary_text": ["ignore"]},
+                    },
+                },
+                {
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "item_completed",
+                        "item": {
+                            "type": "AgentMessage",
+                            "content": [{"type": "Text", "text": "受信できてるよ"}],
+                            "phase": "final_answer",
+                        },
+                    },
+                },
+            ],
+        )
+
+        reader = ConversationHistoryReader(codex_home=tmp_path)
+
+        assert reader.read("codex", session_id) == "User:\ntest\n\nAssistant:\n受信できてるよ"
+
     def test_rejects_invalid_session_id_before_path_lookup(self, tmp_path: Path) -> None:
         reader = ConversationHistoryReader(
             claude_sessions_root=tmp_path,

@@ -789,3 +789,27 @@ async def test_combined_start_prompt_over_limit_becomes_attachment(env) -> None:
     [file] = list(env.host.frontend.files_dir.glob("0/*/message.txt"))
     assert file.read_text(encoding="utf-8") == "t" * 200 + "\n\n" + "n" * 3900
     assert str(file) in env.runs[-1].prompt
+
+
+async def test_switching_backend_carries_the_conversation_into_the_new_session(env) -> None:
+    item_id = await _start(env)
+    reads: list[tuple[str, str]] = []
+
+    class Reader:
+        def read(self, backend: str, session_id: str) -> str:
+            reads.append((backend, session_id))
+            return "User:\nPlan Sunday\n\nAssistant:\nanswer to: Plan Sunday"
+
+    env.host._conversation_history = Reader()
+    env.host._settings.current_backend = AsyncMock(return_value="codex")
+    sent = await env.client.post(
+        f"/console/api/items/{item_id}/reply", json={"text": "and Monday?"}, headers=WRITE
+    )
+    assert sent.status == 202
+    await _settle(env.host)
+
+    resumed = env.runs[-1]
+    assert reads == [("claude", "s1")]
+    assert resumed.session_id is None  # Codex cannot resume a Claude session ID
+    assert "answer to: Plan Sunday" in resumed.prompt
+    assert resumed.prompt.endswith("Current user message:\nand Monday?")

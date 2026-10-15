@@ -1090,3 +1090,30 @@ class TestCodexRunnerStdin:
         assert call_kwargs["stdin"] == _asyncio.subprocess.PIPE
         assert written == [large_prompt.encode()]
         mock_stdin.close.assert_called_once()
+
+
+def test_resume_recovery_reads_current_codex_rollout_format(tmp_path) -> None:
+    import json
+
+    from claude_code_core.codex_runner import _text_transcript_from_rollout
+
+    session_id = "01a13cdc-b41b-7542-a916-ff28d3d65e17"
+    rollout = tmp_path / "sessions" / "2026" / "10" / "15" / f"rollout-x-{session_id}.jsonl"
+    rollout.parent.mkdir(parents=True)
+    items = [
+        {"type": "UserMessage", "content": [{"type": "text", "text": "依頼"}]},
+        {"type": "AgentMessage", "content": [{"type": "Text", "text": "対応したよ"}]},
+        {"type": "UserMessage", "content": [{"type": "text", "text": "失敗した再開"}]},
+    ]
+    rollout.write_text(
+        "".join(
+            json.dumps({"type": "event_msg", "payload": {"type": "item_completed", "item": i}})
+            + "\n"
+            for i in items
+        ),
+        encoding="utf-8",
+    )
+
+    transcript = _text_transcript_from_rollout(session_id, {"CODEX_HOME": str(tmp_path)})
+
+    assert transcript == "User:\n依頼\n\nAssistant:\n対応したよ"
