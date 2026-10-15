@@ -45,7 +45,7 @@ from ..session_view import STATE_HISTORY, STATE_RUNNING, build_session_views
 from ..thread_marker import (
     MAX_THREAD_NAME_LENGTH,
     OUTCOME_ACTION,
-    OUTCOME_DONE,
+    OUTCOME_CANDIDATE,
     OUTCOME_REVIEW,
     OUTCOME_WAITING,
     family_code,
@@ -404,6 +404,7 @@ class ApiServer:
         self.app.router.add_get("/api/threads/{thread_id}/messages", self.get_thread_messages)
         self.app.router.add_post("/api/threads/{thread_id}/message", self.relay_thread_message)
         self.app.router.add_post("/api/threads/{thread_id}/done", self.mark_thread_done)
+        self.app.router.add_post("/api/threads/{thread_id}/candidate", self.mark_thread_done)
         self.app.router.add_post("/api/threads/{thread_id}/waiting", self.mark_thread_waiting)
         self.app.router.add_post("/api/threads/{thread_id}/review", self.mark_thread_review)
         self.app.router.add_post("/api/threads/{thread_id}/action", self.mark_thread_action)
@@ -1671,11 +1672,16 @@ class ApiServer:
         )
 
     async def mark_thread_done(self, request: web.Request) -> web.Response:
-        """POST /api/threads/{thread_id}/done — tell the human the thread can be closed.
+        """POST /api/threads/{thread_id}/done (or ``/candidate``) — propose closing the thread.
 
-        Prefixes the thread title with the done marker (``✅`` by default).  The
-        agent calls this at the end of a turn whose work is fully finished; the
-        chat cog removes the marker again when a human replies in the thread.
+        Prefixes the thread title with the completion-candidate marker (``🏁``
+        by default). The agent calls this at the end of a turn whose work it
+        believes finished. It is a proposal, never a verdict: the console keeps
+        the thread listed under "completion candidates" until a human marks it
+        done (``✅``), because an agent's guess that the work is over must not
+        make an unfinished request disappear from the human's screen. ``/done``
+        keeps its name for the prompts that already call it. The chat cog
+        removes the marker again when a human replies in the thread.
 
         Idempotent: an already-marked thread is not renamed, because Discord
         allows a thread only two renames per ten minutes.
@@ -1685,7 +1691,7 @@ class ApiServer:
         Discord's rate limit and will land on its own; 404 for an unknown
         channel, 400 when it is not a thread, 502 when the rename fails.
         """
-        return await self._mark_thread_outcome(request, OUTCOME_DONE)
+        return await self._mark_thread_outcome(request, OUTCOME_CANDIDATE)
 
     async def mark_thread_waiting(self, request: web.Request) -> web.Response:
         """POST /api/threads/{thread_id}/waiting — the next move is the human's.

@@ -14,6 +14,7 @@ from typing import Any
 
 from ..thread_marker import (
     OUTCOME_ACTION,
+    OUTCOME_CANDIDATE,
     OUTCOME_DONE,
     OUTCOME_ERROR,
     OUTCOME_REVIEW,
@@ -35,7 +36,8 @@ STATUS_WAITING = "waiting"  # ❓ the agent asked the human something
 STATUS_REVIEW = "review"  # 👀 a deliverable to look at
 STATUS_ACTION = "action"  # 📋 a task only the human can do
 STATUS_ERROR = "error"  # ⚠️ the last turn failed
-STATUS_DONE = "done"  # ✅ finished
+STATUS_CANDIDATE = "candidate"  # 🏁 the agent thinks it is finished; a human confirms
+STATUS_DONE = "done"  # ✅ finished — only a human's verdict gives this
 STATUS_SOMEDAY = "someday"  # parked by the human
 STATUS_TODO = "todo"  # a capture: written down, not handed to an agent
 STATUS_IDLE = "idle"  # the agent stopped without saying whose move it is
@@ -46,14 +48,21 @@ BUCKET_AI = "ai"  # an agent is working
 BUCKET_TODO = "todo"
 BUCKET_IDLE = "idle"
 BUCKET_SNOOZED = "snoozed"
+BUCKET_CANDIDATE = "candidate"  # the agent proposes closing it; still listed
 BUCKET_DONE = "done"
 
+# A title marker is the agent's word, never the human's verdict, so no marker
+# alone yields Done: a finished item would vanish from every list on an
+# agent's guess. The ✅ marker maps to a candidate too — threads an agent
+# marked before candidates existed carry it, and a human's own Done is always
+# recorded in the overlay, which derive_status reads first.
 _OUTCOME_STATUS = {
     OUTCOME_WAITING: STATUS_WAITING,
     OUTCOME_REVIEW: STATUS_REVIEW,
     OUTCOME_ACTION: STATUS_ACTION,
     OUTCOME_ERROR: STATUS_ERROR,
-    OUTCOME_DONE: STATUS_DONE,
+    OUTCOME_CANDIDATE: STATUS_CANDIDATE,
+    OUTCOME_DONE: STATUS_CANDIDATE,
 }
 _ME_STATUSES = {STATUS_WAITING, STATUS_REVIEW, STATUS_ACTION, STATUS_ERROR}
 
@@ -113,7 +122,8 @@ def derive_status(
     until the thread moves on. A verdict older than the thread's last message
     is stale: the conversation continued (in chat, or by a scheduled turn),
     and a question the agent asked since must reach the inbox rather than stay
-    filed under Done. Last comes the marker the agent left. A thread without a
+    filed under Done. Last comes the marker the agent left — which can make an
+    item a completion candidate but never Done: only a human finishes work. A thread without a
     marker is *idle* — the agent stopped without saying whose move it is,
     which the console shows rather than guessing.
     """
@@ -158,6 +168,8 @@ def derive_bucket(status: str, *, snoozed: bool) -> str:
         return BUCKET_DONE
     if snoozed:
         return BUCKET_SNOOZED
+    if status == STATUS_CANDIDATE:
+        return BUCKET_CANDIDATE
     if status in _ME_STATUSES:
         return BUCKET_ME
     if status == STATUS_TODO:

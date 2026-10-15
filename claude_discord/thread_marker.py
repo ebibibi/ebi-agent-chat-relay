@@ -30,12 +30,16 @@ DEFAULT_SPAWN_MARKER = "\U0001f916"  # 🤖
 # Prepended to the thread that did the spawning, in front of its own name.
 DEFAULT_PARENT_MARKER = "\U0001f333"  # 🌳
 
-# Prepended when the agent reports the thread's work finished (safe to close).
+# Prepended when a human closed the thread's work. Only a human sets it.
 DEFAULT_DONE_MARKER = "\u2705"  # ✅
+# Prepended when the agent believes the work is finished. A proposal, not a
+# verdict: the thread stays listed until a human confirms it.
+DEFAULT_CANDIDATE_MARKER = "\U0001f3c1"  # 🏁
 
 SPAWN_MARKER_ENV_VAR = "CCDB_SPAWN_THREAD_MARKER"
 PARENT_MARKER_ENV_VAR = "CCDB_SPAWN_PARENT_MARKER"
 DONE_MARKER_ENV_VAR = "CCDB_DONE_THREAD_MARKER"
+CANDIDATE_MARKER_ENV_VAR = "CCDB_CANDIDATE_THREAD_MARKER"
 WAITING_MARKER_ENV_VAR = "CCDB_WAITING_THREAD_MARKER"
 ERROR_MARKER_ENV_VAR = "CCDB_ERROR_THREAD_MARKER"
 REVIEW_MARKER_ENV_VAR = "CCDB_REVIEW_THREAD_MARKER"
@@ -55,6 +59,7 @@ DEFAULT_SCHEDULED_MARKER = "\U000023f0"  # ⏰
 
 # How the last turn ended. At most one applies: each describes whose move it is.
 OUTCOME_DONE = "done"
+OUTCOME_CANDIDATE = "candidate"
 OUTCOME_WAITING = "waiting"
 OUTCOME_REVIEW = "review"
 OUTCOME_ACTION = "action"
@@ -96,6 +101,11 @@ def done_marker() -> str:
     return _marker(DONE_MARKER_ENV_VAR, DEFAULT_DONE_MARKER)
 
 
+def candidate_marker() -> str:
+    """Marker for a thread the agent believes finished, awaiting a human's confirmation."""
+    return _marker(CANDIDATE_MARKER_ENV_VAR, DEFAULT_CANDIDATE_MARKER)
+
+
 def scheduled_marker() -> str:
     """Marker for a thread a scheduled task will post into later."""
     return _marker(SCHEDULED_MARKER_ENV_VAR, DEFAULT_SCHEDULED_MARKER)
@@ -124,6 +134,7 @@ def error_marker() -> str:
 def _outcome_markers() -> dict[str, str]:
     return {
         OUTCOME_DONE: done_marker(),
+        OUTCOME_CANDIDATE: candidate_marker(),
         OUTCOME_WAITING: waiting_marker(),
         OUTCOME_REVIEW: review_marker(),
         OUTCOME_ACTION: action_marker(),
@@ -338,11 +349,11 @@ def split_marker_tags(name: str) -> tuple[str, str]:
     the two halves — which is the point: re-titling a thread must not be the
     moment its lineage quietly disappears from the channel list.
 
-    A leading outcome marker (done, waiting, review, action, error) is dropped, not returned:
-    a retitle only happens on a human's turn, and a thread someone is talking
-    in again has moved past how its last turn ended.  A scheduled marker is
-    kept, leading the tags: the task is still waiting whatever the thread is
-    called now.
+    A leading outcome marker (done, candidate, waiting, review, action, error) is
+    dropped, not returned: a retitle only happens on a human's turn, and a thread
+    someone is talking in again has moved past how its last turn ended.  A
+    scheduled marker is kept, leading the tags: the task is still waiting
+    whatever the thread is called now.
     """
     _, scheduled, rest = _split_status(name)
     tags: list[str] = [scheduled_marker()] if scheduled else []

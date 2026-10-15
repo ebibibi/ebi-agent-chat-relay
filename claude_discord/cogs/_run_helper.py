@@ -150,15 +150,15 @@ def _truncate_result(content: str) -> str:
 
 
 def _build_done_marker_section(config: RunConfig) -> str | None:
-    """Tell the agent how to signal that this thread can be closed.
+    """Tell the agent how to propose that this thread can be closed.
 
-    Only offered where it can work: a surface that renames threads, a backend
-    that exposes the control-plane API, and a done marker the operator has
-    not disabled.
+    The agent proposes; only a human closes. Only offered where it can work: a
+    surface that renames threads, a backend that exposes the control-plane API,
+    and a candidate marker the operator has not disabled.
     """
-    from ..thread_marker import done_marker
+    from ..thread_marker import candidate_marker
 
-    marker = done_marker()
+    marker = candidate_marker()
     if not marker or not config.surface.capabilities.supports_thread_rename:
         return None
     if getattr(config.runner, "api_port", None) is None:
@@ -168,9 +168,11 @@ def _build_done_marker_section(config: RunConfig) -> str | None:
         "When the user's request in this thread is fully finished — changes committed "
         "and pushed/merged, pipelines green, deliverables sent, nothing waiting on you "
         "or on the user — end your final reply by telling the user, in their language, "
-        "that this thread can be closed, and mark it:\n"
-        '  `curl -s -X POST "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/done"`\n'
-        f"This prefixes the thread title with {marker}. Do NOT mark it when you are asking "
+        "that this thread looks ready to close, and mark it as a completion candidate:\n"
+        '  `curl -s -X POST "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/candidate"`\n'
+        f"This prefixes the thread title with {marker}. It is only a proposal: the thread "
+        "stays listed until the user confirms it done, which only the user can do. Do NOT "
+        "mark it when you are asking "
         "a question, waiting for a pipeline or a decision, or leaving work pending. "
         "If the user replies later, the marker is removed automatically.\n"
         "Customer replies: Preparing a draft is NOT sending it to the customer. "
