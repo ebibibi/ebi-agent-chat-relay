@@ -43,7 +43,7 @@ vm.runInContext(fs.readFileSync('claude_discord/console/static/paste.js', 'utf8'
   });
   context.window.ConsoleSlash = { run: async () => false };
   const app = fs.readFileSync('claude_discord/console/static/app.js', 'utf8');
-  vm.runInContext(app.slice(app.indexOf('async function sendReply('), app.indexOf('async function startItem(')), context);
+  vm.runInContext(app.slice(app.indexOf('const isSendKey'), app.indexOf('async function startItem(')), context);
   vm.runInContext(app.slice(app.indexOf('async function capture('), app.indexOf('// Captured work goes')), context);
   const box = { value: text, focus: () => {} };
   await context.sendReply('item', box);

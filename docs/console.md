@@ -213,7 +213,7 @@ the tree included, and filtering does not bring them back. The Done list always 
 choice is remembered per browser.
 
 `j`/`k` move, `Enter` opens, `Esc` closes, `e` done, `1`–`4` priority P0–P3, `s` snooze until
-tomorrow 09:00, `c` write down work (the first line is the title; `Shift+Enter` adds note lines), `r` reply, `/` filter, `h` hide/show done, `p` pin, `g` then `f`/`i`/`c`/`a`/`u`/`t`/`w`/`d` switches
+tomorrow 09:00, `c` write down work (the first line is the title, further lines become a note; `Ctrl+Enter` adds it — in every text box `Enter` is a newline and `Ctrl+Enter` sends), `r` reply, `/` filter, `h` hide/show done, `p` pin, `g` then `f`/`i`/`c`/`a`/`u`/`t`/`w`/`d` switches
 view, `?` help. URLs carry the view and the open item (`/#me/t1234`), so a link can point at a
 single item.
 

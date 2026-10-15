@@ -52,8 +52,9 @@
   .list-head .filter { order: 5; flex: 1 0 100%; min-width: 0; font-size: 16px; min-height: 40px; }
   .bulk-bar[data-active="false"] { display: none; }
   .capture { padding: 8px; display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 4px 6px; }
-  .capture #capture-input { grid-column: 1; }
-  .capture #capture-attach { grid-column: 2; }
+  .capture #capture-input { grid-column: 1; grid-row: span 2; }
+  .capture #capture-attach, .capture #capture-send { grid-column: 2; }
+  .capture #capture-send { min-height: 40px; padding: 0; }
   .capture .autostart { grid-column: 1 / -1; padding-top: 0; }
   .capture-tray { grid-column: 1 / -1; }
   .capture .attach { min-width: 44px; min-height: 40px; }

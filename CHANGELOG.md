@@ -15,11 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/candidate`) now marks a 🏁 completion candidate instead of ✅ Done. Candidates stay listed in
   the console's new "Done?" view until a human confirms them; legacy ✅ titles without a human
   verdict are treated as candidates too (#1048).
+- Console: every text box now behaves the same — `Enter` inserts a newline and `Ctrl+Enter`
+  (`Cmd+Enter` on macOS) sends. The capture box gains a Send button for touch devices (#1056).
 
 ### Added
 
 - Console status chips: narrow any list to the statuses you pick (your reply, to review, your
   task, completion candidates, …) (#1048).
+
+### Fixed
+
+- Console: repeated `Ctrl+Enter` or Send clicks no longer post the same reply or capture twice
+  while the first send is in flight (#1056).
 
 ## [5.1.0] - 2026-10-15
 
