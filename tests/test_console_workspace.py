@@ -210,3 +210,31 @@ def test_binding_resolves_each_working_directory_once(notes, monkeypatch):
     bound = Workspace(notes).bind_items(items)
     assert {i["workspace_path"] for i in bound} == {"Work/Client/Website"}
     assert len(calls) == 1
+
+
+def test_a_guessed_binding_is_marked_and_an_explicit_one_is_not(notes):
+    items = [
+        {"id": "a", "working_dir": str(notes / "02_Contexts/Work/Client/Website")},
+        {"id": "b", "workspace_path": "Work/Client"},
+        {"id": "c", "title": "Unrelated"},
+    ]
+    bound = Workspace(notes).bind_items(items)
+    assert [i.get("workspace_by") for i in bound] == ["auto", None, None]
+
+
+def test_records_give_tasks_and_when_the_records_last_changed(notes):
+    import os
+
+    ws = Workspace(notes)
+    entries = ws.snapshot()["entries"]
+    project = notes / "02_Contexts/Work/Client/Website"
+    os.utime(project / "status.md", (1_700_000_000, 1_700_000_000))
+    (project / "log.md").write_text("# log\n", encoding="utf-8")
+    os.utime(project / "log.md", (1_800_000_000, 1_800_000_000))
+    records = ws.records(entries)
+    website = records["Work/Client/Website"]
+    assert [t["text"] for t in website["tasks"]] == ["🤖 Ship it #auto", "Old task"]
+    # The newer of the task file and the log: either one means the work was recorded.
+    assert website["updated_at"] == "2027-01-15T08:00:00Z"
+    assert records["Work/Client"]["updated_at"] is not None
+    assert ws.bind_items([{"id": "x"}], entries)[0]["workspace_path"] is None

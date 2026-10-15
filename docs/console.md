@@ -50,6 +50,31 @@ Each thread also shows how full its context window was after its last turn — �
 on the row (amber from 70%, red from 90%), used / window tokens in the detail header — so a
 thread close to compaction is visible before it happens.
 
+## The Focus guide
+
+A card at the top of Focus turns the ranking into advice. It is computed from data the board
+already has — status, priority, deadline, lineage and the triage guesses — with no extra
+model call, so it costs nothing per poll and gives the same answer twice
+(`claude_discord/console/guide.py`).
+
+- **Your next move** — the top item that fits where you are, with the reasons it ranks
+  there (overdue, due within 24 h, high priority, the agent asked you, a deliverable to
+  review, a step only you can do, the last turn failed), the next step and, when an agent
+  stopped to hand it over, a note that answering lets the agent carry on.
+- **Nothing needs you** — when no item is yours to act on now, the card says so and shows
+  how much is running, waiting and awaiting a "Done?" confirmation, instead of an empty list.
+- **Decide together** — two or more decisions in one family are gathered under the root
+  thread, so one sitting settles them all.
+- **Records out of step** (only with an [Ebi Workspace](#optional-ebi-workspace)) — a
+  finished or candidate thread from the last three days whose Workspace task with the same
+  text is still open, or whose project records (`status.md` / `single-actions.md` and
+  `log.md`) were last changed before the conversation ended. The second check needs a
+  binding a person chose; a binding guessed from the working directory is too loose to
+  accuse a record of being stale.
+
+Everything except the last part works without a Workspace; without one the board sends
+`guide.drift: null` and the card leaves that section out.
+
 ## Automatic triage
 
 Nobody fills in priority and due date for every thread, so the console asks a fast model
@@ -388,7 +413,7 @@ Endpoints need authentication unless marked *(no sign-in)*. Every method except 
 | GET | `/console/api/passkeys` | Registered passkeys (names and dates, never key material) |
 | POST | `/console/api/passkeys/invite` | A single-use code for adding another device |
 | DELETE | `/console/api/passkeys/{id}` | Remove a passkey and its sessions |
-| GET | `/console/api/board` | Every item, sorted for triage, plus slot usage |
+| GET | `/console/api/board` | Every item, sorted for triage, plus slot usage and the Focus `guide` |
 | GET | `/console/api/usage` | Per backend (or pool profile): `available`, `unavailable_until`, and `windows[]` of `{type, utilization, resets_at, status, reset}` |
 | GET | `/console/api/items/{id}/messages?limit=50` | The conversation's recent messages (max 100), each with `kind`, `embeds` and `attachments` |
 | POST | `/console/api/items` | Write down work: `{title, note?, priority?, due_at?, parent_id?, project?, start?}`. With `start: true` it is handed to an agent in the same request; if that fails the item is kept and the response carries `start_error` |

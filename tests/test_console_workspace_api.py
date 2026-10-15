@@ -98,3 +98,12 @@ async def test_run_original_task_checks_revision_and_keeps_it_open_until_work_su
     assert (
         await env.client.post("/console/api/workspace/run", json=payload, headers=WRITE)
     ).status == 409
+
+
+async def test_board_guide_checks_records_only_with_a_workspace(env, notes):
+    env.console.workspace = Workspace(None)
+    board = await (await env.client.get("/console/api/board", headers=AUTH)).json()
+    assert board["guide"]["drift"] is None
+    env.console.workspace = Workspace(notes)
+    board = await (await env.client.get("/console/api/board", headers=AUTH)).json()
+    assert board["guide"]["drift"] == []

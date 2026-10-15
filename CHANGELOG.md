@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Console: a guide card on Focus — the next move with its reasons and whether answering lets
+  an agent resume, decisions in one family gathered together, an explicit "nothing needs you
+  now", and (with Ebi Workspace) finished threads whose task or records were not updated.
+  Deterministic, no extra model calls; works without a Workspace (#1077).
+
 ### Changed
 
 - **Only a human finishes work.** An agent's `POST /api/threads/{id}/done` (and the new

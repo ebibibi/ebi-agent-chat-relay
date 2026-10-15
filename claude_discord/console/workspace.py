@@ -8,7 +8,7 @@ import os
 import re
 import tempfile
 import threading
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -327,10 +327,17 @@ class Workspace:
         ]
         return repository_matches[0] if len(repository_matches) == 1 else None
 
-    def bind_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        entries = self.snapshot()["entries"]
-        paths = {e["path"] for e in entries}
-        repositories = {e["path"]: self._repository(e["path"]) for e in entries}
+    def bind_items(
+        self, items: list[dict[str, Any]], entries: list[dict[str, Any]] | None = None
+    ) -> list[dict[str, Any]]:
+        """Copies of *items* with ``workspace_path`` filled in where it can be inferred.
+
+        An inferred path is marked ``workspace_by = "auto"`` so a reader can tell a
+        guess from a binding a person chose. *entries* reuses a snapshot already taken.
+        """
+        known: list[dict[str, Any]] = entries if entries is not None else self.snapshot()["entries"]
+        paths = {e["path"] for e in known}
+        repositories = {e["path"]: self._repository(e["path"]) for e in known}
         result = [dict(i) for i in items]
         by_id = {i["id"]: i for i in result}
         # Hundreds of items share a few working directories; bind each one once.
@@ -341,10 +348,10 @@ class Workspace:
                 continue
             cwd = item.get("working_dir")
             if cwd and cwd not in by_cwd:
-                by_cwd[cwd] = self._bind_directory(Path(cwd).resolve(), entries, repositories)
+                by_cwd[cwd] = self._bind_directory(Path(cwd).resolve(), known, repositories)
             item["workspace_path"] = by_cwd[cwd] if cwd else None
             if not item["workspace_path"] and item.get("project"):
-                matches = [e["path"] for e in entries if item["project"] in (e["path"], e["name"])]
+                matches = [e["path"] for e in known if item["project"] in (e["path"], e["name"])]
                 if len(matches) == 1:
                     item["workspace_path"] = matches[0]
         for item in result:
@@ -354,7 +361,35 @@ class Workspace:
                 seen.add(parent["id"])
                 item["workspace_path"] = parent.get("workspace_path")
                 parent = by_id.get(parent.get("parent_id"))
+        for item, original in zip(result, items, strict=True):
+            if item["workspace_path"] and original.get("workspace_path") not in paths:
+                item["workspace_by"] = "auto"
         return result
+
+    def records(self, entries: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        """Per entry: its tasks and when its records last changed (task file or log.md).
+
+        The Focus guide compares this with a thread's last activity to notice work
+        that finished in conversation but was never written back.
+        """
+        out: dict[str, dict[str, Any]] = {}
+        for entry in entries:
+            try:
+                directory = self._directory(entry["path"])
+                stamps = [
+                    (directory / name).stat().st_mtime
+                    for name in (entry["file"], "log.md")
+                    if (directory / name).is_file() and not (directory / name).is_symlink()
+                ]
+            except (WorkspaceError, OSError):
+                continue
+            updated = (
+                datetime.fromtimestamp(max(stamps), UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+                if stamps
+                else None
+            )
+            out[entry["path"]] = {"tasks": entry["tasks"], "updated_at": updated}
+        return out
 
     def prompt(self, path: str, text: str) -> str:
         entry = self.entry(path)

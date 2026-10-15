@@ -52,6 +52,55 @@ window.ConsoleFocus = (() => {
         onclick: () => window.ConsolePlaces.manage(), text: `⚙ ${T.place_manage}` }));
   }
 
+  // The guide card above the list (server: guide.py): the next move and why, decisions to
+  // take together, a plain "nothing needs you" when that is true, and — only with an Ebi
+  // Workspace — finished work whose records were not updated. Without a Workspace the
+  // server sends drift: null and that part simply does not exist.
+  let guide = null;
+  const setGuide = (next) => { guide = next; };
+  const link = (id, label, cls) => h("button", { type: "button", class: "guide-link" + (cls ? " " + cls : ""),
+    onclick: () => openItem(id), text: label });
+
+  function nextMove(g, byId) {
+    const pick = g.next.find((n) => !elsewhere(byId.get(n.id) || n));
+    if (!pick) {
+      const counts = T.guide_counts(g.counts);
+      return [
+        h("div", { class: "guide-calm", text: g.calm ? T.guide_calm : T.guide_elsewhere(g.next.length) }),
+        counts ? h("div", { class: "dim", text: counts }) : null,
+        g.calm && (g.counts.running || g.counts.waiting) ? h("div", { class: "dim", text: T.guide_calm_more }) : null,
+      ];
+    }
+    const reasons = pick.reasons.map((r) => T.guide_reasons[r]).filter(Boolean);
+    return [
+      link(pick.id, pick.title || T.guide_open, "guide-next"),
+      reasons.length ? h("div", { class: "guide-reasons" },
+        ...reasons.map((r) => h("span", { class: "tag", text: r }))) : null,
+      pick.next_step ? h("div", { class: "next", text: `→ ${pick.next_step}` }) : null,
+      pick.why ? h("div", { class: "dim", text: pick.why }) : null,
+      pick.unblocks ? h("div", { class: "guide-unblocks", text: T.guide_unblocks }) : null,
+    ];
+  }
+
+  function section(title, entries) {
+    if (!entries.length) return null;
+    return h("div", { class: "guide-section" }, h("div", { class: "guide-head", text: title }),
+      h("ul", { class: "guide-list" }, ...entries.map((e) => h("li", {}, e))));
+  }
+
+  function card(items) {
+    if (!guide || !Array.isArray(guide.next)) return null;
+    const byId = new Map(items.map((i) => [i.id, i]));
+    const batches = (guide.batches || []).map((b) => link(b.root_id, T.guide_batch(b.title || b.root_id, b.items.length)));
+    const drift = (guide.drift || []).map((d) => h("span", {}, link(d.id, d.title || d.id),
+      h("span", { class: "dim", text: ` — ${d.kind === "task_open" ? T.guide_task_open(d.task) : T.guide_record_stale}` })));
+    return h("li", { class: "guide-card" },
+      h("div", { class: "guide-head", text: T.guide_title }),
+      ...nextMove(guide, byId),
+      section(T.guide_batches, batches),
+      section(T.guide_drift, drift));
+  }
+
   function rows(items) {
     const live = items.filter(ranked);
     const now = live.filter((i) => i.actionable !== false && !elsewhere(i)).sort(byImportance);
@@ -59,6 +108,8 @@ window.ConsoleFocus = (() => {
     const later = live.filter((i) => i.actionable === false)
       .sort((a, b) => readyAt(a).localeCompare(readyAt(b)) || byImportance(a, b));
     const out = [];
+    const guideCard = card(items);
+    if (guideCard) out.push({ node: guideCard });
     out.push({ node: placeBar() });
     const add = (label, list) => {
       if (list.length) out.push({ group: label }, ...list.map((item) => ({ item, depth: 0 })));
@@ -111,5 +162,5 @@ window.ConsoleFocus = (() => {
       ai.next_step ? h("span", { text: `→ ${ai.next_step}` }) : null);
   }
 
-  return { rows, count, note, drawerLine, placeTag };
+  return { rows, count, note, drawerLine, placeTag, setGuide };
 })();

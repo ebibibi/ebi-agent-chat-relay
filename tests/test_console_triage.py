@@ -24,6 +24,7 @@ from claude_discord.console.triage import (
     triage_env,
 )
 from claude_discord.console.work_repo import WorkItemRepository
+from claude_discord.console.workspace import Workspace
 
 NOW = datetime(2026, 10, 12, 3, 0, tzinfo=UTC)
 TOKEN = "t" * 40
@@ -237,6 +238,7 @@ async def test_board_shows_guesses_and_a_human_edit_pins_them(tmp_path) -> None:
     console = ConsoleServer(
         api, work, ConsoleAuthenticator(ConsoleAuthConfig(token=TOKEN)), port=0, triage=triage
     )
+    console.workspace = Workspace(None)
     auth = {"Authorization": f"Bearer {TOKEN}"}
     write = {**auth, "X-Console-Request": "1"}
     async with TestClient(TestServer(console.app)) as client:
@@ -245,8 +247,18 @@ async def test_board_shows_guesses_and_a_human_edit_pins_them(tmp_path) -> None:
         await triage.save(
             item_id, TriageResult(0, None, "期限が近い", "書類を出す"), basis="b", model="haiku"
         )
-        [item] = (await (await client.get("/console/api/board", headers=auth)).json())["items"]
+        board = await (await client.get("/console/api/board", headers=auth)).json()
+        [item] = board["items"]
         assert (item["priority"], item["priority_by"], item["focus"] is not None) == (0, "ai", True)
+        # The guide explains the top of Focus; drift is absent without a Workspace.
+        [first] = board["guide"]["next"]
+        assert (first["id"], first["reasons"], first["next_step"]) == (
+            item_id,
+            ["priority"],
+            "書類を出す",
+        )
+        assert board["guide"]["calm"] is False
+        assert board["guide"]["drift"] is None
         assert await console.triage_messages(item) == [("note", "")]
 
         await client.patch(f"/console/api/items/{item_id}", json={"priority": 2}, headers=write)
