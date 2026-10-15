@@ -402,3 +402,15 @@ button.family-link:hover { color: var(--accent); border-color: var(--accent); }
 .capture-status:empty { display: none; }
 .capture[aria-busy="true"] { opacity: .8; }
 .capture[aria-busy="true"] textarea { cursor: progress; }
+/* The Focus guide card: the next move and why, batched decisions, record drift. */
+.guide-card { list-style: none; margin: 10px 14px 4px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--ai) 45%, var(--line));
+  border-radius: 10px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.guide-head { font-size: 12px; font-weight: 700; color: var(--dim); }
+.guide-link { background: none; border: 0; padding: 0; color: var(--text); text-align: left; cursor: pointer; font: inherit; }
+.guide-link:hover, .guide-link:focus-visible { text-decoration: underline; }
+.guide-link.guide-next { font-size: 15px; font-weight: 700; }
+.guide-reasons { display: flex; flex-wrap: wrap; gap: 4px; }
+.guide-unblocks { color: var(--ai); font-size: 12px; }
+.guide-calm { font-weight: 700; }
+.guide-section { margin-top: 6px; }
+.guide-list { margin: 2px 0 0; padding-left: 18px; }

@@ -45,6 +45,7 @@ from .commands import (
 )
 from .conversations import ConversationRepository
 from .files import resolve_file
+from .guide import build_guide
 from .logsafe import q as _q
 from .messages import serialize_message, with_kind
 from .oidc import OidcClient, OidcConfig, provider_name
@@ -388,8 +389,9 @@ class ConsoleServer:
 
     async def board(self, request: web.Request) -> web.Response:
         items = await self._board_items()
+        records = None
         if self.workspace.root is not None:
-            items = await asyncio.to_thread(self.workspace.bind_items, items)
+            items, records = await asyncio.to_thread(self._bind_workspace, items)
         if self.triage is not None:
             try:
                 items = apply_triage(items, await self.triage.all())
@@ -400,10 +402,18 @@ class ConsoleServer:
             {
                 "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "items": items,
+                "guide": build_guide(items, records=records),
                 "slots": self._slots(),
                 "places": await self._place_list(items),
             }
         )
+
+    def _bind_workspace(
+        self, items: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+        """Bind items to Workspace entries and read their records, from one snapshot."""
+        entries = self.workspace.snapshot()["entries"]
+        return self.workspace.bind_items(items, entries), self.workspace.records(entries)
 
     # -- places ------------------------------------------------------------
     async def _place_list(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -22,6 +22,13 @@ const I18N = {
     slots_down: "Allow one fewer at once", slots_set: (n) => `Up to ${n} at once`, pinned_group: "📌 Working on now", status_filter: "Status:", status_all: "All", pin: "Pin", unpin: "Pinned",
     pin_hint: "Pin as what you are working on now; pinned threads lead every list (p)", hide_done_off: "✅ Showing done", hide_done_on: "✅ Done hidden",
     hide_done_hint: "Hide or show finished items in every list (h)", hide_done_in_done: "The Done list always shows finished items", context_hint: (d) => `Context window used by the last turn: ${d}`, due_over: "overdue", due_in: (x) => `in ${x}`, u_min: "m", u_hour: "h", u_day: "d", focus_ready: "can do now", focus_from: (d) => `from ${d}`, ai_guess: "AI guess", ai_set: "set by AI",
+    guide_title: "🧭 Your next move", guide_unblocks: "▶ Once you answer, the agent carries on", guide_open: "Open",
+    guide_reasons: { overdue: "overdue", due_soon: "due within 24h", priority: "high priority", asked: "the agent asked you", review: "a deliverable to review", action: "a step only you can do", error: "the last turn failed" },
+    guide_calm: "🌿 Nothing needs you right now.", guide_calm_more: "You can stop here — what remains is moving on its own.",
+    guide_counts: (c) => [c.running && `${c.running} running`, c.waiting && `${c.waiting} waiting`, c.candidate && `${c.candidate} to confirm done`].filter(Boolean).join(" · "),
+    guide_elsewhere: (n) => `Nothing to do here; ${n} item(s) need another place.`,
+    guide_batches: "🧺 Decide together", guide_batch: (t, n) => `${t} — ${n} decisions`,
+    guide_drift: "🔍 Records out of step", guide_task_open: (t) => `finished, but the Workspace task "${t}" is still open`, guide_record_stale: "finished after its project records were last updated",
     me: "Inbox", candidate: "Done?", ai: "Running", todo: "To do", idle: "Idle", recent: "Recent", tree: "Tree", snoozed: "Snoozed", done: "Done",
     filter: "Filter…", capture: "+ Write down work, Ctrl+Enter to add (c) — lines after the first become a note", capture_ai: "+ Write down work, Ctrl+Enter hands it to AI (c) — lines after the first become a note",
     autostart: "AI starts right away", empty: "Nothing here. 🎉",
@@ -64,6 +71,13 @@ const I18N = {
     slots_down: "同時に動かせる数を1つ減らす", slots_set: (n) => `同時実行の上限を ${n} にしました`, pinned_group: "📌 いまやってる", status_filter: "ステータス：", status_all: "すべて", pin: "ピン留め", unpin: "ピン中",
     pin_hint: "いまやってる目印。ピン留めしたスレッドはどの一覧でも一番上に出ます（p）", hide_done_off: "✅ 完了も表示", hide_done_on: "✅ 完了を隠す中",
     hide_done_hint: "完了したタスクを全部の一覧で隠す／表示する（h）", hide_done_in_done: "「完了」の一覧では常に表示します", context_hint: (d) => `直近のターンで使ったコンテキスト：${d}`, due_over: "超過", due_in: (x) => `あと${x}`, u_min: "分", u_hour: "時間", u_day: "日", focus_ready: "今すぐできる", focus_from: (d) => `${d}〜`, ai_guess: "AIの見立て", ai_set: "AIが推定",
+    guide_title: "🧭 今やる一手", guide_unblocks: "▶ 返すとAIが続きを進めます", guide_open: "開く",
+    guide_reasons: { overdue: "期限超過", due_soon: "24時間以内に期限", priority: "優先度が高い", asked: "AIが質問中", review: "成果物の確認待ち", action: "本人しかできない作業", error: "直前のターンが失敗" },
+    guide_calm: "🌿 今はあなたの操作は要りません。", guide_calm_more: "残りは自動で進んでいます。今日は終えて大丈夫。",
+    guide_counts: (c) => [c.running && `AI作業中 ${c.running}件`, c.waiting && `待ち ${c.waiting}件`, c.candidate && `完了確認 ${c.candidate}件`].filter(Boolean).join("・"),
+    guide_elsewhere: (n) => `ここでできることはありません。別の場所で ${n} 件。`,
+    guide_batches: "🧺 まとめて判断", guide_batch: (t, n) => `${t} — ${n}件の判断`,
+    guide_drift: "🔍 記録の食い違い", guide_task_open: (t) => `会話では完了、Workspaceのタスク「${t}」は未完了`, guide_record_stale: "会話のあとにプロジェクトの記録が更新されていません",
     me: "受信箱", candidate: "完了候補", ai: "実行中", todo: "やること", idle: "止まっている", recent: "更新順", tree: "ツリー", snoozed: "スヌーズ中", done: "完了",
     filter: "絞り込み…", capture: "＋ 思いついた仕事を書いて Ctrl+Enter（c）。2行目以降はメモ", capture_ai: "＋ 思いついた仕事を書いて Ctrl+Enter → AIが着手（c）。2行目以降はメモ",
     autostart: "AIがすぐ着手", empty: "ここには何もありません 🎉",
@@ -175,6 +189,7 @@ async function refresh() {
     window.ConsoleSlots.onBoard(data.items);
     state.slots = data.slots || {};
     state.places = data.places || [];
+    window.ConsoleFocus.setGuide(data.guide || null);
     if (!state.defaultsLoaded) { state.defaultsLoaded = true; window.ConsoleBackend.loadDefaults(); }
     state.lastSync = new Date();
     $("sync").className = "sync";
