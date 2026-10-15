@@ -1074,6 +1074,52 @@ class TestIngest:
         assert data["thread_id"] == "111222333"
         assert data["attachments_saved"] == 0
 
+    @pytest.fixture
+    async def work_repo(self, tmp_path):
+        from claude_discord.console.work_repo import WorkItemRepository
+
+        r = WorkItemRepository(str(tmp_path / "work.db"))
+        await r.init_db()
+        return r
+
+    @pytest.mark.asyncio
+    async def test_teams_reply_draft_lands_on_the_board_at_p0(
+        self, ingest_client: TestClient, work_repo
+    ) -> None:
+        """Someone in Teams waits for a reply draft: it starts at P0, not the default."""
+        ingest_client._api._console = MagicMock(work_repo=work_repo)  # type: ignore[attr-defined]
+        body = (
+            "Microsoft Teams のスレッドが、サーバー上に1発言1ファイルで同期されています。\n\n"
+            "このスレッドへの返信ドラフトを作成してください。"
+        )
+        resp = await ingest_client.post("/api/ingest", json={"content": body}, headers=self.AUTH)
+        assert resp.status == 201
+        item = await work_repo.get("t111222333")
+        assert item is not None
+        assert item.priority == 0
+
+    @pytest.mark.asyncio
+    async def test_other_ingest_keeps_the_default_priority(
+        self, ingest_client: TestClient, work_repo
+    ) -> None:
+        """A monthly report sweep is not a reply someone is waiting on."""
+        ingest_client._api._console = MagicMock(work_repo=work_repo)  # type: ignore[attr-defined]
+        body = "Microsoft Teams の全チャット・全チャネルを、1発言1ファイルで同期しました。"
+        resp = await ingest_client.post("/api/ingest", json={"content": body}, headers=self.AUTH)
+        assert resp.status == 201
+        assert await work_repo.get("t111222333") is None
+
+    @pytest.mark.asyncio
+    async def test_reply_draft_without_console_still_spawns(
+        self, ingest_client: TestClient
+    ) -> None:
+        resp = await ingest_client.post(
+            "/api/ingest",
+            json={"content": "[Teams Channel Exporter] reply please"},
+            headers=self.AUTH,
+        )
+        assert resp.status == 201
+
     @pytest.mark.asyncio
     async def test_ingest_missing_content_returns_400(self, ingest_client: TestClient) -> None:
         resp = await ingest_client.post("/api/ingest", json={}, headers=self.AUTH)

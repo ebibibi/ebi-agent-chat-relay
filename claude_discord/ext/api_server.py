@@ -42,6 +42,7 @@ from ..discord_ui.file_sender import send_file_blobs
 from ..lounge import length_hint
 from ..relay import MODE_INTERRUPT, MODE_QUEUE, VALID_MODES, RelayGuard, build_relay_prompt
 from ..session_view import STATE_HISTORY, STATE_RUNNING, build_session_views
+from ..teams_exporter import REPLY_DRAFT_PRIORITY, is_reply_draft_request
 from ..thread_marker import (
     MAX_THREAD_NAME_LENGTH,
     OUTCOME_ACTION,
@@ -2457,6 +2458,9 @@ class ApiServer:
         if result_id is not None and self.ingest_repo is not None:
             await self.ingest_repo.set_thread(result_id, str(thread.id), thread.name)
 
+        if is_reply_draft_request(content):
+            await self._prioritize_reply_draft(thread.id)
+
         # Pull the owner into the thread and ping them on start, so the
         # unattended session is visible and they're notified again on completion
         # (via the result sink). Only when a session actually started.
@@ -2486,6 +2490,26 @@ class ApiServer:
             # Poll GET /api/ingest/{result_id} to retrieve the final reply.
             response["result_id"] = result_id
         return web.json_response(response, status=201)
+
+    async def _prioritize_reply_draft(self, thread_id: int) -> None:
+        """Put a Teams reply-draft thread on the console board at P0.
+
+        Someone in Teams is waiting for this answer, so it outranks the rest of
+        the board from the start. It is written as the item's own priority, the
+        way a person sets one: triage leaves it alone, and the human can still
+        lower it. Best effort — no console, no board to rank on.
+        """
+        console = self._console
+        if console is None:
+            return
+        from ..console.work_repo import thread_item_id
+
+        try:
+            await console.work_repo.update(
+                thread_item_id(thread_id), {"priority": REPLY_DRAFT_PRIORITY}
+            )
+        except Exception:
+            logger.warning("could not set the reply draft %d to P0", thread_id, exc_info=True)
 
     async def _ingest_add_owner(self, thread: discord.Thread) -> None:
         """Add the configured bot owner to an ingest thread (no-op if unset).
