@@ -18,10 +18,14 @@ window.ConsoleWorkspace = (() => {
     add:"追加", edit:"編集", save:"保存", cancel:"取消", run:"AIに実行", close:"閉じる", reload:"更新",
     newTask:"新しいタスク", use:"ここで仕事を始める", overview:"概要", empty:"タスクはありません",
     project:"プロジェクト", context:"コンテキスト", pending:"処理中…", threads:"関連する会話",
+    exclude:"🚫 表示しないノート", excludeCount:(n)=>`除外パターン ${n} 件`,
+    excludeHint:"ここに書いたフォルダやファイルは、Console の表示・検索・リンクから完全に外れます。1行に1パターン。「フォルダ名/」はどこにあっても、「02_Contexts/x/」は vault の先頭から、「*.private.md」はファイル名で一致します。隠しフォルダ（.obsidian など）は常に除外されます。",
   } : {title:"Ebi Workspace",pick:"Context / project",auto:"Associate automatically",tasks:"Tasks",
     add:"Add",edit:"Edit",save:"Save",cancel:"Cancel",run:"Run with AI",close:"Close",reload:"Refresh",
     newTask:"New task",use:"Start work here",overview:"Overview",empty:"No tasks",project:"Project",
-    context:"Context",pending:"Working…",threads:"Related conversations"};
+    context:"Context",pending:"Working…",threads:"Related conversations",
+    exclude:"🚫 Hidden notes",excludeCount:(n)=>`${n} pattern(s)`,
+    excludeHint:"Folders and files listed here never appear in the Console: not shown, searched or linked. One pattern per line. 'folder/' matches anywhere, '02_Contexts/x/' from the vault root, '*.private.md' by file name. Hidden folders (.obsidian …) are always excluded."};
   const entry = () => data.entries.find(e => e.path === browsing);
   const button = (text, onclick, cls="btn") => h("button", {type:"button",class:cls,text,onclick});
 
@@ -103,7 +107,8 @@ window.ConsoleWorkspace = (() => {
         i.title||i.id,()=>{hide();openItem(i.id);},"btn ws-related")));
     }
     panel.replaceChildren(h("div",{class:"ws-shell"},h("header",{class:"ws-head"},
-      h("h1",{text:l.title}),button(l.reload,load),button(l.close,hide)),h("div",{class:"ws-body"},menu,content)));
+      h("h1",{text:l.title}),button(l.exclude,()=>excludes(content)),button(l.reload,load),button(l.close,hide)),
+      h("div",{class:"ws-body"},menu,content)));
     content.scrollTop=old;
   }
   function onboarding() {
@@ -130,6 +135,25 @@ window.ConsoleWorkspace = (() => {
         h("h3",{text:ja?"すでにお持ちの場合":"Already have Ebi Workspace?"}),
         h("p",{text:ja?"Consoleを動かしている環境でWorkspaceをセットアップしてから、下のボタンで接続を確認してください。":"Set up Workspace in the environment running Console, then check the connection below."}),
         button(ja?"接続を再確認":"Check connection",load))));
+  }
+  // The owner's list of notes the Console must never show (vault.py); a plain text file.
+  async function excludes(content) {
+    const l=L();
+    try {
+      const data=await api("/workspace/exclude");
+      const area=h("textarea",{class:"ws-exclude-text",rows:12,spellcheck:"false","aria-label":l.exclude,value:data.text});
+      area.value=data.text;
+      const save=async()=>{
+        try {
+          const saved=await api("/workspace/exclude",{method:"PUT",body:{text:area.value}});
+          toast(`${T.saved} · ${l.excludeCount(saved.patterns.length)}`);
+        } catch(err){toast(err.message);}
+      };
+      content.replaceChildren(h("h2",{text:l.exclude}),h("p",{class:"dim",text:l.excludeHint}),
+        h("p",{class:"dim ws-exclude-file",text:data.file}),area,
+        h("div",{class:"ws-exclude-actions"},button(l.save,save,"btn primary"),button(l.cancel,draw)));
+      area.focus();
+    } catch(err){toast(err.message);}
   }
   async function overview(selected, content) {
     try {
