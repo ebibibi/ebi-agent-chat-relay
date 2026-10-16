@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Reserved restart no longer reports failure — and drops the queued runs and the requesting
+  thread's resume — when the restart command is killed by the restart itself
+  (`sudo systemctl restart` from inside the service exits with -15) (#1107).
+
 ### Added
 
 - Console: a guide card on Focus — the next move with its reasons and whether answering lets
