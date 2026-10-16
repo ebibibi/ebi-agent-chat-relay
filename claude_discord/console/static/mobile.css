@@ -20,9 +20,11 @@
   .mobile-tools input, .mobile-tools select { min-width: 0; max-width: 100%; font-size: 16px; }
   .msgs { padding: 8px; gap: 8px; overscroll-behavior-y: contain; overflow-anchor: none; }
   .msg { padding: 8px 10px; }
-  .reply { gap: 6px; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); background: var(--panel); }
-  .reply textarea { min-height: 44px; max-height: min(128px, calc(var(--mobile-height, 100dvh) * .24));
-    font-size: 16px; resize: none; padding: 8px; }
+  .reply { gap: 6px; padding: 6px 8px max(6px, env(safe-area-inset-bottom)); background: var(--panel); }
+  /* Three lines (line-height 1.5 + 8px padding + 1px border) even with the keyboard open. */
+  .reply textarea { --three-lines: calc(4.5em + 18px); min-height: var(--three-lines);
+    max-height: max(var(--three-lines), min(192px, calc(var(--mobile-height, 100dvh) * .24)));
+    flex: none; font-size: 16px; resize: none; padding: 8px; }
   .reply-side { display: contents; }
   .reply-side .attach-wrap { order: -1; flex: none; }
   .reply-side .btn { min-height: 44px; min-width: 48px; }
@@ -60,4 +62,8 @@
   .capture .attach { min-width: 44px; min-height: 40px; }
   .capture textarea { font-size: 16px; }
   .jump { min-height: 40px; right: 10px; bottom: 8px; }
+}
+/* Landscape phones: the conversation needs the height more than a third line does. */
+@media (max-width: 900px) and (max-height: 500px) {
+  .reply textarea { --three-lines: calc(3em + 18px); }
 }

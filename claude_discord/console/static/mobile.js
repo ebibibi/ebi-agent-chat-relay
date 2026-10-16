@@ -14,7 +14,10 @@ window.ConsoleMobile = (() => {
     const height = vv?.height || innerHeight;
     document.documentElement.style.setProperty('--mobile-height', `${height}px`);
     document.documentElement.style.setProperty('--mobile-top', `${vv?.offsetTop || 0}px`);
-    document.documentElement.classList.toggle('keyboard-open', innerHeight - height > 120);
+    // innerHeight shrinks with the visual viewport on some phones; the layout viewport does not.
+    const full = Math.max(innerHeight, document.documentElement.clientHeight);
+    const typing = matchMedia('(pointer: coarse)').matches && document.activeElement?.matches('textarea, input:not([type=checkbox], [type=radio], [type=button])');
+    document.documentElement.classList.toggle('keyboard-open', full - height > 120 || Boolean(typing));
     requestAnimationFrame(() => {
       if (messages?.isConnected) messages.scrollTop = bottom ? messages.scrollHeight : top;
     });
@@ -63,6 +66,8 @@ window.ConsoleMobile = (() => {
   window.addEventListener('resize', viewport);
   window.visualViewport?.addEventListener('resize', viewport);
   window.visualViewport?.addEventListener('scroll', viewport);
+  document.addEventListener('focusin', viewport);
+  document.addEventListener('focusout', () => setTimeout(viewport, 0));
   document.addEventListener('keydown', e => {
     if (narrow.matches && state.drawerOpen && e.key==='Escape') {
       e.preventDefault();e.stopImmediatePropagation();toggleDrawer();

@@ -10,6 +10,8 @@ for(const [width,height] of [[320,700],[390,844],[844,390]])test(`mobile reading
  await page.addInitScript(({width,height})=>{
   const vv=new EventTarget();Object.assign(vv,{height,width,offsetTop:0,offsetLeft:0,scale:1});
   Object.defineProperty(window,'visualViewport',{value:vv});
+  // Chrome on Android shrinks innerHeight with the visual viewport when the keyboard opens.
+  Object.defineProperty(window,'innerHeight',{get:()=>vv.height});
   window.keyboardViewport=(height,offsetTop=0)=>{Object.assign(vv,{height,offsetTop});vv.dispatchEvent(new Event('resize'));};
  },{width,height});
  const items=[{id:'t100',thread_id:'100',title:'A long mobile conversation with a manager',status:'idle',bucket:'idle'},
@@ -37,6 +39,9 @@ for(const [width,height] of [[320,700],[390,844],[844,390]])test(`mobile reading
  await page.evaluate(h=>window.keyboardViewport(h,30),keyboardHeight);
  await page.waitForTimeout(80);
  m=await metrics();assert.ok(m.reply.bottom<=keyboardHeight+31,JSON.stringify(m));assert.ok(m.messages.height>=90,JSON.stringify(m));
+ assert.ok(await page.evaluate(()=>document.documentElement.classList.contains('keyboard-open')),'keyboard detected');
+ const lines=height>500?3:2;// landscape keeps the conversation readable
+ assert.ok(await page.locator('#reply').evaluate((n,lines)=>n.offsetHeight>=lines*parseFloat(getComputedStyle(n).lineHeight)+18,lines),`${lines} lines while typing`);
  if(process.env.CONSOLE_SCREENSHOT_DIR)await page.screenshot({path:`${process.env.CONSOLE_SCREENSHOT_DIR}/keyboard-${width}.png`});
  await page.locator('#reply').fill('Draft line\n'.repeat(30));
  m=await metrics();assert.ok(m.reply.height<keyboardHeight*.48,JSON.stringify(m));assert.ok(m.messages.height>=80,JSON.stringify(m));
