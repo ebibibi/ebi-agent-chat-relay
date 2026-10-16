@@ -132,3 +132,95 @@ async def test_routes_are_authenticated_and_hide_excluded_notes(env, vault, tmp_
     )
     assert image.status == 200 and image.headers["Content-Type"] == "image/png"
     assert "sandbox" in image.headers["Content-Security-Policy"]
+
+
+# -- links -------------------------------------------------------------------------------
+
+
+def _write(root: Path, rel: str, text: str = "x\n") -> None:
+    (root / rel).parent.mkdir(parents=True, exist_ok=True)
+    (root / rel).write_text(text, encoding="utf-8")
+
+
+def test_wikilinks_ignore_code_aliases_headings_and_duplicates():
+    from claude_discord.console.vault import wikilinks
+
+    text = "[[A|alias]] [[B#Heading]] ![[pic.png]] [[A]]\n```\n[[Code]]\n```\n[[C^block]]"
+    assert wikilinks(text) == ["A", "B", "pic.png", "C"]
+
+
+def test_links_resolve_like_obsidian(vault, tmp_path):
+    from claude_discord.console.vault import NoteIndex
+
+    _write(vault, "A/Same.md")
+    _write(vault, "B/Same.md")
+    _write(vault, "B/deeper/Same.md")
+    _write(vault, "A/sub/Child.md")
+    _write(vault, "secret/Hidden.md")
+    v = Vault(vault, tmp_path / "exclude.txt")
+    v.save_excludes("secret/\n")
+    index = NoteIndex(v)
+    assert index.resolve("Idea")["path"] == "04_Knowledge/Idea.md"
+    assert index.resolve("04_Knowledge/Idea.md")["path"] == "04_Knowledge/Idea.md"
+    assert index.resolve("sub/Child", "A/x.md")["path"] == "A/sub/Child.md"
+    assert index.resolve("../A/sub/Child", "B/x.md")["path"] == "A/sub/Child.md"
+    assert index.resolve("Same", "B/x.md") == {"path": "B/Same.md", "candidates": []}
+    far = index.resolve("Same", "C/x.md")
+    assert far["path"] == "A/Same.md" and len(far["candidates"]) == 3
+    assert index.resolve("Same", "B/deeper/x.md")["path"] == "B/deeper/Same.md"
+    assert index.resolve("pic.png")["path"] == "99_Attachments/pic.png"
+    assert index.resolve("Hidden")["path"] is None
+    assert index.resolve("Diary")["path"] is None
+    assert index.resolve("Nothing")["path"] is None
+    assert index.search_names("idea") == ["04_Knowledge/Idea.md"]
+    assert "secret/Hidden.md" not in index.search_names("")
+
+
+def test_backlinks_follow_resolution_and_hide_excluded_sources(vault, tmp_path):
+    from claude_discord.console.vault import NoteIndex
+
+    _write(vault, "04_Knowledge/Other.md", "[[Idea]] and [[Idea#Part|again]]\n")
+    _write(vault, "secret/Leak.md", "[[Idea]]\n")
+    _write(vault, "X/Idea.md", "a different Idea\n")
+    _write(vault, "X/Near.md", "[[Idea]]\n")
+    v = Vault(vault, tmp_path / "exclude.txt")
+    v.save_excludes("secret/\n")
+    index = NoteIndex(v)
+    assert index.backlinks("04_Knowledge/Idea.md") == ["04_Knowledge/Other.md"]
+    assert index.backlinks("X/Idea.md") == ["X/Near.md"]
+
+
+async def test_note_route_resolves_links_and_backlinks_route(env, vault, tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    _write(vault, "04_Knowledge/Other.md", "Back to [[Idea]]\n")
+    env.console.workspace = Workspace(vault)
+    note = await (
+        await env.client.get(
+            "/console/api/workspace/note", headers=AUTH, params={"path": "04_Knowledge/Idea.md"}
+        )
+    ).json()
+    assert note["links"] == {"Other": "04_Knowledge/Other.md"}
+    back = await env.client.get(
+        "/console/api/workspace/backlinks", headers=AUTH, params={"path": "04_Knowledge/Idea.md"}
+    )
+    assert (await back.json())["backlinks"] == ["04_Knowledge/Other.md"]
+    names = await env.client.get("/console/api/workspace/notes", headers=AUTH, params={"q": "oth"})
+    assert (await names.json())["notes"] == ["04_Knowledge/Other.md"]
+    missing = await env.client.get(
+        "/console/api/workspace/backlinks", headers=AUTH, params={"path": "04_Knowledge/No.md"}
+    )
+    assert missing.status == 404
+
+
+def test_a_new_exclusion_applies_to_links_at_once(vault, tmp_path):
+    from claude_discord.console.vault import NoteIndex
+
+    _write(vault, "04_Knowledge/Other.md", "[[Idea]]\n")
+    v = Vault(vault, tmp_path / "exclude.txt")
+    index = NoteIndex(v)
+    assert index.resolve("Other")["path"] == "04_Knowledge/Other.md"
+    assert index.backlinks("04_Knowledge/Idea.md") == ["04_Knowledge/Other.md"]
+    v.save_excludes("04_Knowledge/Other.md\n")
+    assert index.resolve("Other")["path"] is None
+    assert index.backlinks("04_Knowledge/Idea.md") == []
+    assert "04_Knowledge/Other.md" not in index.search_names("other")

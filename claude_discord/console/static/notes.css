@@ -1,0 +1,41 @@
+/* Note viewer (notes.js): Obsidian-flavoured Markdown in a full-height panel. */
+.note-viewer { position:fixed; inset:0; z-index:55; background:#000a; padding:2vh 2vw; display:flex; justify-content:center; }
+.note-viewer[hidden] { display:none; }
+.note-shell { width:min(980px,100%); height:96vh; display:flex; flex-direction:column; background:var(--bg); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+.note-head { display:flex; gap:6px; align-items:center; padding:8px 12px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+.note-crumbs { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
+.note-crumb.last { font-weight:700; font-size:15px; }
+.note-body { flex:1; overflow:auto; padding:18px 26px 40px; line-height:1.65; overflow-wrap:anywhere; outline:none; }
+.note-body h1 { font-size:1.6em; margin:.6em 0 .4em; }
+.note-body h2 { font-size:1.35em; margin:1.1em 0 .4em; border-bottom:1px solid var(--line); padding-bottom:.2em; }
+.note-body h3 { font-size:1.15em; margin:1em 0 .3em; }
+.note-body table { border-collapse:collapse; margin:.6em 0; display:block; overflow-x:auto; }
+.note-body th, .note-body td { border:1px solid var(--line); padding:4px 8px; vertical-align:top; }
+.note-body pre { background:var(--panel); padding:10px; border-radius:6px; overflow:auto; }
+.note-body code { background:var(--panel); padding:0 4px; border-radius:4px; }
+.note-body pre code { padding:0; background:none; }
+.note-body blockquote { margin:.6em 0; padding:.2em 1em; border-left:3px solid var(--line); opacity:.9; }
+.note-body img.note-img { max-width:100%; border-radius:6px; }
+.note-body li > input[type=checkbox] { margin-right:4px; }
+.note-body a { color:var(--accent); }
+.note-body a.wikilink { text-decoration:none; border-bottom:1px dotted currentColor; }
+.note-body a.wikilink.unresolved { opacity:.6; border-bottom-style:dashed; }
+.note-props { font-size:12px; margin-bottom:10px; }
+.note-props summary { cursor:pointer; opacity:.75; }
+.note-props table { display:table; }
+.note-props th { text-align:left; opacity:.75; font-weight:600; }
+.callout { border-left:4px solid var(--accent); background:var(--panel); border-radius:6px; padding:.5em 1em; opacity:1; }
+.callout-title { display:block; font-weight:700; margin-bottom:.2em; text-transform:capitalize; }
+.callout-warning, .callout-caution, .callout-attention { border-left-color:#f59e0b; }
+.callout-danger, .callout-error, .callout-bug, .callout-failure { border-left-color:var(--err); }
+.callout-success, .callout-check, .callout-done { border-left-color:#22c55e; }
+.callout-question, .callout-help, .callout-faq { border-left-color:#a78bfa; }
+.note-embed { border:1px solid var(--line); border-radius:8px; padding:6px 14px; margin:.6em 0; }
+.note-embed-title { display:block; font-size:12px; margin-bottom:4px; }
+.note-backlinks { margin-top:2.5em; padding-top:.6em; border-top:1px solid var(--line); font-size:13px; }
+.note-backlinks h3 { font-size:13px; opacity:.8; }
+@media(max-width:640px) {
+  .note-viewer { padding:0; }
+  .note-shell { height:100dvh; border-radius:0; }
+  .note-body { padding:12px 14px 40px; }
+}

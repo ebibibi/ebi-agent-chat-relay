@@ -93,7 +93,9 @@ window.ConsoleWorkspace = (() => {
     if (selected) {
       content.append(h("h2",{text:selected.path}),h("p",{class:"dim",text:l[selected.kind]}),
         button(l.use,()=>{choose(selected.path);hide();$("capture-input").focus();}),
-        button(l.overview,()=>overview(selected,content)),h("h3",{text:l.tasks}));
+        button(l.overview,()=>{hide();window.ConsoleNotes.open(`02_Contexts/${selected.path}/${selected.kind==="project"?"overview.md":"AGENTS.md"}`);}),
+        selected.kind==="project"?button("status.md",()=>{hide();window.ConsoleNotes.open(`02_Contexts/${selected.path}/status.md`);}):null,
+        h("h3",{text:l.tasks}));
       const list=h("div",{class:"ws-tasks"});
       for(const task of selected.tasks) list.append(taskRow(selected,task));
       if(!selected.tasks.length) list.append(h("p",{text:l.empty}));

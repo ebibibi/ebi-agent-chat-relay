@@ -790,6 +790,8 @@ function fillMessages(container, { force = false, toBottom = false } = {}) {
 
 // ---------------------------------------------------------------- actions
 function syncHash() {
+  // The note viewer owns #note/… while it is open (notes.js).
+  if (location.hash.startsWith("#note/")) return;
   const target = "#" + state.view + (state.open ? "/" + state.open : "");
   if (location.hash !== target) history.replaceState(null, "", target);
 }
