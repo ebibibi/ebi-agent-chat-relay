@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Console: a long chat thread no longer hides files delivered a few turns earlier. The history
+  window is now counted in conversation messages instead of raw Discord messages, so hidden
+  activity (tool-call logs, footers) can no longer push them out; older history is read up to
+  500 messages and cached briefly so polling still costs one REST page (#1118).
 - Reserved restart no longer reports failure — and drops the queued runs and the requesting
   thread's resume — when the restart command is killed by the restart itself
   (`sudo systemctl restart` from inside the service exits with -15) (#1107).

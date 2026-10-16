@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+import discord
 from aiohttp import web
 
 from ..message_actions import message_actions
@@ -47,7 +48,7 @@ from .conversations import ConversationRepository
 from .files import resolve_file
 from .guide import build_guide
 from .logsafe import q as _q
-from .messages import serialize_message, with_kind
+from .messages import KIND_ACTIVITY, serialize_message, with_kind
 from .oidc import OidcClient, OidcConfig, provider_name
 from .passkey_store import PasskeyStore
 from .passkeys import PasskeyService
@@ -98,6 +99,16 @@ CSRF_HEADER = "X-Console-Request"
 MAX_REPLY_CHARS = 4000
 MAX_HISTORY = 100
 DEFAULT_HISTORY = 50
+#: How many raw Discord messages a chat thread's history may read to fill the
+#: window. The window counts conversation (human and agent) messages; activity
+#: such as tool-call logs is hidden by default and can outnumber them several
+#: times over, so reading only ``limit`` raw messages lost files delivered a
+#: few turns earlier. Each 100 is one Discord REST page.
+MAX_HISTORY_SCAN = 500
+#: Messages older than the newest page are reused this long. The client polls
+#: a running thread every few seconds; without this, a long thread would cost
+#: up to five REST pages per poll instead of one.
+HISTORY_OLDER_TTL_SECONDS = 60.0
 MAX_TRIAGE_MESSAGES = 20
 #: How long the archived-thread listing is reused. Listing archives is a REST
 #: call per channel; the board is polled every few seconds.
@@ -231,6 +242,8 @@ class ConsoleServer:
         #: The console's own conversations. Work started here lives in them,
         #: not in a chat thread; chat threads are still shown alongside.
         self.conversations = conversations
+        #: thread id -> (expiry, raw messages newest first); see _older_history.
+        self._older_cache: dict[int, tuple[float, list[Any]]] = {}
         self.sessions = host_session
         self.usage = usage
         self.auth = authenticator
@@ -560,19 +573,66 @@ class ConsoleServer:
         if err:
             return err
         try:
-            history = [m async for m in thread.history(limit=limit)]
+            messages = await self._history_window(thread, limit)
         except Exception as exc:
             logger.warning("console: history of %s failed: %s", thread.id, exc)
             return _error("could not read the thread", 502)
-        history.reverse()
-        return web.json_response(
-            {
-                "messages": [
-                    serialize_message(m, actions=message_actions.for_message(thread.id, m.id))
-                    for m in history
-                ]
-            }
+        return web.json_response({"messages": messages})
+
+    async def _history_window(self, thread: Any, limit: int) -> list[dict[str, object]]:
+        """The latest *limit* conversation messages, oldest first, with the activity between them.
+
+        The newest page is always read fresh. When it holds fewer than *limit*
+        conversation messages, older history is read (and briefly cached) up
+        to :data:`MAX_HISTORY_SCAN` raw messages in all.
+        """
+        page = MAX_HISTORY
+        newest = [m async for m in thread.history(limit=page)]
+        raw = newest
+        if len(newest) == page and self._count_conversation(newest, thread.id) < limit:
+            raw = newest + await self._older_history(thread, newest, page)
+        newest_first: list[dict[str, object]] = []
+        conversation = 0
+        for m in raw:
+            item = serialize_message(m, actions=message_actions.for_message(thread.id, m.id))
+            newest_first.append(item)
+            if item["kind"] != KIND_ACTIVITY:
+                conversation += 1
+                if conversation >= limit:
+                    break
+        newest_first.reverse()
+        return newest_first
+
+    @staticmethod
+    def _count_conversation(messages: list[Any], thread_id: int) -> int:
+        return sum(
+            serialize_message(m, actions=message_actions.for_message(thread_id, m.id))["kind"]
+            != KIND_ACTIVITY
+            for m in messages
         )
+
+    async def _older_history(self, thread: Any, newest: list[Any], page: int) -> list[Any]:
+        """Raw messages older than the *newest* page, newest first; cached per thread.
+
+        The cache holds the whole span last read (that page included), so when
+        new messages push the page forward, the ones that slid out of it are
+        still covered.
+        """
+        before_id = newest[-1].id
+        now = time.monotonic()
+        cached = self._older_cache.get(thread.id)
+        if cached is not None and cached[0] > now:
+            kept = [m for m in cached[1] if m.id < before_id]
+            if kept:
+                return kept
+        older = [
+            m
+            async for m in thread.history(
+                limit=MAX_HISTORY_SCAN - page, before=discord.Object(id=before_id)
+            )
+        ]
+        self._older_cache[thread.id] = (now + HISTORY_OLDER_TTL_SECONDS, newest + older)
+        return older
 
     async def live(self, request: web.Request) -> web.Response:
         """What a console conversation's running turn is doing right now."""
