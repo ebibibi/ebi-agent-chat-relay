@@ -179,5 +179,7 @@ window.ConsoleWorkspace = (() => {
     return selector(item.workspace_path||"",path=>patch(item.id,{workspace_path:path||null}));
   }
   window.addEventListener("console-language-change",capturePicker);
-  return {load,nav,picker,path:()=>chosen||null};
+  // Open the panel on one entry (Focus rows link here).
+  function open(path) { if (path) browsing=path; show(); }
+  return {load,nav,picker,open,path:()=>chosen||null};
 })();

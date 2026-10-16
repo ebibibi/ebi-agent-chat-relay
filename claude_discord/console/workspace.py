@@ -14,6 +14,10 @@ from typing import Any
 
 MAX_DOCUMENT_BYTES = 2_000_000
 _TASK = re.compile(r"^(\s*[-*+]\s+\[)([ xX])(\]\s+)(.+?)(\r?\n)?$")
+# A project's next actions may also be plain bullets ("- item", "1. item"); the plugin's
+# goodmorning reads them as open tasks, so the Console does too and checks them off by
+# turning "- item" into "- [x] item". single-actions.md keeps checkbox-only tasks.
+_PLAIN = re.compile(r"^(\s*(?:[-*+]|\d+[.)])\s+)(?!\[[ xX]\])(\S.*?)(\r?\n)?$")
 _NEXT = {
     "次のアクション",
     "🔥 次に取り組むこと",
@@ -61,10 +65,28 @@ def _tasks(content: str, project: bool) -> list[dict[str, Any]]:
             continue
         if line.startswith("## "):
             active = not project or line[3:].strip() in _NEXT
+        if not active:
+            continue
         match = _TASK.match(line)
-        if active and match:
+        if match:
             tasks.append({"line": number, "text": match[4], "done": match[2].lower() == "x"})
+        elif project and (plain := _PLAIN.match(line)):
+            tasks.append({"line": number, "text": plain[2], "done": False, "checkbox": False})
     return tasks
+
+
+def _edit_line(line: str, *, text: str | None = None, done: bool | None = None) -> str | None:
+    """*line* with its task text and/or state changed, or None when it is not a task."""
+    match = _TASK.match(line)
+    if match:
+        mark = ("x" if done else " ") if done is not None else match[2]
+        return f"{match[1]}{mark}{match[3]}{text if text is not None else match[4]}{match[5] or ''}"
+    plain = _PLAIN.match(line)
+    if plain is None:
+        return None
+    label = text if text is not None else plain[2]
+    box = "[x] " if done else "[ ] " if done is False else ""
+    return f"{plain[1]}{box}{label}{plain[3] or ''}"
 
 
 class Workspace:
@@ -264,12 +286,12 @@ class Workspace:
             if _revision(content) != revision:
                 raise WorkspaceConflictError("The file changed. Refresh and try again.")
             lines = content.splitlines(keepends=True)
-            match = _TASK.match(lines[line - 1])
-            if match is None:
+            task = next(t for t in entry["tasks"] if t["line"] == line)
+            label = self._text(text) if text is not None else task["text"]
+            edited = _edit_line(lines[line - 1], text=label, done=done)
+            if edited is None:
                 raise WorkspaceConflictError("The task changed. Refresh and try again.")
-            label = self._text(text) if text is not None else match[4]
-            mark = ("x" if done else " ") if done is not None else match[2]
-            lines[line - 1] = f"{match[1]}{mark}{match[3]}{label}{match[5] or ''}"
+            lines[line - 1] = edited
             self._write_tasks(path, "".join(lines), revision, f"タスク更新: {label}")
 
     def finish(self, path: str, texts: list[str], label: str, *, done: bool) -> dict[str, Any]:
@@ -296,12 +318,10 @@ class Workspace:
                     self._write_tasks(path, content, entry["revision"], f"会話完了: {label}")
                 return result
             lines = content.splitlines(keepends=True)
-            match = _TASK.match(lines[task["line"] - 1])
-            if match is None:
+            edited = _edit_line(lines[task["line"] - 1], done=done)
+            if edited is None:
                 raise WorkspaceConflictError("The task changed. Refresh and try again.")
-            lines[task["line"] - 1] = (
-                f"{match[1]}{'x' if done else ' '}{match[3]}{match[4]}{match[5] or ''}"
-            )
+            lines[task["line"] - 1] = edited
             action = "タスク完了" if done else "タスク再開"
             self._write_tasks(path, "".join(lines), entry["revision"], f"{action}: {task['text']}")
             result["changed"] = True

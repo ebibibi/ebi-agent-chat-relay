@@ -111,13 +111,20 @@ window.ConsoleFocus = (() => {
     const guideCard = card(items);
     if (guideCard) out.push({ node: guideCard });
     out.push({ node: placeBar() });
+    // Ebi Workspace (focusws.js): today's plan, its ranked next actions after the AI work
+    // that is ready here, and its waiting-for list beside the waiting threads.
+    const ws = window.ConsoleFocusWorkspace;
+    const node = (n) => { if (n) out.push({ node: n }); };
+    node(ws?.planCard());
     const add = (label, list) => {
       if (list.length) out.push({ group: label }, ...list.map((item) => ({ item, depth: 0 })));
     };
     add(T.focus_first, now.slice(0, 1));
     add(T.focus_next, now.slice(1));
+    node(ws?.tasksCard());
     add(T.focus_elsewhere, away);
     add(T.focus_waiting, later);
+    node(ws?.waitingCard());
     return out;
   }
 

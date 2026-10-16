@@ -83,6 +83,7 @@ from .work_repo import (
 )
 from .workspace import Workspace, WorkspaceError
 from .workspace_api import WorkspaceRoutes
+from .workspace_plan import WorkspacePlan
 
 if TYPE_CHECKING:
     from ..ext.api_server import ApiServer
@@ -234,6 +235,7 @@ class ConsoleServer:
         self._compacting: set[int] = set()
         self.work_repo = work_repo
         self.workspace = Workspace.discover()
+        self.workspace_plan = WorkspacePlan.discover(self.workspace)
         #: The model's priority and deadline guesses; None turns automatic triage off.
         self.triage = triage
         #: The managed list of places work can be bound to.
@@ -290,6 +292,7 @@ class ConsoleServer:
         workspace_routes = WorkspaceRoutes(self)
         r.add_get(f"{API_PREFIX}/workspace", workspace_routes.read)
         r.add_get(f"{API_PREFIX}/workspace/document", workspace_routes.document)
+        r.add_get(f"{API_PREFIX}/workspace/plan", workspace_routes.plan)
         r.add_post(f"{API_PREFIX}/workspace/tasks", workspace_routes.change)
         r.add_patch(f"{API_PREFIX}/workspace/tasks", workspace_routes.change)
         r.add_post(f"{API_PREFIX}/workspace/run", workspace_routes.run)
@@ -1301,9 +1304,11 @@ class ConsoleServer:
         texts = [t for t in (item.note, title) if t]
         label = title or item.note or item.id
         try:
-            return await asyncio.to_thread(
+            result = await asyncio.to_thread(
                 self.workspace.finish, path, texts, label[:200], done=done
             )
+            self.workspace_plan.invalidate()
+            return result
         except (WorkspaceError, OSError, UnicodeError) as exc:
             logger.warning("console: Workspace not updated for %s: %s", _q(item.id), exc)
             # A file-system error's text can name paths; only our own messages travel.

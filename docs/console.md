@@ -575,6 +575,23 @@ Undo) unchecks a task finished this way. The response's `workspace` field report
 and a failed update never blocks the finish. Finishing the open conversation also returns to
 the list, as the back button would, so a phone needs one tap per task.
 
+**Workspace work in Focus.** With the Ebi Workspace plugin installed, the 🎯 Focus view also
+shows what the Workspace says to do now, ranked by the plugin's own goodmorning scoring
+(priority × due date, stale projects, recurrence, follow-up dates): the first next action of each
+active project, due follow-ups, and single actions. Each row can be checked off, re-dated (the
+`📅` date is written into the line, before any `🔁` rule) or run with AI, with the same
+revision checks and log/daily-note records as the Workspace view. Today's `## 今日のプラン`
+from the daily note appears as a folded card, and waiting-for entries whose follow-up date has
+not come are listed beside the waiting threads. Plain `- item` bullets under a project's next
+actions count as open tasks, as they do for goodmorning; checking one off writes `- [x] item`.
+
+Console does not copy the plugin's scoring. It runs the installed plugin's
+`scripts/workspace_scanner.py` in a separate isolated Python process (`python -I`) at most once
+a minute and after every Console write. The plugin is found through
+`EBI_WORKSPACE_PLUGIN_DIR` or Claude Code's `~/.claude/plugins/installed_plugins.json`;
+without it this part of Focus is simply absent (`GET /console/api/workspace/plan` answers
+`{"available": false, "reason": "plugin"}`).
+
 Automatic association uses an unambiguous working directory inside the Workspace, a unique
 matching project name, a parent's association, or an explicitly labelled local repository in
 `overview.md` (`repository: /absolute/path`, `working_dir: /absolute/path`, or
