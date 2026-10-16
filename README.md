@@ -1424,7 +1424,7 @@ uv sync --extra api
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/health` | Health check |
-| POST | `/api/notify` | Send immediate notification |
+| POST | `/api/notify` | Send immediate notification (`channel_id` may also be an [Ebi AI Console](docs/console.md) conversation id — the message is posted there instead, with Discord mentions stripped) |
 | POST | `/api/schedule` | Schedule a notification |
 | GET | `/api/scheduled` | List pending notifications |
 | DELETE | `/api/scheduled/{id}` | Cancel a notification |
