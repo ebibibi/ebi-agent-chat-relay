@@ -39,3 +39,17 @@
   .note-shell { height:100dvh; border-radius:0; }
   .note-body { padding:12px 14px 40px; }
 }
+
+/* Note search (notesearch.js) */
+.nsearch { position:fixed; inset:0; z-index:60; background:#0008; display:flex; justify-content:center; align-items:flex-start; padding-top:10vh; }
+.nsearch-shell { width:min(640px,94vw); background:var(--panel); border:1px solid var(--line); border-radius:10px; box-shadow:0 12px 40px #000a; padding:10px; display:flex; flex-direction:column; gap:8px; max-height:75vh; }
+.nsearch-tabs { display:flex; gap:6px; }
+.nsearch-input { padding:10px; font-size:15px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; }
+.nsearch-list { list-style:none; margin:0; padding:0; overflow:auto; }
+.nsearch-item { padding:7px 9px; border-radius:6px; cursor:pointer; }
+.nsearch-item.on { background:var(--raise); border-left:3px solid var(--accent); }
+.nsearch-name { font-weight:600; overflow-wrap:anywhere; }
+.nsearch-path { font-size:11px; overflow-wrap:anywhere; }
+.nsearch-snippet { font-size:12px; opacity:.85; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.nsearch-empty { padding:10px; }
+.note-ref { color:var(--accent); text-decoration:none; border-bottom:1px dotted currentColor; cursor:pointer; overflow-wrap:anywhere; }

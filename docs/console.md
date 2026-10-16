@@ -664,6 +664,17 @@ on the server (`links` in the note response); unresolved links are shown dashed.
 modification time). Browser back/forward walk the notes you followed; Escape or **Close**
 returns to the list. The Workspace panel's **Overview** and **status.md** open here.
 
+**Finding notes.** `Ctrl+O` (⌘O) searches note names and `Ctrl+Shift+F` (⌘⇧F) searches inside
+notes (every term required, first matching line shown); Tab switches between the two, ↑/↓ and
+Enter open the hit, and **📝 Find a note** in the navigation does the same on a phone
+(`GET /console/api/workspace/notes?q=…`, `GET /console/api/workspace/search?q=…`).
+
+**Notes named in conversations.** In every message, vault paths (recognised by the numbered
+top-level folders of an Ebi Workspace vault, e.g. `…/02_Contexts/x/log.md`, also as inline
+code with spaces) and `[[wikilinks]]` become links into the viewer; wikilinks resolve through
+`GET /console/api/workspace/resolve?link=…`. Code blocks are left alone, and a hidden or missing
+note opens as "not found".
+
 The renderer is markdown-it (HTML in notes disabled) with small Obsidian plugins, sanitised by
 DOMPurify into a DOM fragment. Both are vendored single files (`vendor-*.min.js`, licenses in
 `static/THIRD_PARTY_LICENSES.md`) and are loaded only when the first note is opened, so the

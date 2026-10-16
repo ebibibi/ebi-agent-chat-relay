@@ -224,3 +224,37 @@ def test_a_new_exclusion_applies_to_links_at_once(vault, tmp_path):
     assert index.resolve("Other")["path"] is None
     assert index.backlinks("04_Knowledge/Idea.md") == []
     assert "04_Knowledge/Other.md" not in index.search_names("other")
+
+
+def test_full_text_search_needs_every_term_and_skips_excluded(vault, tmp_path):
+    from claude_discord.console.vault import NoteIndex
+
+    _write(vault, "A/Plan.md", "# Plan\nfirst line\nThe Console viewer ships\n")
+    _write(vault, "B/console.md", "nothing here\n")
+    _write(vault, "secret/Console.md", "The Console viewer\n")
+    v = Vault(vault, tmp_path / "exclude.txt")
+    v.save_excludes("secret/\n")
+    index = NoteIndex(v)
+    hits = index.search_text("console viewer")
+    assert [h["path"] for h in hits] == ["A/Plan.md"]
+    assert hits[0]["line"] == 3 and hits[0]["snippet"] == "The Console viewer ships"
+    assert [h["path"] for h in index.search_text("console")] == ["B/console.md", "A/Plan.md"]
+    assert index.search_text("") == [] and index.search_text("x" * 300) == []
+
+
+async def test_resolve_and_search_routes(env, vault, tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    env.console.workspace = Workspace(vault)
+    found = await env.client.get(
+        "/console/api/workspace/resolve", headers=AUTH, params={"link": "Idea#Part|x"}
+    )
+    assert (await found.json())["path"] == "04_Knowledge/Idea.md"
+    missing = await env.client.get(
+        "/console/api/workspace/resolve", headers=AUTH, params={"link": "Nope"}
+    )
+    assert missing.status == 404
+    hits = await env.client.get(
+        "/console/api/workspace/search", headers=AUTH, params={"q": "other"}
+    )
+    assert [h["path"] for h in (await hits.json())["hits"]] == ["04_Knowledge/Idea.md"]
+    assert (await env.client.get("/console/api/workspace/search", params={"q": "x"})).status == 401
