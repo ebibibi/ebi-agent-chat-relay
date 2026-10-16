@@ -210,3 +210,17 @@ async def test_note_route_resolves_links_and_backlinks_route(env, vault, tmp_pat
         "/console/api/workspace/backlinks", headers=AUTH, params={"path": "04_Knowledge/No.md"}
     )
     assert missing.status == 404
+
+
+def test_a_new_exclusion_applies_to_links_at_once(vault, tmp_path):
+    from claude_discord.console.vault import NoteIndex
+
+    _write(vault, "04_Knowledge/Other.md", "[[Idea]]\n")
+    v = Vault(vault, tmp_path / "exclude.txt")
+    index = NoteIndex(v)
+    assert index.resolve("Other")["path"] == "04_Knowledge/Other.md"
+    assert index.backlinks("04_Knowledge/Idea.md") == ["04_Knowledge/Other.md"]
+    v.save_excludes("04_Knowledge/Other.md\n")
+    assert index.resolve("Other")["path"] is None
+    assert index.backlinks("04_Knowledge/Idea.md") == []
+    assert "04_Knowledge/Other.md" not in index.search_names("other")

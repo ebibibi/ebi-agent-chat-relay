@@ -222,6 +222,7 @@ class NoteIndex:
         self.vault = vault
         self._lock = threading.Lock()
         self._built = 0.0
+        self._patterns: list[str] | None = None
         self._paths: list[str] = []
         self._by_name: dict[str, list[str]] = {}
         self._links: dict[str, tuple[float, list[str]]] = {}
@@ -252,9 +253,13 @@ class NoteIndex:
         return sorted(out)
 
     def refresh(self, *, force: bool = False) -> None:
+        """Rebuild when stale, and at once when the exclusion list changed (never fail open)."""
         with self._lock:
-            if not force and self._paths and time.monotonic() - self._built < INDEX_SECONDS:
+            patterns = self.vault.patterns()
+            fresh = time.monotonic() - self._built < INDEX_SECONDS
+            if not force and self._paths and fresh and patterns == self._patterns:
                 return
+            self._patterns = patterns
             paths = self._walk()
             by_name: dict[str, list[str]] = {}
             for rel in paths:
@@ -264,7 +269,18 @@ class NoteIndex:
                     by_name.setdefault(name[:-3], []).append(rel)
             self._paths, self._by_name, self._built = paths, by_name, time.monotonic()
 
+    def _visible(self, paths: list[str]) -> list[str]:
+        """Drop anything the current exclusion list hides, whatever the index holds."""
+        patterns = self.vault.patterns()
+        return [p for p in paths if not excluded(p, patterns)]
+
     def resolve(self, target: str, source: str = "") -> dict[str, Any]:
+        found = self._resolve(target, source)
+        if found["path"] is not None and not self._visible([found["path"]]):
+            return {"path": None, "candidates": []}
+        return {"path": found["path"], "candidates": self._visible(found["candidates"])}
+
+    def _resolve(self, target: str, source: str = "") -> dict[str, Any]:
         """Where ``[[target]]`` in note *source* points: ``{"path", "candidates"}``.
 
         Obsidian's order: a path from the vault root, then relative to the source note,
@@ -301,7 +317,7 @@ class NoteIndex:
         terms = [t for t in query.lower().split() if t]
         notes = [p for p in self._paths if p.endswith(".md")]
         hits = [p for p in notes if all(t in p.lower() for t in terms)] if terms else notes
-        return sorted(hits, key=lambda p: (len(PurePosixPath(p).name), p))[:limit]
+        return self._visible(sorted(hits, key=lambda p: (len(PurePosixPath(p).name), p)))[:limit]
 
     def backlinks(self, rel: str) -> list[str]:
         """Notes whose wikilinks resolve to *rel*; each file is re-read only when it changed."""
@@ -334,4 +350,4 @@ class NoteIndex:
             ]
             if any(self.resolve(t, path)["path"] == rel for t in targets):
                 out.append(path)
-        return out
+        return self._visible(out)
