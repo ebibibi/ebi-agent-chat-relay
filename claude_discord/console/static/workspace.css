@@ -81,3 +81,4 @@
 .ws-sent { margin-top:6px; font-size:12px; }
 .ws-sent summary { cursor:pointer; }
 .ws-sent pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; }
+.group.ws-group { text-transform:none; }

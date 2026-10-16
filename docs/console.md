@@ -633,6 +633,10 @@ so an agent's edit to `status.md` appears while you watch. The `[Ebi Workspace c
 Console appends to a prompt is folded in the conversation under a one-line note naming the
 entry, so it is visible which context each message carried, including after a re-binding.
 
+**Filter and group by context.** With a Workspace, every list starts with 🗂️ chips for the
+top-level contexts it holds (plus ❔ for unresolved threads), combined with OR and remembered per
+browser. **≡ By project** lists a bucket view under one heading per bound entry, unresolved last.
+
 Through the API, `PATCH /console/api/items/{id}` with `workspace_path` pins it; with
 `workspace_path: null` it returns to automatic, unless `workspace_source: "pinned"` is sent too,
 which means "No Workspace". Clients cannot set any other source.
