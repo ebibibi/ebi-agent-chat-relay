@@ -305,6 +305,50 @@ async def test_an_agent_marks_its_console_conversation_through_the_control_plane
     bot.get_channel.assert_not_called()
 
 
+async def _notify_api(tmp_path):
+    from claude_discord.database.notification_repo import NotificationRepository
+    from claude_discord.ext.api_server import ApiServer
+
+    db = str(tmp_path / "sessions.db")
+    await init_db(db)
+    conversations = ConversationRepository(db)
+    await conversations.init_db()
+    await conversations.create(4242, "[keep] Health")
+    notifications = NotificationRepository(str(tmp_path / "n.db"))
+    await notifications.init_db()
+    bot = MagicMock()
+    bot.cogs = {}
+    bot.get_channel.return_value = None
+    bot.fetch_channel = AsyncMock(side_effect=RuntimeError("Unknown Channel"))
+    api = ApiServer(repo=notifications, bot=bot, default_channel_id=1, host="127.0.0.1", port=0)
+    api.console_conversations = conversations
+    return api, conversations, bot
+
+
+async def test_notify_posts_into_a_console_conversation(tmp_path) -> None:
+    """A reminder job keeps working after its conversation moves to the console."""
+    api, conversations, bot = await _notify_api(tmp_path)
+    async with TestClient(TestServer(api.app)) as client:
+        response = await client.post(
+            "/api/notify",
+            json={"channel_id": 4242, "message": "<@418192003549888523> 🌙 Evening BP?"},
+        )
+        assert response.status == 200
+        assert (await response.json())["frontend"] == "console"
+    messages = await conversations.history(4242, 10)
+    assert [m.content for m in messages] == ["🌙 Evening BP?"]
+    assert messages[0].is_bot
+    bot.get_channel.assert_not_called()
+
+
+async def test_notify_still_goes_to_discord_for_other_ids(tmp_path) -> None:
+    api, conversations, bot = await _notify_api(tmp_path)
+    async with TestClient(TestServer(api.app)) as client:
+        response = await client.post("/api/notify", json={"channel_id": 999, "message": "hi"})
+    assert response.status == 500
+    bot.get_channel.assert_called_once_with(999)
+
+
 async def test_a_wait_resumes_a_console_conversation(env) -> None:
     from claude_discord.cogs.wait_watcher import WaitWatcherCog
 
