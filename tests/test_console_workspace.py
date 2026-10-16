@@ -318,3 +318,19 @@ def test_guesses_carry_a_reason_and_a_person_saying_none_stops_them(notes):
         "d": (None, "pinned", None),
         "e": ("Work/Client", "recorded", "record:log.md"),
     }
+
+
+def test_context_reads_current_state_waiting_and_the_latest_log(notes):
+    project = notes / "02_Contexts" / "Work" / "Client" / "Website"
+    (project / "log.md").write_text(
+        "# Log\n" + "".join(f"## 2026-10-{d:02d}\n- " + "x" * 400 + "\n" for d in range(1, 9)),
+        encoding="utf-8",
+    )
+    context = Workspace(notes).context("Work/Client/Website")
+    assert context["current"] == "Ready"
+    assert context["waiting"] == ["Client / Feedback"]
+    assert context["tasks"][0]["text"] == "🤖 Ship it #auto"
+    assert context["log"].startswith("## 2026-10-") and context["log"].endswith("x")
+    assert "2026-10-08" in context["log"] and "2026-10-01" not in context["log"]
+    client = Workspace(notes).context("Work/Client")
+    assert (client["kind"], client["current"], client["waiting"]) == ("context", "", [])

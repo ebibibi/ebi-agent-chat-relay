@@ -306,6 +306,7 @@ class ConsoleServer:
         r.add_get(f"{API_PREFIX}/workspace", workspace_routes.read)
         r.add_get(f"{API_PREFIX}/workspace/document", workspace_routes.document)
         r.add_get(f"{API_PREFIX}/workspace/plan", workspace_routes.plan)
+        r.add_get(f"{API_PREFIX}/workspace/context", workspace_routes.context)
         r.add_post(f"{API_PREFIX}/workspace/tasks", workspace_routes.change)
         r.add_patch(f"{API_PREFIX}/workspace/tasks", workspace_routes.change)
         r.add_post(f"{API_PREFIX}/workspace/run", workspace_routes.run)

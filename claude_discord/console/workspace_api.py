@@ -24,6 +24,17 @@ class WorkspaceRoutes:
         """Workspace next actions ranked by the plugin's goodmorning scoring (Focus view)."""
         return web.json_response(await asyncio.to_thread(self.server.workspace_plan.read))
 
+    async def context(self, request: web.Request) -> web.Response:
+        """One entry's current state, next actions, waiting-for and latest log."""
+        try:
+            return web.json_response(
+                await asyncio.to_thread(
+                    self.server.workspace.context, request.query.get("path", "")
+                )
+            )
+        except (WorkspaceError, OSError, UnicodeError):
+            return web.json_response({"error": "Unknown or unreadable Workspace entry"}, status=400)
+
     async def document(self, request: web.Request) -> web.Response:
         try:
             content = await asyncio.to_thread(

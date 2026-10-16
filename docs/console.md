@@ -625,6 +625,14 @@ repository is written in `overview.md` as `repository: /absolute/path`,
 `working_dir: /absolute/path`, or `- リポジトリ: ~/path`. Overview is available alongside
 tasks; task changes are immediately visible in Obsidian because both use the same files.
 
+**The project beside the conversation.** A bound thread's detail shows a folded 🗂️ section
+with the entry's 📍 current state (`## 現在地`), open next actions to check off in place,
+`## 連絡待ち`, the latest `log.md` entries and the other threads bound to the same entry. It reads
+the Markdown through `GET /console/api/workspace/context?path=…` and refreshes every 30 seconds,
+so an agent's edit to `status.md` appears while you watch. The `[Ebi Workspace context]` block the
+Console appends to a prompt is folded in the conversation under a one-line note naming the
+entry, so it is visible which context each message carried, including after a re-binding.
+
 Through the API, `PATCH /console/api/items/{id}` with `workspace_path` pins it; with
 `workspace_path: null` it returns to automatic, unless `workspace_source: "pinned"` is sent too,
 which means "No Workspace". Clients cannot set any other source.
