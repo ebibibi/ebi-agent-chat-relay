@@ -18,11 +18,11 @@ window.ConsoleNotes = (() => {
   const L = () => ja() ? {
     back: "← 戻る", forward: "進む →", close: "閉じる", backlinks: "🔗 このノートへのリンク", none: "なし",
     loading: "読み込み中…", missing: "ノートが見つかりません（存在しないか、表示しない設定です）", unresolved: "リンク先のノートがありません",
-    properties: "プロパティ", ambiguous: "同名のノートが複数あります", copy: "パスをコピー", copied: "パスをコピーしました",
+    properties: "プロパティ", ambiguous: "同名のノートが複数あります", copy: "パスをコピー", copied: "パスをコピーしました", edit: "✏️ 編集",
   } : {
     back: "← Back", forward: "Forward →", close: "Close", backlinks: "🔗 Linked from", none: "None",
     loading: "Loading…", missing: "Note not found (missing, or hidden by your settings)", unresolved: "No note with that name",
-    properties: "Properties", ambiguous: "Several notes share this name", copy: "Copy path", copied: "Path copied",
+    properties: "Properties", ambiguous: "Several notes share this name", copy: "Copy path", copied: "Path copied", edit: "✏️ Edit",
   };
 
   // -- libraries ------------------------------------------------------------------------
@@ -180,15 +180,39 @@ window.ConsoleNotes = (() => {
         h("button", { type: "button", class: "btn ghost", text: l.copy, onclick: async () => {
           try { await navigator.clipboard.writeText(path); toast(l.copied); } catch (err) { toast(err.message); }
         } }),
+        current && current.path === path && !editing ? h("button", { type: "button", class: "btn note-edit-btn", text: l.edit, onclick: edit }) : null,
         h("button", { type: "button", class: "btn", text: l.close, onclick: close })),
       h("article", { class: "note-body md", tabindex: "-1" }, ...content)));
     panel.hidden = false;
   }
 
-  async function show(path) {
+  // Editing replaces the rendered note; saving or cancelling shows the note again.
+  let editing = null;
+  function edit() {
+    if (!current || !window.ConsoleNoteEdit) return;
+    const note = current;
+    const host = h("div", { class: "note-edit" });
+    editing = true;
+    frame(note.path, host);
+    editing = window.ConsoleNoteEdit.start(note, host, {
+      render: (text) => render(text),
+      done: (saved) => {
+        editing = null;
+        if (saved) cache(saved);
+        show(note.path, saved || undefined);
+      },
+    });
+  }
+  const cache = (note) => { current = { ...current, ...note }; };
+
+  async function show(path, known) {
+    if (editing && editing.dirty && editing.dirty() && !confirm(ja() ? "保存していない変更があります。破棄しますか？" : "Discard unsaved changes?")) return;
+    editing = null;
     frame(path, h("p", { class: "dim", text: L().loading }));
     try {
-      const [note] = await Promise.all([api(`/workspace/note?path=${encodeURIComponent(path)}`), ensureLibs()]);
+      const [fetched] = await Promise.all([known ? null : api(`/workspace/note?path=${encodeURIComponent(path)}`), ensureLibs()]);
+      // A saved note comes back without resolved links; keep the ones already known.
+      const note = fetched || { links: (current && current.links) || {}, ...known };
       if (decodeHash() !== path) return; // navigated on meanwhile
       current = note;
       const body = h("div", { class: "note-content" });
@@ -304,6 +328,8 @@ window.ConsoleNotes = (() => {
   // Closing leaves the list and the open thread exactly as they are: the address goes back
   // to what the Console itself shows, without a hashchange that would re-navigate.
   function close() {
+    if (editing && editing.dirty && editing.dirty() && !confirm(ja() ? "保存していない変更があります。破棄しますか？" : "Discard unsaved changes?")) return;
+    editing = null;
     if (panel) panel.hidden = true;
     current = null;
     const here = typeof state === "object" && state.view ? `#${state.view}${state.open ? "/" + state.open : ""}` : returnHash;

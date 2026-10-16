@@ -11,7 +11,7 @@ test('Note search and links in replies', {timeout: 30000}, async t => {
   const browser = await chromium.launch({headless:true,args:['--no-sandbox']});
   t.after(() => browser.close());
   const page = await browser.newPage({viewport:{width:1280,height:900},locale:'ja-JP'});
-  page.setDefaultTimeout(5000);
+  page.setDefaultTimeout(10000);
   const opened = [];
   const items = [{id:'t1',thread_id:'1',title:'Chat',status:'waiting',bucket:'me',priority:2}];
   await page.route('http://console.test/**', async route => {

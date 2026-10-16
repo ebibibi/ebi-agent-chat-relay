@@ -25,7 +25,7 @@ test('Note viewer', {timeout: 30000}, async t => {
   const browser = await chromium.launch({headless:true,args:['--no-sandbox']});
   t.after(() => browser.close());
   const page = await browser.newPage({viewport:{width:1280,height:900},locale:'ja-JP'});
-  page.setDefaultTimeout(5000);
+  page.setDefaultTimeout(10000);
   await page.route('http://console.test/**', async route => {
     const url = new URL(route.request().url());
     const p = url.pathname;

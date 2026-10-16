@@ -311,6 +311,7 @@ class ConsoleServer:
         r.add_get(f"{API_PREFIX}/workspace/plan", workspace_routes.plan)
         r.add_get(f"{API_PREFIX}/workspace/context", workspace_routes.context)
         r.add_get(f"{API_PREFIX}/workspace/note", workspace_routes.note)
+        r.add_put(f"{API_PREFIX}/workspace/note", workspace_routes.save_note)
         r.add_get(f"{API_PREFIX}/workspace/file", workspace_routes.file)
         r.add_get(f"{API_PREFIX}/workspace/backlinks", workspace_routes.backlinks)
         r.add_get(f"{API_PREFIX}/workspace/notes", workspace_routes.notes)

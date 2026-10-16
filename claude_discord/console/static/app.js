@@ -178,7 +178,13 @@ async function api(path, { method = "GET", body } = {}) {
   let data = null;
   try { data = await res.json(); } catch { /* empty body */ }
   if (res.status === 401) { showLogin(); throw new Error((data && data.error) || "HTTP 401"); }
-  if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);
+  if (!res.ok) {
+    // Callers that care (a 409 carrying the current version) read status and data.
+    const err = new Error((data && data.error) || `HTTP ${res.status}`);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
   return data;
 }
 

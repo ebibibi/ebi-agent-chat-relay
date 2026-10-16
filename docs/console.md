@@ -675,6 +675,15 @@ code with spaces) and `[[wikilinks]]` become links into the viewer; wikilinks re
 `GET /console/api/workspace/resolve?link=…`. Code blocks are left alone, and a hidden or missing
 note opens as "not found".
 
+**Editing a note.** **✏️ Edit** in the viewer shows the Markdown source beside a live preview
+(tabs on a phone); `Ctrl+S` / ⌘S or **💾 Save** writes it with `PUT /console/api/workspace/note`
+(`path`, `revision`, `text`, optional `log`). The write is atomic and moves `最終更新:` and a
+front-matter `updated:` to today. If an agent or Obsidian changed the file since the edit began,
+the server answers 409 with the note as it is now and the viewer shows a line diff: load the
+version on disk, overwrite on purpose, or go back to editing. **Also record in the work log** adds a
+line to the enclosing Workspace entry's `log.md` and the daily note. Leaving with unsaved changes
+asks first.
+
 The renderer is markdown-it (HTML in notes disabled) with small Obsidian plugins, sanitised by
 DOMPurify into a DOM fragment. Both are vendored single files (`vendor-*.min.js`, licenses in
 `static/THIRD_PARTY_LICENSES.md`) and are loaded only when the first note is opened, so the
