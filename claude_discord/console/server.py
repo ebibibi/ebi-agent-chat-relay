@@ -74,6 +74,7 @@ from .uploads import (
     with_attachments,
 )
 from .usage import UsageReader
+from .vault import Vault
 from .work_repo import (
     STATE_DONE,
     STATE_OPEN,
@@ -248,6 +249,7 @@ class ConsoleServer:
         self.workspace_records = RecordWatcher()
         self._records_seen: dict[int, str] = {}
         self._records_task: asyncio.Task[None] | None = None
+        self._vault: Vault | None = None
         self._workspace_index_cache: tuple[float, list[tuple[str, str]]] | None = None
         #: The model's priority and deadline guesses; None turns automatic triage off.
         self.triage = triage
@@ -307,6 +309,10 @@ class ConsoleServer:
         r.add_get(f"{API_PREFIX}/workspace/document", workspace_routes.document)
         r.add_get(f"{API_PREFIX}/workspace/plan", workspace_routes.plan)
         r.add_get(f"{API_PREFIX}/workspace/context", workspace_routes.context)
+        r.add_get(f"{API_PREFIX}/workspace/note", workspace_routes.note)
+        r.add_get(f"{API_PREFIX}/workspace/file", workspace_routes.file)
+        r.add_get(f"{API_PREFIX}/workspace/exclude", workspace_routes.excludes)
+        r.add_put(f"{API_PREFIX}/workspace/exclude", workspace_routes.excludes)
         r.add_post(f"{API_PREFIX}/workspace/tasks", workspace_routes.change)
         r.add_patch(f"{API_PREFIX}/workspace/tasks", workspace_routes.change)
         r.add_post(f"{API_PREFIX}/workspace/run", workspace_routes.run)
@@ -432,6 +438,14 @@ class ConsoleServer:
             await self.work_repo.bind_workspace(item["id"], path, "inferred", "inferred")
         except WorkItemError as exc:
             logger.info("console: inferred Workspace not stored for %s: %s", _q(item["id"]), exc)
+
+    @property
+    def vault(self) -> Vault:
+        """Whole-vault reads for the note viewer; follows the configured Workspace root."""
+        current = self._vault
+        if current is None or current.root != self.workspace.root:
+            current = self._vault = Vault(self.workspace.root)
+        return current
 
     async def _records_loop(self) -> None:
         while True:

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from aiohttp import web
 
+from .vault import VaultError
 from .workspace import WorkspaceConflictError, WorkspaceError
 
 if TYPE_CHECKING:
@@ -34,6 +35,51 @@ class WorkspaceRoutes:
             )
         except (WorkspaceError, OSError, UnicodeError):
             return web.json_response({"error": "Unknown or unreadable Workspace entry"}, status=400)
+
+    async def note(self, request: web.Request) -> web.Response:
+        """Any Markdown note in the vault the owner did not exclude."""
+        try:
+            return web.json_response(
+                await asyncio.to_thread(self.server.vault.note, request.query.get("path", ""))
+            )
+        except (VaultError, OSError):
+            return web.json_response({"error": "Unknown note"}, status=404)
+
+    async def file(self, request: web.Request) -> web.StreamResponse:
+        """An image or PDF a note embeds, served as an inert download-safe file."""
+        try:
+            path, content_type = await asyncio.to_thread(
+                self.server.vault.file, request.query.get("path", "")
+            )
+        except (VaultError, OSError):
+            return web.json_response({"error": "Unknown file"}, status=404)
+        return web.FileResponse(
+            path,
+            headers={
+                "Content-Type": content_type,
+                "X-Content-Type-Options": "nosniff",
+                "Content-Security-Policy": "default-src 'none'; sandbox",
+                "Cache-Control": "private, max-age=300",
+            },
+        )
+
+    async def excludes(self, request: web.Request) -> web.Response:
+        """Read (GET) or replace (PUT, body ``{"text": …}``) the owner's exclusion list."""
+        vault = self.server.vault
+        if request.method == "PUT":
+            body, err = await self.server._json(request)
+            if err is not None:
+                return err
+            try:
+                await asyncio.to_thread(vault.save_excludes, body.get("text"))
+            except VaultError as exc:
+                return web.json_response({"error": str(exc)}, status=400)
+            except OSError:
+                return web.json_response({"error": "Could not save the list"}, status=500)
+        text = await asyncio.to_thread(vault.exclude_text)
+        return web.json_response(
+            {"text": text, "patterns": vault.patterns(), "file": str(vault.excludes_path)}
+        )
 
     async def document(self, request: web.Request) -> web.Response:
         try:

@@ -641,6 +641,19 @@ Through the API, `PATCH /console/api/items/{id}` with `workspace_path` pins it; 
 `workspace_path: null` it returns to automatic, unless `workspace_source: "pinned"` is sent too,
 which means "No Workspace". Clients cannot set any other source.
 
+**Notes beyond the four Workspace files.** `GET /console/api/workspace/note?path=…` returns
+any Markdown note under the vault root (text, revision, modified time) and
+`GET /console/api/workspace/file?path=…` an image or PDF a note embeds (served with
+`nosniff` and a sandboxing CSP; SVG is never served). Paths are vault-relative; `..`,
+backslashes, NUL, symbolic links and hidden folders (`.obsidian`, `.git`, `.trash` …) are refused.
+
+The owner decides what the Console must never show in
+`${XDG_CONFIG_HOME:-~/.config}/ebi-workspace/console-exclude.txt` — editable by hand or from the
+Workspace panel (**🚫 Hidden notes**, `GET`/`PUT /console/api/workspace/exclude`). One pattern per
+line: `folder/` matches a folder anywhere, `02_Contexts/x/` a folder from the vault root,
+`*.private.md` a file name anywhere, `01_Daily/2025-*` a path from the root. An excluded note
+answers exactly like a missing one, and is never listed, searched or linked.
+
 Authenticated API routes:
 
 - `GET /console/api/workspace` — availability and contexts/projects/tasks with revisions.
