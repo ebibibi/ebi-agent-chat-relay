@@ -71,6 +71,18 @@ class AnonymizingBackend:
     def inner(self) -> SessionBackend:
         return object.__getattribute__(self, "_inner")
 
+    async def inject_user_message(self, text: str, images: list[ImageData] | None = None) -> bool:
+        """Refuse: a message delivered mid-turn would skip the gateway's guard.
+
+        Declared rather than left to ``__getattr__``, which would hand the raw
+        text straight to the CLI. The caller runs it as the next turn instead,
+        which goes through :meth:`run` and so through the gateway.
+        """
+        return False
+
+    def unconsumed_messages(self) -> list[Any]:
+        return []
+
     # ------------------------------------------------------------------ run
 
     async def run(

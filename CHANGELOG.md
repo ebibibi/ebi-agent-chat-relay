@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Messages sent while a Claude turn is running now go into that turn, the way Claude Code's own
+  UI takes input mid-turn: the agent reads them at its next step and keeps working instead of
+  the message waiting for the turn to end. Works from Discord threads and Ebi AI Console.
+  A delivered Discord message gets 📥; the Console says "Sent into the running turn". Codex,
+  pi and anonymized runs keep queueing. `/stop` now stops the process that actually runs.
+  See [docs/mid-turn-messages.md](docs/mid-turn-messages.md) (#1129)
 - Console: message search also finds threads deleted from Discord, from their JSONL exports
   (`CCDB_CONSOLE_THREAD_ARCHIVE`), and shows them read only inside the search dialog (#1116)
 - Console: a guide card on Focus — the next move with its reasons and whether answering lets

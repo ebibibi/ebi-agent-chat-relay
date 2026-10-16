@@ -904,8 +904,9 @@ class ConsoleServer:
 
         The text is posted into the thread first (the conversation stays
         whole for anyone reading it in chat), the outcome marker is cleared
-        the way a human reply clears it, and the turn queues behind any turn
-        already running — a reply never interrupts work in flight.
+        the way a human reply clears it. A turn already running takes the
+        reply as input when its agent can (Claude Code); otherwise the reply
+        queues behind it. A reply never interrupts work in flight.
         """
         body, err = await self._json(request)
         if err:
@@ -951,7 +952,9 @@ class ConsoleServer:
             return _error(str(exc), 400)
         schedule_thread_outcome(thread, None)
         prompt = f"{text}\n\n-# 🖥️ via Ebi AI Console ({who})"
-        self._background(cog.deliver_relayed_message(thread, prompt, interrupt=False))
+        self._background(
+            cog.deliver_relayed_message(thread, prompt, interrupt=False, into_running_turn=True)
+        )
         logger.info("console: %s replied in thread %s", _q(who), thread.id)
         return web.json_response({"status": "delivered"}, status=202)
 
@@ -1256,11 +1259,13 @@ class ConsoleServer:
         except WorkItemError as exc:
             return _error(str(exc), 400)
         try:
-            await self.sessions.reply(thread_key, text, who)
+            injected = await self.sessions.reply(thread_key, text, who, into_running_turn=True)
         except LookupError:
             return _error("unknown conversation", 404)
         logger.info("console: %s replied in conversation %s", _q(who), thread_key)
-        return web.json_response({"status": "delivered"}, status=202)
+        # "injected": the running turn took it; "queued": it runs as the next turn.
+        delivery = "injected" if injected is True else "queued"
+        return web.json_response({"status": "delivered", "delivery": delivery}, status=202)
 
     async def _workspace_changes(self, body: dict[str, Any]) -> None:
         if "workspace_path" in body:
