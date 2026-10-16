@@ -272,6 +272,41 @@ class Workspace:
             lines[line - 1] = f"{match[1]}{mark}{match[3]}{label}{match[5] or ''}"
             self._write_tasks(path, "".join(lines), revision, f"タスク更新: {label}")
 
+    def finish(self, path: str, texts: list[str], label: str, *, done: bool) -> dict[str, Any]:
+        """Follow a Console item finishing (or reopening) into the original Markdown.
+
+        The task is the one open (or done) task whose text equals one of *texts*,
+        tried in order; an ambiguous match picks none rather than guess. Finishing
+        with no task still records the conversation in log.md and the daily note;
+        a task already in the wanted state is left alone, since the agent wrote it.
+        """
+        with self._lock:
+            entry = self.entry(path)
+            task = None
+            for text in (t.strip() for t in texts if t and t.strip()):
+                same = [t for t in entry["tasks"] if t["text"].strip() == text]
+                if len(same) == 1:
+                    task = same[0]
+                    break
+            result: dict[str, Any] = {"path": path, "task": task["text"] if task else None}
+            content = _read(self._directory(path) / entry["file"])
+            if task is None or task["done"] == done:
+                result["changed"] = task is None and done
+                if result["changed"]:
+                    self._write_tasks(path, content, entry["revision"], f"会話完了: {label}")
+                return result
+            lines = content.splitlines(keepends=True)
+            match = _TASK.match(lines[task["line"] - 1])
+            if match is None:
+                raise WorkspaceConflictError("The task changed. Refresh and try again.")
+            lines[task["line"] - 1] = (
+                f"{match[1]}{'x' if done else ' '}{match[3]}{match[4]}{match[5] or ''}"
+            )
+            action = "タスク完了" if done else "タスク再開"
+            self._write_tasks(path, "".join(lines), entry["revision"], f"{action}: {task['text']}")
+            result["changed"] = True
+            return result
+
     def add_task(self, path: str, text: str, revision: str) -> None:
         with self._lock:
             label = self._text(text)
