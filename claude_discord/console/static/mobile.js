@@ -23,7 +23,7 @@ window.ConsoleMobile = (() => {
     });
   }
   function layout(item, rebuilt) {
-    const pane = $('detail'), head = $('d-head'), drawer = $('d-drawer');
+    const pane = $('detail'), head = $('d-head'), row = head.querySelector('.d-head-row'), drawer = $('d-drawer');
     let panel = $('mobile-tools');
     if (!panel) {
       panel = h('section', {id:'mobile-tools', class:'mobile-tools', hidden:true},
@@ -36,9 +36,12 @@ window.ConsoleMobile = (() => {
     if (rebuilt) actions.replaceChildren();
     if (narrow.matches) {
       if (itemId !== item.id) {state.drawerOpen = false; itemId = item.id;}
-      for (const node of [...head.children]) {
+      for (const node of [...row.children]) {
         if (!node.matches('[aria-label=close], .d-status, .d-title-input, .detail-nav-toggle, .d-more, .stop')) actions.append(node);
       }
+      // Finish leads the panel so it is in the same spot in every thread.
+      const finish = head.querySelector(':scope > .d-finish');
+      if (finish) actions.prepend(finish);
       const stop = head.querySelector('.stop');
       if (stop) {stop.dataset.compact='true';stop.textContent=stop.disabled?'⏳':'■';}
       const more = head.querySelector('.d-more');
@@ -52,7 +55,7 @@ window.ConsoleMobile = (() => {
       panel.hidden=!state.drawerOpen;
     } else {
       panel.hidden=true;
-      if (!rebuilt) head.append(...actions.children);
+      if (!rebuilt) for (const node of [...actions.children]) (node.matches('.d-finish') ? head : row).append(node);
       if (head.nextElementSibling !== drawer) head.after(drawer);
       if (team && drawer.nextElementSibling !== team) drawer.after(team);
       drawer.hidden=!state.drawerOpen;

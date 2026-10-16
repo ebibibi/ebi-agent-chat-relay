@@ -528,7 +528,10 @@ function renderDetail() {
   const editing = active && active.matches("input:not([type=checkbox]), select") &&
     ($("d-head").contains(active) || $("d-drawer").contains(active));
   if (!editing) {
-    $("d-head").replaceChildren(...headParts(item).filter(Boolean));
+    // Finish sits outside the wrapping row so it keeps the top-right corner
+    // however many optional controls a thread has.
+    $("d-head").replaceChildren(h("div", { class: "d-head-row" }, ...headParts(item).filter(Boolean)),
+      window.ConsoleFinish.button(item));
     $("d-drawer").replaceChildren(...drawerParts(item).filter(Boolean));
   }
   $("d-drawer").hidden = !state.drawerOpen;
@@ -599,7 +602,6 @@ function headParts(item) {
     "aria-expanded": state.drawerOpen ? "true" : "false", onclick: toggleDrawer,
     text: `${state.drawerOpen ? "▴" : "▾"} ${T.details}` }));
   parts.push(...window.ConsoleSlots.controls(item, false));
-  parts.push(window.ConsoleFinish.button(item));
   return parts;
 }
 

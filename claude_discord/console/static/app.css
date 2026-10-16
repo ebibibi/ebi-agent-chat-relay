@@ -188,7 +188,8 @@ button.slash-now:hover { border-color: var(--accent); }
 
 .detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
 /* One compact header row; the triage fields fold into the drawer below it. */
-.detail .d-head { padding: 8px 12px; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; flex-shrink: 0; }
+.detail .d-head { padding: 8px 12px; border-bottom: 1px solid var(--line); display: flex; align-items: flex-start; gap: 8px; flex-shrink: 0; }
+.detail .d-head-row { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
 .detail .d-status { flex: none; }
 .detail .d-title-input { flex: 1 1 14em; min-width: 10em; font-size: 15px; font-weight: 600; background: transparent; border: 1px solid transparent;
   border-radius: 6px; padding: 3px 6px; text-overflow: ellipsis; }
@@ -197,7 +198,7 @@ button.slash-now:hover { border-color: var(--accent); }
 .detail .d-more.on { color: var(--text); border-color: var(--accent); }
 .detail .d-activity { flex: none; color: var(--dim); font-size: 12px; }
 .detail .d-activity.on { color: var(--text); border-color: var(--accent); }
-/* Finish sits at the far right, apart from Details, and needs a confirming second click. */
+/* Finish keeps the header's top-right corner in every thread and needs a confirming second click. */
 .detail .d-finish { flex: none; margin-left: 6px; color: var(--ai); border-color: color-mix(in srgb, var(--ai) 45%, var(--line)); }
 .detail .d-finish.armed { background: var(--ai); color: #0d1020; border-color: var(--ai); font-weight: 600; }
 .toast.undo { display: flex; align-items: center; gap: 12px; }

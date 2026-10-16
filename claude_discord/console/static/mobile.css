@@ -2,8 +2,9 @@
 @media (max-width: 900px) {
   html, body { overflow: hidden; overscroll-behavior: none; }
   .detail { inset: auto 0 auto; top: var(--mobile-top, 0px); height: var(--mobile-height, 100dvh); overflow: hidden; }
-  .detail .d-head { flex-wrap: nowrap; gap: 2px; padding: calc(4px + env(safe-area-inset-top)) 6px 4px; }
-  .detail .d-head > button { flex: 0 0 40px; height: 44px; padding: 0; }
+  .detail .d-head { gap: 2px; padding: calc(4px + env(safe-area-inset-top)) 6px 4px; }
+  .detail .d-head-row { flex-wrap: nowrap; gap: 2px; }
+  .detail .d-head-row > button { flex: 0 0 40px; height: 44px; padding: 0; }
   .detail .d-title-input { min-width: 0; width: 0; flex: 1 1 0; font-size: 16px; padding: 4px; }
   .detail .d-status { display: none; }
   .mobile-tools { display: flex; flex-direction: column; gap: 12px; position: absolute;
