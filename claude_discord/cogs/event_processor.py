@@ -300,6 +300,8 @@ class EventProcessor:
         elif event.message_type == MessageType.ASSISTANT:
             await self._on_assistant(event)
         elif event.message_type == MessageType.USER:
+            if event.injected_text is not None:
+                await self._on_injected_read()
             await self._on_tool_result(event)
         elif event.message_type == MessageType.PROGRESS:
             await self._on_progress(event)
@@ -649,7 +651,11 @@ class EventProcessor:
 
             # In chat_only mode, skip session_complete embed, statusline, and inbox.
             # Just set the done status emoji.
-            if self._chat_only:
+            if event.turn_continues:
+                # The agent goes on with a message the human sent meanwhile:
+                # this answer is not the end of the run, so nothing says "Done".
+                pass
+            elif self._chat_only:
                 await self._config.surface.set_status(StatusKind.DONE)
             else:
                 fields = _completion_fields(event, self._config.runner)
@@ -739,6 +745,23 @@ class EventProcessor:
 
         # Reset for potential next streamer
         self._streamer = self._config.surface.open_stream()
+        if event.turn_continues:
+            # The next turn's answer is its own reply, not a repeat of this one.
+            self._assistant_text_sent = False
+            self._state.partial_text = ""
+
+    async def _on_injected_read(self) -> None:
+        """The agent read a message the human sent mid-turn (issue #1129).
+
+        That message is already in the conversation, below whatever the agent
+        was streaming. Close the stream so the agent's reply to it is posted
+        under the message instead of growing the reply above it.
+        """
+        if self._streamer.has_content:
+            await self._streamer.finalize()
+            self._assistant_text_sent = True
+            self._streamer = self._config.surface.open_stream()
+        self._state.partial_text = ""
 
     # ------------------------------------------------------------------
     # Text streaming helpers
