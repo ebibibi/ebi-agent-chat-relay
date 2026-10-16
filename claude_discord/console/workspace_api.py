@@ -35,6 +35,7 @@ class WorkspaceRoutes:
             )
         except (WorkspaceError, OSError, UnicodeError):
             return web.json_response({"error": "Unknown or unreadable Workspace entry"}, status=400)
+
     async def note(self, request: web.Request) -> web.Response:
         """Any Markdown note in the vault the owner did not exclude."""
         try:
