@@ -293,12 +293,18 @@ function visibleRows() {
 // The status chips sit on top of every view and narrow it; they count the view as it is
 // before narrowing, so switching one on never hides the others it offers.
 function ungroupedRows() {
-  const items = state.items.filter((i) => matches(i) && !(hidingDone() && i.bucket === "done"));
+  const shown = state.items.filter((i) => matches(i) && !(hidingDone() && i.bucket === "done"));
+  // The Workspace chips count the view before either filter; the status chips, after it.
+  const WF = window.ConsoleWsFilter;
+  const inView = state.view === "focus" || state.view === "tree" || state.view === "recent"
+    ? shown : shown.filter((i) => i.bucket === state.view);
+  const wsBar = WF.bar(inView);
+  const items = WF.apply(shown);
   const SF = window.ConsoleStatusFilter;
   const all = pinnedFirst(items);
   const bar = SF.bar(all);
   const rows = SF.active() ? pinnedFirst(SF.apply(items)) : all;
-  return bar ? [{ node: bar }, ...rows] : rows;
+  return [wsBar && { node: wsBar }, bar && { node: bar }, ...rows].filter(Boolean);
 }
 function pinnedFirst(items) {
   const pinned = state.view === "done" ? [] : items.filter(isPinned)
@@ -316,7 +322,7 @@ function viewRows(items) {
   if (state.view === "tree") return treeRows(items.filter((i) => i.bucket !== "done"));
   if (state.view === "recent") return window.ConsoleRecent.rows(items);
   if (state.view === "focus") return window.ConsoleFocus.rows(items);
-  return items.filter((i) => i.bucket === state.view).map((item) => ({ item, depth: 0 }));
+  return window.ConsoleWsFilter.rows(items.filter((i) => i.bucket === state.view));
 }
 function treeRows(items) {
   const ids = new Set(items.map((i) => i.id));
