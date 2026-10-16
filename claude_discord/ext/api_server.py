@@ -202,6 +202,9 @@ def _decode_spawn_attachments(
 
 logger = logging.getLogger(__name__)
 
+# A Discord user/role mention (<@123>, <@!123>, <@&123>).
+_DISCORD_MENTION = re.compile(r"<@[!&]?\d+>")
+
 
 # A scheduled task may pin a model only together with a backend. Model ids are
 # backend-specific — "gpt-6-astra" means nothing to the Claude CLI — so a model
@@ -635,6 +638,9 @@ class ApiServer:
         if not channel_id:
             return web.json_response({"error": "No channel specified"}, status=400)
 
+        if (sent := await self._notify_console(channel_id, message)) is not None:
+            return sent
+
         raw_channel = self.bot.get_channel(channel_id)
         if not raw_channel:
             try:
@@ -686,6 +692,31 @@ class ApiServer:
             result["thread_id"] = str(thread.id)  # type: ignore[union-attr]
             result["thread_name"] = thread.name  # type: ignore[union-attr]
         return web.json_response(result)
+
+    async def _notify_console(self, channel_id: object, message: str) -> web.Response | None:
+        """Post *message* into an Ebi AI Console conversation, if that is the target.
+
+        Console conversations share the thread-key space with Discord threads,
+        so a reminder job keeps working when its conversation moves to the
+        console. Returns None when *channel_id* is not a console conversation.
+        """
+        conversations = self.console_conversations
+        if conversations is None:
+            return None
+        try:
+            thread_key = int(channel_id)  # type: ignore[call-overload]
+        except (TypeError, ValueError):
+            return None
+        if await conversations.get(thread_key) is None:
+            return None
+
+        from ..console.surface import AGENT_AUTHOR
+
+        # A Discord mention means nothing in the console; it would show as raw markup.
+        text = _DISCORD_MENTION.sub("", message).strip() or message
+        await conversations.append(thread_key, author=AGENT_AUTHOR, is_bot=True, content=text)
+        logger.info("notify: posted to console conversation %d", thread_key)
+        return web.json_response({"status": "sent", "frontend": "console"})
 
     async def schedule(self, request: web.Request) -> web.Response:
         """POST /api/schedule — schedule a notification for later."""
