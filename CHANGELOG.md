@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Console: message search also finds threads deleted from Discord, from their JSONL exports
+  (`CCDB_CONSOLE_THREAD_ARCHIVE`), and shows them read only inside the search dialog (#1116)
 - Console: a guide card on Focus — the next move with its reasons and whether answering lets
   an agent resume, decisions in one family gathered together, an explicit "nothing needs you
   now", and (with Ebi Workspace) finished threads whose task or records were not updated.

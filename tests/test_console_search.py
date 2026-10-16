@@ -101,3 +101,92 @@ async def test_search_reopens_an_older_archived_watched_thread(env, monkeypatch)
     assert hit["item"]["id"] == "t1234"
     board = await env.client.get("/console/api/board", headers=AUTH)
     assert any(i["id"] == "t1234" for i in (await board.json())["items"])
+
+
+def _export(root, thread_id, title, messages):
+    lines = [{"_meta": {"id": str(thread_id), "name": title}}]
+    for i, (bot, content) in enumerate(messages):
+        lines.append(
+            {
+                "type": 0,
+                "id": str(i),
+                "content": content,
+                "author": {"username": "ai" if bot else "me", "bot": bot},
+                "timestamp": f"2026-10-0{i + 1}T00:00:00+00:00",
+                "attachments": [],
+            }
+        )
+    import json
+
+    (root / f"{thread_id}.jsonl").write_text(
+        "\n".join(json.dumps(line, ensure_ascii=False) for line in lines), encoding="utf-8"
+    )
+
+
+async def test_deleted_threads_are_found_in_exports_and_read_only(env, tmp_path, monkeypatch):
+    from claude_discord.console.thread_archive import ThreadArchive
+
+    _export(
+        tmp_path,
+        555,
+        "FortiGate redundancy",
+        [(False, "Second FortiGate arrived"), (True, "-# status"), (True, "Use FGCP heartbeat")],
+    )
+    _export(tmp_path, 556, "Unrelated", [(False, "nothing here")])
+    (tmp_path / "notes.txt").write_text("FGCP", encoding="utf-8")
+    route = env.console.app.router
+    search = next(
+        r.handler.__self__ for r in route.routes() if r.resource.canonical == "/console/api/search"
+    )
+    monkeypatch.setattr(search, "archive", ThreadArchive(str(tmp_path)))
+
+    result = await env.client.get("/console/api/search?q=fgcp", headers=AUTH)
+    [hit] = (await result.json())["results"]
+    assert hit["archived"] is True
+    assert hit["item"] == {
+        "id": "a555",
+        "title": "FortiGate redundancy",
+        "bucket": "done",
+        "last_activity_at": "2026-10-03T00:00:00+00:00",
+    }
+    assert "FGCP heartbeat" in hit["snippet"]
+
+    assert (await env.client.get("/console/api/archive/555")).status == 401
+    read = await (await env.client.get("/console/api/archive/555", headers=AUTH)).json()
+    assert read["title"] == "FortiGate redundancy"
+    assert [(m["kind"], m["content"]) for m in read["messages"]] == [
+        ("human", "Second FortiGate arrived"),
+        ("agent", "Use FGCP heartbeat"),
+    ]
+    for bad in ("999", "notes", "..%2Fnotes.txt"):
+        assert (await env.client.get(f"/console/api/archive/{bad}", headers=AUTH)).status == 404
+
+
+async def test_transcript_hit_on_deleted_thread_uses_its_export(env, tmp_path, monkeypatch):
+    from claude_discord.console.thread_archive import ThreadArchive
+
+    _export(tmp_path, 777, "Old work", [(False, "hello")])
+    route = env.console.app.router
+    search = next(
+        r.handler.__self__ for r in route.routes() if r.resource.canonical == "/console/api/search"
+    )
+    monkeypatch.setattr(search, "archive", ThreadArchive(str(tmp_path)))
+    env.console.api.session_repo = SimpleNamespace()
+    env.console.api.transcripts_path = "/test/transcripts"
+    monkeypatch.setattr(env.console, "_board_items", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        env.console, "_thread_for", AsyncMock(return_value=(None, "unknown thread"))
+    )
+    monkeypatch.setattr(
+        "claude_discord.console.search.run_thread_search",
+        AsyncMock(
+            return_value=[
+                ThreadSearchResult(777, "sid", None, None, "discord", None, "a zebra", "body"),
+                ThreadSearchResult(778, "gone", None, None, "discord", None, "zebra", "body"),
+            ]
+        ),
+    )
+    result = await env.client.get("/console/api/search?q=zebra", headers=AUTH)
+    [hit] = (await result.json())["results"]
+    assert hit["item"]["id"] == "a777"
+    assert hit["snippet"] == "a zebra"

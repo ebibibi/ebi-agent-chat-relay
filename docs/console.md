@@ -516,6 +516,14 @@ regardless of backend. Results are capped at 50; use a more specific phrase for 
 A timed-out transcript scan shows a partial-results notice. `GET /console/api/search?q=…`
 is authenticated and accepts a literal query of 1–500 characters.
 
+Threads deleted from Discord can still be found when they were exported first as
+`<thread_id>.jsonl` (a `{"_meta": {"id", "name"}}` line followed by raw Discord message
+objects). Point `CCDB_CONSOLE_THREAD_ARCHIVE` at that directory: search then also matches
+export titles and messages, and a transcript or summary hit on a deleted thread falls back
+to its export. Such results are marked as deleted; selecting one shows the conversation read
+only inside the search dialog (`GET /console/api/archive/<thread_id>`, authenticated, last 500
+messages, bookkeeping hidden). Nothing can be resumed from an export.
+
 Selected rows have a blue outline and a **Selected** marker. Unread rows use a green dot and
 bold title. Pinning keeps its pin symbol while selection keeps its own outline. Background
 refreshes preserve the visible row and its offset, including a thread repeated in a tree and

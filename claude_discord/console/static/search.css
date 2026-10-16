@@ -9,3 +9,4 @@
 .search-result { display:flex; flex-direction:column; align-items:flex-start; text-align:left; gap:8px; white-space:normal; overflow-wrap:anywhere; background:var(--bg); color:var(--text); padding:14px; border:1px solid var(--line); border-radius:8px; cursor:pointer; }
 .search-result:hover,.search-result:focus-visible { border-color:var(--accent); }
 @media(max-width:700px){ .list-head { flex-wrap:wrap; } #search-messages { font-size:12px; } }
+.archive-title { margin:4px 0 0; font-size:16px; }
