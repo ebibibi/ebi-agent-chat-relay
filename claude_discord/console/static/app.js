@@ -572,6 +572,7 @@ function buildDetail(pane, item, key) {
     box.value = state.drafts[item.id] || "";
     window.ConsolePaste.attach(box, item.id, tray);
     window.ConsoleSlash.attach(box, item.id, meta);
+    window.ConsoleBoxSize.attach(form, box, grow);
     requestAnimationFrame(() => grow(box));
   }
   pane.replaceChildren(...nodes.filter(Boolean));
@@ -675,10 +676,12 @@ function setShowActivity(on) {
   if (box) fillMessages(box, { force: true, toBottom: true });
   renderDetail();
 }
-// Textareas grow with what is typed, up to the CSS max-height.
+// Textareas grow with what is typed, up to the CSS max-height. A reply box the user has
+// dragged taller keeps at least that height (boxsize.js).
 function grow(box) {
+  const floor = window.ConsoleBoxSize.floor(box);
   box.style.height = "auto";
-  box.style.height = `${box.scrollHeight + 2}px`;
+  box.style.height = `${Math.max(floor, box.scrollHeight + 2)}px`;
 }
 
 function messageNode(m) {
