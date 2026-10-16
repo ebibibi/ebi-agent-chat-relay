@@ -26,6 +26,7 @@ import discord
 
 from claude_code_core.frontend import Notice, NoticeLevel
 
+from .. import live_runs
 from ..discord_ui.ask_handler import collect_ask_answers
 from ..discord_ui.embeds import error_embed, timeout_embed
 from ..discord_ui.slot_views import SlotWaitView, waiting_embed
@@ -579,6 +580,8 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
         # Deferred only while queueing; later compact/ask reruns queue normally.
         config = replace(config, resumed_from_pause=False)
 
+    live = live_runs.LiveRun(runner=runner, slot=slot, processor=processor)
+    live_runs.register(config.surface.thread_key, live)
     try:
         async for event in runner.run(config.prompt, session_id=config.session_id):
             if processor.should_drain and not event.is_complete:
@@ -600,8 +603,10 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
                 await config.status.set_error()
         await _show_outcome(config, OUTCOME_ERROR)
         await _emit_result_sink(config, None, f"{type(exc).__name__}: {exc}")
+        await _report_undelivered(config, _unread_messages(runner))
         return processor.session_id
     finally:
+        live_runs.unregister(config.surface.thread_key, live)
         if slots is not None and slot is not None:
             slots.release(slot)
         await processor.finalize()
@@ -610,10 +615,16 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
         if config.worktree_manager is not None:
             await _cleanup_session_worktree(config)
 
+    # Messages the human sent into this turn that the agent never read (the
+    # turn was stopped, paused or interrupted first). A continuation of this
+    # run carries them; a run that simply ends shows them as undelivered rather
+    # than starting work the human may have just stopped.
+    unread = _unread_messages(runner)
+
     # Paused to free the slot: queue the continuation as deferred so it
     # resumes on its own once the sessions it yielded to are through.
     if slot is not None and slot.pause_requested:
-        return await _requeue_paused(config, processor)
+        return await _requeue_paused(config, processor, unread)
 
     # After compact_boundary, rerun with a guardrail to prevent Claude from
     # auto-executing "pending tasks" from the compacted context summary.
@@ -622,7 +633,12 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
         logger.info(
             "Compact detected for session %s — rerunning with post-compact guardrail", session_id
         )
-        guardrail_config = replace(config, session_id=session_id, post_compact_rerun=True)
+        guardrail_config = replace(
+            config,
+            prompt=_with_unread(config.prompt, unread),
+            session_id=session_id,
+            post_compact_rerun=True,
+        )
         return await run_claude_with_config(guardrail_config)
 
     # Honour a ScheduleWakeup tool call by registering a one-shot scheduled
@@ -640,6 +656,7 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
             # No Discord UI to collect the answer on. The questions go into the
             # conversation, and the human's next message resumes the session.
             await _post_questions(config, processor.pending_ask)
+            await _report_undelivered(config, unread)
             await _emit_result_sink(config, processor.final_assistant_text, processor.final_error)
             return processor.session_id
         answer_prompt = await collect_ask_answers(
@@ -655,7 +672,9 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
                 "Resuming session %s after AskUserQuestion answer",
                 processor.session_id,
             )
-            return await run_claude_with_config(config.with_prompt(answer_prompt))
+            return await run_claude_with_config(
+                config.with_prompt(_with_unread(answer_prompt, unread))
+            )
 
     # A PR created by this Discord thread is an intermediate artifact, not a
     # terminal outcome. Resume the same agent once so green owner PRs are
@@ -669,7 +688,7 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
     if completion_prompt is not None:
         completion_config = replace(
             config,
-            prompt=completion_prompt,
+            prompt=_with_unread(completion_prompt, unread),
             session_id=session_id,
             pr_completion_gate_rerun=True,
         )
@@ -680,10 +699,49 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
     # sink fires exactly once, from the outermost completed run. An in-stream
     # RESULT error (e.g. API 400/429) is reported as an error, not an empty
     # "done", so the caller can tell a failure from an empty answer.
+    await _report_undelivered(config, unread)
     if processor.final_error:
         await _show_outcome(config, OUTCOME_ERROR)
     await _emit_result_sink(config, processor.final_assistant_text, processor.final_error)
     return processor.session_id
+
+
+def _unread_messages(runner: object) -> list[str]:
+    """Texts delivered into the run that its agent never read."""
+    unconsumed = getattr(runner, "unconsumed_messages", None)
+    if unconsumed is None:
+        return []
+    return [message.text for message in unconsumed()]
+
+
+def _with_unread(prompt: str, unread: list[str]) -> str:
+    """*prompt* followed by the human's unread messages, so the next run sees them."""
+    if not unread:
+        return prompt
+    messages = "\n\n---\n\n".join(unread)
+    return (
+        f"{prompt}\n\n"
+        "The human also sent the following while you were working; you have not "
+        f"read it yet:\n\n{messages}"
+    )
+
+
+async def _report_undelivered(config: RunConfig, unread: list[str]) -> None:
+    """Say which messages the agent never read, so the human can send them again."""
+    if not unread:
+        return
+    quoted = "\n\n".join("> " + text.replace("\n", "\n> ") for text in unread)
+    with contextlib.suppress(Exception):
+        await config.surface.send_notice(
+            Notice(
+                level=NoticeLevel.WARNING,
+                title="Not read by the agent",
+                body=(
+                    "The turn ended before the agent read these messages. "
+                    f"Send them again if they still apply.\n\n{quoted}"
+                ),
+            )
+        )
 
 
 _PLATFORM_LABELS = {"discord": "Discord", "teams": "Teams", "console": "Ebi AI Console"}
@@ -782,7 +840,9 @@ async def _acquire_slot(config: RunConfig, slots: SessionSlotScheduler) -> SlotE
             await view.close(message, resumed=config.resumed_from_pause)
 
 
-async def _requeue_paused(config: RunConfig, processor: EventProcessor) -> str | None:
+async def _requeue_paused(
+    config: RunConfig, processor: EventProcessor, unread: list[str] | None = None
+) -> str | None:
     """Continue a paused session once a slot is free again."""
     session_id = processor.session_id or config.session_id
     logger.info("Thread %d paused to free its slot; re-queued", config.surface.thread_key)
@@ -790,7 +850,7 @@ async def _requeue_paused(config: RunConfig, processor: EventProcessor) -> str |
         config,
         # Without a session there is nothing to resume, so the original
         # request runs again from the start.
-        prompt=PAUSE_RESUME_PROMPT if session_id else config.prompt,
+        prompt=_with_unread(PAUSE_RESUME_PROMPT if session_id else config.prompt, unread or []),
         session_id=session_id,
         resumed_from_pause=True,
     )
