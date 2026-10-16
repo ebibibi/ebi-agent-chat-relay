@@ -85,7 +85,8 @@ channel (inline replies, no thread) are not replayed.
 
 - The queue lives in memory. An ordinary restart (without a reservation) keeps runs that were
   queued for a slot — they are saved on shutdown and replayed — but a Ebi AI Console reply waiting
-  behind its own conversation's running turn is not yet in the slot queue and is dropped.
+  behind its own conversation's running turn is not yet in the slot queue and is dropped. A
+  reply the running turn can take goes into it instead ([mid-turn-messages.md](mid-turn-messages.md)).
 - A deferred thread can wait indefinitely while new runs keep arriving. Prioritize it if that
   happens.
 - Pausing interrupts mid-turn. A tool call in flight at that moment is cut off; the resume prompt
