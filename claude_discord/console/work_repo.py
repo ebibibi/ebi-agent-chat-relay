@@ -67,7 +67,16 @@ EDITABLE_FIELDS = (
     "pinned",
     "paused",
     "workspace_path",
+    "workspace_source",
+    "workspace_reason",
 )
+
+#: How a Workspace binding was decided, weakest first. A binding is only ever replaced by
+#: one at least as strong: a person's choice ("pinned") beats the project the session
+#: actually wrote ("recorded"), which beats a guess from the conversation ("inferred"),
+#: which beats hints such as the working directory ("heuristic").
+WORKSPACE_SOURCES = ("heuristic", "inferred", "recorded", "pinned")
+_BAD_SOURCE = f"workspace_source must be one of {', '.join(WORKSPACE_SOURCES)}"
 
 
 def thread_item_id(thread_id: int) -> str:
@@ -103,6 +112,11 @@ class WorkItem:
     paused_at: str | None = None
     #: Relative context/project path in the explicitly configured Ebi Workspace.
     workspace_path: str | None = None
+    #: How workspace_path was decided (WORKSPACE_SOURCES); "pinned" with no path means a
+    #: person said "no Workspace". None: nothing decided yet, the board guesses on read.
+    workspace_source: str | None = None
+    #: Short machine-readable why, e.g. "cwd", "parent", "record:log.md", "task".
+    workspace_reason: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -122,6 +136,8 @@ class WorkItem:
             "pinned_at": self.pinned_at,
             "paused_at": self.paused_at,
             "workspace_path": self.workspace_path,
+            "workspace_source": self.workspace_source,
+            "workspace_reason": self.workspace_reason,
         }
 
 
@@ -147,6 +163,8 @@ def _row_to_item(row: aiosqlite.Row) -> WorkItem:
         pinned_at=row["pinned_at"],
         paused_at=row["paused_at"],
         workspace_path=row["workspace_path"],
+        workspace_source=row["workspace_source"],
+        workspace_reason=row["workspace_reason"],
     )
 
 
@@ -208,6 +226,12 @@ def validate_changes(changes: dict[str, Any]) -> dict[str, Any]:
             clean[field] = _optional_text(value, field, MAX_PROJECT_CHARS)
         elif field == "workspace_path":
             clean[field] = _optional_text(value, field, 1000)
+        elif field == "workspace_source":
+            if value is not None and value not in WORKSPACE_SOURCES:
+                raise WorkItemError(_BAD_SOURCE)
+            clean[field] = value
+        elif field == "workspace_reason":
+            clean[field] = _optional_text(value, field, 200)
         elif field == "place":
             clean[field] = _optional_text(value, field, MAX_PLACE_CHARS)
         elif field == "pinned":
@@ -242,6 +266,15 @@ class WorkItemRepository:
                 await db.execute("ALTER TABLE work_items ADD COLUMN paused_at TEXT")
             if "workspace_path" not in have:
                 await db.execute("ALTER TABLE work_items ADD COLUMN workspace_path TEXT")
+            if "workspace_source" not in have:
+                await db.execute("ALTER TABLE work_items ADD COLUMN workspace_source TEXT")
+                await db.execute("ALTER TABLE work_items ADD COLUMN workspace_reason TEXT")
+                # Bindings stored before sources existed came from a picker or a prompt;
+                # keep them as decided rather than let a weaker guess replace them.
+                await db.execute(
+                    "UPDATE work_items SET workspace_source = 'pinned'"
+                    " WHERE workspace_path IS NOT NULL"
+                )
             await db.commit()
 
     async def list_all(self) -> list[WorkItem]:
@@ -279,6 +312,8 @@ class WorkItemRepository:
             updated_at=now,
             place=clean.get("place"),
             workspace_path=clean.get("workspace_path"),
+            workspace_source=clean.get("workspace_source"),
+            workspace_reason=clean.get("workspace_reason"),
         )
         await self._check_parent(item.id, item.parent_id)
         await self._write(item)
@@ -306,6 +341,31 @@ class WorkItemRepository:
         updated = replace(current, **clean, updated_at=_now())
         await self._write(updated)
         return updated
+
+    async def bind_workspace(
+        self, item_id: str, path: str | None, source: str, reason: str | None = None
+    ) -> WorkItem | None:
+        """Record a Workspace binding unless a stronger one is already stored.
+
+        Returns the updated item, or None when the stored binding outranks *source*.
+        """
+        if source not in WORKSPACE_SOURCES:
+            raise WorkItemError(_BAD_SOURCE)
+        current = await self.get(item_id)
+        if current is not None and current.workspace_source in WORKSPACE_SOURCES:
+            rank = WORKSPACE_SOURCES.index
+            if rank(current.workspace_source) > rank(source):
+                return None
+            if (current.workspace_path, current.workspace_source, current.workspace_reason) == (
+                path,
+                source,
+                reason,
+            ):
+                return current
+        return await self.update(
+            item_id,
+            {"workspace_path": path, "workspace_source": source, "workspace_reason": reason},
+        )
 
     async def attach_thread(self, item_id: str, thread_id: int) -> WorkItem:
         """A capture was started as a thread: carry its fields over to the thread.
@@ -384,14 +444,17 @@ class WorkItemRepository:
         await db.execute(
             "INSERT INTO work_items (id, thread_id, title, note, parent_id, priority, due_at,"
             " snoozed_until, project, state, created_at, updated_at, place, pinned_at,"
-            " paused_at, workspace_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " paused_at, workspace_path, workspace_source, workspace_reason)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(id) DO UPDATE SET title = excluded.title, note = excluded.note,"
             " parent_id = excluded.parent_id, priority = excluded.priority,"
             " due_at = excluded.due_at, snoozed_until = excluded.snoozed_until,"
             " project = excluded.project, state = excluded.state,"
             " updated_at = excluded.updated_at, place = excluded.place,"
             " pinned_at = excluded.pinned_at, paused_at = excluded.paused_at,"
-            " workspace_path = excluded.workspace_path",
+            " workspace_path = excluded.workspace_path,"
+            " workspace_source = excluded.workspace_source,"
+            " workspace_reason = excluded.workspace_reason",
             (
                 item.id,
                 item.thread_id,
@@ -409,5 +472,7 @@ class WorkItemRepository:
                 item.pinned_at,
                 item.paused_at,
                 item.workspace_path,
+                item.workspace_source,
+                item.workspace_reason,
             ),
         )

@@ -50,3 +50,18 @@
 .ws-focus-plan summary { cursor:pointer; font-weight:600; }
 .ws-focus-plan-body { margin-top:6px; font-size:13px; overflow-wrap:anywhere; }
 .linkish { background:none; border:0; padding:0; color:inherit; cursor:pointer; text-decoration:underline dotted; font:inherit; }
+
+/* Workspace binding badge and picker (wsbind.js) */
+.ws-bind { cursor:default; }
+.ws-bind.ws-inferred, .ws-bind.ws-heuristic { border-style:dashed; }
+.ws-bind.ws-unresolved { opacity:.7; }
+.ws-bind-control { position:relative; flex-wrap:wrap; }
+.ws-bind-pop { position:absolute; z-index:40; top:100%; left:0; margin-top:4px; width:min(420px,92vw); max-height:60vh; display:flex; flex-direction:column; gap:6px; padding:8px; background:var(--panel); border:1px solid var(--line); border-radius:8px; box-shadow:0 8px 24px #0008; }
+.ws-bind-search { padding:8px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:5px; }
+.ws-bind-hint { font-size:11px; }
+.ws-bind-list { overflow:auto; display:flex; flex-direction:column; }
+.ws-bind-head { font-size:11px; opacity:.7; padding:6px 6px 2px; }
+.ws-bind-option { text-align:left; padding:7px 8px; border:0; border-radius:5px; background:transparent; color:var(--text); cursor:pointer; overflow-wrap:anywhere; }
+.ws-bind-option:hover, .ws-bind-option:focus { background:var(--raise); }
+.ws-bind-option.on { border-left:3px solid var(--accent); }
+.ws-bind-empty { padding:8px; }

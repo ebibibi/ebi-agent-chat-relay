@@ -32,7 +32,7 @@ for (const available of [false, true]) {
       } else if (p.endsWith('/workspace/run')) {
         const body = route.request().postDataJSON(); writes.push(body);
         items = [{id:'t1',thread_id:'1',title:'Ship the website',status:'running',bucket:'ai',running:true,
-          workspace_path:entry.path,priority:2}]; data={item:items[0]};
+          workspace_path:entry.path,workspace_source:'pinned',workspace_reason:'task',priority:2}]; data={item:items[0]};
       } else if (p.endsWith('/messages')) data={messages:[]};
       return route.fulfill({contentType:'application/json',body:JSON.stringify(data)});
     });
@@ -74,7 +74,7 @@ for (const available of [false, true]) {
     await page.locator('.ws-task').first().getByRole('button',{name:'AIに実行',exact:true}).click();
     await page.waitForFunction(()=>state.open==='t1');
     assert.equal(writes.at(-1).path,'Work/Website');
-    assert.equal(await page.locator('#d-head .workspace-picker').inputValue(),'Work/Website');
+    assert.match(await page.locator('.ws-bind-control .ws-bind').innerText(),/👤 📂 Work\/Website/);
     await page.locator('.nav-workspace').click();
     await page.setViewportSize({width:390,height:844});
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=390));

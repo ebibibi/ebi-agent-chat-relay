@@ -1271,9 +1271,20 @@ class ConsoleServer:
         return web.json_response({"status": "delivered", "delivery": delivery}, status=202)
 
     async def _workspace_changes(self, body: dict[str, Any]) -> None:
+        """Turn a client's Workspace choice into a binding with its source.
+
+        A path a person picks is pinned. ``workspace_path: null`` hands the item back to
+        automatic binding, unless it comes with ``workspace_source: "pinned"``, which
+        means "no Workspace" and stops guesses. A client never sets any other source.
+        """
+        source = body.pop("workspace_source", None)
+        body.pop("workspace_reason", None)
         if "workspace_path" in body:
-            if body["workspace_path"] is not None:
-                await asyncio.to_thread(self.workspace.entry, body["workspace_path"])
+            path = body["workspace_path"]
+            if path is not None:
+                await asyncio.to_thread(self.workspace.entry, path)
+            body["workspace_source"] = "pinned" if path is not None or source == "pinned" else None
+            body["workspace_reason"] = None
             return
         if self.workspace.root is None:
             return
@@ -1283,6 +1294,8 @@ class ConsoleServer:
             bound = await asyncio.to_thread(self.workspace.bind_items, [*items, candidate])
             if bound[-1].get("workspace_path"):
                 body["workspace_path"] = bound[-1]["workspace_path"]
+                body["workspace_source"] = "heuristic"
+                body["workspace_reason"] = bound[-1].get("workspace_reason")
 
     async def _workspace_prompt(self, item_id: str, text: str) -> str:
         if self.workspace.root is None:
@@ -1321,14 +1334,20 @@ class ConsoleServer:
             return {"path": path, "error": error}
 
     async def _workspace_path(self, item_id: str) -> str | None:
+        """The item's Workspace entry; a guess is stored so later turns keep the same one."""
         item = await self.work_repo.get(item_id)
+        if item is not None and item.workspace_source == "pinned":
+            return item.workspace_path
         path = item.workspace_path if item else None
         if not path:
             items = await self._board_items()
             bound = await asyncio.to_thread(self.workspace.bind_items, items)
-            path = next((i.get("workspace_path") for i in bound if i["id"] == item_id), None)
+            found = next((i for i in bound if i["id"] == item_id), {})
+            path = found.get("workspace_path")
             if path:
-                await self.work_repo.update(item_id, {"workspace_path": path})
+                await self.work_repo.bind_workspace(
+                    item_id, path, "heuristic", found.get("workspace_reason")
+                )
         return path
 
     # -- helpers -----------------------------------------------------------

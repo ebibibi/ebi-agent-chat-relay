@@ -159,3 +159,39 @@ async def test_workspace_reference_survives_capture_to_thread(repo) -> None:
     assert linked.workspace_path == "Work/Client/Website"
     assert (await repo.get(linked.id)).as_dict()["workspace_path"] == "Work/Client/Website"
     assert (await repo.update(linked.id, {"workspace_path": None})).workspace_path is None
+
+
+async def test_workspace_binding_never_downgrades_its_source(repo) -> None:
+    item = await repo.create_capture({"title": "Bind me"})
+    assert item.workspace_source is None
+    bound = await repo.bind_workspace(item.id, "Work/A", "heuristic", "cwd")
+    assert bound is not None and (bound.workspace_path, bound.workspace_reason) == ("Work/A", "cwd")
+    assert (await repo.bind_workspace(item.id, "Work/B", "recorded", "record:log.md")) is not None
+    assert await repo.bind_workspace(item.id, "Work/C", "inferred", None) is None
+    assert (await repo.get(item.id)).workspace_path == "Work/B"
+    assert (await repo.bind_workspace(item.id, "Work/D", "pinned")) is not None
+    assert await repo.bind_workspace(item.id, "Work/E", "recorded", "record:log.md") is None
+    stored = await repo.get(item.id)
+    assert (stored.workspace_path, stored.workspace_source) == ("Work/D", "pinned")
+    assert stored.as_dict()["workspace_source"] == "pinned"
+    with pytest.raises(WorkItemError):
+        await repo.bind_workspace(item.id, "Work/F", "guess")
+
+
+async def test_bindings_from_before_sources_existed_stay_decided(tmp_path) -> None:
+    import aiosqlite
+
+    db = tmp_path / "old.db"
+    old = WorkItemRepository(str(db))
+    await old.init_db()
+    async with aiosqlite.connect(db) as conn:
+        await conn.execute("ALTER TABLE work_items DROP COLUMN workspace_reason")
+        await conn.execute("ALTER TABLE work_items DROP COLUMN workspace_source")
+        await conn.execute(
+            "INSERT INTO work_items (id, thread_id, priority, state, created_at, updated_at,"
+            " workspace_path) VALUES ('t1', 1, 2, 'open', 'x', 'x', 'Work/A')"
+        )
+        await conn.commit()
+    repo = WorkItemRepository(str(db))
+    await repo.init_db()
+    assert (await repo.get("t1")).workspace_source == "pinned"

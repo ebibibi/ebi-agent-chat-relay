@@ -2,7 +2,10 @@
 "use strict";
 window.ConsoleWorkspace = (() => {
   let data = {available:false, entries:[]};
-  let chosen = localStorage.getItem("workspacePath") || "";
+  // A Workspace picked above the capture box applies to the next capture only. Nothing is
+  // remembered: a new thread starts unresolved and the Console works out where it belongs.
+  let chosen = "";
+  localStorage.removeItem("workspacePath");
   let browsing = chosen;
   let panel;
   let busy = false;
@@ -30,7 +33,7 @@ window.ConsoleWorkspace = (() => {
         text:`${e.kind==='project'?'📁':'🗂️'} ${e.path}`})));
   }
   function choose(path) {
-    chosen=path; localStorage.setItem("workspacePath",path); capturePicker();
+    chosen=path; capturePicker();
   }
   function capturePicker() {
     let box=document.getElementById("workspace-capture");
@@ -174,12 +177,10 @@ window.ConsoleWorkspace = (() => {
     }catch(err){toast(err.message);}
     finally{busy=false;draw();}
   }
-  function picker(item) {
-    if(!data.available)return null;
-    return selector(item.workspace_path||"",path=>patch(item.id,{workspace_path:path||null}));
-  }
   window.addEventListener("console-language-change",capturePicker);
   // Open the panel on one entry (Focus rows link here).
   function open(path) { if (path) browsing=path; show(); }
-  return {load,nav,picker,open,path:()=>chosen||null};
+  function consumed() { if (chosen) { chosen=""; capturePicker(); } }
+  return {load,nav,open,consumed,path:()=>chosen||null,
+    available:()=>Boolean(data.available),entries:()=>data.entries};
 })();

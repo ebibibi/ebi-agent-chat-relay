@@ -177,3 +177,37 @@ async def test_done_without_a_workspace_reports_nothing(env):
     done = await env.client.post(f"/console/api/items/{item_id}/done", json={}, headers=WRITE)
     assert done.status == 200
     assert (await done.json())["workspace"] is None
+
+
+async def test_a_picked_binding_is_pinned_and_none_or_auto_can_be_chosen(env, notes):
+    env.console.workspace = Workspace(notes)
+    created = await env.client.post("/console/api/items", headers=WRITE, json={"title": "Loose"})
+    item = (await created.json())["item"]
+    assert item["workspace_source"] is None
+
+    async def patch(body):
+        response = await env.client.patch(
+            f"/console/api/items/{item['id']}", headers=WRITE, json=body
+        )
+        assert response.status == 200
+        return (await response.json())["item"]
+
+    picked = await patch({"workspace_path": "Work/Client", "workspace_source": "recorded"})
+    assert (picked["workspace_path"], picked["workspace_source"]) == ("Work/Client", "pinned")
+    none = await patch({"workspace_path": None, "workspace_source": "pinned"})
+    assert (none["workspace_path"], none["workspace_source"]) == (None, "pinned")
+    auto = await patch({"workspace_path": None})
+    assert (auto["workspace_path"], auto["workspace_source"]) == (None, None)
+
+
+async def test_running_a_task_pins_the_conversation_to_its_entry(env, notes):
+    env.console.workspace = Workspace(notes)
+    entry = env.console.workspace.entry("Work/Client/Website")
+    payload = {
+        "path": entry["path"],
+        "revision": entry["revision"],
+        "line": entry["tasks"][0]["line"],
+    }
+    response = await env.client.post("/console/api/workspace/run", json=payload, headers=WRITE)
+    item = (await response.json())["item"]
+    assert (item["workspace_source"], item["workspace_reason"]) == ("pinned", "task")
