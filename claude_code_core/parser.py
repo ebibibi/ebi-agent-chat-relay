@@ -220,6 +220,8 @@ def _parse_user(data: dict[str, Any], event: StreamEvent) -> None:
     """Parse user message (tool_result blocks with content)."""
     message = data.get("message", {})
     content = message.get("content", [])
+    if data.get("isReplay") and data.get("parent_tool_use_id") is None:
+        event.replay_uuid = data.get("uuid")
 
     for block in content:
         if not isinstance(block, dict):
