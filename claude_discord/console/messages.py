@@ -136,8 +136,11 @@ def serialize_message(
         # Waiting on the person: never fold it away as bookkeeping.
         kind = KIND_AGENT
     created_at: Any = getattr(message, "created_at", None)
+    message_id = getattr(message, "id", None)
     return {
-        "id": getattr(message, "id", None),
+        # A string: Discord ids exceed 2**53, so a JSON number would reach the
+        # browser rounded and button presses would name a message that does not exist.
+        "id": str(message_id) if message_id is not None else None,
         "author": author_name,
         "is_bot": is_bot,
         "kind": kind,
