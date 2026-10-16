@@ -74,6 +74,10 @@ def rewrite_codex_argv(argv: tuple[str, ...], level: str) -> tuple[str, ...]:
     ``resume``, so it goes directly after ``exec``. Any existing ``--sandbox``
     pair and the bypass flag are dropped.
     """
+    if len(argv) > 1 and argv[1] == "app-server":
+        # App-server has config overrides, not exec's --sandbox flag. The last
+        # override wins, including over the runner's explicit bypass setting.
+        return (*argv, "-c", f"sandbox_mode={json.dumps(level)}")
     exec_index = argv.index("exec")
     head = list(argv[: exec_index + 1])
     tail: list[str] = []
@@ -101,8 +105,11 @@ class NativeEnvironment:
         if backend == "pi":
             return PI_REFUSAL
         if backend in CODEX_BACKENDS:
-            if "exec" not in launch.argv:
-                return "The native execution environment expected a `codex exec` command line."
+            if len(launch.argv) < 2 or launch.argv[1] not in ("exec", "app-server"):
+                return (
+                    "The native execution environment expected a `codex exec` "
+                    "or `codex app-server` command line."
+                )
             if codex_sandbox_level(launch.env) is None:
                 return (
                     f"{CODEX_SANDBOX_OVERRIDE_ENV}=danger-full-access disables the Codex sandbox, "

@@ -14,6 +14,7 @@ import re
 import signal
 from collections.abc import AsyncGenerator
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from .account_pool import AccountBinding
@@ -22,11 +23,15 @@ from .codex_transcript import codex_message_from_line
 from .execution import ExecutionRefusedError, carry_execution_mode, prepare_launch, refusal_event
 from .types import (
     ImageData,
+    InjectedMessage,
     MessageType,
     StreamEvent,
     ToolCategory,
     ToolUseEvent,
 )
+
+if TYPE_CHECKING:
+    from .codex_app_server import AppServerSession
 
 logger = logging.getLogger(__name__)
 
@@ -342,6 +347,8 @@ class CodexRunner:
         self.account: AccountBinding | None = None
         self._process: asyncio.subprocess.Process | None = None
         self._interrupt_requested = False
+        self._app_server: AppServerSession | None = None
+        self._unconsumed_app_messages: list[InjectedMessage] = []
 
     async def run(
         self,
@@ -349,6 +356,23 @@ class CodexRunner:
         session_id: str | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Run Codex CLI and yield stream events."""
+        self._unconsumed_app_messages = []
+        if self._use_app_server():
+            from .codex_app_server import AppServerSession
+
+            self._interrupt_requested = False
+            self._app_server = AppServerSession(self)
+            stream = self._app_server.run(prompt, session_id)
+            try:
+                async for event in stream:
+                    yield event
+            finally:
+                try:
+                    await stream.aclose()
+                finally:
+                    self._unconsumed_app_messages = list(self._app_server.outstanding.values())
+                    self._app_server = None
+            return
         attempt_session_id = session_id
         attempt_prompt = prompt
         retried_without_resume = False
@@ -476,8 +500,33 @@ class CodexRunner:
         cloned.account = self.account
         return carry_execution_mode(self, cloned)
 
+    def _use_app_server(self) -> bool:
+        # Local transport needs a separate vendor-egress measurement (decision 13).
+        return (
+            self._execution_backend == "codex"
+            and os.environ.get("CCDB_CODEX_TRANSPORT", "exec") == "app-server"
+        )
+
+    async def inject_user_message(self, text: str, images: list[ImageData] | None = None) -> bool:
+        """Use the shared live-input ownership and acknowledgement contract."""
+        if self._app_server is None:
+            return False
+        return await self._app_server.inject_user_message(text, images)
+
+    def unconsumed_messages(self) -> list[InjectedMessage]:
+        if self._app_server is not None:
+            return list(self._app_server.outstanding.values())
+        return list(self._unconsumed_app_messages)
+
     async def interrupt(self) -> None:
-        """Interrupt the subprocess with SIGINT."""
+        """Interrupt the subprocess with SIGINT, or the active app-server turn."""
+        if self._app_server is not None:
+            self._interrupt_requested = True
+            try:
+                if await self._app_server.interrupt():
+                    return
+            except (TimeoutError, ConnectionError, RuntimeError):
+                logger.warning("Codex app-server interrupt failed; terminating process")
         if self._process and self._process.returncode is None:
             self._interrupt_requested = True
             if os.name == "nt":

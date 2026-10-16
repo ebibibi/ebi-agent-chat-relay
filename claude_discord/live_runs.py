@@ -114,7 +114,7 @@ async def try_inject(
         return False  # An earlier message is waiting; this one goes after it.
     inject = getattr(run.runner, "inject_user_message", None)
     if inject is None:
-        return False  # Codex, pi, AG-UI: no input channel into a running turn.
+        return False  # Backends without a live-input method (pi, AG-UI).
     if backend is not None and run.backend is not None and backend != run.backend:
         return False
     if execution_mode is not ANY_MODE and (
