@@ -461,7 +461,8 @@ function revealSelection() {
 
 function rowNode({ item, depth, children, rowKey, family }) {
   const meta = [];
-  if (item.workspace_path) meta.push(h("span", {class:"tag",text:`🗂️ ${item.workspace_path}`}));
+  const wsTag = window.ConsoleWsBind.badge(item);
+  if (wsTag) meta.push(wsTag);
   const familyTag = family && depth > 1 ? h('span', {class:'tag', text:`↳ ${state.byId.get(item.parent_id)?.title || item.parent_id}`}) : null;
   if (familyTag) meta.push(familyTag);
   // In Recent, name the list the item lives in now, unless its status already says so.
@@ -596,7 +597,7 @@ function headParts(item) {
     "aria-pressed": pinned ? "true" : "false", onclick: () => togglePin(item.id),
     text: pinned ? `📌 ${T.unpin}` : `📌 ${T.pin}` }));
   parts.push(window.ConsolePlaces.picker(item));
-  parts.push(window.ConsoleWorkspace.picker(item));
+  parts.push(window.ConsoleWsBind.control(item));
   // Tool calls and status lines: one click away, never folded into the drawer.
   if (item.thread_id) parts.push(activityToggle());
   parts.push(h("button", { class: "btn d-more" + (state.drawerOpen ? " on" : ""), type: "button",
@@ -929,6 +930,8 @@ async function capture(text) {
     if (prepared.files.length) body.files = prepared.files;
     const data = await api("/items", { method: "POST", body });
     accepted = true;
+    // A Workspace picked for this capture applies to it only; the next one starts unresolved.
+    window.ConsoleWorkspace?.consumed();
     window.ConsolePaste.clear(CAPTURE);
     const started = Boolean(data.item.thread_id);
     await refresh();

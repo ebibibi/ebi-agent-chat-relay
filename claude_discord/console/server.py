@@ -14,12 +14,13 @@ one consumer of it; a terminal or desktop client can be another.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import time
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
@@ -84,6 +85,7 @@ from .work_repo import (
 from .workspace import Workspace, WorkspaceError
 from .workspace_api import WorkspaceRoutes
 from .workspace_plan import WorkspacePlan
+from .workspace_records import RecordWatcher
 
 if TYPE_CHECKING:
     from ..ext.api_server import ApiServer
@@ -98,6 +100,12 @@ API_PREFIX = "/console/api"
 CSRF_HEADER = "X-Console-Request"
 
 MAX_REPLY_CHARS = 4000
+#: How often session transcripts are checked for Workspace record writes.
+RECORD_INTERVAL_SECONDS = 60.0
+#: Sessions idle longer than this are not read for record writes.
+RECORD_HORIZON_DAYS = 14
+#: How long the Workspace entry list offered to the triage model is reused.
+WORKSPACE_INDEX_SECONDS = 300.0
 MAX_HISTORY = 100
 DEFAULT_HISTORY = 50
 #: How many raw Discord messages a chat thread's history may read to fill the
@@ -236,6 +244,11 @@ class ConsoleServer:
         self.work_repo = work_repo
         self.workspace = Workspace.discover()
         self.workspace_plan = WorkspacePlan.discover(self.workspace)
+        #: Reads session transcripts for the Workspace records each thread wrote.
+        self.workspace_records = RecordWatcher()
+        self._records_seen: dict[int, str] = {}
+        self._records_task: asyncio.Task[None] | None = None
+        self._workspace_index_cache: tuple[float, list[tuple[str, str]]] | None = None
         #: The model's priority and deadline guesses; None turns automatic triage off.
         self.triage = triage
         #: The managed list of places work can be bound to.
@@ -373,6 +386,8 @@ class ConsoleServer:
         site = web.TCPSite(self._runner, self.host, self.port, reuse_address=True)
         await site.start()
         logger.info("Ebi AI Console started: http://%s:%d", self.host, self.port)
+        if self.workspace.root is not None and self._records_task is None:
+            self._records_task = asyncio.ensure_future(self._records_loop())
 
     def start_triage(self, ask: Callable[[str], Awaitable[str | None]], *, model: str) -> None:
         """Triage open items in the background with *ask* (one model call per item)."""
@@ -385,15 +400,83 @@ class ConsoleServer:
             read_messages=self.triage_messages,
             model=model,
             registered_places=places.names if places is not None else None,
+            workspace_index=self.workspace_index if self.workspace.root is not None else None,
+            on_workspace=self._bind_inferred,
         )
         self._triager.start(self._board_items, TRIAGE_INTERVAL_SECONDS)
         logger.info("Ebi AI Console: automatic triage on (%s)", model)
 
     async def stop(self) -> None:
+        if self._records_task is not None:
+            self._records_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._records_task
+            self._records_task = None
         if self._triager is not None:
             await self._triager.stop()
         if self._runner:
             await self._runner.cleanup()
+
+    async def workspace_index(self) -> list[tuple[str, str]]:
+        """Workspace entries with one line about each, for the triage model (cached)."""
+        cached = self._workspace_index_cache
+        if cached is not None and time.monotonic() - cached[0] < WORKSPACE_INDEX_SECONDS:
+            return cached[1]
+        index = await asyncio.to_thread(self.workspace.index)
+        self._workspace_index_cache = (time.monotonic(), index)
+        return index
+
+    async def _bind_inferred(self, item: dict[str, Any], path: str) -> None:
+        try:
+            await self.work_repo.bind_workspace(item["id"], path, "inferred", "inferred")
+        except WorkItemError as exc:
+            logger.info("console: inferred Workspace not stored for %s: %s", _q(item["id"]), exc)
+
+    async def _records_loop(self) -> None:
+        while True:
+            try:
+                await self.bind_recorded()
+            except Exception:
+                logger.exception("console: Workspace record pass failed")
+            await asyncio.sleep(RECORD_INTERVAL_SECONDS)
+
+    async def bind_recorded(self) -> int:
+        """Bind threads whose sessions wrote Workspace records since the last pass.
+
+        Only sessions used since the last pass are read, and only the transcript bytes
+        appended since then. Returns how many threads are bound to what they recorded.
+        """
+        repo = self.api.session_repo
+        if self.workspace.root is None or repo is None:
+            return 0
+        records = await repo.list_all(limit=500)
+        horizon = (datetime.now(UTC) - timedelta(days=RECORD_HORIZON_DAYS)).isoformat()
+        fresh = [
+            r
+            for r in records
+            if self._records_seen.get(r.thread_id) != r.last_used_at
+            and (r.last_used_at or "") >= horizon[:10]
+        ]
+        if not fresh:
+            return 0
+        entries = (await asyncio.to_thread(self.workspace.snapshot))["entries"]
+        bound_count = 0
+        for record in fresh:
+            hit = await asyncio.to_thread(
+                self.workspace_records.latest, record.session_id, record.backend, entries
+            )
+            self._records_seen[record.thread_id] = record.last_used_at
+            if hit is None:
+                continue
+            path, file = hit
+            try:
+                bound = await self.work_repo.bind_workspace(
+                    thread_item_id(record.thread_id), path, "recorded", f"record:{file}"
+                )
+            except WorkItemError:
+                continue
+            bound_count += bound is not None
+        return bound_count
 
     # -- shell -------------------------------------------------------------
     async def index(self, request: web.Request) -> web.StreamResponse:
@@ -1271,9 +1354,20 @@ class ConsoleServer:
         return web.json_response({"status": "delivered", "delivery": delivery}, status=202)
 
     async def _workspace_changes(self, body: dict[str, Any]) -> None:
+        """Turn a client's Workspace choice into a binding with its source.
+
+        A path a person picks is pinned. ``workspace_path: null`` hands the item back to
+        automatic binding, unless it comes with ``workspace_source: "pinned"``, which
+        means "no Workspace" and stops guesses. A client never sets any other source.
+        """
+        source = body.pop("workspace_source", None)
+        body.pop("workspace_reason", None)
         if "workspace_path" in body:
-            if body["workspace_path"] is not None:
-                await asyncio.to_thread(self.workspace.entry, body["workspace_path"])
+            path = body["workspace_path"]
+            if path is not None:
+                await asyncio.to_thread(self.workspace.entry, path)
+            body["workspace_source"] = "pinned" if path is not None or source == "pinned" else None
+            body["workspace_reason"] = None
             return
         if self.workspace.root is None:
             return
@@ -1283,6 +1377,8 @@ class ConsoleServer:
             bound = await asyncio.to_thread(self.workspace.bind_items, [*items, candidate])
             if bound[-1].get("workspace_path"):
                 body["workspace_path"] = bound[-1]["workspace_path"]
+                body["workspace_source"] = "heuristic"
+                body["workspace_reason"] = bound[-1].get("workspace_reason")
 
     async def _workspace_prompt(self, item_id: str, text: str) -> str:
         if self.workspace.root is None:
@@ -1321,14 +1417,20 @@ class ConsoleServer:
             return {"path": path, "error": error}
 
     async def _workspace_path(self, item_id: str) -> str | None:
+        """The item's Workspace entry; a guess is stored so later turns keep the same one."""
         item = await self.work_repo.get(item_id)
+        if item is not None and item.workspace_source == "pinned":
+            return item.workspace_path
         path = item.workspace_path if item else None
         if not path:
             items = await self._board_items()
             bound = await asyncio.to_thread(self.workspace.bind_items, items)
-            path = next((i.get("workspace_path") for i in bound if i["id"] == item_id), None)
+            found = next((i for i in bound if i["id"] == item_id), {})
+            path = found.get("workspace_path")
             if path:
-                await self.work_repo.update(item_id, {"workspace_path": path})
+                await self.work_repo.bind_workspace(
+                    item_id, path, "heuristic", found.get("workspace_reason")
+                )
         return path
 
     # -- helpers -----------------------------------------------------------

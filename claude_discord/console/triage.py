@@ -56,6 +56,10 @@ MAX_NOTE_CHARS = 120
 MAX_PLACE_CHARS = 40
 #: Place labels offered to the model, so it reuses "home" instead of inventing "house".
 MAX_KNOWN_PLACES = 20
+#: Ebi Workspace entries offered to the model, and how sure it must be to bind a thread.
+MAX_WORKSPACE_ENTRIES = 150
+MAX_WORKSPACE_LINE_CHARS = 140
+WORKSPACE_CONFIDENCE = 0.7
 
 #: Statuses that are not work to triage.
 #: A completion candidate waits only for the human to confirm it, so it is not ranked either.
@@ -123,6 +127,18 @@ null when it can be done anywhere. Being at a place is not waiting: ready stays 
 Write reason, next, waiting_for and place in the conversation's language.
 """
 
+_WORKSPACE_PROMPT = """
+The person keeps projects and contexts in a notes workspace. Entries (path — what it is):
+{entries}
+
+Also answer, in the same JSON object:
+"workspace": the one entry path above this work belongs to, copied exactly, or null;
+"workspace_confidence": 0.0-1.0, how sure you are.
+Pick an entry only when the conversation is clearly about that project or context; prefer
+the most specific project over its parent context. Small talk, one-off questions and work
+that fits no entry get null.
+"""
+
 _JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
 
 
@@ -142,6 +158,9 @@ class TriageResult:
     ready_at: str | None = None
     waiting_for: str = ""
     place: str | None = None
+    #: The Ebi Workspace entry the model thinks this belongs to, and how sure it is.
+    workspace_path: str | None = None
+    workspace_confidence: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -261,8 +280,13 @@ def build_prompt(
     messages: Sequence[tuple[str, str]],
     now: datetime,
     places: Iterable[str] = (),
+    workspace: Sequence[tuple[str, str]] = (),
 ) -> str:
-    """The prompt for one item. *messages* are (who, text), oldest first."""
+    """The prompt for one item. *messages* are (who, text), oldest first.
+
+    *workspace* lists Ebi Workspace entries as (path, one-line description); when given,
+    the model also says which entry the work belongs to.
+    """
     lines = [
         f"[{who}] {' '.join(text.split())[:MAX_MESSAGE_CHARS]}"
         for who, text in messages[-MAX_MESSAGES:]
@@ -277,7 +301,15 @@ def build_prompt(
         status=status,
         places=", ".join(sorted({p for p in places if p})[:MAX_KNOWN_PLACES]) or "(none yet)",
         messages=body or "(no messages)",
-    )
+    ) + (_WORKSPACE_PROMPT.format(entries=_workspace_lines(workspace)) if workspace else "")
+
+
+def _workspace_lines(workspace: Sequence[tuple[str, str]]) -> str:
+    lines = []
+    for path, about in list(workspace)[:MAX_WORKSPACE_ENTRIES]:
+        about = " ".join(about.split())
+        lines.append(f"- {path} — {about}"[:MAX_WORKSPACE_LINE_CHARS] if about else f"- {path}")
+    return "\n".join(lines)
 
 
 def _parse_due(value: Any, now: datetime) -> str | None:
@@ -326,7 +358,22 @@ def parse_reply(raw: str, *, now: datetime) -> TriageResult | None:
         ready_at=_parse_due(data.get("ready_at"), now),
         waiting_for=_short(data.get("waiting_for"))[:60],
         place=_short(data.get("place"))[:MAX_PLACE_CHARS] or None,
+        workspace_path=_workspace_answer(data.get("workspace")),
+        workspace_confidence=_confidence(data.get("workspace_confidence")),
     )
+
+
+def _workspace_answer(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip().strip("/")
+    return text[:1000] or None
+
+
+def _confidence(value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return 0.0
+    return max(0.0, min(1.0, float(value)))
 
 
 def triage_env() -> dict[str, str]:
@@ -516,6 +563,8 @@ class Triager:
         per_pass: int = PER_PASS,
         concurrency: int = CONCURRENCY,
         registered_places: Callable[[], Awaitable[list[str]]] | None = None,
+        workspace_index: Callable[[], Awaitable[list[tuple[str, str]]]] | None = None,
+        on_workspace: Callable[[dict[str, Any], str], Awaitable[None]] | None = None,
     ) -> None:
         self.repo = repo
         self._ask = ask
@@ -524,6 +573,8 @@ class Triager:
         self._per_pass = per_pass
         self._concurrency = concurrency
         self._registered = registered_places
+        self._workspace_index = workspace_index
+        self._on_workspace = on_workspace
         self._failed: dict[str, tuple[str, float]] = {}
         self._task: asyncio.Task[None] | None = None
 
@@ -551,17 +602,30 @@ class Triager:
         batch = self.due(items, rows)
         managed = await self._registered() if self._registered is not None else []
         places = list(dict.fromkeys(managed + known_places(items, rows)))
+        workspace: list[tuple[str, str]] = []
+        if batch and self._workspace_index is not None:
+            try:
+                workspace = await self._workspace_index()
+            except Exception:
+                logger.exception("console triage: Workspace index unavailable")
         gate = asyncio.Semaphore(self._concurrency)
 
         async def one(item: dict[str, Any]) -> bool:
             async with gate:
-                return await self._triage(item, places)
+                return await self._triage(item, places, workspace)
 
         results = await asyncio.gather(*(one(i) for i in batch))
         return sum(results)
 
-    async def _triage(self, item: dict[str, Any], places: Iterable[str] = ()) -> bool:
+    async def _triage(
+        self,
+        item: dict[str, Any],
+        places: Iterable[str] = (),
+        workspace: Sequence[tuple[str, str]] = (),
+    ) -> bool:
         basis = _basis(item)
+        # Only a thread nobody decided for, and whose session recorded nothing, is guessed.
+        guess = bool(workspace) and item.get("workspace_source") not in ("pinned", "recorded")
         try:
             messages = await self._read(item)
             prompt = build_prompt(
@@ -570,6 +634,7 @@ class Triager:
                 messages=messages,
                 now=datetime.now(UTC),
                 places=places,
+                workspace=workspace if guess else (),
             )
             result = parse_reply(await self._ask(prompt) or "", now=datetime.now(UTC))
             if result is None:
@@ -577,6 +642,14 @@ class Triager:
             # A backend-following ask names the model it used for this item.
             model = str(getattr(self._ask, "model", self._model))
             await self.repo.save(item["id"], result, basis=basis, model=model)
+            known = {path for path, _ in workspace}
+            if (
+                guess
+                and self._on_workspace is not None
+                and result.workspace_path in known
+                and result.workspace_confidence >= WORKSPACE_CONFIDENCE
+            ):
+                await self._on_workspace(item, result.workspace_path)
         except Exception as exc:
             logger.info("console triage: %s skipped: %s", item["id"], exc)
             self._failed[item["id"]] = (basis, time.monotonic())

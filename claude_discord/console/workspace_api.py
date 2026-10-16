@@ -84,6 +84,9 @@ class WorkspaceRoutes:
                     "title": task["text"][:200],
                     "note": task["text"],
                     "workspace_path": entry["path"],
+                    # Started from that task: the person chose where it belongs.
+                    "workspace_source": "pinned",
+                    "workspace_reason": "task",
                 }
             )
             return await self.server._start_guarded(item.id, {}, request[IDENTITY])

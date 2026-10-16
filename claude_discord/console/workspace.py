@@ -89,6 +89,31 @@ def _edit_line(line: str, *, text: str | None = None, done: bool | None = None) 
     return f"{plain[1]}{box}{label}{plain[3] or ''}"
 
 
+# "作成日: 2026-02-16" or "updated: …" says nothing about what an entry is.
+_META_LINE = re.compile(
+    r"^\**(?:作成日|作成|最終更新|更新日|created|updated|status|ステータス)\**\s*[:：]", re.I
+)
+
+
+def _first_prose(text: str, limit: int = 100) -> str:
+    """The first line of plain prose in a Markdown document, shortened."""
+    body = text
+    if body.startswith("---\n"):
+        end = body.find("\n---", 4)
+        body = body[end + 4 :] if end >= 0 else body
+    for line in body.splitlines():
+        line = line.strip()
+        if not line or line.startswith(("#", ">", "|", "```", "<!--", "---")):
+            continue
+        line = re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", line)
+        if _META_LINE.match(line):
+            continue
+        line = re.sub(r"\[\[([^\]|]+\|)?([^\]]+)\]\]", r"\2", line).replace("**", "")
+        if line:
+            return line[:limit]
+    return ""
+
+
 class Workspace:
     def __init__(self, root: Path | None) -> None:
         self.root = root.resolve() if root and (root / "02_Contexts").is_dir() else None
@@ -180,6 +205,22 @@ class Workspace:
                 # One unreadable entry must not expose its target or hide the others.
                 continue
         return {"available": True, "name": self.root.name, "entries": entries}
+
+    def index(self) -> list[tuple[str, str]]:
+        """(path, one line about it) per entry: the first prose line of its overview.
+
+        A project's ``overview.md`` or a context's ``AGENTS.md``; headings, front matter,
+        quotes and lists are skipped. Used to let a model say where a thread belongs.
+        """
+        out = []
+        for entry in self.snapshot()["entries"]:
+            name = "overview.md" if entry["kind"] == "project" else "AGENTS.md"
+            try:
+                text = self.document(entry["path"], name)
+            except (WorkspaceError, OSError, UnicodeError):
+                text = ""
+            out.append((entry["path"], _first_prose(text)))
+        return out
 
     def document(self, path: str, name: str) -> str:
         self.entry(path)
@@ -367,58 +408,79 @@ class Workspace:
         here: Path,
         entries: list[dict[str, Any]],
         repositories: dict[str, Path | None],
-    ) -> str | None:
-        """The entry a working directory belongs to: inside its folder, else its repository."""
+    ) -> tuple[str, str] | None:
+        """The entry a working directory belongs to and why: its folder, else its repository."""
         if self.root is None:
             return None
         base = self.root / "02_Contexts"
         matches = [e["path"] for e in entries if here.is_relative_to(base / e["path"])]
         if matches:
-            return max(matches, key=len)
+            return max(matches, key=len), "cwd"
         repository_matches = [
             path
             for path, repository in repositories.items()
             if repository and here.is_relative_to(repository)
         ]
-        return repository_matches[0] if len(repository_matches) == 1 else None
+        return (repository_matches[0], "repository") if len(repository_matches) == 1 else None
 
     def bind_items(
         self, items: list[dict[str, Any]], entries: list[dict[str, Any]] | None = None
     ) -> list[dict[str, Any]]:
         """Copies of *items* with ``workspace_path`` filled in where it can be inferred.
 
-        An inferred path is marked ``workspace_by = "auto"`` so a reader can tell a
-        guess from a binding a person chose. *entries* reuses a snapshot already taken.
+        A stored binding is kept as it is, and so is a person's "no Workspace" (source
+        ``pinned`` without a path). A guess gets ``workspace_source = "heuristic"``, a
+        ``workspace_reason`` (``cwd``, ``repository``, ``project`` or ``parent``) and,
+        for older clients, ``workspace_by = "auto"``. *entries* reuses a snapshot.
         """
         known: list[dict[str, Any]] = entries if entries is not None else self.snapshot()["entries"]
         paths = {e["path"] for e in known}
         repositories = {e["path"]: self._repository(e["path"]) for e in known}
         result = [dict(i) for i in items]
         by_id = {i["id"]: i for i in result}
+
+        def decided(item: dict[str, Any]) -> bool:
+            if item.get("workspace_source") == "pinned" and not item.get("workspace_path"):
+                return True
+            return item.get("workspace_path") in paths
+
         # Hundreds of items share a few working directories; bind each one once.
-        by_cwd: dict[str, str | None] = {}
+        by_cwd: dict[str, tuple[str, str] | None] = {}
+        guessed: set[str] = set()
         for item in result:
-            explicit = item.get("workspace_path")
-            if explicit in paths:
+            if decided(item):
                 continue
+            guessed.add(item["id"])
+            item["workspace_path"] = item["workspace_reason"] = None
             cwd = item.get("working_dir")
             if cwd and cwd not in by_cwd:
                 by_cwd[cwd] = self._bind_directory(Path(cwd).resolve(), known, repositories)
-            item["workspace_path"] = by_cwd[cwd] if cwd else None
-            if not item["workspace_path"] and item.get("project"):
+            hit = by_cwd[cwd] if cwd else None
+            if hit:
+                item["workspace_path"], item["workspace_reason"] = hit
+            elif item.get("project"):
                 matches = [e["path"] for e in known if item["project"] in (e["path"], e["name"])]
                 if len(matches) == 1:
-                    item["workspace_path"] = matches[0]
+                    item["workspace_path"], item["workspace_reason"] = matches[0], "project"
         for item in result:
+            if item["id"] not in guessed:
+                continue
             seen = {item["id"]}
             parent = by_id.get(item.get("parent_id"))
             while not item["workspace_path"] and parent and parent["id"] not in seen:
                 seen.add(parent["id"])
-                item["workspace_path"] = parent.get("workspace_path")
+                if parent.get("workspace_path"):
+                    item["workspace_path"], item["workspace_reason"] = (
+                        parent["workspace_path"],
+                        "parent",
+                    )
                 parent = by_id.get(parent.get("parent_id"))
-        for item, original in zip(result, items, strict=True):
-            if item["workspace_path"] and original.get("workspace_path") not in paths:
-                item["workspace_by"] = "auto"
+        for item in result:
+            if item["id"] in guessed:
+                found = bool(item["workspace_path"])
+                item["workspace_source"] = "heuristic" if found else None
+                if found:
+                    item["workspace_by"] = "auto"
         return result
 
     def records(self, entries: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:

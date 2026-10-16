@@ -592,12 +592,42 @@ a minute and after every Console write. The plugin is found through
 without it this part of Focus is simply absent (`GET /console/api/workspace/plan` answers
 `{"available": false, "reason": "plugin"}`).
 
-Automatic association uses an unambiguous working directory inside the Workspace, a unique
-matching project name, a parent's association, or an explicitly labelled local repository in
-`overview.md` (`repository: /absolute/path`, `working_dir: /absolute/path`, or
-`- リポジトリ: ~/path`). It does not guess ownership from arbitrary message text. Conflicting
-or missing information remains unassociated for the user to select. Overview is available
-alongside tasks; task changes are immediately visible in Obsidian because both use the same files.
+**Where a thread belongs is worked out, not asked for.** Choosing a context is not a step
+the human has to take: a new thread starts unresolved, the Console binds it in the background,
+and a person only corrects it. Every binding records how it was decided (`workspace_source`)
+and why (`workspace_reason`), and a weaker source never replaces a stronger one:
+
+| Source | Badge | Meaning |
+|---|---|---|
+| `pinned` | 👤 | A person chose it — in the picker, by confirming a guess, by starting from a Workspace task, or by choosing "No Workspace" (pinned without a path, which stops all guesses). |
+| `recorded` | ✍️ | The session wrote that project's records. |
+| `inferred` | 🤖 | Guessed from the conversation. |
+| `heuristic` | 🧭 | An unambiguous working directory inside the Workspace (`cwd`), an explicitly labelled repository in `overview.md` (`repository`), a unique matching project name (`project`), or the parent's binding (`parent`). |
+
+List rows show the badge with its reason on hover; the detail drawer adds ❔ for unresolved
+threads, **✓ Confirm** to pin a guess, and **Change** — a searchable picker with recently used
+entries, "No Workspace" and "Automatic" (which clears the binding so evidence decides again).
+The capture box's picker applies to the next capture only and is never remembered.
+
+`recorded` comes from the session transcript the CLI keeps on disk (Claude Code
+`projects/*/<session>.jsonl`, Codex `sessions/**/rollout-*-<session>.jsonl` in the default
+home): once a minute the Console reads only what sessions used in the last 14 days appended
+since the last pass, and binds a thread to the entry whose `log.md`, `status.md`, `overview.md`
+or `single-actions.md` it last wrote — with a write tool, or a shell command that names the
+file with a write such as `>>`, `tee` or `sed -i`. Reading a record does not count.
+
+`inferred` costs no extra model call: when the background triage looks at a thread that no
+person decided and whose session recorded nothing, its prompt also lists the Workspace
+entries (path and the first prose line of each `overview.md` / `AGENTS.md`) and asks which
+one the conversation is about. Only an answer that names a listed entry with confidence of at
+least 0.7 binds the thread; small talk and one-off questions stay unresolved. A labelled
+repository is written in `overview.md` as `repository: /absolute/path`,
+`working_dir: /absolute/path`, or `- リポジトリ: ~/path`. Overview is available alongside
+tasks; task changes are immediately visible in Obsidian because both use the same files.
+
+Through the API, `PATCH /console/api/items/{id}` with `workspace_path` pins it; with
+`workspace_path: null` it returns to automatic, unless `workspace_source: "pinned"` is sent too,
+which means "No Workspace". Clients cannot set any other source.
 
 Authenticated API routes:
 

@@ -288,3 +288,33 @@ def test_finish_checks_off_a_plain_next_action(notes):
     status.write_text("# Website\n## 次のアクション\n- Ship it\n", encoding="utf-8")
     Workspace(notes).finish("Work/Client/Website", ["Ship it"], "Ship it", done=True)
     assert "- [x] Ship it" in status.read_text(encoding="utf-8")
+
+
+def test_guesses_carry_a_reason_and_a_person_saying_none_stops_them(notes):
+    workspace = Workspace(notes)
+    project_dir = str(notes / "02_Contexts" / "Work" / "Client" / "Website")
+    bound = workspace.bind_items(
+        [
+            {"id": "a", "working_dir": project_dir},
+            {"id": "b", "project": "Website"},
+            {"id": "c", "parent_id": "a"},
+            {"id": "d", "working_dir": project_dir, "workspace_source": "pinned"},
+            {
+                "id": "e",
+                "workspace_path": "Work/Client",
+                "workspace_source": "recorded",
+                "workspace_reason": "record:log.md",
+            },
+        ]
+    )
+    got = {
+        i["id"]: (i.get("workspace_path"), i.get("workspace_source"), i.get("workspace_reason"))
+        for i in bound
+    }
+    assert got == {
+        "a": ("Work/Client/Website", "heuristic", "cwd"),
+        "b": ("Work/Client/Website", "heuristic", "project"),
+        "c": ("Work/Client/Website", "heuristic", "parent"),
+        "d": (None, "pinned", None),
+        "e": ("Work/Client", "recorded", "record:log.md"),
+    }
