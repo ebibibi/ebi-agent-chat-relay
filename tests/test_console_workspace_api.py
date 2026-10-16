@@ -225,3 +225,13 @@ async def test_the_board_reports_how_each_binding_was_decided(env, notes):
     row = next(i for i in board["items"] if i["id"] == item["id"])
     assert (row["workspace_path"], row["workspace_source"]) == ("Work/Client", "pinned")
     assert "workspace_by" not in row
+
+
+async def test_context_route_is_authenticated_and_checks_the_path(env, notes):
+    env.console.workspace = Workspace(notes)
+    url = "/console/api/workspace/context"
+    assert (await env.client.get(url, params={"path": "Work/Client"})).status == 401
+    ok = await env.client.get(url, headers=AUTH, params={"path": "Work/Client/Website"})
+    assert (await ok.json())["current"] == "Ready"
+    bad = await env.client.get(url, headers=AUTH, params={"path": "../x"})
+    assert bad.status == 400

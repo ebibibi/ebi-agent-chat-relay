@@ -538,6 +538,7 @@ function renderDetail() {
   $("d-drawer").hidden = !state.drawerOpen;
   window.ConsoleMobile.layout(item, !editing);
   window.ConsoleFamily.render(item);
+  window.ConsoleWsPane.render(item);
   const msgs = $("msgs");
   if (item.thread_id) fillMessages(msgs);
   else msgs.replaceChildren(item.note
@@ -555,6 +556,7 @@ function buildDetail(pane, item, key) {
     h("div", { class: "d-drawer", id: "d-drawer", hidden: true }),
     window.ConsoleBackend.controls(item),
     h("section", { class: "family", id: "d-family", hidden: true, "aria-label": LANG === "ja" ? "親子スレッド" : "Thread family" }),
+    h("section", { class: "ws-pane", id: "d-ws", hidden: true, "aria-label": "Ebi Workspace" }),
     h("div", { class: "msgs-wrap" }, msgs, jump),
     h("div", { class: "live-slot", id: "live-slot" }),
   ];
@@ -688,7 +690,9 @@ function grow(box) {
 function messageNode(m) {
   const kind = m.kind || (m.is_bot ? "agent" : "human");
   const body = h("div", { class: "body md" });
-  if (m.content) body.append(MD.render(m.content + (m.truncated ? " …" : "")));
+  const sent = window.ConsoleWsPane.splitMessage(m.content);
+  if (sent) body.append(MD.render(sent.text), window.ConsoleWsPane.sentNote(sent));
+  else if (m.content) body.append(MD.render(m.content + (m.truncated ? " …" : "")));
   for (const e of m.embeds || []) {
     const card = h("div", { class: "embed" });
     if (e.color != null) card.style.borderLeftColor = `#${e.color.toString(16).padStart(6, "0")}`;

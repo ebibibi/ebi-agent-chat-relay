@@ -114,6 +114,31 @@ def _first_prose(text: str, limit: int = 100) -> str:
     return ""
 
 
+MAX_CONTEXT_CHARS = 1500
+MAX_CONTEXT_ITEMS = 20
+
+
+def _section(content: str, headings: tuple[str, ...]) -> str:
+    """The body of the first ``## heading`` among *headings*, up to the next ``## ``."""
+    for heading in headings:
+        match = re.search(rf"(?m)^## {re.escape(heading)}\s*$", content)
+        if match:
+            rest = content[match.end() :]
+            end = re.search(r"(?m)^## ", rest)
+            return (rest[: end.start()] if end else rest).strip()
+    return ""
+
+
+def _log_tail(content: str, limit: int = MAX_CONTEXT_CHARS) -> str:
+    """The latest entries of a log.md: from the last ``## `` heading that fits in *limit*."""
+    text = content.rstrip()
+    if len(text) <= limit:
+        return text.strip()
+    starts = [m.start() for m in re.finditer(r"(?m)^##+ ", text)]
+    fitting = [i for i in starts if len(text) - i <= limit]
+    return (text[fitting[0] :] if fitting else "…" + text[-limit:]).strip()
+
+
 class Workspace:
     def __init__(self, root: Path | None) -> None:
         self.root = root.resolve() if root and (root / "02_Contexts").is_dir() else None
@@ -205,6 +230,23 @@ class Workspace:
                 # One unreadable entry must not expose its target or hide the others.
                 continue
         return {"available": True, "name": self.root.name, "entries": entries}
+
+    def context(self, path: str) -> dict[str, Any]:
+        """What the detail pane shows for an entry: where it stands, what is next, what
+        waits on others, and the latest log, all read from the Markdown each time."""
+        entry = self.entry(path)
+        directory = self._directory(path)
+        status = _read(directory / "status.md") if entry["kind"] == "project" else ""
+        return {
+            **entry,
+            "current": _section(status, ("現在地", "Current status"))[:MAX_CONTEXT_CHARS],
+            "waiting": [
+                line.strip()[2:].strip()
+                for line in _section(status, ("連絡待ち", "ブロッカー", "Waiting for")).splitlines()
+                if line.strip().startswith(("- ", "* "))
+            ][:MAX_CONTEXT_ITEMS],
+            "log": _log_tail(_read(directory / "log.md")),
+        }
 
     def index(self) -> list[tuple[str, str]]:
         """(path, one line about it) per entry: the first prose line of its overview.
