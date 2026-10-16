@@ -654,6 +654,21 @@ line: `folder/` matches a folder anywhere, `02_Contexts/x/` a folder from the va
 `*.private.md` a file name anywhere, `01_Daily/2025-*` a path from the root. An excluded note
 answers exactly like a missing one, and is never listed, searched or linked.
 
+**Note viewer.** `#note/<vault path>` opens any visible note full screen, rendered the way
+Obsidian shows it: front matter as a folded properties table, `[[wikilinks]]` (with `#heading`
+and `|alias`), `![[image]]` and one level of `![[note]]` embeds, `> [!type]` callouts, task
+checkboxes, tables and code. Links resolve like Obsidian — a path from the vault root, then
+relative to the note, then a unique file name, then the same-name file closest to the note —
+on the server (`links` in the note response); unresolved links are shown dashed. Below the note,
+**🔗 Linked from** lists backlinks (`GET /console/api/workspace/backlinks`, cached per file
+modification time). Browser back/forward walk the notes you followed; Escape or **Close**
+returns to the list. The Workspace panel's **Overview** and **status.md** open here.
+
+The renderer is markdown-it (HTML in notes disabled) with small Obsidian plugins, sanitised by
+DOMPurify into a DOM fragment. Both are vendored single files (`vendor-*.min.js`, licenses in
+`static/THIRD_PARTY_LICENSES.md`) and are loaded only when the first note is opened, so the
+Console itself still has no build step and no runtime dependency.
+
 Authenticated API routes:
 
 - `GET /console/api/workspace` — availability and contexts/projects/tasks with revisions.

@@ -74,7 +74,7 @@ from .uploads import (
     with_attachments,
 )
 from .usage import UsageReader
-from .vault import Vault
+from .vault import NoteIndex, Vault
 from .work_repo import (
     STATE_DONE,
     STATE_OPEN,
@@ -250,6 +250,7 @@ class ConsoleServer:
         self._records_seen: dict[int, str] = {}
         self._records_task: asyncio.Task[None] | None = None
         self._vault: Vault | None = None
+        self._note_index: NoteIndex | None = None
         self._workspace_index_cache: tuple[float, list[tuple[str, str]]] | None = None
         #: The model's priority and deadline guesses; None turns automatic triage off.
         self.triage = triage
@@ -311,6 +312,8 @@ class ConsoleServer:
         r.add_get(f"{API_PREFIX}/workspace/context", workspace_routes.context)
         r.add_get(f"{API_PREFIX}/workspace/note", workspace_routes.note)
         r.add_get(f"{API_PREFIX}/workspace/file", workspace_routes.file)
+        r.add_get(f"{API_PREFIX}/workspace/backlinks", workspace_routes.backlinks)
+        r.add_get(f"{API_PREFIX}/workspace/notes", workspace_routes.notes)
         r.add_get(f"{API_PREFIX}/workspace/exclude", workspace_routes.excludes)
         r.add_put(f"{API_PREFIX}/workspace/exclude", workspace_routes.excludes)
         r.add_post(f"{API_PREFIX}/workspace/tasks", workspace_routes.change)
@@ -445,7 +448,16 @@ class ConsoleServer:
         current = self._vault
         if current is None or current.root != self.workspace.root:
             current = self._vault = Vault(self.workspace.root)
+            self._note_index = NoteIndex(current)
         return current
+
+    @property
+    def note_index(self) -> NoteIndex:
+        """File names and links of the vault the note viewer reads."""
+        vault = self.vault
+        if self._note_index is None or self._note_index.vault is not vault:
+            self._note_index = NoteIndex(vault)
+        return self._note_index
 
     async def _records_loop(self) -> None:
         while True:

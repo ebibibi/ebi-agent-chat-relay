@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
 
-from .vault import VaultError
+from .vault import VaultError, wikilinks
 from .workspace import WorkspaceConflictError, WorkspaceError
 
 if TYPE_CHECKING:
@@ -37,13 +37,41 @@ class WorkspaceRoutes:
             return web.json_response({"error": "Unknown or unreadable Workspace entry"}, status=400)
 
     async def note(self, request: web.Request) -> web.Response:
-        """Any Markdown note in the vault the owner did not exclude."""
+        """Any Markdown note in the vault the owner did not exclude, with its wikilinks
+        resolved (``links``: target → vault path, or null when nothing matches)."""
+        index = self.server.note_index
+
+        def read() -> dict[str, Any]:
+            note = self.server.vault.note(request.query.get("path", ""))
+            note["links"] = {
+                target: index.resolve(target, note["path"])["path"]
+                for target in wikilinks(note["text"])
+            }
+            return note
+
         try:
-            return web.json_response(
-                await asyncio.to_thread(self.server.vault.note, request.query.get("path", ""))
-            )
+            return web.json_response(await asyncio.to_thread(read))
         except (VaultError, OSError):
             return web.json_response({"error": "Unknown note"}, status=404)
+
+    async def backlinks(self, request: web.Request) -> web.Response:
+        """Notes linking to one note (slower than a read, so asked for separately)."""
+        index = self.server.note_index
+
+        def read() -> list[str]:
+            path = self.server.vault.note(request.query.get("path", ""))["path"]
+            return index.backlinks(path)
+
+        try:
+            return web.json_response({"backlinks": await asyncio.to_thread(read)})
+        except (VaultError, OSError):
+            return web.json_response({"error": "Unknown note"}, status=404)
+
+    async def notes(self, request: web.Request) -> web.Response:
+        """Note paths matching every term of ``q`` (the quick switcher)."""
+        query = request.query.get("q", "")[:200]
+        index = self.server.note_index
+        return web.json_response({"notes": await asyncio.to_thread(index.search_names, query)})
 
     async def file(self, request: web.Request) -> web.StreamResponse:
         """An image or PDF a note embeds, served as an inert download-safe file."""
