@@ -14,6 +14,7 @@ import re
 import signal
 from collections.abc import AsyncGenerator
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from .account_pool import AccountBinding
@@ -27,6 +28,9 @@ from .types import (
     ToolCategory,
     ToolUseEvent,
 )
+
+if TYPE_CHECKING:
+    from .codex_app_server import AppServerSession
 
 logger = logging.getLogger(__name__)
 
@@ -342,6 +346,7 @@ class CodexRunner:
         self.account: AccountBinding | None = None
         self._process: asyncio.subprocess.Process | None = None
         self._interrupt_requested = False
+        self._app_server: AppServerSession | None = None
 
     async def run(
         self,
@@ -349,6 +354,21 @@ class CodexRunner:
         session_id: str | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Run Codex CLI and yield stream events."""
+        if self._use_app_server():
+            from .codex_app_server import AppServerSession
+
+            self._interrupt_requested = False
+            self._app_server = AppServerSession(self)
+            stream = self._app_server.run(prompt, session_id)
+            try:
+                async for event in stream:
+                    yield event
+            finally:
+                try:
+                    await stream.aclose()
+                finally:
+                    self._app_server = None
+            return
         attempt_session_id = session_id
         attempt_prompt = prompt
         retried_without_resume = False
@@ -476,8 +496,28 @@ class CodexRunner:
         cloned.account = self.account
         return carry_execution_mode(self, cloned)
 
+    def _use_app_server(self) -> bool:
+        # Local transport needs a separate vendor-egress measurement (decision 13).
+        return (
+            self._execution_backend == "codex"
+            and os.environ.get("CCDB_CODEX_TRANSPORT", "exec") == "app-server"
+        )
+
+    async def send_user_message(self, prompt: str) -> bool:
+        """Accept a follow-up only after the active app-server turn acknowledges it."""
+        if self._app_server is None:
+            return False
+        return await self._app_server.send_user_message(prompt)
+
     async def interrupt(self) -> None:
-        """Interrupt the subprocess with SIGINT."""
+        """Interrupt the subprocess with SIGINT, or the active app-server turn."""
+        if self._app_server is not None:
+            self._interrupt_requested = True
+            try:
+                if await self._app_server.interrupt():
+                    return
+            except (TimeoutError, ConnectionError, RuntimeError):
+                logger.warning("Codex app-server interrupt failed; terminating process")
         if self._process and self._process.returncode is None:
             self._interrupt_requested = True
             if os.name == "nt":
