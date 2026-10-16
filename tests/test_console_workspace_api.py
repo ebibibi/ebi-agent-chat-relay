@@ -107,3 +107,73 @@ async def test_board_guide_checks_records_only_with_a_workspace(env, notes):
     env.console.workspace = Workspace(notes)
     board = await (await env.client.get("/console/api/board", headers=AUTH)).json()
     assert board["guide"]["drift"] == []
+
+
+async def test_done_checks_the_original_task_and_reopen_unchecks_it(env, notes):
+    env.console.workspace = Workspace(notes)
+    entry = env.console.workspace.entry("Work/Client/Website")
+    payload = {
+        "path": entry["path"],
+        "revision": entry["revision"],
+        "line": entry["tasks"][0]["line"],
+    }
+    started = await env.client.post("/console/api/workspace/run", json=payload, headers=WRITE)
+    item_id = (await started.json())["item"]["id"]
+    await _settle(env.host)
+    done = await env.client.post(f"/console/api/items/{item_id}/done", json={}, headers=WRITE)
+    assert done.status == 200
+    assert (await done.json())["workspace"] == {
+        "path": "Work/Client/Website",
+        "task": "🤖 Ship it #auto",
+        "changed": True,
+    }
+    assert env.console.workspace.entry(entry["path"])["tasks"][0]["done"] is True
+    log = (notes / "02_Contexts/Work/Client/Website/log.md").read_text(encoding="utf-8")
+    assert "タスク完了: 🤖 Ship it #auto" in log
+    reopened = await env.client.post(f"/console/api/items/{item_id}/reopen", json={}, headers=WRITE)
+    assert (await reopened.json())["workspace"]["changed"] is True
+    assert env.console.workspace.entry(entry["path"])["tasks"][0]["done"] is False
+
+
+async def test_done_without_a_matching_task_records_the_conversation(env, notes):
+    env.console.workspace = Workspace(notes)
+    created = await env.client.post(
+        "/console/api/items",
+        headers=WRITE,
+        json={"title": "Fix the footer", "workspace_path": "Work/Client/Website"},
+    )
+    item_id = (await created.json())["item"]["id"]
+    done = await env.client.post(f"/console/api/items/{item_id}/done", json={}, headers=WRITE)
+    assert (await done.json())["workspace"] == {
+        "path": "Work/Client/Website",
+        "task": None,
+        "changed": True,
+    }
+    log = (notes / "02_Contexts/Work/Client/Website/log.md").read_text(encoding="utf-8")
+    assert "会話完了: Fix the footer" in log
+    assert env.console.workspace.entry("Work/Client/Website")["tasks"][0]["done"] is False
+    # Reopening a conversation that never touched a task leaves the notes alone.
+    reopened = await env.client.post(f"/console/api/items/{item_id}/reopen", json={}, headers=WRITE)
+    assert (await reopened.json())["workspace"]["changed"] is False
+
+
+async def test_done_leaves_a_task_the_agent_already_checked(env, notes):
+    env.console.workspace = Workspace(notes)
+    created = await env.client.post(
+        "/console/api/items",
+        headers=WRITE,
+        json={"title": "Old task", "workspace_path": "Work/Client/Website"},
+    )
+    item_id = (await created.json())["item"]["id"]
+    done = await env.client.post(f"/console/api/items/{item_id}/done", json={}, headers=WRITE)
+    assert (await done.json())["workspace"]["changed"] is False
+    assert not (notes / "02_Contexts/Work/Client/Website/log.md").exists()
+
+
+async def test_done_without_a_workspace_reports_nothing(env):
+    env.console.workspace = Workspace(None)
+    created = await env.client.post("/console/api/items", headers=WRITE, json={"title": "Plain"})
+    item_id = (await created.json())["item"]["id"]
+    done = await env.client.post(f"/console/api/items/{item_id}/done", json={}, headers=WRITE)
+    assert done.status == 200
+    assert (await done.json())["workspace"] is None

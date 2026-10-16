@@ -238,3 +238,22 @@ def test_records_give_tasks_and_when_the_records_last_changed(notes):
     assert website["updated_at"] == "2027-01-15T08:00:00Z"
     assert records["Work/Client"]["updated_at"] is not None
     assert ws.bind_items([{"id": "x"}], entries)[0]["workspace_path"] is None
+
+
+def test_finish_checks_one_exact_open_task_and_records_it(notes):
+    workspace = Workspace(notes)
+    result = workspace.finish("Work/Client", ["Call back"], "Call back", done=True)
+    assert result == {"path": "Work/Client", "task": "Call back", "changed": True}
+    assert workspace.entry("Work/Client")["tasks"][0]["done"] is True
+    assert "タスク完了: Call back" in (notes / "02_Contexts/Work/Client/log.md").read_text("utf-8")
+    again = workspace.finish("Work/Client", ["Call back"], "Call back", done=True)
+    assert again == {"path": "Work/Client", "task": "Call back", "changed": False}
+
+
+def test_finish_ignores_ambiguous_tasks(notes):
+    actions = notes / "02_Contexts/Work/Client/single-actions.md"
+    actions.write_text("# Tasks\n- [ ] Call back\n- [ ] Call back\n", encoding="utf-8")
+    workspace = Workspace(notes)
+    result = workspace.finish("Work/Client", ["Call back"], "Call back", done=True)
+    assert result["task"] is None
+    assert [t["done"] for t in workspace.entry("Work/Client")["tasks"]] == [False, False]

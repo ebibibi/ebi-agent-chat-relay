@@ -2,6 +2,9 @@
 // it ("Click again to finish", for a few seconds), the second marks it done, so a stray
 // click, or a double-click, changes nothing. Every finish (button or the "e" key) ends
 // with a toast whose Undo reopens it; a done thread's header offers Reopen for later.
+// Finishing the open item also leaves it, as the back button would: on a phone that is
+// one tap saved per task. With Ebi Workspace the server checks the Obsidian task off
+// (or logs the conversation) and the toast says so.
 // Loaded before app.js, which puts button() in the header and calls finish() for "e".
 "use strict";
 
@@ -36,7 +39,7 @@ window.ConsoleFinish = (() => {
   }
   async function completeMany(ids, progress = () => {}) {
     const parents = new Map(state.items.map(i => [i.id,i.parent_id]));
-    const errors = new Map(), completed = [];
+    const errors = new Map(), completed = [], workspace = [];
     for (const id of ids) {
       const failedBelow = [...errors.keys()].some(child => {
         const seen = new Set();
@@ -49,12 +52,16 @@ window.ConsoleFinish = (() => {
       if (failedBelow) {
         errors.set(id, document.documentElement.lang === 'ja' ? '子の完了に失敗したため未完了のままです' : 'A child failed; parent remains open');
       } else {
-        try { await api(`/items/${encodeURIComponent(id)}/done`, {method:'POST',body:{}}); completed.push(id); }
+        try {
+          const result = await api(`/items/${encodeURIComponent(id)}/done`, {method:'POST',body:{}});
+          completed.push(id);
+          if (result?.workspace) workspace.push(result.workspace);
+        }
         catch (err) { errors.set(id,err.message); }
       }
       progress(completed.length+errors.size);
     }
-    return {completed,errors};
+    return {completed,errors,workspace};
   }
   let finishing = false;
   async function finish(id) {
@@ -64,11 +71,13 @@ window.ConsoleFinish = (() => {
     finishing = true;
     renderDetail();
     try {
+      const name = state.byId.get(id)?.title || state.byId.get(id)?.thread_name || id;
       const result = await completeMany(targets([id]));
+      if (result.completed.includes(id) && state.open === id) closeItem();
       await refresh();
       if (result.errors.size) {
         toast([...result.errors].map(([key,error]) => `${state.byId.get(key)?.title || key}: ${error}`).join(' · '));
-      } else if (result.completed.length) undoToast(id,result.completed);
+      } else if (result.completed.length) undoToast(id,result.completed,name,result.workspace);
     } finally { finishing = false; renderDetail(); }
   }
 
@@ -80,11 +89,23 @@ window.ConsoleFinish = (() => {
     } catch (err) { toast(err.message); }
   }
 
-  function undoToast(id, ids = [id]) {
+  // One line on what happened to the notes: checked off, logged, or why not.
+  function workspaceNote(results) {
+    const ja = document.documentElement.lang === "ja";
+    const failed = results.find(r => r.error);
+    if (failed) return ja ? `⚠️ Obsidian未更新: ${failed.error}` : `⚠️ Obsidian not updated: ${failed.error}`;
+    const changed = results.filter(r => r.changed);
+    if (!changed.length) return "";
+    if (changed.some(r => r.task)) return ja ? "🗂️ Obsidianのタスクを完了に" : "🗂️ Obsidian task checked";
+    return ja ? "🗂️ Obsidianに記録" : "🗂️ Logged in Obsidian";
+  }
+
+  function undoToast(id, ids = [id], name = null, workspace = []) {
     const item = state.byId.get(id);
-    const name = (item && (item.title || item.thread_name)) || id;
+    name ||= (item && (item.title || item.thread_name)) || id;
+    const note = workspaceNote(workspace);
     const t = h("div", { class: "toast undo", role: "status" },
-      h("span", { text: `✅ ${T.finished}: ${name.slice(0, 40)}` }),
+      h("span", { text: `✅ ${T.finished}: ${name.slice(0, 40)}` + (note ? ` · ${note}` : "") }),
       h("button", { class: "btn", type: "button", text: `↩ ${T.undo}`,
         onclick: async () => { t.remove(); for (const key of ids) await reopen(key); } }));
     document.body.append(t);

@@ -558,6 +558,15 @@ Workspace instructions, source tasks and log and is instructed to read them and 
 outcome. Replies and child work retain that association. **Start work here** chooses the
 context for the next capture; an existing conversation's picker can set its association too.
 
+**Finishing follows into the notes.** When a human marks an associated item done (the
+✅ button, `e`, or bulk complete), Console checks off the one open task whose text equals the
+item's note or title — the task a **Run with AI** conversation came from — and records it in
+the log and daily note. With no such task it records the finished conversation instead; a task
+the agent already checked is left alone, and an ambiguous match checks nothing. Reopen (or
+Undo) unchecks a task finished this way. The response's `workspace` field reports the result,
+and a failed update never blocks the finish. Finishing the open conversation also returns to
+the list, as the back button would, so a phone needs one tap per task.
+
 Automatic association uses an unambiguous working directory inside the Workspace, a unique
 matching project name, a parent's association, or an explicitly labelled local repository in
 `overview.md` (`repository: /absolute/path`, `working_dir: /absolute/path`, or

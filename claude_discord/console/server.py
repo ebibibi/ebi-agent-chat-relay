@@ -75,6 +75,7 @@ from .usage import UsageReader
 from .work_repo import (
     STATE_DONE,
     STATE_OPEN,
+    WorkItem,
     WorkItemError,
     WorkItemRepository,
     thread_item_id,
@@ -814,7 +815,8 @@ class ConsoleServer:
             if thread is not None:
                 # Same marker the agent would set, so the chat sidebar agrees.
                 request_thread_outcome(thread, OUTCOME_DONE)
-        return web.json_response({"item": item.as_dict()})
+        workspace = await self._workspace_finish(item, done=True)
+        return web.json_response({"item": item.as_dict(), "workspace": workspace})
 
     async def reopen(self, request: web.Request) -> web.Response:
         item_id = request.match_info["item_id"]
@@ -832,7 +834,8 @@ class ConsoleServer:
             # The ✅ that done() put on the title would keep the item in Done.
             if thread is not None and thread_outcome(thread.name or "") == OUTCOME_DONE:
                 schedule_thread_outcome(thread, None)
-        return web.json_response({"item": item.as_dict()})
+        workspace = await self._workspace_finish(item, done=False)
+        return web.json_response({"item": item.as_dict(), "workspace": workspace})
 
     async def reply(self, request: web.Request) -> web.Response:
         """Hand the human's answer to the thread's session, as if typed there.
@@ -1214,6 +1217,38 @@ class ConsoleServer:
     async def _workspace_prompt(self, item_id: str, text: str) -> str:
         if self.workspace.root is None:
             return text
+        path = await self._workspace_path(item_id)
+        return await asyncio.to_thread(self.workspace.prompt, path, text) if path else text
+
+    async def _workspace_finish(self, item: WorkItem, *, done: bool) -> dict[str, Any] | None:
+        """Mirror a human's done/reopen into the bound Workspace entry, never failing it.
+
+        The button is the human saying the work is over; with a Workspace, the
+        Markdown records follow without asking the agent to do it.
+        """
+        if self.workspace.root is None:
+            return None
+        path = await self._workspace_path(item.id)
+        if not path:
+            return None
+        title = item.title
+        if not title and item.thread_id is not None:
+            # A thread nobody retitled carries its name only on the board.
+            board = next((i for i in await self._board_items() if i["id"] == item.id), {})
+            title = board.get("title") or board.get("thread_name")
+        texts = [t for t in (item.note, title) if t]
+        label = title or item.note or item.id
+        try:
+            return await asyncio.to_thread(
+                self.workspace.finish, path, texts, label[:200], done=done
+            )
+        except (WorkspaceError, OSError, UnicodeError) as exc:
+            logger.warning("console: Workspace not updated for %s: %s", _q(item.id), exc)
+            # A file-system error's text can name paths; only our own messages travel.
+            error = str(exc) if isinstance(exc, WorkspaceError) else "Could not update Workspace"
+            return {"path": path, "error": error}
+
+    async def _workspace_path(self, item_id: str) -> str | None:
         item = await self.work_repo.get(item_id)
         path = item.workspace_path if item else None
         if not path:
@@ -1222,7 +1257,7 @@ class ConsoleServer:
             path = next((i.get("workspace_path") for i in bound if i["id"] == item_id), None)
             if path:
                 await self.work_repo.update(item_id, {"workspace_path": path})
-        return await asyncio.to_thread(self.workspace.prompt, path, text) if path else text
+        return path
 
     # -- helpers -----------------------------------------------------------
     async def _json(self, request: web.Request) -> tuple[dict[str, Any], web.Response | None]:
