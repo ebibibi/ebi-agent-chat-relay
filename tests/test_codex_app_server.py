@@ -137,7 +137,14 @@ async def test_acknowledged_steer_and_clean_eof(transport, tmp_path):
         task = asyncio.create_task(consume())
         await asyncio.wait_for(active.wait(), 5)
         assert await runner.inject_user_message("reject") is False
-        assert await runner.inject_user_message("followup") is True
+        from claude_discord.live_runs import LiveRun, register, try_inject, unregister
+
+        live = LiveRun(runner=runner)
+        register(1130, live)
+        try:
+            assert await try_inject(1130, "followup") is True
+        finally:
+            unregister(1130, live)
         await asyncio.wait_for(task, 5)
     assert launches[0][0][1:4] == ("app-server", "--listen", "stdio://")
     assert any(e.session_id == "a1b2-1234" for e in events)
@@ -545,3 +552,16 @@ async def test_echo_is_recorded_even_when_renderer_is_paused():
     process.stdout.feed_eof()
     await session._read()
     assert session.outstanding == {}
+
+
+async def test_rpc_after_reader_exit_fails_without_waiting():
+    from unittest.mock import AsyncMock
+
+    from claude_code_core.codex_app_server import AppServerSession
+
+    session = AppServerSession(CodexRunner())
+    session._reader = asyncio.create_task(asyncio.sleep(0))
+    await session._reader
+    with patch.object(session, "_write", AsyncMock()) as write, pytest.raises(ConnectionError):
+        await asyncio.wait_for(session._request("turn/interrupt", {}), 0.05)
+    write.assert_not_called()

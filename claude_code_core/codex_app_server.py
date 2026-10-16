@@ -73,6 +73,8 @@ class AppServerSession:
         await self.process.stdin.drain()
 
     async def _request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        if self._reader is None or self._reader.done():
+            raise ConnectionError("Codex app-server reader is closed")
         self._next_id += 1
         request_id = self._next_id
         future = asyncio.get_running_loop().create_future()
