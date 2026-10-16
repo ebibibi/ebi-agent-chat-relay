@@ -264,6 +264,15 @@ a.btn { text-decoration: none; display: inline-block; }
   display: flex; gap: 8px; align-items: flex-end; flex-shrink: 0; }
 .reply textarea { flex: 1; min-height: 64px; max-height: 40vh; resize: vertical; background: var(--panel);
   border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; line-height: 1.5; }
+/* Drag the top edge of the reply form to resize the box (boxsize.js); desktop only. */
+.reply { position: relative; }
+.reply-resize { position: absolute; left: 0; right: 0; top: -5px; height: 9px; z-index: 2; cursor: row-resize; touch-action: none; }
+.reply-resize::after { content: ""; position: absolute; left: 0; right: 0; top: 4px; height: 1px; transition: background .1s; }
+.reply-resize:hover::after, .reply-resize:focus-visible::after, .row-resizing .reply-resize::after { background: var(--accent); }
+.reply-resize:focus-visible { outline: none; }
+.row-resizing { cursor: row-resize; user-select: none; }
+@media (min-width: 901px) and (pointer: fine) { .reply textarea { resize: none; } }
+@media (max-width: 900px), (pointer: coarse) { .reply-resize { display: none; } }
 
 .help { position: fixed; inset: 0; background: rgb(0 0 0 / .6); display: grid; place-items: center; z-index: 10; }
 .help .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 22px; max-width: 420px; }
@@ -302,7 +311,7 @@ a.btn { display: block; text-align: center; text-decoration: none; color: inheri
 a.btn.primary { color: #0d1020; }
 .auth-or { text-align: center; color: var(--dim); margin: 0; font-size: 12px; }
 .reply-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-.reply-main textarea { width: 100%; }
+.reply-main textarea { width: 100%; flex: none; }
 .paste-tray { display: flex; flex-wrap: wrap; gap: 6px; }
 .paste-item { position: relative; width: 72px; height: 72px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--raise); }
 .paste-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
