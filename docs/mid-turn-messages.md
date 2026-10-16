@@ -1,11 +1,12 @@
 # Messages sent while the agent works
 
 Claude Code and Codex take input while they work: type a follow-up mid-turn and the agent reads
-it at its next step, without stopping. ccdb does the same for the Claude backend.
+it at its next step, without stopping. ccdb does the same for Claude and, with the
+[experimental app-server transport](codex-app-server.md), cloud Codex.
 
 ## What happens when you send a message during a turn
 
-| Where you write | Claude backend, turn running | Otherwise |
+| Where you write | Claude or enabled Codex app-server, turn running | Otherwise |
 |---|---|---|
 | Discord thread reply | Goes into the running turn; the message gets 📥 | Runs as the next turn |
 | Ebi AI Console conversation | Goes into the running turn; the toast says *Sent into the running turn* | Runs as the next turn |
@@ -13,8 +14,8 @@ it at its next step, without stopping. ccdb does the same for the Claude backend
 | `/api/threads/<id>/message` (another session) | Unchanged: `queue` waits, `interrupt` stops the turn | — |
 | Wait results, scheduler, restart replays | Unchanged: run as the next turn | — |
 
-"Otherwise" covers Codex, pi and AG-UI backends (no input channel into a running turn yet —
-Codex is tracked in #1130), anonymized runs (a mid-turn message would skip the privacy gateway,
+"Otherwise" covers Codex using the default exec transport, local models, pi and AG-UI,
+anonymized runs (a mid-turn message would skip the privacy gateway,
 so it runs as a normal turn that goes through it), a run that is about to pause for another
 thread, and a turn that is already finishing.
 
@@ -51,5 +52,6 @@ unread messages are added to that continuation's prompt instead.
 ## Code
 
 - `claude_code_core/runner.py` — `ClaudeRunner.inject_user_message()`, `unconsumed_messages()`
+- `claude_code_core/codex_app_server.py` — Codex `turn/steer` and correlated input echoes
 - `claude_discord/live_runs.py` — the runner each conversation is running, `try_inject()`
 - `claude_discord/cogs/_run_helper.py` — publishes the live run, carries or reports unread messages
