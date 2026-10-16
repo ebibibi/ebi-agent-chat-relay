@@ -335,6 +335,7 @@ class ConsoleServer:
         r.add_post(f"{API_PREFIX}/items", self.create_item)
         r.add_patch(f"{API_PREFIX}/items/{{item_id}}", self.patch_item)
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/messages", self.messages)
+        r.add_get(f"{API_PREFIX}/items/{{item_id}}/notes", workspace_routes.thread_notes)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/reply", self.reply)
         r.add_post(
             f"{API_PREFIX}/items/{{item_id}}/messages/{{message_id}}/actions/{{action_id}}",

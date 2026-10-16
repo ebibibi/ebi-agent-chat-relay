@@ -552,6 +552,7 @@ function renderDetail() {
   window.ConsoleMobile.layout(item, !editing);
   window.ConsoleFamily.render(item);
   window.ConsoleWsPane.render(item);
+  window.ConsoleThreadNotes.render(item);
   const msgs = $("msgs");
   if (item.thread_id) fillMessages(msgs);
   else msgs.replaceChildren(item.note
@@ -570,6 +571,7 @@ function buildDetail(pane, item, key) {
     window.ConsoleBackend.controls(item),
     h("section", { class: "family", id: "d-family", hidden: true, "aria-label": LANG === "ja" ? "親子スレッド" : "Thread family" }),
     h("section", { class: "ws-pane", id: "d-ws", hidden: true, "aria-label": "Ebi Workspace" }),
+    h("section", { class: "tnotes", id: "d-notes", hidden: true }),
     h("div", { class: "msgs-wrap" }, msgs, jump),
     h("div", { class: "live-slot", id: "live-slot" }),
   ];
