@@ -614,7 +614,13 @@ The capture box's picker applies to the next capture only and is never remembere
 home): once a minute the Console reads only what sessions used in the last 14 days appended
 since the last pass, and binds a thread to the entry whose `log.md`, `status.md`, `overview.md`
 or `single-actions.md` it last wrote — with a write tool, or a shell command that names the
-file with a write such as `>>`, `tee` or `sed -i`. Reading a record does not count. A labelled
+file with a write such as `>>`, `tee` or `sed -i`. Reading a record does not count.
+
+`inferred` costs no extra model call: when the background triage looks at a thread that no
+person decided and whose session recorded nothing, its prompt also lists the Workspace
+entries (path and the first prose line of each `overview.md` / `AGENTS.md`) and asks which
+one the conversation is about. Only an answer that names a listed entry with confidence of at
+least 0.7 binds the thread; small talk and one-off questions stay unresolved. A labelled
 repository is written in `overview.md` as `repository: /absolute/path`,
 `working_dir: /absolute/path`, or `- リポジトリ: ~/path`. Overview is available alongside
 tasks; task changes are immediately visible in Obsidian because both use the same files.

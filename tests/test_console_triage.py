@@ -396,3 +396,87 @@ async def test_setting_a_place_from_the_console_pins_it(tmp_path) -> None:
             f"/console/api/items/{item_id}", json={"place": "x" * 41}, headers=write
         )
         assert bad.status == 400
+
+
+# -- Workspace inference -----------------------------------------------------
+
+
+def test_the_workspace_answer_is_parsed_and_clamped() -> None:
+    raw = '{"priority": 2, "workspace": " Work/Site/ ", "workspace_confidence": 3}'
+    result = parse_reply(raw, now=NOW)
+    assert result is not None
+    assert (result.workspace_path, result.workspace_confidence) == ("Work/Site", 1.0)
+    bare = parse_reply('{"priority": 2, "workspace_confidence": "high"}', now=NOW)
+    assert bare is not None and (bare.workspace_path, bare.workspace_confidence) == (None, 0.0)
+
+
+def test_workspace_entries_join_the_prompt_only_when_given() -> None:
+    plain = build_prompt(title="t", status="idle", messages=[("person", "hi")], now=NOW)
+    assert "workspace" not in plain
+    prompt = build_prompt(
+        title="t",
+        status="idle",
+        messages=[("person", "hi")],
+        now=NOW,
+        workspace=[("Work/Site", "The company website"), ("Home", "")],
+    )
+    assert "- Work/Site — The company website\n- Home" in prompt
+    assert '"workspace_confidence"' in prompt
+
+
+async def test_a_confident_guess_from_the_index_binds_and_others_do_not(repo) -> None:
+    replies = {
+        "Sure": '{"priority": 2, "workspace": "Work/Site", "workspace_confidence": 0.9}',
+        "Unsure": '{"priority": 2, "workspace": "Work/Site", "workspace_confidence": 0.4}',
+        "Invented": '{"priority": 2, "workspace": "Work/Elsewhere", "workspace_confidence": 1}',
+        "Decided": '{"priority": 2, "workspace": "Work/Site", "workspace_confidence": 1}',
+    }
+    prompts: dict[str, str] = {}
+
+    async def ask(prompt: str) -> str | None:
+        title = prompt.split("Item title: ")[1].split("\n")[0]
+        prompts[title] = prompt
+        return replies[title]
+
+    async def read(item):
+        return [("person", "the site")]
+
+    async def index():
+        return [("Work/Site", "The company website")]
+
+    bound: list[tuple[str, str]] = []
+
+    async def on_workspace(item, path):
+        bound.append((item["id"], path))
+
+    triager = Triager(
+        repo,
+        ask=ask,
+        read_messages=read,
+        per_pass=10,
+        workspace_index=index,
+        on_workspace=on_workspace,
+    )
+    items = [
+        _item("t1", title="Sure"),
+        _item("t2", title="Unsure"),
+        _item("t3", title="Invented"),
+        _item("t4", title="Decided", workspace_source="recorded"),
+    ]
+    assert await triager.run_once(items) == 4
+    assert bound == [("t1", "Work/Site")]
+    # A thread whose binding is decided is not asked about the Workspace at all.
+    assert "Work/Site" not in prompts["Decided"] and "Work/Site" in prompts["Sure"]
+
+
+async def test_the_workspace_index_names_each_entry_by_its_first_prose_line(tmp_path) -> None:
+    root = tmp_path / "notes"
+    project = root / "02_Contexts" / "Work" / "Site"
+    project.mkdir(parents=True)
+    (root / "02_Contexts" / "Work" / "AGENTS.md").write_text("# Work\nDay job.\n")
+    (project / "status.md").write_text("# Site\n")
+    (project / "overview.md").write_text(
+        "---\ntags: [x]\n---\n# Site\n作成日: 2026-01-01\n> quote\n"
+        "- **The** [[Docs|company]] site\n"
+    )
+    assert Workspace(root).index() == [("Work", "Day job."), ("Work/Site", "The company site")]

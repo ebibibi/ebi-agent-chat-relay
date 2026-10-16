@@ -104,6 +104,8 @@ MAX_REPLY_CHARS = 4000
 RECORD_INTERVAL_SECONDS = 60.0
 #: Sessions idle longer than this are not read for record writes.
 RECORD_HORIZON_DAYS = 14
+#: How long the Workspace entry list offered to the triage model is reused.
+WORKSPACE_INDEX_SECONDS = 300.0
 MAX_HISTORY = 100
 DEFAULT_HISTORY = 50
 #: How many raw Discord messages a chat thread's history may read to fill the
@@ -246,6 +248,7 @@ class ConsoleServer:
         self.workspace_records = RecordWatcher()
         self._records_seen: dict[int, str] = {}
         self._records_task: asyncio.Task[None] | None = None
+        self._workspace_index_cache: tuple[float, list[tuple[str, str]]] | None = None
         #: The model's priority and deadline guesses; None turns automatic triage off.
         self.triage = triage
         #: The managed list of places work can be bound to.
@@ -397,6 +400,8 @@ class ConsoleServer:
             read_messages=self.triage_messages,
             model=model,
             registered_places=places.names if places is not None else None,
+            workspace_index=self.workspace_index if self.workspace.root is not None else None,
+            on_workspace=self._bind_inferred,
         )
         self._triager.start(self._board_items, TRIAGE_INTERVAL_SECONDS)
         logger.info("Ebi AI Console: automatic triage on (%s)", model)
@@ -411,6 +416,21 @@ class ConsoleServer:
             await self._triager.stop()
         if self._runner:
             await self._runner.cleanup()
+
+    async def workspace_index(self) -> list[tuple[str, str]]:
+        """Workspace entries with one line about each, for the triage model (cached)."""
+        cached = self._workspace_index_cache
+        if cached is not None and time.monotonic() - cached[0] < WORKSPACE_INDEX_SECONDS:
+            return cached[1]
+        index = await asyncio.to_thread(self.workspace.index)
+        self._workspace_index_cache = (time.monotonic(), index)
+        return index
+
+    async def _bind_inferred(self, item: dict[str, Any], path: str) -> None:
+        try:
+            await self.work_repo.bind_workspace(item["id"], path, "inferred", "inferred")
+        except WorkItemError as exc:
+            logger.info("console: inferred Workspace not stored for %s: %s", _q(item["id"]), exc)
 
     async def _records_loop(self) -> None:
         while True:

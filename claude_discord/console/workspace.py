@@ -89,6 +89,31 @@ def _edit_line(line: str, *, text: str | None = None, done: bool | None = None) 
     return f"{plain[1]}{box}{label}{plain[3] or ''}"
 
 
+# "作成日: 2026-02-16" or "updated: …" says nothing about what an entry is.
+_META_LINE = re.compile(
+    r"^\**(?:作成日|作成|最終更新|更新日|created|updated|status|ステータス)\**\s*[:：]", re.I
+)
+
+
+def _first_prose(text: str, limit: int = 100) -> str:
+    """The first line of plain prose in a Markdown document, shortened."""
+    body = text
+    if body.startswith("---\n"):
+        end = body.find("\n---", 4)
+        body = body[end + 4 :] if end >= 0 else body
+    for line in body.splitlines():
+        line = line.strip()
+        if not line or line.startswith(("#", ">", "|", "```", "<!--", "---")):
+            continue
+        line = re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", line)
+        if _META_LINE.match(line):
+            continue
+        line = re.sub(r"\[\[([^\]|]+\|)?([^\]]+)\]\]", r"\2", line).replace("**", "")
+        if line:
+            return line[:limit]
+    return ""
+
+
 class Workspace:
     def __init__(self, root: Path | None) -> None:
         self.root = root.resolve() if root and (root / "02_Contexts").is_dir() else None
@@ -180,6 +205,22 @@ class Workspace:
                 # One unreadable entry must not expose its target or hide the others.
                 continue
         return {"available": True, "name": self.root.name, "entries": entries}
+
+    def index(self) -> list[tuple[str, str]]:
+        """(path, one line about it) per entry: the first prose line of its overview.
+
+        A project's ``overview.md`` or a context's ``AGENTS.md``; headings, front matter,
+        quotes and lists are skipped. Used to let a model say where a thread belongs.
+        """
+        out = []
+        for entry in self.snapshot()["entries"]:
+            name = "overview.md" if entry["kind"] == "project" else "AGENTS.md"
+            try:
+                text = self.document(entry["path"], name)
+            except (WorkspaceError, OSError, UnicodeError):
+                text = ""
+            out.append((entry["path"], _first_prose(text)))
+        return out
 
     def document(self, path: str, name: str) -> str:
         self.entry(path)
