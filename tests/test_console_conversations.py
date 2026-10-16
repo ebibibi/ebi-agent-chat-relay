@@ -901,3 +901,41 @@ async def test_a_reply_queues_when_the_running_turn_cannot_take_it(env) -> None:
 
     assert (await replied.json())["delivery"] == "queued"
     assert len(env.runs) == 2
+
+
+async def test_a_later_reply_does_not_overtake_one_already_waiting(env) -> None:
+    """Codex review of #1129: initial → B → A reordered a correction before its subject."""
+    import asyncio
+
+    from claude_discord import live_runs
+
+    item_id = await _start(env)
+    key = int(item_id[1:])
+    received: list[str] = []
+
+    class _Live:
+        async def inject_user_message(self, text: str, images=None) -> bool:
+            received.append(text)
+            return True
+
+    lock = env.host._locks.setdefault(key, asyncio.Lock())
+    await lock.acquire()  # a turn is running
+    try:
+        await env.client.post(
+            f"/console/api/items/{item_id}/reply", json={"text": "A"}, headers=WRITE
+        )
+        run = live_runs.LiveRun(runner=_Live())
+        live_runs.register(key, run)
+        try:
+            replied = await env.client.post(
+                f"/console/api/items/{item_id}/reply", json={"text": "B"}, headers=WRITE
+            )
+        finally:
+            live_runs.unregister(key, run)
+    finally:
+        lock.release()
+    await _settle(env.host)
+
+    assert (await replied.json())["delivery"] == "queued"
+    assert received == []
+    assert [r.prompt for r in env.runs[1:]] == ["A", "B"]

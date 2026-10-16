@@ -41,11 +41,11 @@ from ..session_slots import (
 )
 from ..thread_marker import OUTCOME_ERROR, OUTCOME_WAITING
 from ..thread_status import schedule_thread_outcome
-from .event_processor import EventProcessor
+from .event_processor import EventProcessor, _backend_name_from_runner
 from .run_config import RunConfig
 
 if TYPE_CHECKING:
-    from claude_code_core.types import AskQuestion
+    from claude_code_core.types import AskQuestion, InjectedMessage
 
     from ..database.wait_repo import WaitRepository
 
@@ -580,13 +580,31 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
         # Deferred only while queueing; later compact/ask reruns queue normally.
         config = replace(config, resumed_from_pause=False)
 
-    live = live_runs.LiveRun(runner=runner, slot=slot, processor=processor)
+    live = live_runs.LiveRun(
+        runner=runner,
+        slot=slot,
+        processor=processor,
+        backend=_backend_name_from_runner(runner),
+    )
     live_runs.register(config.surface.thread_key, live)
     try:
         async for event in runner.run(config.prompt, session_id=config.session_id):
             if processor.should_drain and not event.is_complete:
                 continue
             await processor.process(event)
+    except asyncio.CancelledError:
+        # Shutdown or eviction: whatever the human sent into this turn and the
+        # agent never read must not vanish without a word.
+        unread_on_cancel = _unread_messages(runner)
+        if unread_on_cancel:
+            logger.warning(
+                "Run in %d cancelled with %d unread message(s)",
+                config.surface.thread_key,
+                len(unread_on_cancel),
+            )
+            with contextlib.suppress(BaseException):
+                await asyncio.shield(_report_undelivered(config, unread_on_cancel))
+        raise
     except Exception as exc:
         logger.exception("Error running Claude CLI for thread %d", config.surface.thread_key)
         with contextlib.suppress(Exception):
@@ -633,11 +651,8 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
         logger.info(
             "Compact detected for session %s — rerunning with post-compact guardrail", session_id
         )
-        guardrail_config = replace(
-            config,
-            prompt=_with_unread(config.prompt, unread),
-            session_id=session_id,
-            post_compact_rerun=True,
+        guardrail_config = _carry_unread(
+            replace(config, session_id=session_id, post_compact_rerun=True), unread
         )
         return await run_claude_with_config(guardrail_config)
 
@@ -673,7 +688,7 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
                 processor.session_id,
             )
             return await run_claude_with_config(
-                config.with_prompt(_with_unread(answer_prompt, unread))
+                _carry_unread(config.with_prompt(answer_prompt), unread)
             )
 
     # A PR created by this Discord thread is an intermediate artifact, not a
@@ -687,8 +702,7 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
     )
     if completion_prompt is not None:
         completion_config = replace(
-            config,
-            prompt=_with_unread(completion_prompt, unread),
+            _carry_unread(config.with_prompt(completion_prompt), unread),
             session_id=session_id,
             pr_completion_gate_rerun=True,
         )
@@ -706,31 +720,43 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
     return processor.session_id
 
 
-def _unread_messages(runner: object) -> list[str]:
-    """Texts delivered into the run that its agent never read."""
+def _unread_messages(runner: object) -> list[InjectedMessage]:
+    """Messages delivered into the run that its agent never read."""
     unconsumed = getattr(runner, "unconsumed_messages", None)
     if unconsumed is None:
         return []
-    return [message.text for message in unconsumed()]
+    return list(unconsumed())
 
 
-def _with_unread(prompt: str, unread: list[str]) -> str:
-    """*prompt* followed by the human's unread messages, so the next run sees them."""
+def _message_text(message: InjectedMessage) -> str:
+    if message.text:
+        return message.text
+    return f"({len(message.images)} image(s), no text)"
+
+
+def _carry_unread(config: RunConfig, unread: list[InjectedMessage]) -> RunConfig:
+    """*config* with the human's unread messages — text and images — added to its prompt."""
     if not unread:
-        return prompt
-    messages = "\n\n---\n\n".join(unread)
-    return (
-        f"{prompt}\n\n"
+        return config
+    messages = "\n\n---\n\n".join(_message_text(m) for m in unread)
+    prompt = (
+        f"{config.prompt}\n\n"
         "The human also sent the following while you were working; you have not "
         f"read it yet:\n\n{messages}"
     )
+    images = [image for message in unread for image in message.images]
+    return replace(
+        config,
+        prompt=prompt,
+        images=[*(config.images or []), *images] if images else config.images,
+    )
 
 
-async def _report_undelivered(config: RunConfig, unread: list[str]) -> None:
+async def _report_undelivered(config: RunConfig, unread: list[InjectedMessage]) -> None:
     """Say which messages the agent never read, so the human can send them again."""
     if not unread:
         return
-    quoted = "\n\n".join("> " + text.replace("\n", "\n> ") for text in unread)
+    quoted = "\n\n".join("> " + _message_text(message).replace("\n", "\n> ") for message in unread)
     with contextlib.suppress(Exception):
         await config.surface.send_notice(
             Notice(
@@ -841,7 +867,7 @@ async def _acquire_slot(config: RunConfig, slots: SessionSlotScheduler) -> SlotE
 
 
 async def _requeue_paused(
-    config: RunConfig, processor: EventProcessor, unread: list[str] | None = None
+    config: RunConfig, processor: EventProcessor, unread: list[InjectedMessage] | None = None
 ) -> str | None:
     """Continue a paused session once a slot is free again."""
     session_id = processor.session_id or config.session_id
@@ -850,11 +876,11 @@ async def _requeue_paused(
         config,
         # Without a session there is nothing to resume, so the original
         # request runs again from the start.
-        prompt=_with_unread(PAUSE_RESUME_PROMPT if session_id else config.prompt, unread or []),
+        prompt=PAUSE_RESUME_PROMPT if session_id else config.prompt,
         session_id=session_id,
         resumed_from_pause=True,
     )
-    return await run_claude_with_config(resume_config)
+    return await run_claude_with_config(_carry_unread(resume_config, unread or []))
 
 
 async def _emit_result_sink(config: RunConfig, text: str | None, error: str | None) -> None:

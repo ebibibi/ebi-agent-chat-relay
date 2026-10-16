@@ -173,3 +173,112 @@ async def test_an_intermediate_result_is_not_the_end() -> None:
     # The second turn produced no streamed text: its RESULT text is the reply.
     assert "second answer" in surface.conformance_sent_text
     assert [n.title for n in surface.notices].count("Done") == 1
+
+
+async def test_a_run_under_other_settings_is_not_given_the_message() -> None:
+    """After /backend local or /sandbox, a reply must not reach the old process."""
+    runner = _Runner([])
+    runner.execution_mode = None
+    run = live_runs.LiveRun(runner=runner, backend="claude")
+    live_runs.register(57, run)
+    try:
+        assert await live_runs.try_inject(57, "secret", backend="local") is False
+        assert (
+            await live_runs.try_inject(57, "x", backend="claude", execution_mode="bwrap") is False
+        )
+        assert await live_runs.try_inject(57, "ok", backend="claude", execution_mode=None) is True
+    finally:
+        live_runs.unregister(57, run)
+    assert runner.injected == ["ok"]
+
+
+async def test_a_waiting_message_is_not_overtaken() -> None:
+    """A reply queued behind the turn keeps later replies out of that turn."""
+    runner = _Runner([])
+    run = live_runs.LiveRun(runner=runner)
+    live_runs.register(58, run)
+    try:
+        release = live_runs.hold(58)
+        assert await live_runs.try_inject(58, "B") is False
+        release()
+        release()  # idempotent
+        assert await live_runs.try_inject(58, "C") is True
+        with live_runs.queued(58):
+            assert await live_runs.try_inject(58, "D") is False
+        assert await live_runs.try_inject(58, "E") is True
+    finally:
+        live_runs.unregister(58, run)
+    assert runner.injected == ["C", "E"]
+
+
+async def test_a_cancelled_run_still_reports_unread_messages() -> None:
+    import asyncio
+
+    surface = MemorySurface()
+    started = asyncio.Event()
+
+    class _Hangs(_Runner):
+        async def run(self, prompt: str, session_id: str | None = None) -> AsyncGenerator:
+            started.set()
+            await asyncio.Event().wait()
+            yield  # pragma: no cover
+
+    runner = _Hangs([], unread=["do Y too"])
+    task = asyncio.create_task(
+        run_claude_with_config(RunConfig(surface=surface, runner=runner, prompt="go"))
+    )
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert live_runs.get(surface.thread_key) is None
+    notice = next(n for n in surface.notices if n.title == "Not read by the agent")
+    assert "do Y too" in (notice.body or "")
+
+
+async def test_unread_images_ride_along_with_a_continuation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import claude_discord.cogs._run_helper as helper
+    from claude_code_core.types import ImageData
+
+    picture = ImageData(data="aGk=", media_type="image/png")
+
+    class _ImageRunner(_Runner):
+        def unconsumed_messages(self) -> list[InjectedMessage]:
+            unread, self._unread = self._unread, []
+            return [InjectedMessage(uuid="1", text="", images=(picture,)) for _ in unread]
+
+    surface = MemorySurface()
+    runner = _ImageRunner([_result()], unread=["image only"])
+    slot = SimpleNamespace(pause_requested=True, on_pause=None)
+    configs: list[Any] = []
+
+    async def _acquire(config: Any, _slots: Any) -> Any:
+        configs.append(config)
+        return slot if len(configs) == 1 else None
+
+    monkeypatch.setattr(
+        helper, "get_session_slots", lambda: SimpleNamespace(release=lambda _s: None)
+    )
+    monkeypatch.setattr(helper, "_acquire_slot", _acquire)
+
+    await run_claude_with_config(RunConfig(surface=surface, runner=runner, prompt="go"))
+
+    assert configs[1].images == [picture]
+    assert "image" in runner.prompts[1]
+
+
+async def test_an_empty_second_turn_does_not_inherit_the_first_answer() -> None:
+    surface = MemorySurface()
+    processor = EventProcessor(RunConfig(surface=surface, runner=_Runner([]), prompt="go"))
+
+    await processor.process(_text("FIRST ANSWER"))
+    await processor.process(_result("FIRST ANSWER", turn_continues=True))
+    await processor.process(
+        StreamEvent(message_type=MessageType.USER, injected_text="and?", replay_uuid="u")
+    )
+    await processor.process(_result(""))
+
+    assert processor.final_assistant_text != "FIRST ANSWER"

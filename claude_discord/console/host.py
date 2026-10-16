@@ -22,7 +22,7 @@ from ..backend_settings import session_is_resumable
 from ..cogs._run_helper import run_claude_with_config
 from ..cogs.run_config import RunConfig
 from ..cross_backend_handoff import ConversationHistoryReader, carry_history_across_backends
-from ..execution_settings import apply_thread_execution_mode
+from ..execution_settings import apply_thread_execution_mode, thread_execution_mode
 from ..thread_marker import OUTCOME_ERROR
 from .conversations import CONSOLE_FRONTEND
 from .surface import ConsoleFrontend, ConsoleSurface, apply_outcome
@@ -126,13 +126,27 @@ class ConsoleSessionHost:
         await self.frontend.repo.append(
             surface.thread_key, author=author, is_bot=False, content=prompt
         )
-        if into_running_turn and await live_runs.try_inject(surface.thread_key, prompt):
+        if into_running_turn and await self._inject(surface.thread_key, prompt):
             return True
         self._spawn(surface, prompt)
         return False
 
+    async def _inject(self, thread_key: int, prompt: str) -> bool:
+        """Deliver into the running turn, if it runs under this conversation's settings."""
+        return await live_runs.try_inject(
+            thread_key,
+            prompt,
+            backend=await self._settings.current_backend(thread_key),
+            execution_mode=await thread_execution_mode(
+                getattr(self._settings, "repo", None), thread_key
+            ),
+        )
+
     def _spawn(self, surface: ConsoleSurface, prompt: str) -> None:
-        task = asyncio.create_task(self._run_queued(surface, prompt))
+        # Taken now, not when the task first runs: a reply arriving in between
+        # must already see that this one is waiting.
+        release = live_runs.hold(surface.thread_key)
+        task = asyncio.create_task(self._run_queued(surface, prompt, release))
         self._tasks.add(task)
         task.add_done_callback(self._finished)
 
@@ -141,18 +155,27 @@ class ConsoleSessionHost:
         if not task.cancelled() and task.exception() is not None:
             logger.error("console: turn failed", exc_info=task.exception())
 
-    async def _run_queued(self, surface: ConsoleSurface, prompt: str) -> None:
+    async def _run_queued(
+        self, surface: ConsoleSurface, prompt: str, release: Callable[[], None] = lambda: None
+    ) -> None:
         lock = self._locks.setdefault(surface.thread_key, asyncio.Lock())
-        async with lock:
-            try:
-                await self._run(surface, prompt)
-            except Exception:
-                logger.exception("console: turn for %d failed", surface.thread_key)
-                await surface.send_text("⚠️ The turn could not run. See the bot log.")
-                await surface.set_outcome(OUTCOME_ERROR)
-            finally:
-                # What was live is in the transcript now.
-                self.frontend.live.clear(surface.thread_key)
+        try:
+            async with lock:
+                release()
+                await self._run_locked(surface, prompt)
+        finally:
+            release()
+
+    async def _run_locked(self, surface: ConsoleSurface, prompt: str) -> None:
+        try:
+            await self._run(surface, prompt)
+        except Exception:
+            logger.exception("console: turn for %d failed", surface.thread_key)
+            await surface.send_text("⚠️ The turn could not run. See the bot log.")
+            await surface.set_outcome(OUTCOME_ERROR)
+        finally:
+            # What was live is in the transcript now.
+            self.frontend.live.clear(surface.thread_key)
 
     async def _run(self, surface: ConsoleSurface, prompt: str) -> None:
         thread_key = surface.thread_key

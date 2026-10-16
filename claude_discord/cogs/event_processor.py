@@ -746,9 +746,16 @@ class EventProcessor:
         # Reset for potential next streamer
         self._streamer = self._config.surface.open_stream()
         if event.turn_continues:
-            # The next turn's answer is its own reply, not a repeat of this one.
+            # The next turn's answer is its own reply, not a repeat of this one:
+            # nothing of this turn may stand in for it if that turn says nothing.
             self._assistant_text_sent = False
             self._state.partial_text = ""
+            self._state.accumulated_text = ""
+            self._state.last_assistant_url = None
+            self._last_turn_input_tokens = None
+            self._last_turn_output_tokens = None
+            self._last_turn_cache_read_tokens = None
+            self._last_turn_cache_creation_tokens = None
 
     async def _on_injected_read(self) -> None:
         """The agent read a message the human sent mid-turn (issue #1129).

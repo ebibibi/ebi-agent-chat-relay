@@ -55,7 +55,7 @@ from ..discord_ui.thread_dashboard import ThreadState, ThreadStatusDashboard
 from ..discord_ui.thread_renamer import suggest_retitle, suggest_title
 from ..discord_ui.thread_retitle import RetitleTracker
 from ..discord_ui.views import RewindSelectView, StopView
-from ..execution_settings import apply_thread_execution_mode
+from ..execution_settings import apply_thread_execution_mode, thread_execution_mode
 from ..restart_reservation import QUEUED_RESTART_REASON, persist_queued_runs
 from ..session_slots import get_session_slots
 from ..thread_marker import (
@@ -1181,7 +1181,7 @@ class ClaudeChatCog(commands.Cog):
             )
             return
 
-        if into_running_turn and await live_runs.try_inject(thread.id, text):
+        if into_running_turn and await self._inject_into_running_turn(thread.id, text):
             with contextlib.suppress(discord.HTTPException):
                 await seed_message.add_reaction(INJECTED_REACTION)
             return
@@ -1486,7 +1486,7 @@ class ClaudeChatCog(commands.Cog):
 
         # Claude Code takes input while it works; so does a thread. A reply to a
         # running turn goes into that turn instead of waiting for it to end.
-        if await live_runs.try_inject(thread.id, typed_prompt, images or None):
+        if await self._inject_into_running_turn(thread.id, typed_prompt, images or None):
             with contextlib.suppress(discord.HTTPException):
                 await message.add_reaction(INJECTED_REACTION)
             return
@@ -1544,6 +1544,23 @@ class ClaudeChatCog(commands.Cog):
                 "so its file-backed conversation history will be carried into a fresh session."
             )
         return None
+
+    async def _inject_into_running_turn(
+        self, thread_id: int, text: str, images: list[ImageData] | None = None
+    ) -> bool:
+        """Deliver into the running turn, if it runs under this thread's current settings.
+
+        After ``/backend local`` or ``/sandbox`` the message must reach the run
+        those settings start, not the process still running under the old ones.
+        """
+        repo = self._backend_settings.repo if self._backend_settings is not None else None
+        return await live_runs.try_inject(
+            thread_id,
+            text,
+            images,
+            backend=await self._current_backend_name(thread_id),
+            execution_mode=await thread_execution_mode(repo, thread_id),
+        )
 
     async def _current_backend_name(self, thread_id: int) -> str:
         """Backend the next turn in *thread_id* runs on (for account pools)."""
@@ -1728,99 +1745,103 @@ class ClaudeChatCog(commands.Cog):
         # Everything from evicting the previous run through registering this one
         # happens under the lock, so no concurrent _run_claude can observe an
         # empty slot and spawn a parallel process.
-        async with lock:
-            await self._evict_active_run(
-                thread, interrupt=interrupt_existing, notice=interrupt_notice
-            )
-
-            # Mark thread as PROCESSING when Claude starts
-            if dashboard is not None:
-                await dashboard.set_state(
-                    thread.id,
-                    ThreadState.PROCESSING,
-                    description,
-                    thread=thread,
+        # A message waiting here keeps later ones from overtaking it into the
+        # running turn (issue #1129) until the turn before it is over.
+        with live_runs.queued(thread.id) as release_queue:
+            async with lock:
+                await self._evict_active_run(
+                    thread, interrupt=interrupt_existing, notice=interrupt_notice
                 )
+                release_queue()
 
-            model_override = await self._get_current_model()
-            effective_model = model_override or self.runner.model
-
-            async def _notify_stall() -> None:
-                threshold = status._stall_hard
-                await thread.send(
-                    f"-# ⚠️ No activity for {threshold}s — could be extended thinking "
-                    "or context compression. Will resume automatically."
-                )
-
-            status = StatusManager(
-                user_message,
-                on_hard_stall=_notify_stall,
-                model=effective_model,
-            )
-            await status.set_thinking()
-
-            tools_override = await self._get_allowed_tools()
-            effort_override = await self._get_current_effort()
-
-            # Account pool: choose the login for this turn. Under the lock and
-            # after eviction, so a queued run's transcript is complete before
-            # it is copied to another profile.
-            account_plan: TurnPlan | None = None
-            if self._account_router is not None:
-                try:
-                    account_plan, session_id, prompt = await plan_account_turn(
-                        self._account_router,
-                        backend=await self._current_backend_name(thread.id),
-                        thread_id=thread.id,
-                        session_id=session_id,
-                        prompt=prompt,
+                # Mark thread as PROCESSING when Claude starts
+                if dashboard is not None:
+                    await dashboard.set_state(
+                        thread.id,
+                        ThreadState.PROCESSING,
+                        description,
+                        thread=thread,
                     )
-                except Exception:
-                    # Never lose the user's turn to pool bookkeeping: run on
-                    # the relay's own login and say so in the log.
-                    logger.exception("Account pool: planning failed for thread %d", thread.id)
 
-            runner = await self._build_runner_for_thread(
-                thread_id=thread.id,
-                model_override=model_override,
-                tools_override=tools_override,
-                fork_session=fork,
-                working_dir_override=working_dir_override,
-                effort_override=effort_override,
-            )
-            account_turn: AccountTurn | None = None
-            if account_plan is not None and hasattr(runner, "account"):
-                runner.account = account_plan.binding  # type: ignore[attr-defined]
-                account_turn = AccountTurn(binding=account_plan.binding)
-                notice = plan_notice(account_plan)
-                if notice:
-                    with contextlib.suppress(discord.HTTPException):
-                        await thread.send(notice)
+                model_override = await self._get_current_model()
+                effective_model = model_override or self.runner.model
 
-            # A turn that may be retried on another profile must not report
-            # its rejected attempt as the terminal outcome: hold the sink's
-            # result and deliver it only if no retry follows.
-            sink_outcome: list[tuple[str | None, str | None]] = []
+                async def _notify_stall() -> None:
+                    threshold = status._stall_hard
+                    await thread.send(
+                        f"-# ⚠️ No activity for {threshold}s — could be extended thinking "
+                        "or context compression. Will resume automatically."
+                    )
 
-            async def _hold_sink(text: str | None, error: str | None) -> None:
-                sink_outcome.append((text, error))
+                status = StatusManager(
+                    user_message,
+                    on_hard_stall=_notify_stall,
+                    model=effective_model,
+                )
+                await status.set_thinking()
 
-            run_sink: Callable[[str | None, str | None], Awaitable[None]] | None = result_sink
-            if account_turn is not None and result_sink is not None and not _account_retry:
-                run_sink = _hold_sink
+                tools_override = await self._get_allowed_tools()
+                effort_override = await self._get_current_effort()
 
-            # Register as the sole active run BEFORE releasing the lock. Track
-            # the task too so a later eviction can await our cleanup.
-            self._active_runners[thread.id] = runner
-            if current_task is not None:
-                self._active_tasks[thread.id] = current_task
+                # Account pool: choose the login for this turn. Under the lock and
+                # after eviction, so a queued run's transcript is complete before
+                # it is copied to another profile.
+                account_plan: TurnPlan | None = None
+                if self._account_router is not None:
+                    try:
+                        account_plan, session_id, prompt = await plan_account_turn(
+                            self._account_router,
+                            backend=await self._current_backend_name(thread.id),
+                            thread_id=thread.id,
+                            session_id=session_id,
+                            prompt=prompt,
+                        )
+                    except Exception:
+                        # Never lose the user's turn to pool bookkeeping: run on
+                        # the relay's own login and say so in the log.
+                        logger.exception("Account pool: planning failed for thread %d", thread.id)
 
-            # In chat_only mode, skip the "Session running" message and stop button.
-            stop_view: StopView | None = None
-            if not chat_only:
-                stop_view = StopView(runner)
-                stop_msg = await thread.send("-# ⏺ Session running", view=stop_view)
-                stop_view.set_message(stop_msg)
+                runner = await self._build_runner_for_thread(
+                    thread_id=thread.id,
+                    model_override=model_override,
+                    tools_override=tools_override,
+                    fork_session=fork,
+                    working_dir_override=working_dir_override,
+                    effort_override=effort_override,
+                )
+                account_turn: AccountTurn | None = None
+                if account_plan is not None and hasattr(runner, "account"):
+                    runner.account = account_plan.binding  # type: ignore[attr-defined]
+                    account_turn = AccountTurn(binding=account_plan.binding)
+                    notice = plan_notice(account_plan)
+                    if notice:
+                        with contextlib.suppress(discord.HTTPException):
+                            await thread.send(notice)
+
+                # A turn that may be retried on another profile must not report
+                # its rejected attempt as the terminal outcome: hold the sink's
+                # result and deliver it only if no retry follows.
+                sink_outcome: list[tuple[str | None, str | None]] = []
+
+                async def _hold_sink(text: str | None, error: str | None) -> None:
+                    sink_outcome.append((text, error))
+
+                run_sink: Callable[[str | None, str | None], Awaitable[None]] | None = result_sink
+                if account_turn is not None and result_sink is not None and not _account_retry:
+                    run_sink = _hold_sink
+
+                # Register as the sole active run BEFORE releasing the lock. Track
+                # the task too so a later eviction can await our cleanup.
+                self._active_runners[thread.id] = runner
+                if current_task is not None:
+                    self._active_tasks[thread.id] = current_task
+
+                # In chat_only mode, skip the "Session running" message and stop button.
+                stop_view: StopView | None = None
+                if not chat_only:
+                    stop_view = StopView(runner)
+                    stop_msg = await thread.send("-# ⏺ Session running", view=stop_view)
+                    stop_view.set_message(stop_msg)
 
         # --- Phase 2: run the subprocess OUTSIDE the lock --------------------
         # The lock is released so a later message can interrupt this run. The
