@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Console: buttons on Discord messages (such as the restart approval in an upgrade thread) work
+  again. Message ids are now sent to the browser as strings; as JSON numbers they exceeded 2**53,
+  were rounded, and every press answered 404 (#1131).
 - Console: a long chat thread no longer hides files delivered a few turns earlier. The history
   window is now counted in conversation messages instead of raw Discord messages, so hidden
   activity (tool-call logs, footers) can no longer push them out; older history is read up to
