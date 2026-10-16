@@ -107,7 +107,10 @@ def build_restart_action(
             code = await asyncio.wait_for(proc.wait(), timeout=grace_seconds)
         except TimeoutError as exc:
             raise RuntimeError(f"restart command still running after {grace_seconds:.0f}s") from exc
-        if code != 0:
+        # A negative code means a signal ended the command. ``systemctl restart`` run from
+        # inside the service is killed with the service's cgroup: that is the restart under
+        # way, not a failure. Whether it worked is decided by this process surviving below.
+        if code > 0:
             raise RuntimeError(f"restart command exited with {code}")
         await asyncio.sleep(grace_seconds)
         raise RuntimeError("restart command succeeded but this process was not restarted")

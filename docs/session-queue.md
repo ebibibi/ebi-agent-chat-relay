@@ -69,10 +69,12 @@ How the bot restarts:
 released and nothing restarts. Without it the reservation waits as long as it takes; `DELETE`
 cancels at any time before the restart itself begins.
 
-If the restart fails — the command exits non-zero, or this process is still alive 30 seconds
-after the command ran — the hold is released, the saved rows are dropped (the queue runs in this
+If the restart fails — the command exits with an error code, or this process is still alive
+30 seconds after the command ran — the hold is released, the saved rows are dropped (the queue runs in this
 process, so replaying it later would run it twice) and `GET /api/restart` reports `last_error`.
-A bot stuck holding its queue is worse than one that did not restart. Pausing a running thread is
+A bot stuck holding its queue is worse than one that did not restart. A command ended by a
+signal (`sudo systemctl restart` is killed along with the service it is restarting) is not an
+error: only this process surviving the grace period counts as a failure. Pausing a running thread is
 refused while the queue is held (`409 held`): the freed slot would stay empty.
 
 Saved runs expire with the other pending resumes (5 minutes), which a normal restart is far

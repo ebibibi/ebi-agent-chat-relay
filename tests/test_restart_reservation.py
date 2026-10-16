@@ -348,3 +348,20 @@ async def test_api_rejects_a_bad_max_wait(slots) -> None:
         for bad in (0, -5, "soon"):
             response = await client.post("/api/restart", json={"max_wait_seconds": bad})
             assert response.status == 400
+
+
+async def test_a_command_killed_by_the_restart_itself_is_not_a_failure() -> None:
+    """``sudo systemctl restart`` dies with SIGTERM when systemd stops this process's cgroup.
+
+    That is the restart happening: it must not be reported as failed (which drops the
+    saved runs and the requesting thread's resume) while this process is being stopped.
+    """
+    bot = MagicMock()
+    bot.close = AsyncMock()
+    killed = "sh -c 'kill -TERM $$'"
+    # Still waiting for this process to be stopped: no failure reported yet.
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(build_restart_action(bot, command=killed, grace_seconds=5)(), 0.5)
+    # Still alive after the grace period: now it is a failure.
+    with pytest.raises(RuntimeError, match="not restarted"):
+        await build_restart_action(bot, command=killed, grace_seconds=0.01)()
