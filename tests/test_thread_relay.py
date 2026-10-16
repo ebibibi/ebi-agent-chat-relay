@@ -349,3 +349,36 @@ async def test_long_url_relay_is_one_attachment_and_one_unchanged_agent_input() 
     assert sent.filename == "message.txt"
     assert sent.fp.getvalue().decode("utf-8") == text
     assert cog._run_claude.call_args.args[2] == text
+
+
+async def test_a_console_reply_goes_into_the_running_turn() -> None:
+    """Issue #1129: a human writing from Ebi AI Console reaches the agent mid-turn."""
+    from claude_discord import live_runs
+
+    cog = _make_cog()
+    thread = _make_target_thread()
+    seed = MagicMock()
+    seed.add_reaction = AsyncMock()
+    thread.send = AsyncMock(return_value=seed)
+    cog._run_claude = AsyncMock()
+    received: list[str] = []
+
+    class _Live:
+        async def inject_user_message(self, text: str, images=None) -> bool:
+            received.append(text)
+            return True
+
+    run = live_runs.LiveRun(runner=_Live())
+    live_runs.register(thread.id, run)
+    try:
+        await cog.deliver_relayed_message(
+            thread, "also check X", interrupt=False, into_running_turn=True
+        )
+        # Another AI's relay keeps its queue semantics.
+        await cog.deliver_relayed_message(thread, "from a peer", interrupt=False)
+    finally:
+        live_runs.unregister(thread.id, run)
+
+    assert received == ["also check X"]
+    assert thread.send.await_count == 2, "both stay visible in the thread"
+    cog._run_claude.assert_awaited_once()

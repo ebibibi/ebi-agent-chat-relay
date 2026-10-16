@@ -4,9 +4,10 @@ The console's counterpart of ``TeamsSessionHost``: it builds the runner the
 same way, resumes the same session, and hands the turn to the same session
 runner Discord uses. Only the surface differs.
 
-Turns for one conversation run one at a time. A reply that arrives while a
-turn is running waits for it, the way a chat reply queues behind work in
-flight — a reply never interrupts.
+Turns for one conversation run one at a time. A human's reply that arrives
+while a turn is running goes into that turn when its agent can take input
+(Claude Code), the way the CLI's own UI does; otherwise it waits for the turn
+to finish. A reply never interrupts.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from .. import live_runs
 from ..backend_settings import session_is_resumable
 from ..cogs._run_helper import run_claude_with_config
 from ..cogs.run_config import RunConfig
@@ -84,14 +86,20 @@ class ConsoleSessionHost:
         await self._submit(surface, prompt, author)
         return surface.thread_key
 
-    async def reply(self, thread_key: int, prompt: str, author: str) -> None:
-        """Continue a conversation with the human's message."""
+    async def reply(
+        self, thread_key: int, prompt: str, author: str, *, into_running_turn: bool = False
+    ) -> bool:
+        """Continue a conversation with the human's message.
+
+        Returns True when the message went into the turn already running,
+        False when it was queued as a turn of its own.
+        """
         surface = await self.frontend.resolve_surface(thread_key)
         if surface is None:
             raise LookupError(f"unknown console conversation {thread_key}")
         # A reply answers whatever the marker asked; clear it like a chat reply would.
         await apply_outcome(self.frontend.repo, thread_key, None)
-        await self._submit(surface, prompt, author)
+        return await self._submit(surface, prompt, author, into_running_turn=into_running_turn)
 
     async def resume_queued(self, thread_key: int, prompt: str) -> None:
         """Run a turn that was queued when the bot restarted.
@@ -107,11 +115,21 @@ class ConsoleSessionHost:
         )
         self._spawn(surface, prompt)
 
-    async def _submit(self, surface: ConsoleSurface, prompt: str, author: str) -> None:
+    async def _submit(
+        self,
+        surface: ConsoleSurface,
+        prompt: str,
+        author: str,
+        *,
+        into_running_turn: bool = False,
+    ) -> bool:
         await self.frontend.repo.append(
             surface.thread_key, author=author, is_bot=False, content=prompt
         )
+        if into_running_turn and await live_runs.try_inject(surface.thread_key, prompt):
+            return True
         self._spawn(surface, prompt)
+        return False
 
     def _spawn(self, surface: ConsoleSurface, prompt: str) -> None:
         task = asyncio.create_task(self._run_queued(surface, prompt))

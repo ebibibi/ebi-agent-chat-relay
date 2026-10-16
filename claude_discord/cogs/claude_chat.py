@@ -27,6 +27,7 @@ from claude_code_core.account_pool import AccountTurn
 from claude_code_core.attention_repo import AttentionRecorder
 from claude_code_core.backend import SessionBackend
 
+from .. import live_runs
 from ..account_turns import (
     failover_notice,
     plan_account_turn,
@@ -78,6 +79,9 @@ if TYPE_CHECKING:
     from ..database.repository import UsageStatsRepository
 
 logger = logging.getLogger(__name__)
+
+# Reacted on a message that went into the turn already running (issue #1129).
+INJECTED_REACTION = "📥"
 
 # How many messages to scan when recovering an ``auto_start=false`` seed.
 # A seed is chunked at Discord's per-message limit, so this bounds the seed at
@@ -508,7 +512,12 @@ class ClaudeChatCog(commands.Cog):
             )
             return
 
-        runner = self._active_runners.get(interaction.channel.id)
+        # The live run holds the runner that owns the process; the registered
+        # one may be the template it was cloned from, which has none.
+        live = live_runs.get(interaction.channel.id)
+        runner = (
+            live.runner if live is not None else self._active_runners.get(interaction.channel.id)
+        )
         if not runner:
             await interaction.response.send_message(
                 "No active session is running in this thread.", ephemeral=True
@@ -1127,6 +1136,7 @@ class ClaudeChatCog(commands.Cog):
         text: str,
         *,
         interrupt: bool,
+        into_running_turn: bool = False,
     ) -> None:
         """Feed a message from another session into this thread's Claude session.
 
@@ -1145,6 +1155,9 @@ class ClaudeChatCog(commands.Cog):
                 this" reaches Claude within seconds. When False, wait for the
                 current turn to finish — the right default, because a message
                 that preempts a turn can cost the receiver uncommitted work.
+            into_running_turn: Hand the message to the turn in flight, if it can
+                take input, instead of waiting for it — what a human replying
+                from Ebi AI Console expects. Falls back to waiting.
         """
         try:
             if len(text) > DISCORD_MAX_CHARS:
@@ -1166,6 +1179,11 @@ class ClaudeChatCog(commands.Cog):
                 "deliver_relayed_message: thread %d no longer exists, dropping relay",
                 thread.id,
             )
+            return
+
+        if into_running_turn and await live_runs.try_inject(thread.id, text):
+            with contextlib.suppress(discord.HTTPException):
+                await seed_message.add_reaction(INJECTED_REACTION)
             return
 
         record = await self.repo.get(thread.id)
@@ -1414,6 +1432,8 @@ class ClaudeChatCog(commands.Cog):
         if record is not None and session_id:
             session_id = await self._session_id_for_current_backend(thread, record)
         prompt, images = await self._build_prompt_and_images(message)
+        # What the human typed, before any context is prepended for a new turn.
+        typed_prompt = prompt
 
         # Threads ccdb did not create are conversations it has only partly seen:
         # a mention wakes it into the middle of a discussion whose earlier turns
@@ -1463,6 +1483,13 @@ class ClaudeChatCog(commands.Cog):
         # Scheduled here — on the human's turn — so the budget is spent on what
         # someone actually asked for, not on Claude's own commentary.
         self._schedule_retitle(thread, message.content or "")
+
+        # Claude Code takes input while it works; so does a thread. A reply to a
+        # running turn goes into that turn instead of waiting for it to end.
+        if await live_runs.try_inject(thread.id, typed_prompt, images or None):
+            with contextlib.suppress(discord.HTTPException):
+                await message.add_reaction(INJECTED_REACTION)
+            return
 
         # Determine chat_only from the parent channel of this thread.
         chat_only = (thread.parent_id or 0) in self._chat_only_channel_ids

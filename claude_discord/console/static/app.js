@@ -50,7 +50,7 @@ const I18N = {
       model: "Choose the model for the current backend", effort: "Set the reasoning effort",
       compact: "Summarize the conversation to free up context", context: "Show context window usage", cost: "Show token usage and cost" }, send: "Send", hour: "1h", tomorrow: "Tomorrow", week: "Next week",
     pressed: (l) => `Pressed: ${l}`,
-    clear: "Clear", loading: "Loading…", capturing: "Adding task…", sent: "Sent — the agent will pick it up", started: "Started", captured: "Added to To do",
+    clear: "Clear", loading: "Loading…", capturing: "Adding task…", sent: "Sent — the agent will pick it up", sent_live: "Sent into the running turn — the agent reads it while it works", started: "Started", captured: "Added to To do",
     today: "Today", yesterday: "Yesterday",
     saved: "Saved", offline: "offline", updated: "updated", no_project: "No project", queued: "queued",
     st: { running: "running", waiting: "waiting for you", review: "to review", action: "your task",
@@ -99,7 +99,7 @@ const I18N = {
       model: "今のバックエンドのモデルを選ぶ", effort: "推論の強さ（effort）を設定する",
       compact: "ここまでの会話を要約してコンテキストを空ける", context: "コンテキストの使用量を見る", cost: "トークン使用量と料金を見る" }, send: "送信", hour: "1時間", tomorrow: "明日", week: "来週",
     pressed: (l) => `押しました: ${l}`,
-    clear: "解除", loading: "読み込み中…", capturing: "タスクを登録中…", sent: "送りました。エージェントが拾います", started: "スレッドを開始しました", captured: "「やること」に追加しました",
+    clear: "解除", loading: "読み込み中…", capturing: "タスクを登録中…", sent: "送りました。エージェントが拾います", sent_live: "実行中のエージェントに届けました。作業を続けながら読みます", started: "スレッドを開始しました", captured: "「やること」に追加しました",
     today: "今日", yesterday: "昨日",
     saved: "保存しました", offline: "接続できません", updated: "更新", no_project: "案件なし", queued: "待ち",
     st: { running: "実行中", waiting: "あなたの返事待ち", review: "確認待ち", action: "あなたの作業",
@@ -881,11 +881,11 @@ async function sendReply(id, box) {
       return;
     }
     const body = await window.ConsolePaste.prepareText(text, files);
-    await api(`/items/${encodeURIComponent(id)}/reply`, { method: "POST", body });
+    const sent = await api(`/items/${encodeURIComponent(id)}/reply`, { method: "POST", body });
     box.value = "";
     delete state.drafts[id];
     window.ConsolePaste.clear(id);
-    toast(T.sent);
+    toast(sent && sent.delivery === "injected" ? T.sent_live : T.sent);
     await refresh();
     setTimeout(() => loadMessages(id), 1500);
   } catch (err) { toast(err.message); }

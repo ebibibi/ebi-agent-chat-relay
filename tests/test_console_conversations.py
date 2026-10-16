@@ -857,3 +857,47 @@ async def test_switching_backend_carries_the_conversation_into_the_new_session(e
     assert resumed.session_id is None  # Codex cannot resume a Claude session ID
     assert "answer to: Plan Sunday" in resumed.prompt
     assert resumed.prompt.endswith("Current user message:\nand Monday?")
+
+
+async def test_a_reply_goes_into_the_turn_already_running(env) -> None:
+    """Issue #1129: the agent reads a reply mid-turn instead of after it."""
+    from claude_discord import live_runs
+
+    item_id = await _start(env)
+    key = int(item_id[1:])
+    received: list[str] = []
+
+    class _Live:
+        async def inject_user_message(self, text: str, images=None) -> bool:
+            received.append(text)
+            return True
+
+    run = live_runs.LiveRun(runner=_Live())
+    live_runs.register(key, run)
+    try:
+        replied = await env.client.post(
+            f"/console/api/items/{item_id}/reply", json={"text": "also Monday"}, headers=WRITE
+        )
+        await _settle(env.host)
+    finally:
+        live_runs.unregister(key, run)
+
+    assert (await replied.json())["delivery"] == "injected"
+    assert received == ["also Monday"]
+    assert len(env.runs) == 1, "no second turn is started for an injected reply"
+    messages = (
+        await (await env.client.get(f"/console/api/items/{item_id}/messages", headers=AUTH)).json()
+    )["messages"]
+    assert (False, "also Monday") in [(m["is_bot"], m["content"]) for m in messages]
+
+
+async def test_a_reply_queues_when_the_running_turn_cannot_take_it(env) -> None:
+    item_id = await _start(env)
+
+    replied = await env.client.post(
+        f"/console/api/items/{item_id}/reply", json={"text": "and Monday?"}, headers=WRITE
+    )
+    await _settle(env.host)
+
+    assert (await replied.json())["delivery"] == "queued"
+    assert len(env.runs) == 2
