@@ -12,11 +12,12 @@ import json
 import logging
 import os
 import re
+import uuid
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
 
 from .execution import ExecutionRefusedError, prepare_launch, refusal_event
-from .types import MessageType, StreamEvent, ToolCategory, ToolUseEvent
+from .types import ImageData, InjectedMessage, MessageType, StreamEvent, ToolCategory, ToolUseEvent
 
 if TYPE_CHECKING:
     from .codex_runner import CodexRunner
@@ -58,11 +59,12 @@ class AppServerSession:
         self.process: asyncio.subprocess.Process | None = None
         self._next_id = 0
         self._pending: dict[int, asyncio.Future[dict[str, Any]]] = {}
-        self._notifications: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+        self._notifications: asyncio.Queue[dict[str, Any] | StreamEvent | None] = asyncio.Queue()
         self._reader: asyncio.Task[None] | None = None
         self._stderr: asyncio.Task[None] | None = None
         self._usage: dict[str, Any] = {}
         self._closing = False
+        self.outstanding: dict[str, InjectedMessage] = {}
 
     async def _write(self, message: dict[str, Any]) -> None:
         if self.process is None or self.process.stdin is None:
@@ -94,6 +96,7 @@ class AppServerSession:
                     raise ValueError("Invalid JSON-RPC id")
                 if "error" in data and not isinstance(data["error"], dict):
                     raise ValueError("Invalid JSON-RPC error")
+                response_id = data.get("id")
                 if "method" in data:
                     if "id" in data:
                         # No unattended approval/UI can be granted by the relay.
@@ -107,15 +110,27 @@ class AppServerSession:
                             }
                         )
                     else:
+                        params = data.get("params", {})
+                        if (
+                            data["method"] == "item/completed"
+                            and params.get("threadId") == self.thread_id
+                            and params.get("turnId") == self.turn_id
+                            and params.get("item", {}).get("type") == "userMessage"
+                        ):
+                            acknowledgement = self.acknowledge_user_message(params["item"])
+                            if acknowledgement is not None:
+                                await self._notifications.put(acknowledgement)
                         await self._notifications.put(data)
                 elif (
-                    future := self._pending.get(data.get("id"))
-                ) is not None and not future.done():
+                    isinstance(response_id, int)
+                    and (future := self._pending.get(response_id)) is not None
+                    and not future.done()
+                ):
                     if "error" in data:
                         future.set_exception(RpcError(data["error"].get("message", "RPC failed")))
                     else:
                         future.set_result(data.get("result", {}))
-        except (OSError, ValueError, ConnectionError):
+        except (OSError, ValueError, ConnectionError, TypeError, AttributeError):
             logger.warning("Codex app-server stream failed", exc_info=True)
         finally:
             for future in self._pending.values():
@@ -130,24 +145,38 @@ class AppServerSession:
         while await self.process.stderr.read(65536):
             pass
 
-    async def send_user_message(self, prompt: str) -> bool:
+    async def inject_user_message(self, text: str, images: list[ImageData] | None = None) -> bool:
+        """Own the input until its correlated userMessage echo, as Claude does."""
         if self._closing or self.thread_id is None or self.turn_id is None:
             return False
-        expected_turn = self.turn_id
+        message = InjectedMessage(uuid=str(uuid.uuid4()), text=text, images=tuple(images or ()))
+        self.outstanding[message.uuid] = message
+        inputs = user_input(text, images)
         try:
-            response = await self._request(
+            await self._request(
                 "turn/steer",
                 {
                     "threadId": self.thread_id,
-                    "expectedTurnId": expected_turn,
-                    "input": [{"type": "text", "text": prompt}],
+                    "expectedTurnId": self.turn_id,
+                    "clientUserMessageId": message.uuid,
+                    "input": inputs,
                 },
             )
-            return response.get("turnId") == expected_turn
         except RpcError:
+            self.outstanding.pop(message.uuid, None)
             return False
-        # Transport failures have ambiguous delivery. Do not convert them into
-        # an explicit rejection, which could cause duplicate execution.
+        except (TimeoutError, ConnectionError, OSError):
+            # Shared contract: True transfers ownership to the runner. Never
+            # both return False (immediate queue) and report it as unconsumed.
+            logger.warning("Codex steer delivery uncertain; retaining unconsumed input")
+        return True
+
+    def acknowledge_user_message(self, item: dict[str, Any]) -> StreamEvent | None:
+        client_id = item.get("clientId")
+        message = self.outstanding.pop(client_id, None) if isinstance(client_id, str) else None
+        if message is None:
+            return None
+        return StreamEvent(raw={}, message_type=MessageType.USER, injected_text=message.text)
 
     async def interrupt(self) -> bool:
         if self.thread_id and self.turn_id:
@@ -223,7 +252,7 @@ class AppServerSession:
                 return
             turn_params: dict[str, Any] = {
                 "threadId": self.thread_id,
-                "input": [{"type": "text", "text": prompt}],
+                "input": user_input(prompt, runner.images),
             }
             if runner.effort:
                 turn_params["effort"] = runner.effort
@@ -245,6 +274,9 @@ class AppServerSession:
                             error="Codex app-server disconnected before turn completion",
                         )
                     return
+                if isinstance(notification, StreamEvent):
+                    yield notification
+                    continue
                 params = notification.get("params", {})
                 if params.get("threadId") != self.thread_id:
                     continue
@@ -316,6 +348,16 @@ class AppServerSession:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+
+
+def user_input(text: str, images: list[ImageData] | None = None) -> list[dict[str, str]]:
+    return [
+        {"type": "text", "text": text},
+        *(
+            {"type": "image", "url": f"data:{image.media_type};base64,{image.data}"}
+            for image in images or ()
+        ),
+    ]
 
 
 def item_events(data: dict[str, Any]) -> list[StreamEvent]:

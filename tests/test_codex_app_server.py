@@ -52,6 +52,11 @@ for line in sys.stdin:
             flush=True,
         )
     if method == "turn/steer" and m["params"]["input"][0]["text"] != "reject":
+        print(json.dumps({"method": "item/completed", "params": {
+            "threadId": thread, "turnId": "turn1", "item": {
+                "type": "userMessage", "clientId": m["params"].get("clientUserMessageId")
+            }
+        }}), flush=True)
         for item in [
             {"type": "commandExecution", "id": "cmd1", "aggregatedOutput": "ok"},
             {"type": "agentMessage", "id": "msg1", "text": "steered"},
@@ -105,7 +110,7 @@ def test_opt_in_and_local_stays_exec(transport):
 
 
 async def test_inactive_and_exec_decline():
-    assert await CodexRunner().send_user_message("hello") is False
+    assert await CodexRunner().inject_user_message("hello") is False
 
 
 async def test_acknowledged_steer_and_clean_eof(transport, tmp_path):
@@ -131,8 +136,8 @@ async def test_acknowledged_steer_and_clean_eof(transport, tmp_path):
     with patch("asyncio.create_subprocess_exec", side_effect=start):
         task = asyncio.create_task(consume())
         await asyncio.wait_for(active.wait(), 5)
-        assert await runner.send_user_message("reject") is False
-        assert await runner.send_user_message("followup") is True
+        assert await runner.inject_user_message("reject") is False
+        assert await runner.inject_user_message("followup") is True
         await asyncio.wait_for(task, 5)
     assert launches[0][0][1:4] == ("app-server", "--listen", "stdio://")
     assert any(e.session_id == "a1b2-1234" for e in events)
@@ -144,8 +149,10 @@ async def test_acknowledged_steer_and_clean_eof(transport, tmp_path):
     assert terminal[0].cache_read_tokens == 3
     assert terminal[0].output_tokens == 5
     assert not terminal[0].error
+    assert [e.injected_text for e in events if e.injected_text] == ["followup"]
+    assert runner.unconsumed_messages() == []
     assert runner._process.returncode == 0
-    assert await runner.send_user_message("late") is False
+    assert await runner.inject_user_message("late") is False
 
 
 async def test_invalid_resume_rejected_before_spawn(transport):
@@ -261,8 +268,8 @@ async def test_steer_timeout_is_not_reported_as_explicit_rejection(monkeypatch):
     session.thread_id = "a1b2"
     session.turn_id = "turn1"
     monkeypatch.setattr(session, "_request", AsyncMock(side_effect=TimeoutError))
-    with pytest.raises(TimeoutError):
-        await session.send_user_message("hello")
+    assert await session.inject_user_message("hello") is True
+    assert [m.text for m in session.outstanding.values()] == ["hello"]
 
 
 @pytest.mark.parametrize("kind", ["fileChange", "mcpToolCall"])
@@ -387,7 +394,7 @@ async def test_completion_before_steer_ack_does_not_lose_acceptance(transport, t
     with patch("asyncio.create_subprocess_exec", side_effect=start):
         task = asyncio.create_task(consume())
         await asyncio.wait_for(started.wait(), 3)
-        assert await runner.send_user_message("hello")
+        assert await runner.inject_user_message("hello")
         await asyncio.wait_for(task, 3)
     assert len([e for e in events if e.is_complete]) == 1
     assert runner._process.returncode == 0
@@ -466,3 +473,75 @@ async def test_interrupt_before_turn_start_does_not_start_work(transport, tmp_pa
         remaining = [e async for e in stream]
     assert not any(e.error for e in remaining)
     assert runner._process.returncode is not None
+
+
+async def test_shared_injection_contract_tracks_echo_and_unconsumed():
+    from unittest.mock import AsyncMock
+
+    from claude_code_core.codex_app_server import AppServerSession
+    from claude_code_core.types import ImageData
+
+    runner = CodexRunner()
+    session = AppServerSession(runner)
+    runner._app_server = session
+    session.thread_id, session.turn_id = "a1b2", "turn1"
+    request = AsyncMock(return_value={"turnId": "turn1"})
+    with patch.object(session, "_request", request):
+        assert await runner.inject_user_message("hello", [ImageData("YWJj", "image/png")])
+    (message,) = runner.unconsumed_messages()
+    assert message.text == "hello"
+    params = request.call_args.args[1]
+    assert params["clientUserMessageId"] == message.uuid
+    assert params["input"][1] == {"type": "image", "url": "data:image/png;base64,YWJj"}
+    # Echo is correlated by client ID, not by text (repeated inputs are valid).
+    ack = session.acknowledge_user_message({"id": "server-id", "clientId": message.uuid})
+    assert ack.injected_text == "hello"
+    assert runner.unconsumed_messages() == []
+    assert session.acknowledge_user_message({"clientId": "unrelated"}) is None
+
+
+async def test_shared_injection_owns_ambiguous_write_and_reports_unconsumed():
+    from unittest.mock import AsyncMock
+
+    from claude_code_core.codex_app_server import AppServerSession
+
+    runner = CodexRunner()
+    session = AppServerSession(runner)
+    runner._app_server = session
+    session.thread_id, session.turn_id = "a1b2", "turn1"
+    with patch.object(session, "_request", AsyncMock(side_effect=ConnectionError)):
+        assert await runner.inject_user_message("hello") is True
+    assert [m.text for m in runner.unconsumed_messages()] == ["hello"]
+
+
+async def test_echo_is_recorded_even_when_renderer_is_paused():
+    from unittest.mock import AsyncMock, MagicMock
+
+    from claude_code_core.codex_app_server import AppServerSession
+    from claude_code_core.types import InjectedMessage
+
+    session = AppServerSession(CodexRunner())
+    session.thread_id, session.turn_id = "a1b2", "turn1"
+    session.outstanding["client1"] = InjectedMessage("client1", "hello")
+    process = MagicMock()
+    process.stdin.drain = AsyncMock()
+    process.stdout = asyncio.StreamReader()
+    session.process = process
+    process.stdout.feed_data(
+        (
+            json.dumps(
+                {
+                    "method": "item/completed",
+                    "params": {
+                        "threadId": "a1b2",
+                        "turnId": "turn1",
+                        "item": {"type": "userMessage", "clientId": "client1"},
+                    },
+                }
+            )
+            + "\n"
+        ).encode()
+    )
+    process.stdout.feed_eof()
+    await session._read()
+    assert session.outstanding == {}

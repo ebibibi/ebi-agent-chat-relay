@@ -7,12 +7,16 @@ The default remains `exec`. This is an experimental protocol, measured on
 **codex-cli 0.162.1**; use a compatible installed CLI.
 
 With the shared live-input delivery path (#1129), a follow-up sent while a Codex
-turn is running can be steered into that same turn. The runner returns `True`
-only after `turn/steer` acknowledges the active turn ID. Explicit rejection or
-an inactive turn returns `False`, leaving the existing follow-up queue available.
-An RPC timeout or broken connection raises: delivery is uncertain, and callers
-must not silently interpret that as confirmed rejection or blindly retry it.
-The relay cannot guarantee exactly-once delivery across a broken transport.
+turn is running can be steered into that same turn. The runner implements
+`inject_user_message(text, images=None) -> bool` and `unconsumed_messages()` from
+#1129. `True` transfers ownership to the runner; a correlated `userMessage` echo
+produces an `injected_text` stream event. Messages without that echo remain
+available to the shared fallback queue when the run ends. An inactive turn or
+explicit RPC rejection returns `False`, leaving immediate queueing to the caller.
+A timeout or broken connection retains runner ownership and the unconsumed input
+rather than both queueing it immediately and returning it again on teardown.
+Exactly-once delivery across a broken transport is not guaranteed: the agent
+may have accepted a message whose echo did not reach the relay.
 
 The `local` backend **always uses exec**, even when this setting is enabled.
 Its isolated, verified `CODEX_HOME` and vendor-egress guarantees (AGENTS.md,
@@ -67,7 +71,7 @@ Protocol sequence:
 
 Decision: keep this a deployment opt-in while the protocol and its execution
 behavior gain operational coverage. Existing consumers get the previous exec
-behavior without configuration changes. A cross-engine design review identified
+behavior without configuration changes. A cross-engine design and code review identified
 response/request ID separation, ambiguous steer delivery, native sandbox
 precedence, and process cleanup as the main risks; the implementation and
 protocol-peer regression tests cover those boundaries.

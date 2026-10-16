@@ -23,6 +23,7 @@ from .codex_transcript import codex_message_from_line
 from .execution import ExecutionRefusedError, carry_execution_mode, prepare_launch, refusal_event
 from .types import (
     ImageData,
+    InjectedMessage,
     MessageType,
     StreamEvent,
     ToolCategory,
@@ -347,6 +348,7 @@ class CodexRunner:
         self._process: asyncio.subprocess.Process | None = None
         self._interrupt_requested = False
         self._app_server: AppServerSession | None = None
+        self._unconsumed_app_messages: list[InjectedMessage] = []
 
     async def run(
         self,
@@ -354,6 +356,7 @@ class CodexRunner:
         session_id: str | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Run Codex CLI and yield stream events."""
+        self._unconsumed_app_messages = []
         if self._use_app_server():
             from .codex_app_server import AppServerSession
 
@@ -367,6 +370,7 @@ class CodexRunner:
                 try:
                     await stream.aclose()
                 finally:
+                    self._unconsumed_app_messages = list(self._app_server.outstanding.values())
                     self._app_server = None
             return
         attempt_session_id = session_id
@@ -503,11 +507,16 @@ class CodexRunner:
             and os.environ.get("CCDB_CODEX_TRANSPORT", "exec") == "app-server"
         )
 
-    async def send_user_message(self, prompt: str) -> bool:
-        """Accept a follow-up only after the active app-server turn acknowledges it."""
+    async def inject_user_message(self, text: str, images: list[ImageData] | None = None) -> bool:
+        """Use the shared live-input ownership and acknowledgement contract."""
         if self._app_server is None:
             return False
-        return await self._app_server.send_user_message(prompt)
+        return await self._app_server.inject_user_message(text, images)
+
+    def unconsumed_messages(self) -> list[InjectedMessage]:
+        if self._app_server is not None:
+            return list(self._app_server.outstanding.values())
+        return list(self._unconsumed_app_messages)
 
     async def interrupt(self) -> None:
         """Interrupt the subprocess with SIGINT, or the active app-server turn."""
