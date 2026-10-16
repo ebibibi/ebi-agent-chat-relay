@@ -404,6 +404,7 @@ function renderNav() {
     }))),
     window.ConsoleSlots.nav(),
     window.ConsoleWorkspace.nav(),
+    window.ConsoleNoteSearch.nav(),
     window.ConsoleBackend.nav(),
     window.ConsoleBackend.childNav(),
     window.ConsoleNotify ? h("button", { class: "nav-notify" + (window.ConsoleNotify.isOn() ? " on" : ""),
@@ -697,8 +698,9 @@ function messageNode(m) {
   const kind = m.kind || (m.is_bot ? "agent" : "human");
   const body = h("div", { class: "body md" });
   const sent = window.ConsoleWsPane.splitMessage(m.content);
-  if (sent) body.append(MD.render(sent.text), window.ConsoleWsPane.sentNote(sent));
-  else if (m.content) body.append(MD.render(m.content + (m.truncated ? " …" : "")));
+  const md = (text) => window.ConsoleNotes.linkify(MD.render(text));
+  if (sent) body.append(md(sent.text), window.ConsoleWsPane.sentNote(sent));
+  else if (m.content) body.append(md(m.content + (m.truncated ? " …" : "")));
   for (const e of m.embeds || []) {
     const card = h("div", { class: "embed" });
     if (e.color != null) card.style.borderLeftColor = `#${e.color.toString(16).padStart(6, "0")}`;

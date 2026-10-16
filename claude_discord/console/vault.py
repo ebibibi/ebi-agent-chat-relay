@@ -319,6 +319,36 @@ class NoteIndex:
         hits = [p for p in notes if all(t in p.lower() for t in terms)] if terms else notes
         return self._visible(sorted(hits, key=lambda p: (len(PurePosixPath(p).name), p)))[:limit]
 
+    def search_text(self, query: str, limit: int = 50) -> list[dict[str, Any]]:
+        """Notes containing every term of *query* (case-insensitive), with the first match.
+
+        Name matches come first; then files are read in path order until *limit* hits.
+        """
+        self.refresh()
+        root = self.vault.root
+        terms = [t for t in query.lower().split() if t]
+        if root is None or not terms or len(query) > 200:
+            return []
+        hits: list[dict[str, Any]] = []
+        for path in self._visible([p for p in self._paths if p.endswith(".md")]):
+            try:
+                with (root / path).open("rb") as source:
+                    text = source.read(MAX_NOTE_BYTES).decode("utf-8", errors="replace")
+            except OSError:
+                continue
+            lower = text.lower()
+            name = path.lower()
+            if not all(t in lower or t in name for t in terms):
+                continue
+            at = lower.find(terms[0])
+            line = lower.count("\n", 0, at) + 1 if at >= 0 else 0
+            start = text.rfind("\n", 0, max(at, 0)) + 1
+            end = text.find("\n", max(at, 0))
+            snippet = text[start : end if end >= 0 else len(text)].strip()[:200]
+            hits.append({"path": path, "line": line, "snippet": snippet if at >= 0 else ""})
+        hits.sort(key=lambda h: (not all(t in h["path"].lower() for t in terms), h["path"]))
+        return hits[:limit]
+
     def backlinks(self, rel: str) -> list[str]:
         """Notes whose wikilinks resolve to *rel*; each file is re-read only when it changed."""
         self.refresh()

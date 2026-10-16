@@ -67,6 +67,19 @@ class WorkspaceRoutes:
         except (VaultError, OSError):
             return web.json_response({"error": "Unknown note"}, status=404)
 
+    async def resolve(self, request: web.Request) -> web.Response:
+        """Where a ``[[link]]`` written outside any note (e.g. in a reply) points."""
+        link = request.query.get("link", "")[:500]
+        index = self.server.note_index
+        found = await asyncio.to_thread(index.resolve, link, "")
+        return web.json_response(found, status=200 if found["path"] else 404)
+
+    async def search(self, request: web.Request) -> web.Response:
+        """Full-text search over visible notes (``q``: space-separated terms, all required)."""
+        query = request.query.get("q", "")[:200]
+        index = self.server.note_index
+        return web.json_response({"hits": await asyncio.to_thread(index.search_text, query)})
+
     async def notes(self, request: web.Request) -> web.Response:
         """Note paths matching every term of ``q`` (the quick switcher)."""
         query = request.query.get("q", "")[:200]

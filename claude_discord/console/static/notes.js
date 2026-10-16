@@ -160,7 +160,6 @@ window.ConsoleNotes = (() => {
     if (panel) return panel;
     panel = h("section", { id: "note-viewer", class: "note-viewer", role: "dialog", "aria-modal": "true", hidden: true });
     panel.addEventListener("click", onClick);
-    panel.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } });
     document.body.append(panel);
     return panel;
   }
@@ -244,6 +243,54 @@ window.ConsoleNotes = (() => {
     }
   }
 
+  // -- links in conversation messages ---------------------------------------------------------
+  // Vault paths (".../02_Contexts/x/log.md", "04_Knowledge/y.md") and [[wikilinks]] in a
+  // rendered message become links into the viewer. Paths are recognised by the numbered
+  // top-level folders of an Ebi Workspace vault; the server still decides what is visible.
+  const VAULT_PATH = /(?:[^\s`'"<>()（）]*?\/)?((?:0\d|99)_[^\s/`'"<>]+\/[^\s`'"<>]*?\.md)(?![\w.])/g;
+  const WIKILINK = /\[\[([^\[\]\n]+?)\]\]/g;
+  async function openLink(raw) {
+    const target = raw.split("|")[0].split("#")[0].trim();
+    try {
+      const found = await api(`/workspace/resolve?link=${encodeURIComponent(target)}`);
+      open(found.path);
+    } catch { toast(L().unresolved); }
+  }
+  function anchor(text, onclick) {
+    return h("a", { href: "#", class: "note-ref", text, onclick: (e) => { e.preventDefault(); onclick(); } });
+  }
+  function linkify(root) {
+    if (!window.ConsoleWorkspace?.available()) return root;
+    // Inline code that is exactly one vault path (spaces allowed there).
+    for (const code of root.querySelectorAll("code")) {
+      if (code.closest("pre")) continue;
+      const match = /^(?:.*?\/)?((?:0\d|99)_[^/]+\/.+?\.md)$/.exec(code.textContent.trim());
+      if (match) code.replaceWith(anchor(code.textContent, () => open(match[1])));
+    }
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: (n) => n.parentElement.closest("a, code, pre") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+      const text = node.nodeValue;
+      const parts = [];
+      let last = 0;
+      const hits = [...text.matchAll(VAULT_PATH)].map((m) => ({ at: m.index, end: m.index + m[0].length, label: m[0], go: () => open(m[1]) }))
+        .concat([...text.matchAll(WIKILINK)].map((m) => ({ at: m.index, end: m.index + m[0].length, label: m[1].split("|").pop(), go: () => openLink(m[1]) })))
+        .sort((a, b) => a.at - b.at);
+      for (const hit of hits) {
+        if (hit.at < last) continue;
+        parts.push(text.slice(last, hit.at), anchor(hit.label, hit.go));
+        last = hit.end;
+      }
+      if (!parts.length) continue;
+      parts.push(text.slice(last));
+      node.replaceWith(...parts.filter((p) => p !== ""));
+    }
+    return root;
+  }
+
   // -- routing --------------------------------------------------------------------------------
   function decodeHash() {
     if (!location.hash.startsWith(PREFIX)) return null;
@@ -254,11 +301,13 @@ window.ConsoleNotes = (() => {
     if (!location.hash.startsWith(PREFIX)) returnHash = location.hash;
     location.hash = noteHref(path);
   }
+  // Closing leaves the list and the open thread exactly as they are: the address goes back
+  // to what the Console itself shows, without a hashchange that would re-navigate.
   function close() {
     if (panel) panel.hidden = true;
     current = null;
-    history.pushState(null, "", returnHash || "#focus");
-    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    const here = typeof state === "object" && state.view ? `#${state.view}${state.open ? "/" + state.open : ""}` : returnHash;
+    history.replaceState(null, "", here || "#focus");
   }
   function route() {
     const path = decodeHash();
@@ -266,7 +315,16 @@ window.ConsoleNotes = (() => {
     else if (panel && !panel.hidden) { panel.hidden = true; current = null; }
   }
   window.addEventListener("hashchange", route);
+  // Escape closes the viewer wherever focus is, unless a dialog above it handles it first.
+  // Capture phase: the list's own Escape (close the thread) must not also fire.
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && panel && !panel.hidden && !document.querySelector(".nsearch")) {
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+    }
+  }, true);
   window.addEventListener("load", () => { if (decodeHash()) { returnHash = "#focus"; route(); } });
 
-  return { open, isOpen: () => Boolean(panel && !panel.hidden), href: noteHref };
+  return { open, openLink, linkify, isOpen: () => Boolean(panel && !panel.hidden), href: noteHref };
 })();
