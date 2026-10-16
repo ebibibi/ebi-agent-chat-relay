@@ -257,3 +257,34 @@ def test_finish_ignores_ambiguous_tasks(notes):
     result = workspace.finish("Work/Client", ["Call back"], "Call back", done=True)
     assert result["task"] is None
     assert [t["done"] for t in workspace.entry("Work/Client")["tasks"]] == [False, False]
+
+
+def test_plain_next_action_bullets_are_tasks_and_get_checked_off(notes):
+    status = notes / "02_Contexts" / "Work" / "Client" / "Website" / "status.md"
+    status.write_text(
+        "# Website\n## 次のアクション\n- Plain step\n1. Numbered step\n- [ ] Boxed\n"
+        "## 連絡待ち\n- Client / Feedback\n",
+        encoding="utf-8",
+    )
+    actions = notes / "02_Contexts" / "Work" / "Client" / "single-actions.md"
+    actions.write_text("- Not a task here\n- [ ] Call back\n", encoding="utf-8")
+    workspace = Workspace(notes)
+    entry = workspace.entry("Work/Client/Website")
+    assert [(t["text"], t.get("checkbox", True)) for t in entry["tasks"]] == [
+        ("Plain step", False),
+        ("Numbered step", False),
+        ("Boxed", True),
+    ]
+    assert [t["text"] for t in workspace.entry("Work/Client")["tasks"]] == ["Call back"]
+    workspace.update_task("Work/Client/Website", 4, entry["revision"], done=True)
+    entry = workspace.entry("Work/Client/Website")
+    workspace.update_task("Work/Client/Website", 5, entry["revision"], text="Renamed")
+    lines = status.read_text(encoding="utf-8").splitlines()
+    assert lines[2:5] == ["- Plain step", "1. [x] Numbered step", "- [ ] Renamed"]
+
+
+def test_finish_checks_off_a_plain_next_action(notes):
+    status = notes / "02_Contexts" / "Work" / "Client" / "Website" / "status.md"
+    status.write_text("# Website\n## 次のアクション\n- Ship it\n", encoding="utf-8")
+    Workspace(notes).finish("Work/Client/Website", ["Ship it"], "Ship it", done=True)
+    assert "- [x] Ship it" in status.read_text(encoding="utf-8")

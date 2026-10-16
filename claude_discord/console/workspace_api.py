@@ -20,6 +20,10 @@ class WorkspaceRoutes:
     async def read(self, request: web.Request) -> web.Response:
         return web.json_response(await asyncio.to_thread(self.server.workspace.snapshot))
 
+    async def plan(self, request: web.Request) -> web.Response:
+        """Workspace next actions ranked by the plugin's goodmorning scoring (Focus view)."""
+        return web.json_response(await asyncio.to_thread(self.server.workspace_plan.read))
+
     async def document(self, request: web.Request) -> web.Response:
         try:
             content = await asyncio.to_thread(
@@ -53,6 +57,7 @@ class WorkspaceRoutes:
                     text=body.get("text"),
                     done=body.get("done"),
                 )
+            self.server.workspace_plan.invalidate()
             return web.json_response(await asyncio.to_thread(self.server.workspace.entry, path))
         except WorkspaceConflictError as exc:
             return web.json_response({"error": str(exc)}, status=409)

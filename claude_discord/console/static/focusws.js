@@ -1,0 +1,180 @@
+// Ebi Workspace inside the Focus view: today's goodmorning plan, the next actions the
+// Workspace plugin ranks highest (same scoring as goodmorning — the server runs the plugin's
+// own scanner), and its waiting-for list. The Markdown stays the source of truth: every
+// action here is a revision-checked write to the original line, like the Workspace panel.
+// Without a Workspace, or without the plugin, nothing here renders.
+// Loaded before focus.js, which places these nodes in its rows.
+"use strict";
+
+window.ConsoleFocusWorkspace = (() => {
+  const REFRESH_MS = 60_000;
+  let plan = null;
+  let loadedAt = 0;
+  let loading = false;
+  let busy = false;
+  let planOpen = localStorage.getItem("wsPlanOpen") === "1";
+  const ja = () => document.documentElement.lang === "ja";
+  const L = () => ja() ? {
+    title: "🗂️ Ebi Workspace から", plan: "📋 今日のプラン（goodmorning）", waiting: "⏳ Ebi Workspace の連絡待ち",
+    done: "✅ 完了", redate: "📅 期限", run: "▶ AIに実行", open: "📂", open_hint: "Ebi Workspace で開く",
+    more: (n) => `ほか ${n} 件`, follow_up: "📣 催促", lapsed: (n, d) => `期限を${d}日以上過ぎたものが ${n} 件（goodmorning の「期限の見直し」）`,
+    over: (d) => `期限${d}日超過`, today: "今日が期限", soon: (d) => `あと${d}日`, on: (s) => `期限 ${s}`,
+    since: (s) => `${s}〜`, nudge: (s) => `催促 ${s}`, total: (n, all) => `上位 ${n} 件 / 全 ${all} 件`,
+    no_line: "元の行を特定できないため、ここでは操作できません",
+  } : {
+    title: "🗂️ From Ebi Workspace", plan: "📋 Today's plan (goodmorning)", waiting: "⏳ Waiting for (Ebi Workspace)",
+    done: "✅ Done", redate: "📅 Due", run: "▶ Run with AI", open: "📂", open_hint: "Open in Ebi Workspace",
+    more: (n) => `${n} more`, follow_up: "📣 Follow up", lapsed: (n, d) => `${n} item(s) more than ${d} days overdue (goodmorning's review list)`,
+    over: (d) => `${d}d overdue`, today: "due today", soon: (d) => `in ${d}d`, on: (s) => `due ${s}`,
+    since: (s) => `since ${s}`, nudge: (s) => `follow up ${s}`, total: (n, all) => `top ${n} of ${all}`,
+    no_line: "The original line could not be identified, so it cannot be changed here",
+  };
+
+  // Task text is Obsidian Markdown; a row shows it as plain text.
+  const plain = (text) => String(text || "")
+    .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2")
+    .replace(/\[\[([^\]]+)\]\]/g, (_, target) => target.split("/").pop().replace(/\.md$/, ""))
+    .replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/`([^`]+)`/g, "$1");
+
+  function ensure() {
+    if (loading || Date.now() - loadedAt < REFRESH_MS) return;
+    load();
+  }
+  async function load() {
+    loading = true;
+    try {
+      plan = await api("/workspace/plan");
+    } catch {
+      plan = null;
+    } finally {
+      loading = false;
+      loadedAt = Date.now();
+      if (state.view === "focus") render();
+    }
+  }
+
+  function dueText(item) {
+    if (item.days === null || item.days === undefined) return null;
+    const l = L();
+    if (item.days < 0) return l.over(-item.days);
+    if (item.days === 0) return l.today;
+    if (item.days <= 7) return l.soon(item.days);
+    return l.on(item.due);
+  }
+
+  // "📅2026-10-20" replaces the task's own date, or is added before a 🔁 rule / at the end.
+  function withDue(raw, iso) {
+    if (/📅\d{4}-\d{2}-\d{2}/.test(raw)) return raw.replace(/📅\d{4}-\d{2}-\d{2}/, `📅${iso}`);
+    const repeat = raw.indexOf("🔁");
+    return repeat >= 0 ? `${raw.slice(0, repeat).trimEnd()} 📅${iso} ${raw.slice(repeat)}`
+      : `${raw.trimEnd()} 📅${iso}`;
+  }
+
+  async function act(fn) {
+    if (busy) return;
+    busy = true;
+    render();
+    try {
+      await fn();
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      busy = false;
+      await load();
+    }
+  }
+  const complete = (item) => act(async () => {
+    await api("/workspace/tasks", { method: "PATCH", body: { path: item.path, line: item.line, revision: item.revision, done: true } });
+    toast(T.saved);
+  });
+  const redate = (item, iso) => act(async () => {
+    await api("/workspace/tasks", { method: "PATCH", body: { path: item.path, line: item.line, revision: item.revision, text: withDue(item.raw, iso) } });
+    toast(T.saved);
+  });
+  const run = (item) => act(async () => {
+    const result = await api("/workspace/run", { method: "POST", body: { path: item.path, line: item.line, revision: item.revision } });
+    await refresh();
+    openItem(result.item.id);
+  });
+
+  function dateButton(item) {
+    const input = h("input", { type: "date", class: "ws-focus-date", "aria-label": L().redate,
+      value: item.due || "", hidden: true,
+      onchange: (e) => { if (e.target.value) redate(item, e.target.value); } });
+    const button = h("button", { type: "button", class: "btn", disabled: busy, text: L().redate, onclick: () => {
+      input.hidden = false;
+      if (input.showPicker) { try { input.showPicker(); } catch { input.focus(); } } else input.focus();
+    } });
+    return [button, input];
+  }
+
+  function itemNode(item) {
+    const l = L();
+    const usable = item.line !== null && item.line !== undefined && Boolean(item.revision);
+    const over = item.days !== null && item.days !== undefined && item.days < 0;
+    const tags = [
+      item.kind === "follow_up" ? l.follow_up : null,
+      item.priority,
+      item.more ? l.more(item.more) : null,
+    ].filter(Boolean).map((t) => h("span", { class: "tag", text: t }));
+    const due = dueText(item);
+    if (due) tags.splice(1, 0, h("span", { class: "tag" + (over ? " ws-due-over" : ""), text: due }));
+    const actions = usable ? [
+      h("button", { type: "button", class: "btn", disabled: busy, text: l.done, onclick: () => complete(item) }),
+      ...dateButton(item),
+      h("button", { type: "button", class: "btn", disabled: busy, text: l.run, onclick: () => run(item) }),
+    ] : [];
+    return h("li", { class: "ws-focus-item" },
+      h("div", { class: "ws-focus-text", text: plain(item.text) }),
+      h("div", { class: "ws-focus-meta" },
+        h("span", { class: "dim ws-focus-path", text: item.path }),
+        ...tags),
+      item.status ? h("div", { class: "dim ws-focus-status", text: `📍 ${plain(item.status)}` }) : null,
+      h("div", { class: "ws-focus-actions", title: usable ? "" : l.no_line },
+        ...actions,
+        h("button", { type: "button", class: "btn ghost", title: l.open_hint, "aria-label": l.open_hint,
+          text: l.open, onclick: () => window.ConsoleWorkspace.open(item.path) })));
+  }
+
+  // The goodmorning plan, folded by default so it never pushes the work off screen.
+  function planCard() {
+    ensure();
+    if (!plan || !plan.available || !plan.today_plan) return null;
+    const body = h("div", { class: "ws-focus-plan-body" });
+    body.append(MD.render(plan.today_plan));
+    return h("li", { class: "ws-focus-plan" }, h("details", { open: planOpen,
+      ontoggle: (e) => { planOpen = e.target.open; localStorage.setItem("wsPlanOpen", planOpen ? "1" : "0"); } },
+      h("summary", { text: L().plan }), body));
+  }
+
+  function tasksCard() {
+    if (!plan || !plan.available || !plan.items.length) return null;
+    const l = L();
+    return h("li", { class: "ws-focus" },
+      h("div", { class: "group ws-focus-head" }, h("span", { text: l.title }),
+        plan.total > plan.items.length ? h("span", { class: "dim", text: ` · ${l.total(plan.items.length, plan.total)}` }) : null),
+      h("ul", { class: "ws-focus-list" }, ...plan.items.map(itemNode)),
+      plan.lapsed ? h("div", { class: "dim ws-focus-lapsed", text: l.lapsed(plan.lapsed, plan.lapsed_days) }) : null);
+  }
+
+  // Waiting-for entries whose follow-up date has not come; the due ones are already ranked above.
+  function waitingCard() {
+    if (!plan || !plan.available) return null;
+    const waiting = plan.waiting.filter((w) => w.days === null || w.days > 0);
+    if (!waiting.length) return null;
+    const l = L();
+    return h("li", { class: "ws-focus ws-focus-waiting" },
+      h("div", { class: "group ws-focus-head", text: l.waiting }),
+      h("ul", { class: "ws-focus-list" }, ...waiting.map((w) => h("li", { class: "ws-focus-item" },
+        h("div", { class: "ws-focus-text", text: plain(w.who ? `${w.who} / ${w.what}` : w.what) }),
+        h("div", { class: "ws-focus-meta" },
+          h("button", { type: "button", class: "linkish dim ws-focus-path", title: l.open_hint,
+            onclick: () => window.ConsoleWorkspace.open(w.path), text: w.path }),
+          w.since ? h("span", { class: "tag", text: l.since(w.since) }) : null,
+          w.due ? h("span", { class: "tag", text: l.nudge(w.due) }) : null)))));
+  }
+
+  return { planCard, tasksCard, waitingCard, load };
+})();

@@ -1,0 +1,109 @@
+// Focus view with Ebi Workspace: plan card, ranked next actions with write-back, waiting list.
+// Run: NODE_PATH=<dir with playwright> node --test tests/console_focus_workspace.browser.cjs
+const {test} = require('node:test');
+const assert = require('node:assert/strict');
+const {chromium} = require('playwright');
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '../claude_discord/console/static');
+
+function planFixture() {
+  return {available:true,date:'2026-10-16',total:3,lapsed:2,lapsed_days:14,
+    today_plan:'### オススメ着手順\n1. Ship the website',
+    items:[
+      {kind:'project',path:'Work/Website',text:'**Ship** the [[Docs/guide|guide]]',score:80,line:3,
+        raw:'**Ship** the [[Docs/guide|guide]] 🔁毎週',revision:'v1',priority:'P1',more:1,status:'Ready',due:'2026-10-14',days:-2},
+      {kind:'follow_up',path:'Work/Website',text:'Client / Feedback',score:70,line:null,raw:null,revision:null,
+        priority:'P1',due:'2026-10-16',days:0},
+      {kind:'single',path:'Work',text:'Call back',score:40,line:2,raw:'[P2] Call back 📅2026-10-17',
+        revision:'v2',priority:'P2',due:'2026-10-17',days:1},
+    ],
+    waiting:[
+      {path:'Work/Website',who:'Client',what:'Feedback',since:'2026-10-01',due:'2026-10-16',days:0},
+      {path:'Work/Website',who:'Vendor',what:'Quote',since:null,due:'2026-10-30',days:14},
+    ]};
+}
+
+for (const mode of ['available','plugin-missing']) {
+  test(`Focus with Ebi Workspace (${mode})`, {timeout: 30000}, async t => {
+    const browser = await chromium.launch({headless:true,args:['--no-sandbox']});
+    t.after(() => browser.close());
+    const page = await browser.newPage({viewport:{width:1440,height:900},locale:'ja-JP'});
+    const writes = [];
+    let plan = mode === 'available' ? planFixture() : {available:false,reason:'plugin'};
+    let planReads = 0;
+    let items = [];
+    await page.route('http://console.test/**', async route => {
+      const p = new URL(route.request().url()).pathname;
+      if (p === '/' || p.startsWith('/static/')) {
+        const file = p === '/' ? 'index.html' : path.basename(p);
+        return route.fulfill({body:fs.readFileSync(path.join(root,file)),contentType:
+          file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html'});
+      }
+      let data = {};
+      if (p.endsWith('/board')) data = {items,slots:{},places:[]};
+      else if (p.endsWith('/workspace/plan')) { planReads += 1; data = plan; }
+      else if (p.endsWith('/workspace')) data = {available:true,entries:[]};
+      else if (p.endsWith('/workspace/tasks')) {
+        writes.push(route.request().postDataJSON());
+        if (plan.items) plan = {...plan, items: plan.items.slice(1)};
+        data = {};
+      } else if (p.endsWith('/workspace/run')) {
+        writes.push(route.request().postDataJSON());
+        items = [{id:'t1',thread_id:'1',title:'Call back',status:'running',bucket:'ai',running:true,
+          workspace_path:'Work',priority:2}];
+        data = {item:items[0]};
+      } else if (p.endsWith('/messages')) data = {messages:[]};
+      return route.fulfill({contentType:'application/json',body:JSON.stringify(data)});
+    });
+    await page.goto('http://console.test/');
+    await page.evaluate(() => setView('focus'));
+    await page.waitForFunction(() => document.querySelector('.place-bar'));
+    if (mode !== 'available') {
+      await page.waitForFunction(() => true);
+      await page.waitForTimeout(300);
+      assert.ok(planReads >= 1);
+      assert.equal(await page.locator('.ws-focus, .ws-focus-plan').count(), 0);
+      return;
+    }
+    await page.locator('.ws-focus-item').first().waitFor();
+    // Plan card: folded by default, renders Markdown when opened.
+    const summary = page.locator('.ws-focus-plan summary');
+    assert.match(await summary.innerText(), /今日のプラン/);
+    await summary.click();
+    await page.getByText('Ship the website').waitFor();
+    // Ranked rows: Markdown flattened, tags, and rows without a line offer only "open".
+    const rows = page.locator('.ws-focus:not(.ws-focus-waiting) .ws-focus-item');
+    assert.equal(await rows.count(), 3);
+    assert.equal(await rows.nth(0).locator('.ws-focus-text').innerText(), 'Ship the guide');
+    assert.match(await rows.nth(0).innerText(), /期限2日超過/);
+    assert.match(await rows.nth(0).innerText(), /ほか 1 件/);
+    assert.equal(await rows.nth(1).getByRole('button', {name:'✅ 完了'}).count(), 0);
+    assert.match(await page.locator('.ws-focus-lapsed').innerText(), /2 件/);
+    // Waiting list shows only entries whose follow-up has not come yet.
+    const waiting = page.locator('.ws-focus-waiting .ws-focus-item');
+    assert.equal(await waiting.count(), 1);
+    assert.match(await waiting.innerText(), /Vendor \/ Quote/);
+    // Re-date keeps the recurrence rule after the new date.
+    await rows.nth(0).getByRole('button', {name:'📅 期限'}).click();
+    await rows.nth(0).locator('input[type=date]').fill('2026-10-20');
+    await page.waitForFunction(() => document.querySelectorAll('.ws-focus:not(.ws-focus-waiting) .ws-focus-item').length === 2);
+    assert.deepEqual(writes.at(-1), {path:'Work/Website',line:3,revision:'v1',
+      text:'**Ship** the [[Docs/guide|guide]] 📅2026-10-20 🔁毎週'});
+    // Complete writes done:true for the exact line and revision.
+    plan = planFixture(); plan.items = plan.items.slice(2);
+    await page.evaluate(() => window.ConsoleFocusWorkspace.load());
+    await page.waitForFunction(() => document.querySelectorAll('.ws-focus:not(.ws-focus-waiting) .ws-focus-item').length === 1);
+    await rows.nth(0).getByRole('button', {name:'▶ AIに実行'}).click();
+    await page.waitForFunction(() => state.open === 't1');
+    assert.deepEqual(writes.at(-1), {path:'Work',line:2,revision:'v2'});
+    plan = planFixture();
+    await page.evaluate(() => window.ConsoleFocusWorkspace.load());
+    await page.locator('.ws-focus-item').first().waitFor();
+    await rows.nth(2).getByRole('button', {name:'✅ 完了'}).click();
+    await page.waitForFunction(() => document.querySelectorAll('.ws-focus:not(.ws-focus-waiting) .ws-focus-item').length === 2);
+    assert.deepEqual(writes.at(-1), {path:'Work',line:2,revision:'v2',done:true});
+    await page.setViewportSize({width:390,height:844});
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 390));
+  });
+}
