@@ -1,122 +1,181 @@
 # Ebi Agent Chat Relay
 
-*Formerly Claude Code Discord Bridge, then Claude & Codex Discord Bridge. Every existing
-identifier still works: the package is `claude-code-discord-bridge` (kebab-case), the
-command is `ccdb`, and `ccdb` remains the short name used throughout this document.*
-
 [![CI](https://github.com/ebibibi/ebi-agent-chat-relay/actions/workflows/ci.yml/badge.svg)](https://github.com/ebibibi/ebi-agent-chat-relay/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/ebibibi/ebi-agent-chat-relay/actions/workflows/codeql.yml/badge.svg)](https://github.com/ebibibi/ebi-agent-chat-relay/actions/workflows/codeql.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Run coding agents from Discord or Microsoft Teams. Choose Claude Code, OpenAI Codex,
-a local model, or any compatible AG-UI agent behind the same conversation.**
-
-Ebi Agent Chat Relay turns each Discord thread or Teams conversation into an isolated,
-persistent agent session. Work on a feature in one conversation, review a PR in another, and run
-a background task in a third — simultaneously. Discord can mix backends per thread; Teams uses the
-configured/global backend in v4. The relay handles coordination so sessions do not clobber each
-other.
-
-**Why the name changed.** This started as a bridge between one AI and one chat app. It is now a
-relay with two production frontends and five backend choices. Three of the four words in the old
-name had stopped being true. See [ADR-0001](docs/adr/0001-adopt-ebi-agent-chat-relay.md) for the
-decision and [the rename plan](docs/RENAME_PLAN.md) for the compatibility-preserving transition.
-
-**Use your existing subscriptions, your own infrastructure, or a remote agent.** ccdb can run the
-official Claude Code and Codex CLIs, a Codex-compatible local endpoint, an AG-UI HTTP/SSE agent,
-or the pi CLI. Discord exposes runtime `/backend` switching; Teams uses the configured backend
-through the same factory in v4.
-
-## What's new in v5
-
-Version 5 gives the relay **a GUI of its own: the Ebi AI Console**. Every agent thread — chat
-threads and the console's own conversations — on one web screen, on desktop or phone:
-
-- **Focus view** (the default) answers "what do I do now?". Automatic triage by the cheapest model
-  of your backend (Haiku on Claude, the cheapest catalog model on Codex) fills in priority, due
-  date, next step and place; a value a person sets always wins.
-- **Act without leaving the screen** — reply with any file attached, preview files in place, switch
-  backend, model and effort with a picker, change the concurrent-session limit, and pause, resume
-  or stop running work.
-- **Keep delegated work beside the parent conversation** — a collapsible panel shows child and
-  grandchild status, latest reports and completion counts. Inspect a child, then return to the
-  parent for decisions; direct child replies require an explicit choice.
-- **Optional** — nothing starts unless `CCDB_CONSOLE_PORT` is set, and Discord and Teams keep
-  working exactly as before. With the console on, triage is on by default
-  (`CCDB_CONSOLE_TRIAGE=0` turns it off).
-
-**Version 5.1 adds Workspace integration and more ways to manage conversations:**
-
-- **Ebi Workspace tasks** — browse contexts and projects, read overviews, add/edit/complete
-  tasks, and start AI work from a task. Project `status.md` and context `single-actions.md`
-  remain the source of truth; revision checks reject stale edits.
-- **Search messages** — find text in available conversation history and local transcripts,
-  with excerpts and links back to the matching thread, without AI calls.
-- **Manage thread families** — configure manager and child backend/model/effort independently,
-  and select multiple threads to complete together. Completing a parent includes descendants.
-- **Desktop and mobile controls** — copy text-file contents and thread links, switch
-  Japanese/English without losing drafts or attachments, and keep the mobile composer accessible.
-
-See the [console guide](docs/console.md), the [v5.1.0 release notes](docs/releases/v5.1.0.md) and
-[ADR-0014](docs/adr/0014-publish-the-ebi-ai-console-as-v5.md). Scheduler integration comes next.
-
-## What's new in v4
-
-Version 4 makes two independent choices explicit: **where people talk** and **which agent does the
-work**. Any supported frontend can use any supported backend.
-
-### Frontend × backend
-
-| | Claude Code | OpenAI Codex | Local | AG-UI | pi |
-|---|---:|---:|---:|---:|---:|
-| Discord | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Microsoft Teams | ✅ | ✅ | ✅ | ✅ | ✅ |
-
-- **Discord** remains the zero-migration default. Existing deployments start exactly as before.
-- **Microsoft Teams** is production-ready through a small public receiver and an outbound-only
-  `ActivityPuller` on the private session host. Discord and Teams can run together in one process
-  with `CCDB_FRONTENDS=discord,teams`.
-- **AG-UI** connects either chat surface to an HTTP/SSE agent implementing the Agent–User
-  Interaction Protocol. Claude Code, Codex, and the guarded local backend remain available.
-- **pi** runs the [pi](https://github.com/earendil-works/pi) CLI, which reaches Anthropic,
-  OpenAI, Google, GitHub Copilot and OpenAI-compatible local servers through one agent. It has
-  no sandbox in the non-interactive modes ccdb uses, so it refuses to spawn until
-  `CCDB_PI_ALLOW_UNSANDBOXED=1` states that the host's own isolation is trusted.
-
-Start with the [backend guide](docs/backends.md). For Teams, follow the complete
-[Microsoft Teams setup guide](docs/teams-setup.md), then use the deeper
-[surface behavior](docs/teams.md) and [relay security model](docs/teams-relay.md) references.
+**One cockpit for all your coding agents.** Run Claude Code, OpenAI Codex, local models, pi and
+AG-UI agents side by side — from a web console on your desktop or phone, or from Discord and
+Microsoft Teams. Let a strong model manage, hand the legwork to cheaper ones, and step in only when
+a decision is actually yours.
 
 **[日本語](docs/ja/README.md)** | **[简体中文](docs/zh-CN/README.md)** | **[한국어](docs/ko/README.md)** | **[Español](docs/es/README.md)** | **[Português](docs/pt-BR/README.md)** | **[Français](docs/fr/README.md)**
 
-> **Disclaimer:** This project is not affiliated with, endorsed by, or officially connected to Anthropic or OpenAI. "Claude" and "Claude Code" are trademarks of Anthropic, PBC; "OpenAI", "Codex", and "ChatGPT" are trademarks of OpenAI. This is an independent open-source tool that interfaces with the Claude Code CLI and the OpenAI Codex CLI.
+![Ebi AI Console: a manager agent on Claude Opus coordinating child agents on Codex and a local model](docs/images/readme/console-family.png)
 
-> **Built entirely by Claude Code.** This entire codebase — architecture, implementation, tests, documentation — was written by Claude Code itself. The human author provided requirements and direction via natural language. See [How This Project Was Built](#how-this-project-was-built).
+<sub>Every screenshot in this README uses fictional sample data. Regenerate them with
+[`scripts/readme_screenshots.cjs`](scripts/readme_screenshots.cjs).</sub>
+
+## Why people use it
+
+| | |
+|---|---|
+| 🖥️ **A GUI built for supervising agents** | The Ebi AI Console shows every agent thread on one screen, sorted by *whose move it is*. It tells you what to do next and lets you reply, attach files, switch models, pause or stop — without opening a terminal. |
+| 🔀 **Multi-harness** | Claude Code, OpenAI Codex, a local model, the pi CLI or any AG-UI agent — pick one per conversation and switch mid-thread. The conversation is handed over, not lost. |
+| 💸 **Multi-agent, cost-aware** | A manager agent on your best model delegates to child agents on cheaper or flat-rate models. Triage runs on the cheapest model you have. Subscriptions you already pay for do the work. |
+| 🛡️ **Parallel without collisions** | Every session works in its own git worktree, sees what the others are doing, and claims what it touches. Ten agents, one repository, no clobbered work. |
 
 ---
 
-## The Big Idea: Parallel Sessions Without Fear
+<a id="whats-new-in-v5"></a>
 
-When you send tasks to Claude Code or OpenAI Codex in separate Discord threads, the relay does four things automatically — regardless of which backend you picked:
+## 🖥️ The Ebi AI Console — supervise agents, don't babysit terminals
 
-1. **Concurrency notice injection** — Every session's system prompt includes mandatory instructions: create a git worktree, work only inside it, never touch the main working directory directly.
+![Focus view: the console picks your next move and shows the agent's drafted reply](docs/images/readme/console-focus.png)
 
-2. **Active session registry** — Each running session knows about the others. If two sessions are about to touch the same repo, they can coordinate rather than conflict.
+Running several agents is easy; keeping track of them is the hard part. The console answers one
+question first: **"what do I do now?"**
 
-3. **AI Lounge** — A session-to-session "breakroom" injected into every prompt. Before starting, each session reads recent lounge messages to see what other sessions are doing, and claims the repo, issue or file it is about to touch (see [Resource Claims](#resource-claims)) so a second session is turned away before it duplicates the work. Before disruptive operations (force push, bot restart, DB drop), sessions check the lounge first so they don't stomp on each other's work.
+- **Focus view** — a cheap, tool-less model reads each thread with new activity and fills in
+  priority, due date, the next step and whether it needs a particular place (📍 office, home).
+  Your next move is pinned at the top. Anything a person sets by hand always wins.
+- **Sorted by whose move it is** — ❓ waiting for your answer, 👀 to review, 📋 your task,
+  ⚠️ failed, running, idle, done. Agents report outcomes through the relay, so the board stays
+  accurate without extra prompting.
+- **Act in place** — reply with files attached; preview images, Markdown, HTML, CSV and logs inline;
+  autocomplete slash commands and skills; ⏸ pause, ■ stop and ▶ resume running work.
+- **See the cost before it bites** — 5-hour and weekly quota meters for Claude and Codex in the
+  header, and every thread shows how full its context window is (🧠 41%).
+- **Capture work instantly** — write down a task and an agent starts on it right away, in a
+  conversation the console owns (no chat app needed).
+- **Search, share, finish in bulk** — search inside conversations, copy thread links, and complete
+  several threads at once (a parent completes its children too).
 
-4. **Backend-agnostic surface** — The same Discord UI, slash commands, scheduler, API, and Lounge work the same way whether a thread runs Claude or Codex. Mix backends across threads if you want — e.g. Claude for refactors, Codex for code review — using `/backend` per thread.
+<img src="docs/images/readme/console-mobile.png" alt="The console on a phone" width="260" align="right">
+
+**On your phone too.** Install the console to your home screen; the mobile layout keeps the
+composer within reach. Check on your agents from the train, answer the one question that blocks
+them, and let them carry on.
+
+**Secure by default.** The console never runs unauthenticated: passkeys (WebAuthn) out of the box,
+optionally combined with Cloudflare Access, OIDC or an email allowlist. The JSON API under
+`/console/api` is the contract; the bundled web client is one consumer.
+
+```bash
+uv add "claude-code-discord-bridge[console] @ git+https://github.com/ebibibi/ebi-agent-chat-relay.git"
+CCDB_CONSOLE_PORT=8100 ccdb start   # open http://localhost:8100 and register a passkey
+```
+
+The console is optional — nothing listens unless `CCDB_CONSOLE_PORT` is set, and Discord and Teams
+keep working exactly as before. Full guide: [docs/console.md](docs/console.md).
+
+<br clear="right">
+
+---
+
+<a id="whats-new-in-v4"></a>
+
+## 🔀 Multi-harness — one surface, every agent CLI
+
+The relay drives the **official CLIs** as subprocesses, so every agent keeps its own tools, skills,
+memory and project instructions. You bring your existing logins; the relay never sees an API key.
+
+| Frontend × backend | Claude Code | OpenAI Codex | Local (Ollama etc.) | pi | AG-UI |
+|---|:---:|:---:|:---:|:---:|:---:|
+| **Ebi AI Console** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Discord** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Microsoft Teams** | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+- **Switch per conversation** — `/backend`, `/model` and `/effort` (or the picker above the reply
+  box) change the agent from the next turn. Model lists are discovered live, so a model released
+  this morning is selectable without upgrading the relay.
+- **Hand over, don't restart** — session IDs are not portable between CLIs, so when you switch,
+  the relay hands the conversation transcript to the new agent and carries on.
+- **Local when it matters** — the `local` backend runs Codex against a model on your own hardware
+  and refuses to start if the CLI would still phone home. `/ollama` manages the models.
+- **Ask outside, safely** — `/ask` sends one anonymized, isolated question to an external model.
+
+Details: [backend guide](docs/backends.md) · [local backend](docs/local-backend.md) ·
+[pi](docs/pi-backend.md) · [AG-UI](docs/agui-backend.md) · [escalation](docs/escalation.md).
+
+---
+
+## 💸 Multi-agent, cost-aware
+
+Not every task needs your most expensive model. The relay lets you decide **which model thinks and
+which model types**:
+
+- **Manager and children are configured separately.** A parent conversation on, say, Claude Opus
+  breaks the work down and delegates it to child threads on Codex, a smaller Claude model or a
+  local model. Set child defaults globally or per parent, right from the console.
+- **Delegated work stays visible.** The parent shows a *Delegated work* panel with each child's
+  status and latest report. You talk to the manager; it coordinates the children.
+- **Spread the load across subscriptions.** Claude and Codex have separate quotas. Running the
+  manager on one and the workers on the other uses both flat-rate plans in parallel instead of
+  exhausting one. [Account pools](docs/account-pools.md) rotate several logins per backend on top.
+- **Housekeeping on the cheapest model.** Console triage uses the cheapest model of your backend
+  (Haiku on Claude, the cheapest catalog model on Codex), one-shot and without tools.
+- **Pin scheduled jobs to a model.** Nightly audits and digests can run on a small model while
+  interactive work keeps the big one.
+- **A concurrency limit you can change live** keeps the number of running agents — and the bill —
+  where you want it.
+
+```text
+Ship storefront v2.0              Claude Opus 5.5     manager: plans, reviews, asks you
+ ├─ Implement checkout flow       Codex gpt-6.1-sol   running
+ ├─ Write E2E tests               Codex gpt-6.1-sol   running
+ ├─ Security review of PR #128    Codex gpt-6.1-sol   done
+ └─ Update API reference          Local gpt-oss:120b  waiting for your review
+```
+
+---
+
+## 🛡️ Parallel sessions without fear
+
+Each conversation is an isolated, persistent agent session. The relay injects coordination into
+every one of them, regardless of backend:
+
+1. **Worktree isolation** — every session is told to create a git worktree and never touch the
+   main working directory.
+2. **Active session registry** — sessions can see who else is running and where.
+3. **AI Lounge** — a shared breakroom where sessions announce intent before acting, and which they
+   check before disruptive operations such as restarts or force pushes.
+4. **Resource claims** — a session claims the repo, issue or file it is about to touch; a second
+   session is turned away instead of duplicating the work.
 
 ```
 Thread A (feature)    ──→  Claude Code  (worktree-A)  ─┐
 Thread B (PR review)  ──→  OpenAI Codex (worktree-B)   ├─→  #ai-lounge
-Thread C (docs)       ──→  Claude Code  (worktree-C)  ─┘    "A: auth refactor in progress"
+Thread C (docs)       ──→  local model  (worktree-C)  ─┘    "A: auth refactor in progress"
                                                              "B: PR #42 review done (codex)"
                                                              "C: updating README"
 ```
 
-No race conditions. No lost work. No merge surprises. No backend lock-in.
+Plus: a **scheduler** for recurring agent jobs, **CI waits** that free the session slot until a
+pipeline finishes, **startup resume** after restarts, a **REST API** for spawning and messaging
+sessions from scripts and CI, and **execution environments** (bubblewrap, containers, SSH) that put
+an OS boundary around the agent. All covered below.
+
+---
+
+## Get started
+
+- **Console + Discord in 5 minutes:** follow the [Quick Start](#quick-start--claude-or-codex-in-discord-in-5-minutes),
+  then set `CCDB_CONSOLE_PORT` to add the web console.
+- **Microsoft Teams:** the [Teams setup guide](docs/teams-setup.md).
+- **Release notes:** [v5.1.0](docs/releases/v5.1.0.md) (Workspace tasks, search, thread families) ·
+  [v5.0.0](docs/releases/v5.0.0.md) (the console) · [v4.0.0](docs/releases/v4.0.0.md) (Teams,
+  AG-UI, pi) · [CHANGELOG](CHANGELOG.md).
+
+*Formerly Claude Code Discord Bridge, then Claude & Codex Discord Bridge — see
+[ADR-0001](docs/adr/0001-adopt-ebi-agent-chat-relay.md). Every existing identifier still works:
+the package is `claude-code-discord-bridge`, the command is `ccdb`, and `ccdb` is the short name
+used throughout this document.*
+
+> **Disclaimer:** This project is not affiliated with, endorsed by, or officially connected to Anthropic or OpenAI. "Claude" and "Claude Code" are trademarks of Anthropic, PBC; "OpenAI", "Codex", and "ChatGPT" are trademarks of OpenAI. This is an independent open-source tool that interfaces with the Claude Code CLI and the OpenAI Codex CLI.
+
+> **Built entirely by Claude Code.** This entire codebase — architecture, implementation, tests, documentation — was written by Claude Code itself. The human author provided requirements and direction via natural language. See [How This Project Was Built](#how-this-project-was-built).
 
 ---
 
