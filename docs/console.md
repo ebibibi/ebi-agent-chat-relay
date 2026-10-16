@@ -607,7 +607,14 @@ and why (`workspace_reason`), and a weaker source never replaces a stronger one:
 List rows show the badge with its reason on hover; the detail drawer adds ❔ for unresolved
 threads, **✓ Confirm** to pin a guess, and **Change** — a searchable picker with recently used
 entries, "No Workspace" and "Automatic" (which clears the binding so evidence decides again).
-The capture box's picker applies to the next capture only and is never remembered. A labelled
+The capture box's picker applies to the next capture only and is never remembered.
+
+`recorded` comes from the session transcript the CLI keeps on disk (Claude Code
+`projects/*/<session>.jsonl`, Codex `sessions/**/rollout-*-<session>.jsonl` in the default
+home): once a minute the Console reads only what sessions used in the last 14 days appended
+since the last pass, and binds a thread to the entry whose `log.md`, `status.md`, `overview.md`
+or `single-actions.md` it last wrote — with a write tool, or a shell command that names the
+file with a write such as `>>`, `tee` or `sed -i`. Reading a record does not count. A labelled
 repository is written in `overview.md` as `repository: /absolute/path`,
 `working_dir: /absolute/path`, or `- リポジトリ: ~/path`. Overview is available alongside
 tasks; task changes are immediately visible in Obsidian because both use the same files.

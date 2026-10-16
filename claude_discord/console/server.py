@@ -14,12 +14,13 @@ one consumer of it; a terminal or desktop client can be another.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import time
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
@@ -84,6 +85,7 @@ from .work_repo import (
 from .workspace import Workspace, WorkspaceError
 from .workspace_api import WorkspaceRoutes
 from .workspace_plan import WorkspacePlan
+from .workspace_records import RecordWatcher
 
 if TYPE_CHECKING:
     from ..ext.api_server import ApiServer
@@ -98,6 +100,10 @@ API_PREFIX = "/console/api"
 CSRF_HEADER = "X-Console-Request"
 
 MAX_REPLY_CHARS = 4000
+#: How often session transcripts are checked for Workspace record writes.
+RECORD_INTERVAL_SECONDS = 60.0
+#: Sessions idle longer than this are not read for record writes.
+RECORD_HORIZON_DAYS = 14
 MAX_HISTORY = 100
 DEFAULT_HISTORY = 50
 #: How many raw Discord messages a chat thread's history may read to fill the
@@ -236,6 +242,10 @@ class ConsoleServer:
         self.work_repo = work_repo
         self.workspace = Workspace.discover()
         self.workspace_plan = WorkspacePlan.discover(self.workspace)
+        #: Reads session transcripts for the Workspace records each thread wrote.
+        self.workspace_records = RecordWatcher()
+        self._records_seen: dict[int, str] = {}
+        self._records_task: asyncio.Task[None] | None = None
         #: The model's priority and deadline guesses; None turns automatic triage off.
         self.triage = triage
         #: The managed list of places work can be bound to.
@@ -373,6 +383,8 @@ class ConsoleServer:
         site = web.TCPSite(self._runner, self.host, self.port, reuse_address=True)
         await site.start()
         logger.info("Ebi AI Console started: http://%s:%d", self.host, self.port)
+        if self.workspace.root is not None and self._records_task is None:
+            self._records_task = asyncio.ensure_future(self._records_loop())
 
     def start_triage(self, ask: Callable[[str], Awaitable[str | None]], *, model: str) -> None:
         """Triage open items in the background with *ask* (one model call per item)."""
@@ -390,10 +402,61 @@ class ConsoleServer:
         logger.info("Ebi AI Console: automatic triage on (%s)", model)
 
     async def stop(self) -> None:
+        if self._records_task is not None:
+            self._records_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._records_task
+            self._records_task = None
         if self._triager is not None:
             await self._triager.stop()
         if self._runner:
             await self._runner.cleanup()
+
+    async def _records_loop(self) -> None:
+        while True:
+            try:
+                await self.bind_recorded()
+            except Exception:
+                logger.exception("console: Workspace record pass failed")
+            await asyncio.sleep(RECORD_INTERVAL_SECONDS)
+
+    async def bind_recorded(self) -> int:
+        """Bind threads whose sessions wrote Workspace records since the last pass.
+
+        Only sessions used since the last pass are read, and only the transcript bytes
+        appended since then. Returns how many threads are bound to what they recorded.
+        """
+        repo = self.api.session_repo
+        if self.workspace.root is None or repo is None:
+            return 0
+        records = await repo.list_all(limit=500)
+        horizon = (datetime.now(UTC) - timedelta(days=RECORD_HORIZON_DAYS)).isoformat()
+        fresh = [
+            r
+            for r in records
+            if self._records_seen.get(r.thread_id) != r.last_used_at
+            and (r.last_used_at or "") >= horizon[:10]
+        ]
+        if not fresh:
+            return 0
+        entries = (await asyncio.to_thread(self.workspace.snapshot))["entries"]
+        bound_count = 0
+        for record in fresh:
+            hit = await asyncio.to_thread(
+                self.workspace_records.latest, record.session_id, record.backend, entries
+            )
+            self._records_seen[record.thread_id] = record.last_used_at
+            if hit is None:
+                continue
+            path, file = hit
+            try:
+                bound = await self.work_repo.bind_workspace(
+                    thread_item_id(record.thread_id), path, "recorded", f"record:{file}"
+                )
+            except WorkItemError:
+                continue
+            bound_count += bound is not None
+        return bound_count
 
     # -- shell -------------------------------------------------------------
     async def index(self, request: web.Request) -> web.StreamResponse:
