@@ -241,6 +241,55 @@ class TestInterruptOnNewMessage:
         assert kwargs.get("interrupt_existing") is True
 
     @pytest.mark.asyncio
+    async def test_reply_goes_into_the_running_turn_when_it_takes_input(self) -> None:
+        """Issue #1129: a reply reaches the agent mid-turn, as in Claude Code itself."""
+        from claude_discord import live_runs
+
+        cog = _make_cog()
+        message = self._make_thread_message(4242)
+        message.add_reaction = AsyncMock()
+        cog._run_claude = AsyncMock()
+        received: list[str] = []
+
+        class _Live:
+            async def inject_user_message(self, text: str, images=None) -> bool:
+                received.append(text)
+                return True
+
+        run = live_runs.LiveRun(runner=_Live())
+        live_runs.register(4242, run)
+        try:
+            await cog._handle_thread_reply(message)
+        finally:
+            live_runs.unregister(4242, run)
+
+        assert received == ["new instruction"]
+        cog._run_claude.assert_not_called()
+        message.add_reaction.assert_awaited_once_with("📥")
+
+    @pytest.mark.asyncio
+    async def test_stop_reaches_the_runner_that_owns_the_process(self) -> None:
+        """/stop must SIGINT the live clone, not the template it was cloned from."""
+        from claude_discord import live_runs
+
+        cog = _make_cog()
+        interaction = _make_thread_interaction(777)
+        template = MagicMock()
+        template.interrupt = AsyncMock()
+        cog._active_runners[777] = template
+        live = MagicMock()
+        live.interrupt = AsyncMock()
+        run = live_runs.LiveRun(runner=live)
+        live_runs.register(777, run)
+        try:
+            await cog.stop_session.callback(cog, interaction)
+        finally:
+            live_runs.unregister(777, run)
+
+        live.interrupt.assert_awaited_once()
+        template.interrupt.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_evict_active_run_interrupts_and_notifies(self) -> None:
         """_evict_active_run(interrupt=True) posts the notice and SIGINTs the runner."""
         cog = _make_cog()

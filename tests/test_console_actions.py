@@ -115,3 +115,11 @@ def test_a_message_with_actions_is_never_folded_away() -> None:
     out = serialize_message(msg, actions=[{"id": "0", "label": "Yes", "style": "success"}])
     assert out["kind"] == "agent"
     assert out["actions"][0]["label"] == "Yes"
+
+
+def test_a_snowflake_message_id_survives_a_javascript_round_trip() -> None:
+    # Discord ids exceed 2**53; as a JSON number the browser rounds them and the
+    # press is sent to a message that does not exist.
+    snowflake = 1560662987600306177
+    out = serialize_message(_message(mid=snowflake))
+    assert out["id"] == str(snowflake)

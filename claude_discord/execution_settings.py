@@ -76,21 +76,28 @@ class ExecutionSettings:
         return await self.repo.delete(f"{EXECUTION_THREAD_PREFIX}{thread_id}")
 
 
-async def apply_thread_execution_mode(
-    runner: Any, repo: SettingsRepository | None, thread_id: int | None
-) -> None:
-    """Set ``runner.execution_mode`` from the thread's stored, allowed choice.
+async def thread_execution_mode(
+    repo: SettingsRepository | None, thread_id: int | None
+) -> str | None:
+    """The thread's stored, allowed execution mode; None means the deployment default.
 
     A read failure propagates: the thread may have asked for a stricter
     environment than the default, and quietly running it under the default
     would be the wrong direction to fail.
     """
     if repo is None or thread_id is None:
-        return
+        return None
     # Only an async key-value store can hold a choice; anything else (a bare
     # stand-in without a working ``get``) has none to apply.
     if not inspect.iscoroutinefunction(getattr(repo, "get", None)):
-        return
-    mode = await ExecutionSettings(repo).thread_mode(thread_id)
+        return None
+    return await ExecutionSettings(repo).thread_mode(thread_id)
+
+
+async def apply_thread_execution_mode(
+    runner: Any, repo: SettingsRepository | None, thread_id: int | None
+) -> None:
+    """Set ``runner.execution_mode`` from the thread's stored, allowed choice."""
+    mode = await thread_execution_mode(repo, thread_id)
     if mode is not None:
         runner.execution_mode = mode

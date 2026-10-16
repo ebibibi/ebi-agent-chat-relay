@@ -100,7 +100,7 @@ async def test_a_delivered_file_stays_visible_behind_activity(client) -> None:
     assert len(shown) == 31
     assert shown[0]["attachments"][0]["filename"] == "article.md"
     # Oldest first, and the activity between them is still there for the toggle.
-    assert [m["id"] for m in messages] == sorted(m["id"] for m in messages)
+    assert [int(m["id"]) for m in messages] == sorted(int(m["id"]) for m in messages)
     assert sum(m["kind"] == "activity" for m in messages) == 240
 
 
