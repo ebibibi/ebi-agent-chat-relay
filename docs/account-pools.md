@@ -137,7 +137,7 @@ The copy overwrites an older copy at the target, so a thread that moves
 A → B → A resumes on A with the turns it took on B. If the copy is impossible
 (the transcript is missing or unreadable), the relay starts a fresh session on
 the new profile and seeds it with the text of the previous conversation, using
-the same mechanism as a [cross-backend handoff](../README.md#backend-switching--claude--codex--local--ag-ui--pi-on-demand).
+the same mechanism as a [cross-backend handoff](guide/features.md#backend-switching--claude--codex--local--ag-ui--pi-on-demand).
 
 The thread sees one line when this happens, e.g.
 `🔀 Account personal → work (session transcript copied, resuming).`
