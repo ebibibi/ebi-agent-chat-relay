@@ -5,7 +5,7 @@
 // Finishing the open item also leaves it, as the back button would: on a phone that is
 // one tap saved per task. With Ebi Workspace the server checks the Obsidian task off
 // (or logs the conversation) and the toast says so.
-// Loaded before app.js, which puts button() in the header and calls finish() for "e".
+// Loaded before app.js, which pins button() to the header's top-right corner and calls finish() for "e".
 "use strict";
 
 window.ConsoleFinish = (() => {
