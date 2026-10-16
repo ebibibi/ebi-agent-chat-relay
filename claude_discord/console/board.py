@@ -300,6 +300,8 @@ def _item(
         "snoozed_until": snoozed_until if snoozed else None,
         "project": overlay.project if overlay else None,
         "workspace_path": overlay.workspace_path if overlay else None,
+        "workspace_source": overlay.workspace_source if overlay else None,
+        "workspace_reason": overlay.workspace_reason if overlay else None,
         "place": overlay.place if overlay else None,
         "pinned_at": overlay.pinned_at if overlay else None,
         "paused_at": overlay.paused_at if overlay else None,

@@ -211,3 +211,17 @@ async def test_running_a_task_pins_the_conversation_to_its_entry(env, notes):
     response = await env.client.post("/console/api/workspace/run", json=payload, headers=WRITE)
     item = (await response.json())["item"]
     assert (item["workspace_source"], item["workspace_reason"]) == ("pinned", "task")
+
+
+async def test_the_board_reports_how_each_binding_was_decided(env, notes):
+    env.console.workspace = Workspace(notes)
+    created = await env.client.post(
+        "/console/api/items",
+        headers=WRITE,
+        json={"title": "Pinned", "workspace_path": "Work/Client"},
+    )
+    item = (await created.json())["item"]
+    board = await (await env.client.get("/console/api/board", headers=AUTH)).json()
+    row = next(i for i in board["items"] if i["id"] == item["id"])
+    assert (row["workspace_path"], row["workspace_source"]) == ("Work/Client", "pinned")
+    assert "workspace_by" not in row
