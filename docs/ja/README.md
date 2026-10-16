@@ -1427,7 +1427,7 @@ uv sync --extra api
 | メソッド | パス | 説明 |
 |----------|------|------|
 | GET | `/api/health` | ヘルスチェック |
-| POST | `/api/notify` | 即時通知の送信 |
+| POST | `/api/notify` | 即時通知の送信（`channel_id` に [Ebi AI Console](../console.md) の会話 ID を指定すると、その会話に投稿します。Discord のメンションは取り除かれます） |
 | POST | `/api/schedule` | 通知のスケジュール |
 | GET | `/api/scheduled` | 保留中の通知一覧 |
 | DELETE | `/api/scheduled/{id}` | スケジュール済み通知のキャンセル |
