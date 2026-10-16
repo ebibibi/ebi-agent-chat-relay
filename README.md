@@ -7,9 +7,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **One cockpit for all your coding agents.** Run Claude Code, OpenAI Codex, local models, pi and
-AG-UI agents side by side — from a web console on your desktop or phone, or from Discord and
-Microsoft Teams. Let a strong model manage, hand the legwork to cheaper ones, and step in only when
-a decision is actually yours.
+AG-UI agents side by side — and talk to them wherever you like: a dedicated web console on your
+desktop or phone (with Entra ID sign-in), Discord, or Microsoft Teams. Let a strong model manage,
+hand the legwork to cheaper ones, and step in only when a decision is actually yours.
 
 **[日本語](docs/ja/README.md)** | **[简体中文](docs/zh-CN/README.md)** | **[한국어](docs/ko/README.md)** | **[Español](docs/es/README.md)** | **[Português](docs/pt-BR/README.md)** | **[Français](docs/fr/README.md)**
 
@@ -23,6 +23,7 @@ a decision is actually yours.
 | | |
 |---|---|
 | 🖥️ **A GUI built for supervising agents** | The Ebi AI Console shows every agent thread on one screen, sorted by *whose move it is*. It tells you what to do next and lets you reply, attach files, switch models, pause or stop — without opening a terminal. |
+| 📱 **Multi-frontend** | Discord, Microsoft Teams or the dedicated web console — use one, or all of them at once from one process. Bring the relay to your team's Teams tenant and sign in to the console with Entra ID, Google, any OIDC provider or passkeys. |
 | 🔀 **Multi-harness** | Claude Code, OpenAI Codex, a local model, the pi CLI or any AG-UI agent — pick one per conversation and switch mid-thread. The conversation is handed over, not lost. |
 | 💸 **Multi-agent, cost-aware** | A manager agent on your best model delegates to child agents on cheaper or flat-rate models. Triage runs on the cheapest model you have. Subscriptions you already pay for do the work. |
 | 🛡️ **Parallel without collisions** | Every session works in its own git worktree, sees what the others are doing, and claims what it touches. Ten agents, one repository, no clobbered work. |
@@ -60,7 +61,8 @@ composer within reach. Check on your agents from the train, answer the one quest
 them, and let them carry on.
 
 **Secure by default.** The console never runs unauthenticated: passkeys (WebAuthn) out of the box,
-optionally combined with Cloudflare Access, OIDC or an email allowlist. The JSON API under
+plus optional sign-in with Microsoft Entra ID, Google or any OIDC provider, Cloudflare Access and an
+email allowlist. The JSON API under
 `/console/api` is the contract; the bundled web client is one consumer.
 
 The console is optional — nothing listens unless `CCDB_CONSOLE_PORT` is set — and it can also be your
@@ -72,16 +74,36 @@ only frontend: no Discord account needed (see the [Quick start](#-quick-start--t
 
 <a id="whats-new-in-v4"></a>
 
-## 🔀 Multi-harness — one surface, every agent CLI
+## 📱 Multi-frontend — talk to your agents where you already are
 
-The relay drives the **official CLIs** as subprocesses, so every agent keeps its own tools, skills,
-memory and project instructions. You bring your existing logins; the relay never sees an API key.
+Where you talk and which agent works are two independent choices. Any frontend works with any
+agent, and one relay process can serve several frontends at once
+(`CCDB_FRONTENDS=discord,teams,console`) over the same sessions, scheduler and API.
 
 | Frontend × backend | Claude Code | OpenAI Codex | Local (Ollama etc.) | pi | AG-UI |
 |---|:---:|:---:|:---:|:---:|:---:|
 | **Ebi AI Console** | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Discord** | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Microsoft Teams** | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+- **Ebi AI Console** — the dedicated GUI shown above, for desktop and phone. It can be your only
+  frontend: no chat account needed.
+- **Discord** — one thread per session, emoji status reactions, slash commands. The fastest way to
+  get going on a personal server.
+- **Microsoft Teams** — bring agents into your organization's Microsoft 365 tenant. A small public
+  receiver accepts Bot Framework activities, and the private session host pulls them outbound-only,
+  so the machine that runs your agents never opens an inbound port.
+  [Setup guide](docs/teams-setup.md) · [security model](docs/teams-relay.md).
+- **Entra ID sign-in** — the console signs in with Microsoft Entra ID (or Google, any OpenID Connect
+  provider, Cloudflare Access) on top of passkeys, limited to an allowlist of addresses.
+  [Console authentication](docs/console.md#optional-sign-in-with-google-entra-id-or-any-openid-connect-provider).
+
+---
+
+## 🔀 Multi-harness — one surface, every agent CLI
+
+The relay drives the **official CLIs** as subprocesses, so every agent keeps its own tools, skills,
+memory and project instructions. You bring your existing logins; the relay never sees an API key.
 
 - **Switch per conversation** — `/backend`, `/model` and `/effort` (or the picker above the reply
   box) change the agent from the next turn. Model lists are discovered live, so a model released
