@@ -394,3 +394,86 @@ async def test_a_console_reply_goes_into_the_running_turn() -> None:
     assert received == ["also check X"]
     assert thread.send.await_count == 2, "both stay visible in the thread"
     cog._run_claude.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Relays to an Ebi AI Console conversation (no Discord channel behind it)
+# ---------------------------------------------------------------------------
+
+
+def _console_host(*, owns: bool = True) -> MagicMock:
+    from claude_discord.console.host import ConsoleSessionHost
+
+    host = MagicMock(spec=ConsoleSessionHost)
+    host.owns = AsyncMock(return_value=owns)
+    host.relay = AsyncMock(return_value="queued")
+    return host
+
+
+async def test_relay_to_a_console_conversation_never_looks_for_a_discord_channel(
+    api_client: TestClient, bot: MagicMock, cog: MagicMock
+) -> None:
+    bot.console_sessions = _console_host()
+    resp = await api_client.post(
+        f"/api/threads/{B}/message", json={"text": "done, PR merged", "from_thread": A}
+    )
+
+    assert resp.status == 202
+    body = await resp.json()
+    assert body["frontend"] == "console"
+    assert body["delivery"] == "queued"
+    bot.get_channel.assert_not_called()
+    bot.fetch_channel.assert_not_called()
+    cog.deliver_relayed_message.assert_not_called()
+    args, kwargs = bot.console_sessions.relay.call_args
+    assert args[0] == B
+    assert "done, PR merged" in args[1] and str(A) in args[1]
+    assert kwargs["interrupt"] is False
+
+
+async def test_interrupt_mode_reaches_a_console_conversation(
+    api_client: TestClient, bot: MagicMock
+) -> None:
+    bot.console_sessions = _console_host()
+    bot.console_sessions.relay.return_value = "interrupted"
+    resp = await api_client.post(
+        f"/api/threads/{B}/message",
+        json={"text": "stop now", "from_thread": A, "mode": "interrupt"},
+    )
+
+    assert resp.status == 202
+    assert (await resp.json())["delivery"] == "interrupted"
+    assert bot.console_sessions.relay.call_args.kwargs["interrupt"] is True
+
+
+async def test_a_console_delivery_failure_is_a_5xx_the_sender_sees(
+    api_client: TestClient, bot: MagicMock
+) -> None:
+    bot.console_sessions = _console_host()
+    bot.console_sessions.relay.side_effect = RuntimeError("database is locked")
+    resp = await api_client.post(f"/api/threads/{B}/message", json={"text": "hi", "from_thread": A})
+
+    assert resp.status == 500
+    assert "not delivered" in (await resp.json())["error"]
+
+
+async def test_a_thread_the_console_does_not_own_still_goes_to_discord(
+    api_client: TestClient, bot: MagicMock, cog: MagicMock, thread: MagicMock
+) -> None:
+    bot.console_sessions = _console_host(owns=False)
+    resp = await api_client.post(f"/api/threads/{B}/message", json={"text": "hi", "from_thread": A})
+
+    assert resp.status == 202
+    assert (await resp.json())["frontend"] == "discord"
+    await asyncio.sleep(0)
+    assert cog.deliver_relayed_message.call_args.args[0] is thread
+    bot.console_sessions.relay.assert_not_called()
+
+
+async def test_unknown_thread_error_names_the_thread(
+    api_client: TestClient, bot: MagicMock
+) -> None:
+    bot.get_channel.return_value = None
+    resp = await api_client.post(f"/api/threads/{B}/message", json={"text": "hi", "from_thread": A})
+    assert resp.status == 404
+    assert str(B) in (await resp.json())["error"]

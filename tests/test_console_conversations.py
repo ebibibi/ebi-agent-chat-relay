@@ -939,3 +939,61 @@ async def test_a_later_reply_does_not_overtake_one_already_waiting(env) -> None:
     assert (await replied.json())["delivery"] == "queued"
     assert received == []
     assert [r.prompt for r in env.runs[1:]] == ["A", "B"]
+
+
+async def _relay_api(env, tmp_path):
+    from claude_discord.database.notification_repo import NotificationRepository
+    from claude_discord.ext.api_server import ApiServer
+
+    repo = NotificationRepository(str(tmp_path / "n.db"))
+    await repo.init_db()
+    bot = MagicMock()
+    bot.cogs = {}
+    bot.console_sessions = env.host
+    bot.fetch_channel = AsyncMock(side_effect=RuntimeError("Unknown Channel"))
+    return ApiServer(repo=repo, bot=bot, host="127.0.0.1", port=0), bot
+
+
+async def test_a_relayed_message_reaches_a_console_conversation(env, tmp_path) -> None:
+    item_id = await _start(env)
+    key = int(item_id[1:])
+    api, bot = await _relay_api(env, tmp_path)
+    async with TestClient(TestServer(api.app)) as client:
+        response = await client.post(
+            f"/api/threads/{key}/message",
+            json={"text": "child finished: PR merged", "from_thread": 42},
+        )
+        body = await response.json()
+    assert response.status == 202
+    assert body["frontend"] == "console"
+    await _settle(env.host)
+
+    bot.fetch_channel.assert_not_called()
+    assert "child finished: PR merged" in env.runs[-1].prompt
+    history = await env.conversations.history(key, 20)
+    assert any("child finished: PR merged" in m.content and not m.is_bot for m in history)
+
+
+async def test_an_interrupting_relay_stops_the_console_turn_first(env) -> None:
+    item_id = await _start(env)
+    key = int(item_id[1:])
+    pressed: list[bool] = []
+
+    async def on_stop() -> None:
+        pressed.append(True)
+
+    surface = await env.host.frontend.resolve_surface(key)
+    await surface.offer_interrupt(on_stop)
+
+    delivery = await env.host.relay(key, "stop, I have this", "thread 42", interrupt=True)
+    await _settle(env.host)
+
+    assert delivery == "interrupted" and pressed == [True]
+    assert env.runs[-1].prompt == "stop, I have this"
+    history = await env.conversations.history(key, 20)
+    assert any("Interrupted by another session" in m.content for m in history)
+
+
+async def test_a_relay_to_an_unknown_console_key_raises_lookup_error(env) -> None:
+    with pytest.raises(LookupError):
+        await env.host.relay(987654, "hi", "thread 42", interrupt=False)

@@ -25,7 +25,7 @@ from ..cross_backend_handoff import ConversationHistoryReader, carry_history_acr
 from ..execution_settings import apply_thread_execution_mode, thread_execution_mode
 from ..thread_marker import OUTCOME_ERROR
 from .conversations import CONSOLE_FRONTEND
-from .surface import ConsoleFrontend, ConsoleSurface, apply_outcome
+from .surface import AGENT_AUTHOR, ConsoleFrontend, ConsoleSurface, apply_outcome
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +110,27 @@ class ConsoleSessionHost:
         return await self._submit(
             surface, prompt, author, into_running_turn=into_running_turn, brief=brief
         )
+
+    async def relay(self, thread_key: int, prompt: str, author: str, *, interrupt: bool) -> str:
+        """Deliver another session's message, with the relay API's queue/interrupt meaning.
+
+        ``interrupt`` presses Stop on the running turn first, so the message runs as
+        soon as that turn has ended; otherwise it waits behind it. Returns
+        ``"interrupted"`` when a running turn was stopped, else ``"queued"``.
+        Raises LookupError when *thread_key* is not a console conversation.
+        """
+        if await self.frontend.resolve_surface(thread_key) is None:
+            raise LookupError(f"unknown console conversation {thread_key}")
+        stopped = interrupt and await self.frontend.live.stop(thread_key)
+        if stopped:
+            await self.frontend.repo.append(
+                thread_key,
+                author=AGENT_AUTHOR,
+                is_bot=True,
+                content="⚡ Interrupted by another session's message",
+            )
+        await self.reply(thread_key, prompt, author)
+        return "interrupted" if stopped else "queued"
 
     async def resume_queued(self, thread_key: int, prompt: str) -> None:
         """Run a turn that was queued when the bot restarted.
