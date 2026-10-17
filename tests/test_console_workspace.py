@@ -140,6 +140,7 @@ def test_binding_follows_working_directory_or_parent_and_disambiguates_names(not
     assert "Continue the task" in prompt
     assert str(notes / "02_Contexts/Work/Client/Website/status.md") in prompt
     assert "AGENTS.md" in prompt and "log.md" in prompt
+    assert prompt == f"Continue the task\n\n{ws.brief('Work/Client/Website')}"
 
 
 def test_daily_symlink_is_rejected_before_task_write(notes, tmp_path):

@@ -56,7 +56,17 @@ async def test_start_reply_and_child_keep_workspace_association(env, notes):
     )
     assert reply.status == 202
     await _settle(env.host)
+    assert env.runs[-1].prompt.startswith("Continue\n\n[EBI WORKSPACE CONTEXT]\n")
     assert "Work/Client/Website" in env.runs[-1].prompt
+    response = await env.client.get(f"/console/api/items/{item['id']}/messages", headers=AUTH)
+    messages = (await response.json())["messages"]
+    human = [m["content"] for m in messages if m["kind"] == "human"]
+    assert human == ["Ship it", "Continue"]
+    briefs = [m for m in messages if m["author"] == "Ebi Workspace"]
+    assert len(briefs) == 2
+    assert all(
+        m["kind"] == "activity" and "[EBI WORKSPACE CONTEXT]" in m["content"] for m in briefs
+    )
     child = await env.client.post(
         "/console/api/items", headers=WRITE, json={"title": "Child task", "parent_id": item["id"]}
     )

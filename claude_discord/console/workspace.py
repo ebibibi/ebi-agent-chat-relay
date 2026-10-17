@@ -13,6 +13,8 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 MAX_DOCUMENT_BYTES = 2_000_000
+# Upper case so the Console classifies the message as an automatic prompt (activity).
+BRIEF_HEADER = "[EBI WORKSPACE CONTEXT]"
 _TASK = re.compile(r"^(\s*[-*+]\s+\[)([ xX])(\]\s+)(.+?)(\r?\n)?$")
 # A project's next actions may also be plain bullets ("- item", "1. item"); the plugin's
 # goodmorning reads them as open tasks, so the Console does too and checks them off by
@@ -551,12 +553,20 @@ class Workspace:
         return out
 
     def prompt(self, path: str, text: str) -> str:
+        return f"{text}\n\n{self.brief(path)}"
+
+    def brief(self, path: str) -> str:
+        """The instructions the agent gets with a message about *path*.
+
+        Kept apart from the person's text: the transcript records it as its own
+        message, which the Console files under activity rather than the conversation.
+        """
         entry = self.entry(path)
         directory = self._directory(path)
         if self.root is None:
             raise WorkspaceError("Ebi Workspace is not configured")
         return (
-            f"{text}\n\n[Ebi Workspace context]\n"
+            f"{BRIEF_HEADER}\n"
             f"This work belongs to {path}. Read applicable AGENTS.md files from "
             f"{self.root} down to {directory}, then read {directory / entry['file']} "
             f"and {directory / 'overview.md'} if present. Keep tasks in that original "

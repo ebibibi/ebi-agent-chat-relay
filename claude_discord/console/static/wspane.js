@@ -2,8 +2,8 @@
 // next (check off in place), what waits on others, the latest log, and the other threads bound
 // to it. Read from the Markdown through /workspace/context, so an agent's edit to status.md
 // shows up here within half a minute. Folded by default; the choice is remembered per browser.
-// Also folds the "[Ebi Workspace context]" block the Console adds to a prompt, so the
-// conversation shows that context was sent, and which, without the wall of instructions.
+// Also folds the "[Ebi Workspace context]" block that older messages carry inside the human's
+// text. New messages send it as a separate activity message ("[EBI WORKSPACE CONTEXT]").
 // Loaded after workspace.js and before app.js.
 "use strict";
 

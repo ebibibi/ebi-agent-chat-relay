@@ -338,6 +338,18 @@ async def test_delivery_to_a_deleted_thread_is_swallowed_with_a_warning(caplog) 
     assert any(str(thread.id) in record.message for record in caplog.records)
 
 
+async def test_brief_is_its_own_message_and_reaches_the_agent_with_the_text() -> None:
+    cog = _make_cog()
+    thread = _make_target_thread()
+    cog._run_claude = AsyncMock()
+    brief = "[EBI WORKSPACE CONTEXT]\nThis work belongs to Work/Site."
+
+    await cog.deliver_relayed_message(thread, "Please fix it", interrupt=False, brief=brief)
+
+    assert [c.args[0] for c in thread.send.call_args_list] == ["Please fix it", brief]
+    assert cog._run_claude.call_args.args[2] == f"Please fix it\n\n{brief}"
+
+
 async def test_long_url_relay_is_one_attachment_and_one_unchanged_agent_input() -> None:
     cog = _make_cog()
     thread = _make_target_thread()

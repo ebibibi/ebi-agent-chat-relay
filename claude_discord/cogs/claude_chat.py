@@ -1137,6 +1137,7 @@ class ClaudeChatCog(commands.Cog):
         *,
         interrupt: bool,
         into_running_turn: bool = False,
+        brief: str | None = None,
     ) -> None:
         """Feed a message from another session into this thread's Claude session.
 
@@ -1158,6 +1159,9 @@ class ClaudeChatCog(commands.Cog):
             into_running_turn: Hand the message to the turn in flight, if it can
                 take input, instead of waiting for it — what a human replying
                 from Ebi AI Console expects. Falls back to waiting.
+            brief: Instructions for the agent only (Ebi Workspace context). Posted
+                as a message of its own after *text*, which the Console files under
+                activity, and appended to what the agent receives.
         """
         try:
             if len(text) > DISCORD_MAX_CHARS:
@@ -1180,6 +1184,10 @@ class ClaudeChatCog(commands.Cog):
                 thread.id,
             )
             return
+        if brief:
+            text = f"{text}\n\n{brief}"
+            with contextlib.suppress(discord.HTTPException):
+                await thread.send(brief[:DISCORD_MAX_CHARS])
 
         if into_running_turn and await self._inject_into_running_turn(thread.id, text):
             with contextlib.suppress(discord.HTTPException):
