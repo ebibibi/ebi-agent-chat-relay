@@ -7,6 +7,8 @@
 // work bound to none of them moves to its own group, so "Do this first" is always
 // something that can be done here and now.
 // Priority, deadline, readiness and place come from a fast model where nobody set them.
+// Readiness can be overridden ("can do now" / "waiting"); on a thread the override lasts
+// until the conversation moves again, then the model's fresh guess takes over.
 // Loaded before app.js, which calls rows() from visibleRows() and note() from rowNode().
 "use strict";
 
@@ -137,6 +139,20 @@ window.ConsoleFocus = (() => {
     return `⏳ ${[when, ai.waiting_for].filter(Boolean).join(" · ") || T.focus_waiting}`;
   }
 
+  const yours = (item) => item.readiness_by === "you";
+  const setReadiness = (item, readiness) => patch(item.id, { readiness });
+
+  // The ⏳/▶ button in the detail header: what Focus believes, one click to flip it.
+  // Dashed like the 📍 button while it is the model's guess. Only for the human's own work.
+  function readyToggle(item) {
+    if (!ranked(item)) return null;
+    const waiting = item.actionable === false;
+    return h("button", { class: "btn d-ready" + (yours(item) ? " on" : " ai"), type: "button",
+      title: yours(item) ? T.ready_yours : T.ready_hint, "aria-pressed": waiting ? "true" : "false",
+      onclick: () => setReadiness(item, waiting ? "now" : "waiting"),
+      text: waiting ? `⏳ ${T.ready_wait}` : `▶ ${T.ready_now}` });
+  }
+
   // The 📍 tag on a row's meta line, in every list.
   function placeTag(item) {
     if (!item.place) return null;
@@ -145,11 +161,16 @@ window.ConsoleFocus = (() => {
   }
 
   // Under the row's meta line: what it waits for, or the next step and why it ranks.
+  // A waiting row carries a "can do now" button, for when the model misread the wait.
   function note(item) {
-    const ai = item.ai;
+    const ai = item.ai || (yours(item) ? {} : null);
     if (!ai) return null;
-    return h("div", { class: "ai-note" + (item.actionable === false ? " waiting" : "") },
-      item.actionable === false ? h("span", { class: "wait", text: waitText(ai) }) : null,
+    const waiting = item.actionable === false;
+    const wait = yours(item) ? `⏳ ${T.ready_wait} 👤` : waitText(ai);
+    return h("div", { class: "ai-note" + (waiting ? " waiting" : "") },
+      waiting ? h("span", { class: "wait", title: yours(item) ? T.ready_yours : "", text: wait }) : null,
+      waiting ? h("button", { type: "button", class: "chip ready-now", title: T.ready_hint,
+        onclick: (e) => { e.stopPropagation(); setReadiness(item, "now"); }, text: `▶ ${T.ready_now}` }) : null,
       ai.next_step ? h("span", { class: "next", text: `→ ${ai.next_step}` }) : null,
       ai.reason ? h("span", { class: "why", text: ai.reason }) : null);
   }
@@ -166,8 +187,10 @@ window.ConsoleFocus = (() => {
       h("span", { class: "dim", text: `🤖 ${T.ai_guess}` }),
       h("span", { text: bits.join(" · ") }),
       ai.reason ? h("span", { class: "dim", text: ai.reason }) : null,
-      ai.next_step ? h("span", { text: `→ ${ai.next_step}` }) : null);
+      ai.next_step ? h("span", { text: `→ ${ai.next_step}` }) : null,
+      yours(item) ? h("button", { type: "button", class: "btn", title: T.ready_yours,
+        onclick: () => setReadiness(item, null), text: `🤖 ${T.ready_back_ai}` }) : null);
   }
 
-  return { rows, count, note, drawerLine, placeTag, setGuide };
+  return { rows, count, note, drawerLine, placeTag, setGuide, readyToggle };
 })();

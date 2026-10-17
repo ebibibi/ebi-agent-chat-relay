@@ -396,6 +396,22 @@ async def test_setting_a_place_from_the_console_pins_it(tmp_path) -> None:
             f"/console/api/items/{item_id}", json={"place": "x" * 41}, headers=write
         )
         assert bad.status == 400
+        await client.patch(
+            f"/console/api/items/{item_id}", json={"readiness": "waiting"}, headers=write
+        )
+        [item] = (await (await client.get("/console/api/board", headers=auth)).json())["items"]
+        assert (item["readiness"], item["readiness_by"], item["actionable"]) == (
+            "waiting",
+            "you",
+            False,
+        )
+        await client.patch(f"/console/api/items/{item_id}", json={"readiness": None}, headers=write)
+        [item] = (await (await client.get("/console/api/board", headers=auth)).json())["items"]
+        assert (item["readiness"], item["actionable"]) == (None, True)  # back to the guess
+        bad = await client.patch(
+            f"/console/api/items/{item_id}", json={"readiness": "maybe"}, headers=write
+        )
+        assert bad.status == 400
 
 
 # -- Workspace inference -----------------------------------------------------
@@ -480,3 +496,52 @@ async def test_the_workspace_index_names_each_entry_by_its_first_prose_line(tmp_
         "- **The** [[Docs|company]] site\n"
     )
     assert Workspace(root).index() == [("Work", "Day job."), ("Work/Site", "The company site")]
+
+
+# -- a person's own call on readiness ------------------------------------------
+
+
+async def test_a_persons_readiness_overrides_the_guess(repo) -> None:
+    await repo.save(
+        "t1", TriageResult(1, None, "r", "n", ready=False, waiting_for="先方"), basis="b", model="m"
+    )
+    await repo.save("t2", TriageResult(1, None, "r", "n"), basis="b", model="m")
+    rows = await repo.all()
+    set_at = "2026-10-12T02:30:00Z"  # after the last activity at 02:00
+    now_, wait, untriaged = apply_triage(
+        [
+            _item("t1", readiness="now", readiness_at=set_at),
+            _item("t2", readiness="waiting", readiness_at=set_at),
+            _item("t9", readiness="waiting", readiness_at=set_at),
+        ],
+        rows,
+        now=NOW,
+    )
+    assert (now_["actionable"], now_["readiness_by"], now_["ai"]["ready"]) == (True, "you", False)
+    assert (wait["actionable"], wait["readiness"]) == (False, "waiting")
+    assert untriaged["actionable"] is False  # holds even before any guess exists
+
+
+async def test_activity_after_the_override_returns_a_thread_to_the_guess(repo) -> None:
+    await repo.save(
+        "t1", TriageResult(1, None, "r", "n", ready=False, waiting_for="先方"), basis="b", model="m"
+    )
+    rows = await repo.all()
+    stale = {"readiness": "now", "readiness_at": "2026-10-12T01:00:00Z"}
+    [thread] = apply_triage([_item("t1", **stale)], rows, now=NOW)
+    assert (thread["actionable"], thread["readiness"], "readiness_by" in thread) == (
+        False,
+        None,
+        False,
+    )
+    # Written-down work has no activity of its own: the override stays until cleared.
+    [capture] = apply_triage([_item("t1", thread_id=None, **stale)], rows, now=NOW)
+    assert (capture["actionable"], capture["readiness_by"]) == (True, "you")
+
+
+async def test_an_override_does_not_rank_work_that_is_not_the_persons(repo) -> None:
+    item = _item(
+        status="running", bucket="ai", readiness="now", readiness_at="2026-10-12T02:30:00Z"
+    )
+    [out] = apply_triage([item], {}, now=NOW)
+    assert (out["focus"], out["actionable"]) == (None, None)

@@ -36,7 +36,7 @@ import aiosqlite
 from claude_code_core.child_env import strip_transport_credentials
 from claude_code_core.runner import resolve_cli_argv
 
-from .work_repo import DEFAULT_PRIORITY
+from .work_repo import DEFAULT_PRIORITY, READINESS_NOW, READINESS_WAITING
 
 logger = logging.getLogger(__name__)
 
@@ -486,9 +486,37 @@ def apply_triage(
                     due is not None and due < now and item.get("status") not in _SKIP_STATUSES
                 )
         new["focus"] = focus_score(new, now=now)
-        new["actionable"] = actionable(row, now=now) if new["focus"] is not None else None
+        human = human_readiness(item)
+        # A stale override is dropped from the output too, so the client draws the guess.
+        new["readiness"] = None if human is None else item["readiness"]
+        if human is None:
+            ready = actionable(row, now=now)
+        else:
+            ready = human
+            new["readiness_by"] = "you"
+        new["actionable"] = ready if new["focus"] is not None else None
         out.append(new)
     return out
+
+
+def human_readiness(item: dict[str, Any]) -> bool | None:
+    """A person's "can do now" (True) or "waiting" (False); None leaves it to the guess.
+
+    Unlike a priority or a place, readiness is a property of the moment. On a
+    thread the override answers the situation it was set in: activity after it
+    (a reply, a finished turn) returns the item to the model, which reads that
+    activity, so a stale "can do now" never hides a wait that came later.
+    Written-down work has no such activity and keeps the override until cleared.
+    """
+    value = item.get("readiness")
+    if value not in (READINESS_NOW, READINESS_WAITING):
+        return None
+    if item.get("thread_id"):
+        set_at = _parse_ts(item.get("readiness_at"))
+        activity = _parse_ts(item.get("last_activity_at"))
+        if set_at is None or (activity is not None and activity > set_at):
+            return None
+    return value == READINESS_NOW
 
 
 def actionable(row: Triage | None, *, now: datetime) -> bool:
