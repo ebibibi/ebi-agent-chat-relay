@@ -344,7 +344,8 @@ window.ConsoleNotes = (() => {
   // Escape closes the viewer wherever focus is, unless a dialog above it handles it first.
   // Capture phase: the list's own Escape (close the thread) must not also fire.
   window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && panel && !panel.hidden && !document.querySelector(".nsearch")) {
+    // While editing, Escape belongs to the editor (closing a completion list, a search panel).
+    if (e.key === "Escape" && panel && !panel.hidden && !document.querySelector(".nsearch, .note-edit")) {
       e.preventDefault();
       e.stopPropagation();
       close();
