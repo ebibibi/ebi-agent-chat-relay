@@ -1200,6 +1200,18 @@ class ApiServer:
             logger.info("Relay refused (%s → %s): %s", from_thread, thread_id, refusal)
             return web.json_response({"error": refusal}, status=429)
 
+        prompt = build_relay_prompt(text=text, from_thread=from_thread, hop=hop)
+
+        # An Ebi AI Console conversation shares the thread-key space but has no
+        # Discord channel behind it: looking one up would fail with "Unknown Channel".
+        from ..console.host import ConsoleSessionHost
+
+        console = getattr(self.bot, "console_sessions", None)
+        if isinstance(console, ConsoleSessionHost) and await console.owns(thread_id):
+            return await self._relay_to_console(
+                console, thread_id, prompt, from_thread=from_thread, mode=mode, hop=hop, now=now
+            )
+
         from ..cogs.claude_chat import ClaudeChatCog
 
         cog: ClaudeChatCog | None = self.bot.cogs.get("ClaudeChatCog")  # type: ignore[assignment]
@@ -1213,11 +1225,16 @@ class ApiServer:
             try:
                 thread = await self.bot.fetch_channel(thread_id)
             except Exception as exc:
-                return web.json_response({"error": str(exc)}, status=404)
+                return web.json_response(
+                    {
+                        "error": f"Thread {thread_id} not found (no Discord thread and no "
+                        f"Console conversation): {exc}"
+                    },
+                    status=404,
+                )
         if not isinstance(thread, _discord.Thread):
             return web.json_response({"error": "Target must be a thread"}, status=400)
 
-        prompt = build_relay_prompt(text=text, from_thread=from_thread, hop=hop)
         self.relay_guard.record(from_thread=from_thread, to_thread=thread_id, now=now)
 
         # Run in the background so the sender is not blocked for the length of
@@ -1233,7 +1250,67 @@ class ApiServer:
             hop,
         )
         return web.json_response(
-            {"status": "delivered", "thread_id": thread_id, "mode": mode, "hop": hop},
+            {
+                "status": "delivered",
+                "thread_id": thread_id,
+                "mode": mode,
+                "hop": hop,
+                "frontend": "discord",
+            },
+            status=202,
+        )
+
+    async def _relay_to_console(
+        self,
+        console: Any,
+        thread_id: int,
+        prompt: str,
+        *,
+        from_thread: int,
+        mode: str,
+        hop: int,
+        now: float,
+    ) -> web.Response:
+        """Deliver a relay into a Console conversation and report what actually happened.
+
+        Unlike the Discord path this is awaited: recording the message and queuing
+        the turn is quick, so a failure reaches the sender as an error status
+        instead of disappearing into a background task after a 202.
+        """
+        try:
+            delivery = await console.relay(
+                thread_id,
+                prompt,
+                f"thread {from_thread}",
+                interrupt=mode == MODE_INTERRUPT,
+            )
+        except LookupError:
+            return web.json_response(
+                {"error": f"Console conversation {thread_id} not found"}, status=404
+            )
+        except Exception as exc:
+            logger.exception("Relay to console conversation %s failed", thread_id)
+            return web.json_response(
+                {"error": f"Message not delivered to console conversation {thread_id}: {exc}"},
+                status=500,
+            )
+        self.relay_guard.record(from_thread=from_thread, to_thread=thread_id, now=now)
+        logger.info(
+            "Relayed message: thread %s → console conversation %s (mode=%s, hop=%s)",
+            from_thread,
+            thread_id,
+            mode,
+            hop,
+        )
+        return web.json_response(
+            {
+                "status": "delivered",
+                "thread_id": thread_id,
+                "mode": mode,
+                "hop": hop,
+                "frontend": "console",
+                "delivery": delivery,
+            },
             status=202,
         )
 
