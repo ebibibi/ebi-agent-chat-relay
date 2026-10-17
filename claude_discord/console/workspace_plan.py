@@ -6,6 +6,10 @@ stale projects and follow-ups. The Console never copies it: it runs the installe
 scanner in a separate, isolated Python process and reads JSON back. Without the plugin the
 plan is simply unavailable and the rest of the Workspace integration keeps working.
 
+Stale projects (untouched for the plugin's stale period) stay in the ranking instead of
+dropping out, and one of them always takes a shown slot: a list that hides what has stalled
+lets it stall further. They and projects without a next action are also listed on their own.
+
 Every ranked task is mapped back to its Markdown line through ``Workspace.entry`` so the
 Focus view can complete, re-date or hand it to an agent with the same revision checks as the
 Workspace panel.
@@ -34,6 +38,8 @@ SCANNER = Path("scripts") / "workspace_scanner.py"
 CACHE_SECONDS = 60.0
 SCAN_TIMEOUT = 20.0
 MAX_ITEMS = 8
+MAX_STALLED = 30
+_PRIORITY_ORDER = {"P1": 0, "P2": 1, "P3": 2}
 MAX_PLAN_CHARS = 8000
 
 # Runs inside the isolated child: ``python -I -c`` ignores PYTHONPATH, the user site and the
@@ -223,24 +229,50 @@ class WorkspacePlan:
                 return {"due": None, "days": None}
             return {"due": value, "days": (date.fromisoformat(value) - today).days}
 
+        def project_row(p: dict[str, Any]) -> dict[str, Any]:
+            stale = p["category"] == "stale"
+            return row(
+                "project",
+                p["rel_path"],
+                p["next_actions"][0],
+                p["score"],
+                priority=p["priority"] or None,
+                more=len(p["next_actions"]) - 1,
+                status=_first_line(p["current_status"]),
+                stale_days=p["staleness_days"] if stale else None,
+                **due(p["nearest_deadline"]),
+            )
+
         lapsed = int(scan.get("lapsed_days", 14))
         rows: list[dict[str, Any]] = []
+        stale_rows: list[dict[str, Any]] = []
+        stalled: list[dict[str, Any]] = []
         follow_ups: list[dict[str, Any]] = []
         waiting: list[dict[str, Any]] = []
         for p in scan["projects"]:
             path = p["rel_path"]
-            if p["category"] == "active" and p["score"] > 0 and p["next_actions"]:
-                rows.append(
-                    row(
-                        "project",
-                        path,
-                        p["next_actions"][0],
-                        p["score"],
-                        priority=p["priority"] or None,
-                        more=len(p["next_actions"]) - 1,
-                        status=_first_line(p["current_status"]),
+            if p["category"] in ("active", "stale") and p["next_actions"]:
+                project = project_row(p)
+                if p["category"] == "stale":
+                    stale_rows.append(project)
+                    stalled.append(project)
+                if p["score"] > 0 or p["category"] == "stale":
+                    rows.append(project)
+            elif p["category"] in ("stale", "no_next_action"):
+                stalled.append(
+                    {
+                        "kind": "no_next",
+                        "path": path,
+                        "text": None,
+                        "score": p["score"],
+                        "line": None,
+                        "raw": None,
+                        "revision": None,
+                        "priority": p["priority"] or None,
+                        "status": _first_line(p["current_status"]),
+                        "stale_days": p["staleness_days"] if p["category"] == "stale" else None,
                         **due(p["nearest_deadline"]),
-                    )
+                    }
                 )
             scores = p.get("follow_up_scores") or []
             for w, score in zip(p["due_follow_ups"], scores, strict=False):
@@ -279,6 +311,18 @@ class WorkspacePlan:
                     )
                 )
         rows.sort(key=lambda r: -r["score"])
+        shown = rows[:MAX_ITEMS]
+        if stale_rows and not any(r.get("stale_days") is not None for r in shown):
+            # One stalled project always gets a slot: following the list then un-stalls work.
+            pick = max(stale_rows, key=lambda r: (r["score"], r["stale_days"]))
+            shown = [*shown[: MAX_ITEMS - 1], pick]
+        stalled.sort(
+            key=lambda r: (
+                _PRIORITY_ORDER.get(r["priority"] or "", 1),
+                r["kind"] == "no_next",
+                -(r["stale_days"] or 0),
+            )
+        )
         waiting.sort(key=lambda w: w["due"] or "9999")
         lapsed_count = sum(1 for s in scan["single_actions"] if s["lapsed"]) + sum(
             len(p["lapsed_milestones"]) for p in scan["projects"]
@@ -286,7 +330,9 @@ class WorkspacePlan:
         return {
             "available": True,
             "date": today.isoformat(),
-            "items": rows[:MAX_ITEMS],
+            "items": shown,
+            "stalled": stalled[:MAX_STALLED],
+            "stalled_total": len(stalled),
             "total": len(rows),
             "waiting": waiting,
             "lapsed": lapsed_count,
