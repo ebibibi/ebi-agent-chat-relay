@@ -103,7 +103,7 @@ class TestDiscordFilters:
 
     def test_new_thread_title_matches_the_name_the_thread_is_created_with(self) -> None:
         empty = message(channel=text_channel(), content="")
-        assert activity_from_message(empty, opens_thread=True).thread_title == "Claude Chat"
+        assert activity_from_message(empty, opens_thread=True).thread_title == "AI Chat"
         long = message(channel=text_channel(), content="x" * 300)
         assert activity_from_message(long, opens_thread=True).thread_title == "x" * 100
         assert initial_thread_name("x" * 300) == "x" * 100

@@ -273,7 +273,7 @@ class TestParserAskUserQuestion:
 class TestAskEmbed:
     def test_default_title(self) -> None:
         embed = ask_embed("Which approach?")
-        assert embed.title == "❓ Claude needs your input"
+        assert embed.title == "❓ The agent needs your input"
 
     def test_custom_header_used_in_title(self) -> None:
         embed = ask_embed("Which approach?", header="Auth method")

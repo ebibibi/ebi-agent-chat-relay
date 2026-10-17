@@ -197,7 +197,7 @@ class SkillCommandCog(commands.Cog):
         """Check if the channel is a thread under any configured claude channel."""
         return isinstance(channel, discord.Thread) and channel.parent_id in self._channel_ids
 
-    @app_commands.command(name="skill", description="Run a Claude Code skill")
+    @app_commands.command(name="skill", description="Run a skill")
     @app_commands.describe(
         name="Skill name (type to filter)",
         args="Optional arguments to pass to the skill",
@@ -274,7 +274,7 @@ class SkillCommandCog(commands.Cog):
         else:
             channel = self.bot.get_channel(self.claude_channel_id)
         if not isinstance(channel, discord.TextChannel):
-            await interaction.followup.send("Claude channel not found.", ephemeral=True)
+            await interaction.followup.send("Chat channel not found.", ephemeral=True)
             return
 
         thread_name = f"/{name} {args}" if args else f"/{name}"

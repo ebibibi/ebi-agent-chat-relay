@@ -138,7 +138,7 @@ class AlertResponderCog(commands.Cog):
         owner_id = os.environ.get("DISCORD_OWNER_ID", "")
         mention = f"<@{owner_id}> " if owner_id else ""
         await thread.send(
-            f"{mention}🔍 Alert detected. Claude Code is investigating the root cause..."
+            f"{mention}🔍 Alert detected. The agent is investigating the root cause..."
         )
 
         prompt = _INVESTIGATION_PROMPT.format(alert_text=alert_message.content)

@@ -186,8 +186,7 @@ class JobFailureTriageCog(commands.Cog):
         owner_id = os.environ.get("DISCORD_OWNER_ID", "")
         mention = f"<@{owner_id}> " if owner_id else ""
         await thread.send(
-            f"{mention}{title_emoji} **{job_name}** の失敗を検知。"
-            " Claude Code が調査を開始します..."
+            f"{mention}{title_emoji} **{job_name}** の失敗を検知。 AI が調査を開始します..."
         )
 
         prompt = _INVESTIGATION_PROMPT.format(**failure_info)

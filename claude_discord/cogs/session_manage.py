@@ -484,7 +484,7 @@ class SessionManageCog(commands.Cog):
         """Show the claude --resume command for the current thread."""
         if not isinstance(interaction.channel, discord.Thread):
             await interaction.response.send_message(
-                "This command can only be used in a Claude chat thread.",
+                "This command can only be used in an agent chat thread.",
                 ephemeral=True,
             )
             return
@@ -514,7 +514,7 @@ class SessionManageCog(commands.Cog):
 
     @app_commands.command(
         name="sessions",
-        description="List all known Claude Code sessions",
+        description="List all known agent sessions",
     )
     @app_commands.describe(origin="Filter by session origin")
     @app_commands.choices(origin=_ORIGIN_CHOICES)
@@ -676,7 +676,7 @@ class SessionManageCog(commands.Cog):
 
     @app_commands.command(
         name="worktree-list",
-        description="List all active Claude Code session worktrees",
+        description="List all active session worktrees",
     )
     async def worktree_list(self, interaction: discord.Interaction) -> None:
         """Show all session worktrees (branch ``session/\\d+``) and their status."""
@@ -838,7 +838,7 @@ class SessionManageCog(commands.Cog):
         """Display context window usage (%) with a progress bar and autocompact distance."""
         if not isinstance(interaction.channel, discord.Thread):
             await interaction.response.send_message(
-                "This command can only be used in a Claude chat thread.", ephemeral=True
+                "This command can only be used in an agent chat thread.", ephemeral=True
             )
             return
 

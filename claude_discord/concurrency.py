@@ -27,7 +27,7 @@ class ActiveSession:
 
 
 _BASE_CONCURRENCY_NOTICE = """\
-[CONCURRENCY NOTICE — MANDATORY] You are one of MULTIPLE Claude Code sessions \
+[CONCURRENCY NOTICE — MANDATORY] You are one of MULTIPLE AI agent sessions \
 running simultaneously via Discord. Your thread ID is {thread_id}. \
 Messages marked [this thread] in the AI Lounge are YOUR earlier posts from \
 this same thread — not from other sessions. After context compaction you may \

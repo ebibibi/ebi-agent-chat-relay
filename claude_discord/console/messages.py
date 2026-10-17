@@ -34,7 +34,7 @@ MAX_EMBED_TEXT_CHARS = 1000
 _AGENT_EMBED_COLORS = frozenset({COLOR_ASK, COLOR_ERROR, 0x00BFFF})
 # "-# ..." is Discord subtext: ccdb uses it for every status note.
 _SUBTEXT = re.compile(r"^-# ")
-# "[WAIT FINISHED — automatic continuation]", "[MESSAGE FROM ANOTHER CLAUDE SESSION — …]".
+# "[WAIT FINISHED — automatic continuation]", "[MESSAGE FROM ANOTHER AI SESSION — …]".
 _AUTOMATIC_PROMPT = re.compile(r"^\[[A-Z][A-Z0-9 _/#-]*(?:—[^\]\n]*)?\]")
 # "🟡 <@123> The agent has finished — your reply is needed here."
 _PING = re.compile(r"^\S{1,2} <@!?\d+> ")

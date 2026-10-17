@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Claude/GPT partner models) with its reset time, read the same way the CLI's `/credits` panel
   does. Shown only on hosts where `agy` is signed in.
 
+### Changed
+
+- **Backend-neutral wording in agent- and user-facing text** (#1163) — the relay header is now `[MESSAGE FROM ANOTHER AI SESSION — thread …]`, and the concurrency notice, lounge invite, ask embed title, default thread name, help title and several slash-command descriptions no longer say "Claude" where every backend is meant. Claude-specific text (`/usage`, CLI session import, transcript search) is unchanged. The Console still classifies the old relay header as activity.
+
 ### Fixed
 
 - Console: buttons on Discord messages (such as the restart approval in an upgrade thread) work
