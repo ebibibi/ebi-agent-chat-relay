@@ -95,6 +95,15 @@ A guess never overrides a person:
   guesses leave it alone (clearing a place means "anywhere", not "guess again"). A priority other than P2 that existed before triage counts as yours.
 - A filled-in value is drawn outlined (priority) or in italics (due date), and the detail
   drawer shows the model's full guess under "🤖 AI guess", including fields you overrode.
+- Whether you can act now is yours to correct too. The **⏳ Waiting / ▶ Can do now** button in
+  the detail header shows what Focus believes (dashed while it is the model's guess) and flips
+  it with one click; a row under "⏳ Waiting" has its own **▶ Can do now**, and the drawer has
+  **🤖 Back to the AI's call**. Unlike a priority, readiness belongs to the moment: on a thread
+  your call holds until the conversation moves again (a reply, a finished turn), then the
+  model's fresh guess takes over, so a stale "can do now" never hides a wait that came later.
+  Written-down work keeps it until you clear it. API: `PATCH /console/api/items/{id}` with
+  `readiness: "now" | "waiting" | null`; the board reports `readiness`, `readiness_by: "you"`
+  and the resulting `actionable`.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -417,7 +426,7 @@ Endpoints need authentication unless marked *(no sign-in)*. Every method except 
 | GET | `/console/api/usage` | Per backend (or pool profile): `available`, `unavailable_until`, and `windows[]` of `{type, utilization, resets_at, status, reset}` |
 | GET | `/console/api/items/{id}/messages?limit=50` | The conversation's recent messages (max 100), each with `kind`, `embeds` and `attachments` |
 | POST | `/console/api/items` | Write down work: `{title, note?, priority?, due_at?, parent_id?, project?, start?}`. With `start: true` it is handed to an agent in the same request; if that fails the item is kept and the response carries `start_error` |
-| PATCH | `/console/api/items/{id}` | Change `title`, `note`, `priority` (0–3), `due_at`, `snoozed_until`, `project`, `parent_id`, `state` |
+| PATCH | `/console/api/items/{id}` | Change `title`, `note`, `priority` (0–3), `due_at`, `snoozed_until`, `project`, `parent_id`, `state`, `readiness` (`now`, `waiting`, `null` = the AI's guess) |
 | POST | `/console/api/items/{id}/reply` | `{text}` — continues the session, queued behind a running turn |
 | POST | `/console/api/items/{id}/done` | Mark done (also sets the ✅ marker on the thread) |
 | POST | `/console/api/items/{id}/reopen` | Clear the done/someday verdict |

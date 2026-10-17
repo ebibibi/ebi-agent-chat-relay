@@ -134,6 +134,18 @@ async def test_a_table_from_before_places_gains_the_column(tmp_path) -> None:
     assert item.place is None
     updated = await repo.update("c1", {"place": " 事務所 "})
     assert updated.place == "事務所"
+    assert (item.readiness, item.readiness_at) == (None, None)
+
+
+async def test_readiness_records_when_and_clearing_returns_it_to_the_guess(repo) -> None:
+    item = await repo.create_capture({"title": "Ship it"})
+    waiting = await repo.update(item.id, {"readiness": "waiting"})
+    assert waiting.readiness == "waiting" and waiting.readiness_at
+    assert (await repo.get(item.id)).as_dict()["readiness"] == "waiting"
+    cleared = await repo.update(item.id, {"readiness": None})
+    assert (cleared.readiness, cleared.readiness_at) == (None, None)
+    with pytest.raises(WorkItemError, match="readiness"):
+        await repo.update(item.id, {"readiness": "soon"})
 
 
 async def test_pinning_records_when_and_unpinning_clears_it(repo) -> None:

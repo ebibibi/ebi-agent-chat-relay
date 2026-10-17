@@ -34,6 +34,10 @@ MAX_NOTE_CHARS = 4000
 MAX_PROJECT_CHARS = 300
 #: A place or device the work is bound to: "home", "office", "work laptop".
 MAX_PLACE_CHARS = 40
+#: A person's own call on whether they can act on an item now, overriding the triage guess.
+READINESS_NOW = "now"
+READINESS_WAITING = "waiting"
+READINESS = (READINESS_NOW, READINESS_WAITING)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS work_items (
@@ -64,6 +68,7 @@ EDITABLE_FIELDS = (
     "project",
     "state",
     "place",
+    "readiness",
     "pinned",
     "paused",
     "workspace_path",
@@ -117,6 +122,10 @@ class WorkItem:
     workspace_source: str | None = None
     #: Short machine-readable why, e.g. "cwd", "parent", "record:log.md", "task".
     workspace_reason: str | None = None
+    #: A person's "can do now" / "waiting" (READINESS); None leaves it to the triage guess.
+    readiness: str | None = None
+    #: When readiness was set; a thread's later activity makes it stale (see triage).
+    readiness_at: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -138,6 +147,8 @@ class WorkItem:
             "workspace_path": self.workspace_path,
             "workspace_source": self.workspace_source,
             "workspace_reason": self.workspace_reason,
+            "readiness": self.readiness,
+            "readiness_at": self.readiness_at,
         }
 
 
@@ -165,6 +176,8 @@ def _row_to_item(row: aiosqlite.Row) -> WorkItem:
         workspace_path=row["workspace_path"],
         workspace_source=row["workspace_source"],
         workspace_reason=row["workspace_reason"],
+        readiness=row["readiness"],
+        readiness_at=row["readiness_at"],
     )
 
 
@@ -234,6 +247,11 @@ def validate_changes(changes: dict[str, Any]) -> dict[str, Any]:
             clean[field] = _optional_text(value, field, 200)
         elif field == "place":
             clean[field] = _optional_text(value, field, MAX_PLACE_CHARS)
+        elif field == "readiness":
+            if value is not None and value not in READINESS:
+                raise WorkItemError(f"readiness must be one of {', '.join(READINESS)} or null")
+            clean[field] = value
+            clean["readiness_at"] = _now() if value else None
         elif field == "pinned":
             if not isinstance(value, bool):
                 raise WorkItemError("pinned must be true or false")
@@ -275,6 +293,9 @@ class WorkItemRepository:
                     "UPDATE work_items SET workspace_source = 'pinned'"
                     " WHERE workspace_path IS NOT NULL"
                 )
+            if "readiness" not in have:
+                await db.execute("ALTER TABLE work_items ADD COLUMN readiness TEXT")
+                await db.execute("ALTER TABLE work_items ADD COLUMN readiness_at TEXT")
             await db.commit()
 
     async def list_all(self) -> list[WorkItem]:
@@ -444,8 +465,9 @@ class WorkItemRepository:
         await db.execute(
             "INSERT INTO work_items (id, thread_id, title, note, parent_id, priority, due_at,"
             " snoozed_until, project, state, created_at, updated_at, place, pinned_at,"
-            " paused_at, workspace_path, workspace_source, workspace_reason)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " paused_at, workspace_path, workspace_source, workspace_reason, readiness,"
+            " readiness_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(id) DO UPDATE SET title = excluded.title, note = excluded.note,"
             " parent_id = excluded.parent_id, priority = excluded.priority,"
             " due_at = excluded.due_at, snoozed_until = excluded.snoozed_until,"
@@ -454,7 +476,8 @@ class WorkItemRepository:
             " pinned_at = excluded.pinned_at, paused_at = excluded.paused_at,"
             " workspace_path = excluded.workspace_path,"
             " workspace_source = excluded.workspace_source,"
-            " workspace_reason = excluded.workspace_reason",
+            " workspace_reason = excluded.workspace_reason,"
+            " readiness = excluded.readiness, readiness_at = excluded.readiness_at",
             (
                 item.id,
                 item.thread_id,
@@ -474,5 +497,7 @@ class WorkItemRepository:
                 item.workspace_path,
                 item.workspace_source,
                 item.workspace_reason,
+                item.readiness,
+                item.readiness_at,
             ),
         )

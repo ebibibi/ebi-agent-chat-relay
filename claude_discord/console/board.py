@@ -303,6 +303,8 @@ def _item(
         "workspace_source": overlay.workspace_source if overlay else None,
         "workspace_reason": overlay.workspace_reason if overlay else None,
         "place": overlay.place if overlay else None,
+        "readiness": overlay.readiness if overlay else None,
+        "readiness_at": overlay.readiness_at if overlay else None,
         "pinned_at": overlay.pinned_at if overlay else None,
         "paused_at": overlay.paused_at if overlay else None,
         "note": overlay.note if overlay else None,
