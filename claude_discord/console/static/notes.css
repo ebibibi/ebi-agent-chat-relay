@@ -55,13 +55,17 @@
 .note-ref { color:var(--accent); text-decoration:none; border-bottom:1px dotted currentColor; cursor:pointer; overflow-wrap:anywhere; }
 
 /* Note editing (noteedit.js) */
-.note-edit { display:flex; flex-direction:column; gap:8px; height:100%; }
+/* While editing, the panel takes the whole window and each pane scrolls inside itself. */
+.note-viewer:has(.note-edit) { padding:1vh 1vw; }
+.note-shell:has(.note-edit) { width:100%; height:98vh; }
+.note-body:has(> .note-edit) { overflow:hidden; padding:10px 14px; }
+.note-edit { display:flex; flex-direction:column; gap:8px; height:100%; min-height:0; }
 .note-edit-bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .note-edit-logl { font-size:12px; display:flex; align-items:center; gap:4px; }
 .note-edit-tabs { display:none; gap:6px; margin-left:auto; }
-.note-edit-split { display:grid; grid-template-columns:1fr 1fr; gap:12px; min-height:60vh; }
-.note-edit-text { width:100%; box-sizing:border-box; min-height:60vh; resize:vertical; font-family:ui-monospace,SFMono-Regular,monospace; font-size:13px; line-height:1.55; padding:10px; background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:6px; }
-.note-edit-preview { overflow:auto; border-left:1px solid var(--line); padding-left:12px; }
+.note-edit-split { display:grid; grid-template-columns:1fr 1fr; grid-template-rows:minmax(0,1fr); gap:12px; flex:1; min-height:0; }
+.note-edit-text { width:100%; height:100%; box-sizing:border-box; resize:none; font-family:ui-monospace,SFMono-Regular,monospace; font-size:13px; line-height:1.55; padding:10px; background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:6px; }
+.note-edit-preview { overflow:auto; min-height:0; border-left:1px solid var(--line); padding:0 12px 40px; }
 .note-conflict { border:1px solid #f59e0b; border-radius:8px; padding:8px 12px; background:var(--panel); }
 .note-diff { font-family:ui-monospace,monospace; font-size:12px; max-height:40vh; overflow:auto; margin:6px 0; white-space:pre-wrap; overflow-wrap:anywhere; }
 .note-diff-line.add { background:#22c55e22; }
@@ -70,7 +74,7 @@
   .note-edit-tabs { display:flex; }
   .note-edit-split { grid-template-columns:1fr; }
   .note-edit-split.show-edit .note-edit-preview, .note-edit-split.show-preview .note-edit-text, .note-edit-split.show-preview .note-edit-cm { display:none; }
-  .note-edit-preview { border-left:0; padding-left:0; }
+  .note-edit-preview { border-left:0; padding:0 0 40px; }
 }
 
 /* Notes a thread changed (threadnotes.js) */
@@ -86,4 +90,4 @@
 /* CodeMirror 6 in the editor (vendor-codemirror.min.js). It renders in a shadow root and is
    themed there (see scripts/codemirror/entry.js); only the host box is styled here. */
 .note-edit-text[hidden] { display:none; }
-.note-edit-cm { min-height:60vh; border:1px solid var(--line); border-radius:6px; background:var(--panel); overflow:hidden; }
+.note-edit-cm { height:100%; min-height:0; border:1px solid var(--line); border-radius:6px; background:var(--panel); overflow:hidden; }

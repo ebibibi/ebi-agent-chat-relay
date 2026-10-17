@@ -119,6 +119,14 @@ window.ConsoleNotes = (() => {
         inline.children = lines.length > 1 ? [title, firstText, ...keep] : [title, ...keep];
       }
     });
+    // Block elements carry their first source line (1-based, counting front matter) so the
+    // editor can keep its preview scrolled to the same place.
+    m.core.ruler.push("source_line", (state) => {
+      const offset = state.env.lineOffset || 0;
+      for (const token of state.tokens) {
+        if (token.map && token.block && token.nesting !== -1) token.attrSet("data-line", String(token.map[0] + 1 + offset));
+      }
+    });
     return m;
   }
 
@@ -137,10 +145,11 @@ window.ConsoleNotes = (() => {
 
   function render(text) {
     const { props, body } = split(text);
-    const html = md.render(body);
+    const lineOffset = text.slice(0, text.length - body.length).split("\n").length - 1;
+    const html = md.render(body, { lineOffset });
     const fragment = window.DOMPurify.sanitize(html, {
       RETURN_DOM_FRAGMENT: true,
-      ADD_ATTR: ["data-target", "data-embed", "data-heading"],
+      ADD_ATTR: ["data-target", "data-embed", "data-heading", "data-line"],
       FORBID_TAGS: ["style", "form", "iframe", "object", "embed"],
     });
     for (const a of fragment.querySelectorAll("a[href]")) {

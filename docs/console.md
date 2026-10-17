@@ -690,8 +690,10 @@ code with spaces) and `[[wikilinks]]` become links into the viewer; wikilinks re
 `GET /console/api/workspace/resolve?link=…`. Code blocks are left alone, and a hidden or missing
 note opens as "not found".
 
-**Editing a note.** **✏️ Edit** in the viewer shows the Markdown source beside a live preview
-(tabs on a phone); `Ctrl+S` / ⌘S or **💾 Save** writes it with `PUT /console/api/workspace/note`
+**Editing a note.** **✏️ Edit** in the viewer widens the panel to the window and shows the
+Markdown source beside a live preview (tabs on a phone). Each pane scrolls on its own and the other
+follows it: preview blocks carry `data-line`, their first source line, and positions between two
+blocks are interpolated; `Ctrl+S` / ⌘S or **💾 Save** writes it with `PUT /console/api/workspace/note`
 (`path`, `revision`, `text`, optional `log`). The write is atomic and moves `最終更新:` and a
 front-matter `updated:` to today. If an agent or Obsidian changed the file since the edit began,
 the server answers 409 with the note as it is now and the viewer shows a line diff: load the

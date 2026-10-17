@@ -1,5 +1,5 @@
-// Edit a note in the viewer: Markdown source beside a live preview (stacked with tabs on a
-// phone). Ctrl+S / ⌘S saves. The save carries the revision the edit started from; if an
+// Edit a note in the viewer: Markdown source beside a live preview that scrolls with it
+// (stacked with tabs on a phone). Ctrl+S / ⌘S saves. The save carries the revision the edit started from; if an
 // agent or Obsidian changed the file meanwhile, the server refuses (409) and this shows what
 // differs, then lets the human reload theirs away or overwrite on purpose.
 // It starts as a plain textarea, which always works; CodeMirror 6 (vendored single file,
@@ -80,16 +80,72 @@ window.ConsoleNoteEdit = (() => {
     } catch { return []; }
   }
   // Swap the textarea for CodeMirror, keeping whatever was typed meanwhile.
-  async function upgrade(area, use, { onChange, onSave }) {
+  async function upgrade(area, use, { onChange, onSave, onScroll }) {
     let lib;
     try { lib = await loadLibrary(); } catch { return; }
     if (!area.isConnected) return;
     const holder = h("div", { class: "note-edit-cm" });
     area.after(holder);
-    const editor = lib.create(holder, { doc: area.value, onChange, onSave, linkSource });
+    const editor = lib.create(holder, { doc: area.value, onChange, onSave, onScroll, linkSource });
     area.hidden = true;
     use(editor);
     editor.focus();
+  }
+
+  // Scroll sync. The preview's blocks carry data-line (their first source line); between two
+  // of them a position is interpolated, so a long paragraph scrolls smoothly too.
+  function anchors(preview) {
+    const base = preview.getBoundingClientRect().top - preview.scrollTop;
+    const out = [{ line: 1, top: 0 }];
+    for (const el of preview.querySelectorAll("[data-line]")) {
+      const line = Number(el.dataset.line);
+      const top = el.getBoundingClientRect().top - base;
+      const last = out[out.length - 1];
+      if (line > last.line && top >= last.top) out.push({ line, top });
+    }
+    return out;
+  }
+  // Map *value* from one key to the other ("line" ↔ "top") through the anchors.
+  function interpolate(points, from, to, value) {
+    let i = 0;
+    while (i + 1 < points.length && points[i + 1][from] <= value) i += 1;
+    const a = points[i], b = points[i + 1];
+    if (!b) return a[to];
+    return a[to] + (value - a[from]) / Math.max(1e-6, b[from] - a[from]) * (b[to] - a[to]);
+  }
+  function syncScroll(preview) {
+    let source = null;
+    let driven = null; // the side being scrolled by the other one: its next scroll events are echoes
+    let timer = 0;
+    const drive = (side, apply) => {
+      driven = side;
+      apply();
+      clearTimeout(timer);
+      timer = setTimeout(() => { driven = null; }, 120);
+    };
+    const fromEditor = () => {
+      if (!source || driven === "editor") return;
+      drive("preview", () => {
+        if (!source.topLine) { // the plain textarea: by proportion
+          const el = source.element;
+          preview.scrollTop = el.scrollTop / Math.max(1, el.scrollHeight - el.clientHeight) * (preview.scrollHeight - preview.clientHeight);
+        } else if (source.atEnd()) preview.scrollTop = preview.scrollHeight;
+        else preview.scrollTop = interpolate(anchors(preview), "line", "top", source.topLine());
+      });
+    };
+    const fromPreview = () => {
+      if (!source || driven === "preview") return;
+      drive("editor", () => {
+        const end = preview.scrollTop + preview.clientHeight >= preview.scrollHeight - 2;
+        if (!source.topLine) {
+          const el = source.element;
+          el.scrollTop = preview.scrollTop / Math.max(1, preview.scrollHeight - preview.clientHeight) * (el.scrollHeight - el.clientHeight);
+        } else if (end && preview.scrollTop > 0) source.scrollToEnd();
+        else source.scrollToLine(interpolate(anchors(preview), "top", "line", preview.scrollTop));
+      });
+    };
+    preview.addEventListener("scroll", fromPreview, { passive: true });
+    return { use: (next) => { source = next; }, fromEditor };
   }
 
   /** Replace *host*'s content with an editor for *note*; *render* turns Markdown into nodes. */
@@ -102,8 +158,12 @@ window.ConsoleNoteEdit = (() => {
     area.value = note.text;
     const preview = h("div", { class: "note-edit-preview note-content" });
     // What the editor holds: the textarea until CodeMirror replaces it.
-    let source = { get value() { return area.value; }, focus: () => area.focus() };
-    const draw = () => preview.replaceChildren(render(source.value));
+    let source = { get value() { return area.value; }, focus: () => area.focus(), element: area };
+    const sync = syncScroll(preview);
+    sync.use(source);
+    area.addEventListener("scroll", sync.fromEditor, { passive: true });
+    // Re-rendering resets the preview's layout, so it is aligned with the editor again.
+    const draw = () => { preview.replaceChildren(render(source.value)); sync.fromEditor(); };
     let timer = 0;
     area.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(draw, 250); });
     const log = h("input", { type: "checkbox", class: "note-edit-log" });
@@ -165,8 +225,9 @@ window.ConsoleNoteEdit = (() => {
       split);
     draw();
     area.focus();
-    upgrade(area, (editor) => { source = editor; }, {
+    upgrade(area, (editor) => { source = editor; sync.use(editor); }, {
       onChange: () => { clearTimeout(timer); timer = setTimeout(draw, 250); },
+      onScroll: () => sync.fromEditor(),
       onSave: () => save(),
     });
     return { dirty, cancel };
