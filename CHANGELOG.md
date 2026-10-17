@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   own (skipped permissions, `acceptEdits`, `auto`), since agy cannot enforce it. The parser is built from
   recorded agy 1.3.5 runs; per-turn usage is rebuilt from steps because `result.usage` is the
   conversation's running total (ADR-0016).
+- Console: the usage strip shows Antigravity (`agy`) quota — one window per pool (Gemini and the
+  Claude/GPT partner models) with its reset time, read the same way the CLI's `/credits` panel
+  does. Shown only on hosts where `agy` is signed in.
 
 ### Fixed
 

@@ -8,6 +8,9 @@ is always on screen. Sources are the ones ``/usage`` already reads:
 * Codex: ``codex exec --json`` carries no rate-limit events, so the read-only
   ``codex app-server`` probe is the only source. It spawns a process, so its
   answer is cached and never run once per poll.
+* Antigravity: the Cloud Code quota endpoint the ``agy`` CLI reads for its
+  ``/credits`` panel (see :mod:`.antigravity_quota`). A network call, cached
+  like the Codex probe.
 * Account pools: every profile from :meth:`AccountRouter.statuses`, with the
   router's own view of whether the profile is blocked.
 """
@@ -23,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 from claude_code_core.types import RateLimitInfo
 
 from ..account_turns import codex_windows
+from .antigravity_quota import antigravity_windows
 
 if TYPE_CHECKING:
     from claude_code_core.account_router import AccountRouter
@@ -37,6 +41,34 @@ CODEX_CACHE_SECONDS = 120.0
 CODEX_FAIL_CACHE_SECONDS = 60.0
 
 CodexFetcher = Callable[[str], Awaitable[dict | None]]
+AntigravityFetcher = Callable[[str], Awaitable[dict | None]]
+
+
+class _ProbeCache:
+    """One cached answer per probe, so a poll never spawns or calls out."""
+
+    def __init__(self, name: str, fetch: Callable[[], Awaitable[dict | None]]) -> None:
+        self._name = name
+        self._fetch = fetch
+        self._cache: tuple[float, dict | None] | None = None
+        self._lock = asyncio.Lock()
+
+    async def get(self) -> dict | None:
+        async with self._lock:
+            mono = time.monotonic()
+            if self._cache is not None:
+                fetched_at, data = self._cache
+                ttl = CODEX_CACHE_SECONDS if data is not None else CODEX_FAIL_CACHE_SECONDS
+                if mono - fetched_at < ttl:
+                    return data
+            try:
+                data = await self._fetch()
+            except Exception:
+                logger.warning("console: %s usage probe failed", self._name, exc_info=True)
+                data = None
+            data = data if isinstance(data, dict) else None
+            self._cache = (mono, data)
+            return data
 
 
 def _window(info: RateLimitInfo, now: float) -> dict[str, Any]:
@@ -110,6 +142,8 @@ class UsageReader:
         account_router: AccountRouter | None = None,
         codex_command: str | None = None,
         fetch_codex: CodexFetcher | None = None,
+        agy_command: str | None = None,
+        fetch_antigravity: AntigravityFetcher | None = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
         self._usage = usage_repo
@@ -117,8 +151,10 @@ class UsageReader:
         self._codex_command = codex_command
         self._fetch_codex = fetch_codex
         self._clock = clock
-        self._codex_cache: tuple[float, dict | None] | None = None
-        self._codex_lock = asyncio.Lock()
+        self._codex = _ProbeCache("Codex", self._probe_codex)
+        self._agy_command = agy_command
+        self._fetch_antigravity = fetch_antigravity
+        self._antigravity = _ProbeCache("Antigravity", self._probe_antigravity)
 
     async def read(self) -> dict[str, Any]:
         now = self._clock()
@@ -131,6 +167,8 @@ class UsageReader:
             backends.append(await self._claude_entry(now))
         if "codex" not in pooled and self._codex_command:
             backends.append(await self._codex_entry(now))
+        if "antigravity" not in pooled and self._agy_command:
+            backends.append(await self._antigravity_entry(now))
         return {"now": int(now), "backends": backends}
 
     async def _pool_entries(self, now: float) -> list[dict[str, Any]]:
@@ -161,7 +199,7 @@ class UsageReader:
         return backend_entry("claude", windows, now=now)
 
     async def _codex_entry(self, now: float) -> dict[str, Any]:
-        data = await self._codex_data()
+        data = await self._codex.get()
         if data is None:
             return backend_entry("codex", [], now=now, error="unavailable")
         return backend_entry(
@@ -172,18 +210,6 @@ class UsageReader:
             reset_credits=_reset_credits(data),
         )
 
-    async def _codex_data(self) -> dict | None:
-        async with self._codex_lock:
-            mono = time.monotonic()
-            if self._codex_cache is not None:
-                fetched_at, data = self._codex_cache
-                ttl = CODEX_CACHE_SECONDS if data is not None else CODEX_FAIL_CACHE_SECONDS
-                if mono - fetched_at < ttl:
-                    return data
-            data = await self._probe_codex()
-            self._codex_cache = (mono, data)
-            return data
-
     async def _probe_codex(self) -> dict | None:
         assert self._codex_command
         fetch = self._fetch_codex
@@ -191,12 +217,22 @@ class UsageReader:
             from ..discord_ui.engine_status import fetch_codex_rate_limits
 
             fetch = fetch_codex_rate_limits
-        try:
-            data = await fetch(self._codex_command)
-        except Exception:
-            logger.warning("console: Codex usage probe failed", exc_info=True)
-            return None
-        return data if isinstance(data, dict) else None
+        return await fetch(self._codex_command)
+
+    async def _antigravity_entry(self, now: float) -> dict[str, Any]:
+        data = await self._antigravity.get()
+        if data is None:
+            return backend_entry("antigravity", [], now=now, error="unavailable")
+        return backend_entry("antigravity", antigravity_windows(data), now=now)
+
+    async def _probe_antigravity(self) -> dict | None:
+        assert self._agy_command
+        fetch = self._fetch_antigravity
+        if fetch is None:
+            from .antigravity_quota import fetch_antigravity_quota
+
+            fetch = fetch_antigravity_quota
+        return await fetch(self._agy_command)
 
 
 __all__ = ["UsageReader", "backend_entry"]
