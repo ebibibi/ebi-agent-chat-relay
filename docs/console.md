@@ -204,6 +204,12 @@ remaining. On a phone the strip wraps, so every backend stays visible.
   reads as reset until the next turn refreshes it.
 - **Codex**: read through the read-only `codex app-server` probe, cached for two minutes. Shown
   when `CCDB_CODEX_COMMAND` is set. Available rate-limit reset credits are shown too.
+- **Antigravity**: the quota the `agy` CLI shows in its `/credits` panel, read from the Cloud Code
+  `fetchAvailableModels` endpoint with the CLI's own stored sign-in (cached like Codex). One
+  window per quota pool: **Gemini** and **Claude/GPT** (the partner models). Shown when the CLI is
+  signed in on the host (`~/.gemini/antigravity-cli/antigravity-oauth-token`, override with
+  `CCDB_AGY_TOKEN_FILE`); an expired token is renewed by running `agy models` once
+  (`CCDB_AGY_COMMAND`, default `agy`). `CCDB_CONSOLE_AGY_USAGE=0` hides the row.
 - **Account pools** (`CCDB_ACCOUNT_POOLS_FILE`): one entry per profile, using the router's own
   view of whether the profile is blocked.
 

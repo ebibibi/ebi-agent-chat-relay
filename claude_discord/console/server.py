@@ -1667,6 +1667,21 @@ async def maybe_start_console(api_server: ApiServer) -> ConsoleServer | None:
         return None
 
 
+def _agy_usage_command() -> str | None:
+    """The ``agy`` command when its quota can be shown, else ``None``.
+
+    Shown only where the CLI has signed in (its token file exists), so a host
+    without Antigravity gets no empty row. ``CCDB_CONSOLE_AGY_USAGE=0`` hides it.
+    """
+    from .antigravity_quota import token_file
+
+    if (os.getenv("CCDB_CONSOLE_AGY_USAGE") or "").strip().lower() in {"0", "false", "no", "off"}:
+        return None
+    if not token_file().is_file():
+        return None
+    return (os.getenv("CCDB_AGY_COMMAND") or "").strip() or "agy"
+
+
 async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer | None:
     config = ConsoleAuthConfig.from_env().effective()
     problems = config.problems()
@@ -1684,6 +1699,7 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
         usage_repo=getattr(bot, "usage_repo", None),
         account_router=getattr(bot, "account_router", None),
         codex_command=(os.getenv("CCDB_CODEX_COMMAND") or "").strip() or None,
+        agy_command=_agy_usage_command(),
     )
     conversations = ConversationRepository(api_server.session_repo.db_path)
     await conversations.init_db()

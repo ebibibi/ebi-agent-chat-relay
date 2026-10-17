@@ -13,10 +13,10 @@
           credits: (n) => `リセット券 ${n}`, resetsAt: "リセット", d: "日", h: "時間", m: "分",
           out: (at, left) => `⛔ 復活 ${at}（あと${left}）` },
   }, {get: (strings, key) => strings[document.documentElement.lang === "ja" ? "ja" : "en"][key]});
-  const NAMES = { claude: "Claude", codex: "Codex", pi: "pi", local: "Local", agui: "AG-UI" };
+  const NAMES = { claude: "Claude", codex: "Codex", antigravity: "Antigravity", pi: "pi", local: "Local", agui: "AG-UI" };
   const WINDOWS = new Proxy({}, {get: (_, key) => {
     const week = document.documentElement.lang === "ja" ? "週" : "7d";
-    return {five_hour:"5h",seven_day:week,seven_day_opus:`${week} Opus`,seven_day_sonnet:`${week} Sonnet`}[key];
+    return {five_hour:"5h",seven_day:week,seven_day_opus:`${week} Opus`,seven_day_sonnet:`${week} Sonnet`,gemini:"Gemini",partner:"Claude/GPT"}[key];
   }});
 
   const strip = document.getElementById("usage");
