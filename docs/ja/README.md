@@ -75,11 +75,11 @@
 1 つのリレープロセスで複数のフロントエンドを同時に動かせます（`CCDB_FRONTENDS=discord,teams,console`）。
 セッション・スケジューラー・API は共通です。
 
-| フロントエンド × バックエンド | Claude Code | OpenAI Codex | ローカル（Ollama 等） | pi | AG-UI |
-|---|:---:|:---:|:---:|:---:|:---:|
-| **Ebi AI Console** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Discord** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Microsoft Teams** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| フロントエンド × バックエンド | Claude Code | OpenAI Codex | ローカル（Ollama 等） | pi | AG-UI | Antigravity |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Ebi AI Console** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Discord** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Microsoft Teams** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 - **Ebi AI Console** — 上で紹介した専用 GUI。デスクトップでもスマートフォンでも。これだけを使うこともでき、
   チャットのアカウントは要りません。

@@ -10,6 +10,7 @@ from discord import app_commands
 from discord.app_commands import Choice
 from discord.ext import commands
 
+from claude_code_core.antigravity_runner import VALID_AGY_EFFORTS
 from claude_code_core.codex_runner import VALID_CODEX_EFFORTS
 from claude_code_core.local_backend import pull_ollama_model, validate_ollama_model_name
 from claude_code_core.pi_runner import VALID_PI_THINKING
@@ -37,6 +38,7 @@ VALID_EFFORTS: dict[str, frozenset[str]] = {
     "local": VALID_CODEX_EFFORTS,
     # pi calls this "thinking" and includes an explicit "off".
     "pi": VALID_PI_THINKING,
+    "antigravity": VALID_AGY_EFFORTS,
 }
 
 EFFORT_ORDER: dict[str, list[str]] = {
@@ -44,6 +46,7 @@ EFFORT_ORDER: dict[str, list[str]] = {
     "codex": ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
     "local": ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
     "pi": ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+    "antigravity": ["low", "medium", "high", "xhigh", "max"],
 }
 
 # Suggestions only: the model fields remain free text.
@@ -73,6 +76,12 @@ SUGGESTED_MODELS: dict[str, list[tuple[str, str]]] = {
     "pi": [
         ("anthropic/claude-opus-5", "Claude Opus 5"),
         ("openai-codex/gpt-6-astra", "GPT-6-Astra"),
+    ],
+    # Suggestions only; `agy models` lists what the signed-in account can use.
+    "antigravity": [
+        ("claude-opus-4-6-thinking", "Claude Opus 4.6 (Thinking)"),
+        ("claude-sonnet-4-6", "Claude Sonnet 4.6 (Thinking)"),
+        ("gemini-3.8-flash-high", "Gemini 3.8 Flash (High)"),
     ],
 }
 
@@ -247,7 +256,13 @@ class BackendCommandCog(commands.Cog):
             if resolved_scope == SCOPE_THREAD and target_thread_id is not None
             else "**globally**"
         )
-        emoji = {"codex": "🌀", "local": "🏠", "agui": "🔌", "pi": "🥧"}.get(name, "🤖")
+        emoji = {
+            "codex": "🌀",
+            "local": "🏠",
+            "agui": "🔌",
+            "pi": "🥧",
+            "antigravity": "🪐",
+        }.get(name, "🤖")
         await interaction.response.send_message(
             f"{emoji} Backend set to `{name}` {scope_label}. Next session will use it.",
             ephemeral=False,

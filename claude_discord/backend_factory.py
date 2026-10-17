@@ -32,6 +32,7 @@ DEFAULT_MODEL: dict[str, str | None] = {
     "local": None,
     "agui": None,
     "pi": None,
+    "antigravity": None,
 }
 DEFAULT_COMMAND = {
     "claude": "claude",
@@ -39,6 +40,7 @@ DEFAULT_COMMAND = {
     "local": "codex",
     "agui": "ag-ui",
     "pi": "pi",
+    "antigravity": "agy",
 }
 
 
@@ -62,6 +64,7 @@ class BackendFactory:
         agui_url: str | None = None,
         agui_token: str | None = None,
         pi_command: str | None = None,
+        agy_command: str | None = None,
     ) -> None:
         self.claude_command = claude_command or DEFAULT_COMMAND["claude"]
         self.codex_command = codex_command or DEFAULT_COMMAND["codex"]
@@ -77,6 +80,8 @@ class BackendFactory:
         self.agui_url = agui_url
         self.agui_token = agui_token
         self.pi_command = pi_command or DEFAULT_COMMAND["pi"]
+        # agy installs to ~/.local/bin, which a systemd unit's PATH often lacks.
+        self.agy_command = agy_command or DEFAULT_COMMAND["antigravity"]
 
     def command_for(self, backend: str) -> str:
         if backend == "claude":
@@ -87,6 +92,8 @@ class BackendFactory:
             return self.codex_command
         if backend == "pi":
             return self.pi_command
+        if backend == "antigravity":
+            return self.agy_command
         if backend == "agui":
             return DEFAULT_COMMAND["agui"]
         raise ValueError(f"Unknown backend: {backend!r}")

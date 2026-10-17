@@ -14,8 +14,9 @@ Teams app.
 | Local | local `codex` CLI to an OpenAI-compatible `/v1/responses` endpoint | none by default | data that should stay on a controlled network |
 | AG-UI | HTTP request plus JSON server-sent events | optional bearer token | custom and hosted agents that implement AG-UI |
 | pi | local `pi` CLI | the CLI's own login or an API key | one agent over many providers, including subscriptions and local servers |
+| Antigravity | local `agy` CLI | the CLI's own Google sign-in | Gemini, Claude and GPT-OSS models on a Google AI subscription |
 
-All five work from both Discord and Microsoft Teams. The frontend controls message rendering,
+All six work from both Discord and Microsoft Teams. The frontend controls message rendering,
 buttons, files, and rate limits; the backend controls model execution and streamed events.
 
 ## Select a backend
@@ -34,6 +35,7 @@ On Discord, switch an individual conversation without restarting:
 /backend local
 /backend agui
 /backend pi
+/backend antigravity
 ```
 
 These are Discord slash commands, and a conversation override is persisted in SQLite so it survives
@@ -161,6 +163,43 @@ Select a provider and model together, because pi resolves both from one value:
 `/effort` maps to pi's thinking level, which includes an explicit `off`.
 
 See [pi backend](pi-backend.md) for the measured CLI contract and the event mapping.
+
+## Google Antigravity (agy)
+
+The [Google Antigravity CLI](https://antigravity.google/) (`agy`) runs as a CLI-spawn backend the
+same way Claude Code, Codex and pi do. Sign in once in an interactive `agy`, then:
+
+```dotenv
+# agy installs to ~/.local/bin, which a systemd unit's PATH usually lacks.
+CCDB_AGY_COMMAND=/home/you/.local/bin/agy
+```
+
+```text
+/backend antigravity
+/model claude-opus-4-6-thinking   # ids from `agy models`; unset = agy's own default
+/effort high                      # low, medium, high, xhigh, max
+```
+
+**Permissions.** agy's print mode cannot ask for approval, so a tool that needs it is
+auto-denied and the turn ends without doing the work. ccdb maps its own settings onto agy:
+
+| ccdb | agy |
+|---|---|
+| `CCDB_DANGEROUSLY_SKIP_PERMISSIONS=true` or permission mode `bypassPermissions` | `--dangerously-skip-permissions` |
+| permission mode `acceptEdits` / `plan` / `auto` | `--mode accept-edits` / `plan` / `auto` |
+| anything else | agy's default (request-review: approval-gated tools are denied) |
+
+Because the default fails closed, no extra opt-in is needed to spawn agy (unlike pi). A denied
+tool is reported in the thread instead of rendering as an empty answer; allow-rules under
+`permissions.allow` in agy's own `settings.json` are honoured. agy has no tool allowlist flag, so
+ccdb refuses a turn that combines `CCDB_ALLOWED_TOOLS` with skipped permissions rather than run
+every tool.
+
+**Limits.** The prompt is sent over stdin as one stream-json message, never in argv.
+`APPEND_SYSTEM_PROMPT` is not passed (agy has no flag for it), images are not forwarded,
+and only the `host` execution environment has been verified (agy keeps its sign-in under
+`~/.gemini`). An unknown `--conversation` id makes agy start a new conversation, whose id ccdb then
+stores, so a lost conversation degrades to a fresh one instead of an error.
 
 ## Pinning a scheduled task to a backend
 

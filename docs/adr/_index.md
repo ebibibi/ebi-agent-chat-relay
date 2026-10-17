@@ -21,3 +21,4 @@ earlier ADR instead of rewriting its history.
 - [ADR-0013: Keep the relay an interface layer; leave governance to an external control plane](0013-keep-the-relay-an-interface-layer.md)
 - [ADR-0014: Publish the Ebi AI Console as version 5](0014-publish-the-ebi-ai-console-as-v5.md)
 - [ADR-0015: Center thread families on the parent conversation](0015-center-thread-families-on-the-parent-conversation.md)
+- [ADR-0016: Map ccdb permissions onto agy's own flags instead of gating the Antigravity backend](0016-map-ccdb-permissions-onto-agy-flags.md)

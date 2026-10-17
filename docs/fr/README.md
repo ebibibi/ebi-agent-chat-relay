@@ -367,7 +367,7 @@ Si le bot redémarre en pleine session, les sessions Claude interrompues sont au
 
 ccdb 3.0 introduit trois commandes slash qui changent quelle IA gère la prochaine session, sans redémarrage du bot :
 
-- `/backend [name] [scope]` — affiche ou change de backend. `name` vaut `claude`, `codex`, `local`, `agui` ou `pi`. `scope` vaut `thread` (ce fil uniquement) ou `global` (défaut à l'échelle du serveur). Quand vous omettez `scope`, la commande se résout automatiquement : dans un fil, elle s'applique à ce fil, sinon elle définit le défaut global.
+- `/backend [name] [scope]` — affiche ou change de backend. `name` vaut `claude`, `codex`, `local`, `agui`, `pi` ou `antigravity`. `scope` vaut `thread` (ce fil uniquement) ou `global` (défaut à l'échelle du serveur). Quand vous omettez `scope`, la commande se résout automatiquement : dans un fil, elle s'applique à ce fil, sinon elle définit le défaut global.
 - `/model [name] [scope]` — affiche ou change le modèle utilisé par le backend **actuel**. Chaque backend mémorise sa propre préférence de modèle, donc basculer d'un backend à l'autre préserve vos modèles favoris. Laissez le modèle d'un backend non défini pour vous en remettre au défaut de la CLI concernée (par ex. Codex utilise le `model` de `~/.codex/config.toml`, donc ccdb suit le défaut de la console plutôt que d'épingler une version).
 - `/effort [level] [scope]` — affiche ou change l'**effort de raisonnement** utilisé par le backend actuel. Les niveaux valides sont spécifiques au backend : Claude accepte `low/medium/high/max` ; Codex accepte `low/medium/high/xhigh/max/ultra` (mappé sur le `model_reasoning_effort` de la CLI). Laissez-le non défini pour vous en remettre au défaut de la CLI.
 
