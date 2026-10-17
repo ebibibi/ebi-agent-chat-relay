@@ -53,3 +53,22 @@
 .nsearch-snippet { font-size:12px; opacity:.85; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .nsearch-empty { padding:10px; }
 .note-ref { color:var(--accent); text-decoration:none; border-bottom:1px dotted currentColor; cursor:pointer; overflow-wrap:anywhere; }
+
+/* Note editing (noteedit.js) */
+.note-edit { display:flex; flex-direction:column; gap:8px; height:100%; }
+.note-edit-bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.note-edit-logl { font-size:12px; display:flex; align-items:center; gap:4px; }
+.note-edit-tabs { display:none; gap:6px; margin-left:auto; }
+.note-edit-split { display:grid; grid-template-columns:1fr 1fr; gap:12px; min-height:60vh; }
+.note-edit-text { width:100%; box-sizing:border-box; min-height:60vh; resize:vertical; font-family:ui-monospace,SFMono-Regular,monospace; font-size:13px; line-height:1.55; padding:10px; background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:6px; }
+.note-edit-preview { overflow:auto; border-left:1px solid var(--line); padding-left:12px; }
+.note-conflict { border:1px solid #f59e0b; border-radius:8px; padding:8px 12px; background:var(--panel); }
+.note-diff { font-family:ui-monospace,monospace; font-size:12px; max-height:40vh; overflow:auto; margin:6px 0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.note-diff-line.add { background:#22c55e22; }
+.note-diff-line.del { background:#ef444422; }
+@media(max-width:800px) {
+  .note-edit-tabs { display:flex; }
+  .note-edit-split { grid-template-columns:1fr; }
+  .note-edit-split.show-edit .note-edit-preview, .note-edit-split.show-preview .note-edit-text { display:none; }
+  .note-edit-preview { border-left:0; padding-left:0; }
+}

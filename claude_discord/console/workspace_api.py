@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
 
-from .vault import VaultError, wikilinks
+from .vault import VaultConflictError, VaultError, wikilinks
 from .workspace import WorkspaceConflictError, WorkspaceError
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .server import ConsoleServer
@@ -53,6 +56,49 @@ class WorkspaceRoutes:
             return web.json_response(await asyncio.to_thread(read))
         except (VaultError, OSError):
             return web.json_response({"error": "Unknown note"}, status=404)
+
+    async def save_note(self, request: web.Request) -> web.Response:
+        """Save an edited note (``path``, ``revision``, ``text``; ``log``: record it too).
+
+        A stale revision answers 409 with the note as it is now, so the browser can show
+        the difference. ``log`` adds a line to the enclosing Workspace entry's log.md and
+        the daily note, like a task change does.
+        """
+        body, err = await self.server._json(request)
+        if err is not None:
+            return err
+        vault = self.server.vault
+        try:
+            saved = await asyncio.to_thread(
+                vault.save, body.get("path"), body.get("text"), body.get("revision")
+            )
+        except VaultConflictError as exc:
+            return web.json_response({"error": str(exc), "current": exc.current}, status=409)
+        except (VaultError, OSError):
+            return web.json_response({"error": "Could not save the note"}, status=400)
+        self.server.workspace_plan.invalidate()
+        if body.get("log") is True:
+            await asyncio.to_thread(self._log_edit, saved["path"])
+        return web.json_response(saved)
+
+    def _log_edit(self, rel: str) -> None:
+        """Record an edit in the log of the Workspace entry the note sits in, if any."""
+        parts = rel.split("/")
+        if len(parts) < 3 or parts[0] != "02_Contexts":
+            return
+        workspace = self.server.workspace
+        for end in range(len(parts) - 1, 1, -1):
+            entry = "/".join(parts[1:end])
+            try:
+                workspace.entry(entry)
+            except (WorkspaceError, OSError, UnicodeError):
+                continue
+            try:
+                workspace._record(entry, f"ノート編集: {parts[-1]}")
+            except (WorkspaceError, OSError, UnicodeError) as exc:
+                # The note itself is saved; a missing log line must not fail the save.
+                logger.warning("console: note edit not logged for %s: %s", entry, exc)
+            return
 
     async def backlinks(self, request: web.Request) -> web.Response:
         """Notes linking to one note (slower than a read, so asked for separately)."""

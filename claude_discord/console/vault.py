@@ -27,6 +27,7 @@ import re
 import tempfile
 import threading
 import time
+from datetime import date
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -54,6 +55,14 @@ DEFAULT_EXCLUDES = (
 
 class VaultError(ValueError):
     """Unknown, excluded, unsafe or unreadable vault path (all look the same to a client)."""
+
+
+class VaultConflictError(VaultError):
+    """The note changed on disk after the browser read it; carries the current note."""
+
+    def __init__(self, current: dict[str, Any]) -> None:
+        super().__init__("The note changed. Review the difference and try again.")
+        self.current = current
 
 
 def exclude_file() -> Path:
@@ -104,6 +113,8 @@ class Vault:
         self.root = root.resolve() if root else None
         self.excludes_path = excludes or exclude_file()
         self._lock = threading.Lock()
+        #: Serialises note writes; separate from _lock, which patterns() takes inside them.
+        self._write_lock = threading.Lock()
         self._cache: tuple[float, list[str]] | None = None
 
     # -- exclusion list ----------------------------------------------------------
@@ -179,6 +190,41 @@ class Vault:
             "revision": _revision(data),
             "modified": path.stat().st_mtime,
         }
+
+    def save(self, rel: Any, text: Any, revision: Any) -> dict[str, Any]:
+        """Write a note the browser edited, refusing if it changed since *revision* was read.
+
+        ``最終更新:`` and a front-matter ``updated:`` date are moved to today when present.
+        Raises :class:`VaultConflictError` (with the current note) on a stale revision.
+        """
+        if not isinstance(text, str) or "\0" in text:
+            raise VaultError("The note must be text")
+        data = text.encode("utf-8")
+        if len(data) > MAX_NOTE_BYTES:
+            raise VaultError("The note is too large to save")
+        clean, path = self.resolve(rel, NOTE_SUFFIXES)
+        today = date.today().isoformat()
+        text = re.sub(r"(?m)^(最終更新:\s*\**)\d{4}-\d{2}-\d{2}", rf"\g<1>{today}", text)
+        if text.startswith("---\n"):
+            end = text.find("\n---", 4)
+            if end >= 0:
+                front = re.sub(r"(?m)^updated:.*$", f"updated: {today}", text[:end])
+                text = front + text[end:]
+        with self._write_lock:
+            current = self.note(clean)
+            if current["revision"] != revision:
+                raise VaultConflictError(current)
+            fd, temporary = tempfile.mkstemp(prefix=".console-", dir=path.parent)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8", newline="") as out:
+                    out.write(text)
+                os.chmod(temporary, path.stat().st_mode & 0o777)
+                if self.note(clean)["revision"] != revision:
+                    raise VaultConflictError(self.note(clean))
+                os.replace(temporary, path)
+            finally:
+                Path(temporary).unlink(missing_ok=True)
+        return self.note(clean)
 
     def file(self, rel: Any) -> tuple[Path, str]:
         """An attachment a note embeds: its path and content type."""

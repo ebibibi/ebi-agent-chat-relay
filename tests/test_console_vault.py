@@ -258,3 +258,53 @@ async def test_resolve_and_search_routes(env, vault, tmp_path, monkeypatch):
     )
     assert [h["path"] for h in (await hits.json())["hits"]] == ["04_Knowledge/Idea.md"]
     assert (await env.client.get("/console/api/workspace/search", params={"q": "x"})).status == 401
+
+
+def test_save_checks_revision_dates_and_paths(vault, tmp_path):
+    from datetime import date
+
+    from claude_discord.console.vault import VaultConflictError
+
+    target = vault / "04_Knowledge" / "Dated.md"
+    target.write_text(
+        "---\nupdated: 2020-01-01\n---\n最終更新: 2020-01-01\nbody\n", encoding="utf-8"
+    )
+    v = Vault(vault, tmp_path / "exclude.txt")
+    note = v.note("04_Knowledge/Dated.md")
+    saved = v.save("04_Knowledge/Dated.md", note["text"] + "more\n", note["revision"])
+    today = date.today().isoformat()
+    assert f"updated: {today}" in saved["text"] and f"最終更新: {today}" in saved["text"]
+    assert target.read_text(encoding="utf-8").endswith("body\nmore\n")
+    with pytest.raises(VaultConflictError) as stale:
+        v.save("04_Knowledge/Dated.md", "lost\n", note["revision"])
+    assert stale.value.current["revision"] == saved["revision"]
+    v.save_excludes("secret/\n")
+    for bad_path, text in (
+        ("secret/Diary.md", "x"),
+        ("../x.md", "x"),
+        ("04_Knowledge/New.md", "x"),
+    ):
+        with pytest.raises(VaultError):
+            v.save(bad_path, text, "r")
+    with pytest.raises(VaultError):
+        v.save("04_Knowledge/Dated.md", "x" * 2_100_000, saved["revision"])
+
+
+async def test_save_route_conflict_and_log(env, vault, tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    project = vault / "02_Contexts" / "Work" / "Site"
+    project.mkdir(parents=True)
+    (project / "status.md").write_text("# Site\n", encoding="utf-8")
+    (project / "notes.md").write_text("draft\n", encoding="utf-8")
+    env.console.workspace = Workspace(vault)
+    url = "/console/api/workspace/note"
+    note = await (
+        await env.client.get(url, headers=AUTH, params={"path": "02_Contexts/Work/Site/notes.md"})
+    ).json()
+    body = {"path": note["path"], "revision": note["revision"], "text": "final\n", "log": True}
+    assert (await env.client.put(url, headers=AUTH, json=body)).status == 403
+    saved = await env.client.put(url, headers=WRITE, json=body)
+    assert saved.status == 200 and (await saved.json())["text"] == "final\n"
+    assert "ノート編集: notes.md" in (project / "log.md").read_text(encoding="utf-8")
+    stale = await env.client.put(url, headers=WRITE, json=body)
+    assert stale.status == 409 and (await stale.json())["current"]["text"] == "final\n"
