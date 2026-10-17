@@ -115,6 +115,7 @@ async def test_console_thread_link_guidance_uses_verified_search_ids() -> None:
     config = RunConfig(surface=MemorySurface(), runner=_runner(), prompt="find earlier work")
     context = await _build_system_context(config)
     assert "[thread title](/#focus/t<thread_id>)" in context
+    assert "[note title](/#note/<vault-relative path>)" in context
     assert "/api/search?q=" in context
     assert "Never invent thread IDs" in context
 

@@ -18,10 +18,11 @@ const NOTES = {
     '[evil](javascript:window.pwned=3) [site](https://example.com) [rel](../B/Other.md)',
   ].join('\n'), links: {Other: 'B/Other.md', Missing: null, 'pic.png': 'img/pic.png'}},
   'B/Other.md': {text: '# Other\nBack to [[Home]]', links: {Home: 'A/Home.md'}},
+  '02_Contexts/個人事業主/会社設計書.md': {text: '# 会社設計書', links: {}},
 };
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 
-test('Note viewer', {timeout: 30000}, async t => {
+async function launch(t) {
   const browser = await chromium.launch({headless:true,args:['--no-sandbox']});
   t.after(() => browser.close());
   const page = await browser.newPage({viewport:{width:1280,height:900},locale:'ja-JP'});
@@ -46,6 +47,11 @@ test('Note viewer', {timeout: 30000}, async t => {
     else if (p.endsWith('/workspace')) data = {available:true,entries:[]};
     return route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});
   });
+  return page;
+}
+
+test('Note viewer', {timeout: 30000}, async t => {
+  const page = await launch(t);
   await page.goto('http://console.test/#focus');
   await page.evaluate(() => window.ConsoleNotes.open('A/Home.md'));
   const body = page.locator('.note-content');
@@ -86,4 +92,28 @@ test('Note viewer', {timeout: 30000}, async t => {
   await page.getByText('ノートが見つかりません').waitFor();
   await page.setViewportSize({width:390,height:844});
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 390));
+});
+
+test('note links in a conversation message open the viewer in place', {timeout: 30000}, async t => {
+  const page = await launch(t);
+  await page.goto('http://console.test/?token=secret#focus');
+  const encoded = '/#note/02_Contexts/%E5%80%8B%E4%BA%BA%E4%BA%8B%E6%A5%AD%E4%B8%BB/%E4%BC%9A%E7%A4%BE%E8%A8%AD%E8%A8%88%E6%9B%B8.md';
+  await page.evaluate((md) => {
+    const box = document.createElement('div'); box.id = 'msg';
+    box.append(MD.render(md)); document.body.append(box);
+  }, `[開く](${encoded}) [生](#note/02_Contexts/個人事業主/会社設計書.md) [外](https://elsewhere.test/#note/A/Home.md)`);
+  const links = page.locator('#msg a');
+  assert.equal(await links.count(), 3);
+  assert.equal(await links.nth(0).getAttribute('target'), null);
+  assert.equal(await links.nth(1).getAttribute('target'), null);
+  assert.equal(await links.nth(2).getAttribute('target'), '_blank');
+  for (const n of [0, 1]) {
+    await links.nth(n).click();
+    await page.locator('.note-content > h1', {hasText:'会社設計書'}).waitFor();
+    // Same tab, query (and its token) kept.
+    assert.equal(page.context().pages().length, 1);
+    assert.equal(new URL(page.url()).search, '?token=secret');
+    await page.getByRole('button', {name:'閉じる'}).click();
+    await page.waitForFunction(() => document.getElementById('note-viewer').hidden);
+  }
 });

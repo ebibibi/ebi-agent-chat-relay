@@ -15,6 +15,16 @@ window.ConsoleLinks = (() => {
       return {view:match[1], id:match[2]};
     } catch { return null; }
   }
+  // A note in the viewer: /#note/<vault path>, each segment URL-encoded or not.
+  function note(href) {
+    try {
+      const url = new URL(href, location.href);
+      if (url.origin !== location.origin || url.pathname !== '/' || url.username || url.password) return null;
+      if (!url.hash.startsWith('#note/')) return null;
+      const path = url.hash.slice(6).split('/').map(decodeURIComponent).join('/');
+      return path ? path : null;
+    } catch { return null; }
+  }
   function button(item) {
     const button = h('button',{class:'btn thread-copy-link',type:'button',text:L().copy});
     button.addEventListener('click',async () => {
@@ -42,6 +52,9 @@ window.ConsoleLinks = (() => {
       if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
       const anchor=event.target.closest?.('a[href]');
       if (!anchor || anchor.hasAttribute('download')) return;
+      const path=note(anchor.href);
+      // Open in place: following the href itself would drop the query (and its token).
+      if (path!==null && window.ConsoleNotes) { event.preventDefault(); window.ConsoleNotes.open(path); return; }
       const target=route(anchor.href);
       if (!target) return;
       event.preventDefault();
@@ -57,5 +70,5 @@ window.ConsoleLinks = (() => {
       }
     });
   }
-  return {route,button,wire};
+  return {route,note,button,wire};
 })();

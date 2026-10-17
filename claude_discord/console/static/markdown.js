@@ -1,6 +1,7 @@
 // Discord-flavoured Markdown → DOM nodes for the Ebi AI Console.
 // Builds elements with createElement/textContent only — never innerHTML — so a
-// message can format itself but cannot inject markup. Links are http(s), plus /console/api/files/ downloads.
+// message can format itself but cannot inject markup. Links are http(s), Console routes
+// (#focus/<id>, #note/<vault path>), plus /console/api/files/ downloads.
 "use strict";
 
 const MD = (() => {
@@ -11,8 +12,9 @@ const MD = (() => {
   // One alternation per construct; the first group that matched decides.
   const INLINE = new RegExp([
     /``([^`]+?)``|`([^`\n]+)`/.source,                                    // 1,2 code
-    // The one same-origin target: a delivered file (live.js downloads it with the token).
-    /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+|\/?#[a-z]+\/[A-Za-z0-9_-]+|\/console\/api\/files\/[^\s)]+)\)/.source, // 3,4 [text](url)
+    // Same-origin targets: Console routes, a note path (encoded or not), and a delivered file
+    // (live.js downloads it with the token).
+    /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+|\/?#note\/[^\s)]+|\/?#[a-z]+\/[A-Za-z0-9_-]+|\/console\/api\/files\/[^\s)]+)\)/.source, // 3,4 [text](url)
     /<(https?:\/\/[^\s>]+)>/.source,                                       // 5 <url>
     /(https?:\/\/[^\s<]*[^\s<.,:;"')\]!?*_~|])/.source,                   // 6 bare url
     /\*\*\*([^*][\s\S]*?)\*\*\*/.source,                                   // 7 bold italic
@@ -30,7 +32,7 @@ const MD = (() => {
   function link(href, label) {
     const a = el("a");
     a.href = href;
-    if (!window.ConsoleLinks?.route(href)) a.target = "_blank";
+    if (!window.ConsoleLinks?.route(href) && window.ConsoleLinks?.note(href) == null) a.target = "_blank";
     a.rel = "noopener noreferrer";
     a.append(...(typeof label === "string" ? [text(label)] : label));
     return a;
