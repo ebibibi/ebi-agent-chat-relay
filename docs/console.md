@@ -684,6 +684,13 @@ version on disk, overwrite on purpose, or go back to editing. **Also record in t
 line to the enclosing Workspace entry's `log.md` and the daily note. Leaving with unsaved changes
 asks first.
 
+**Notes a thread changed.** Under a conversation, **📝 Notes this thread changed** (folded, read
+when opened) lists the vault notes its session wrote — found in the session transcript like the
+✍️ binding, widened to any note under a numbered top-level vault folder — each with a diff from
+the vault's last recorded revision before the thread started to the file on disk now (so it also
+includes other edits made meanwhile, which the panel says). New notes show in full; excluded,
+hidden and unchanged notes are left out. `GET /console/api/items/{id}/notes`.
+
 The renderer is markdown-it (HTML in notes disabled) with small Obsidian plugins, sanitised by
 DOMPurify into a DOM fragment. Both are vendored single files (`vendor-*.min.js`, licenses in
 `static/THIRD_PARTY_LICENSES.md`) and are loaded only when the first note is opened, so the

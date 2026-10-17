@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
 
+from .thread_notes import changed_notes
 from .vault import VaultConflictError, VaultError, wikilinks
 from .workspace import WorkspaceConflictError, WorkspaceError
 
@@ -99,6 +100,26 @@ class WorkspaceRoutes:
                 # The note itself is saved; a missing log line must not fail the save.
                 logger.warning("console: note edit not logged for %s: %s", entry, exc)
             return
+
+    async def thread_notes(self, request: web.Request) -> web.Response:
+        """Vault notes the item's session wrote, with diffs since the thread started."""
+        item_id = request.match_info["item_id"]
+        repo = self.server.api.session_repo
+        if self.server.workspace.root is None or repo is None:
+            return web.json_response({"notes": []})
+        if not item_id.startswith("t") or not item_id[1:].isdigit():
+            return web.json_response({"notes": []})
+        record = await repo.get(int(item_id[1:]))
+        if record is None:
+            return web.json_response({"notes": []})
+        notes = await asyncio.to_thread(
+            changed_notes,
+            self.server.vault,
+            record.session_id,
+            record.backend,
+            record.created_at,
+        )
+        return web.json_response({"notes": notes, "since": record.created_at})
 
     async def backlinks(self, request: web.Request) -> web.Response:
         """Notes linking to one note (slower than a read, so asked for separately)."""
