@@ -91,3 +91,9 @@
    themed there (see scripts/codemirror/entry.js); only the host box is styled here. */
 .note-edit-text[hidden] { display:none; }
 .note-edit-cm { height:100%; min-height:0; border:1px solid var(--line); border-radius:6px; background:var(--panel); overflow:hidden; }
+/* Live preview: the editor alone, drawing the note itself (see scripts/codemirror/livepreview.js). */
+.note-edit.note-edit-live .note-edit-split { grid-template-columns:1fr; }
+.note-edit.note-edit-live .note-edit-preview, .note-edit.note-edit-live .note-edit-tabs { display:none; }
+.note-edit.note-edit-live .note-edit-split .note-edit-cm { display:block; }
+.note-edit-mode { margin-left:auto; }
+@media(max-width:800px) { .note-edit-mode { margin-left:0; } }

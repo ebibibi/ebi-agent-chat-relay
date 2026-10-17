@@ -702,10 +702,17 @@ line to the enclosing Workspace entry's `log.md` and the daily note. Leaving wit
 asks first.
 
 The editor starts as a plain textarea and is replaced by **CodeMirror 6** as soon as its
-vendored bundle (`vendor-codemirror.min.js`, ~410 KB, loaded on the first edit only) arrives:
+vendored bundle (`vendor-codemirror.min.js`, ~420 KB, loaded on the first edit only) arrives:
 Markdown highlighting, list continuation, search (`Ctrl+F`), undo history and `[[` completion of
 note names. It runs in a shadow root so the Console's `style-src 'self'` CSP still holds; if the
 bundle cannot load, the textarea stays. The bundle is built from `scripts/codemirror/`.
+
+With CodeMirror loaded the editor opens in **live preview** (Obsidian-style): headings, emphasis,
+inline code, links, `[[wikilinks]]`, quotes, bullets and task boxes are drawn in place and their
+markup shows only on the lines holding the cursor; a task box toggles `[ ]` ↔ `[x]` on click. It
+only decorates the text, so a save sends exactly what was typed. **⇆ Source and preview** switches
+to the side-by-side layout (and **👁 Live preview** back); the choice is kept in `localStorage`
+(`ccdb.noteEditMode`).
 
 **Notes a thread changed.** Under a conversation, **📝 Notes this thread changed** (folded, read
 when opened) lists the vault notes its session wrote — found in the session transcript like the

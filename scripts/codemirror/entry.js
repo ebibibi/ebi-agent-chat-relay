@@ -1,11 +1,12 @@
 // Entry for the Console's vendored CodeMirror 6 bundle (vendor-codemirror.min.js).
-// Exposes window.ConsoleCodeMirror.create(parent, options) and nothing else.
+// Exposes window.ConsoleCodeMirror.create(parent, options) and nothing else. With live: true
+// (or setLive later) it shows the Obsidian-style live preview from livepreview.js.
 //
 // The Console's CSP is style-src 'self'. CodeMirror styles itself through style-mod, which
 // writes a <style> element into a document (blocked) but uses a constructable stylesheet in a
 // shadow root (allowed). So the editor lives in an open shadow root on *parent*, and its look
 // comes from EditorView.theme with the Console's CSS variables, which inherit into it.
-import { EditorState } from "@codemirror/state";
+import { EditorState, Compartment } from "@codemirror/state";
 import {
   EditorView, keymap, drawSelection, highlightActiveLine, highlightSpecialChars,
   dropCursor, rectangularSelection, placeholder as placeholderExt,
@@ -14,7 +15,8 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirro
 import {
   syntaxHighlighting, defaultHighlightStyle, bracketMatching, indentOnInput,
 } from "@codemirror/language";
-import { markdown, markdownKeymap } from "@codemirror/lang-markdown";
+import { markdown, markdownKeymap, markdownLanguage } from "@codemirror/lang-markdown";
+import { livePreview } from "./livepreview.js";
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 
@@ -33,10 +35,32 @@ const consoleTheme = EditorView.theme({
   ".cm-tooltip-autocomplete ul li[aria-selected]": { backgroundColor: "var(--accent)", color: "#fff" },
   ".cm-searchMatch": { backgroundColor: "#f59e0b44" },
   ".cm-panels": { backgroundColor: "var(--panel)", color: "var(--text)" },
+  // Live preview (livepreview.js): reads like the rendered note, in a readable column.
+  "&.cm-live .cm-scroller": { fontFamily: "inherit", lineHeight: "1.65" },
+  "&.cm-live .cm-content": { maxWidth: "860px", margin: "0 auto", padding: "16px 24px 40vh", fontSize: "15px" },
+  "&.cm-live .cm-activeLine": { backgroundColor: "transparent" },
+  ".cm-lp-h": { fontWeight: "700", textDecoration: "none" },
+  ".cm-lp-h1": { fontSize: "1.6em" }, ".cm-lp-h2": { fontSize: "1.35em" }, ".cm-lp-h3": { fontSize: "1.15em" },
+  ".cm-lp-h *": { textDecoration: "none" },
+  ".cm-lp-strong": { fontWeight: "700" }, ".cm-lp-em": { fontStyle: "italic" },
+  ".cm-lp-strike": { textDecoration: "line-through", opacity: "0.75" },
+  ".cm-lp-code": { fontFamily: "ui-monospace, SFMono-Regular, monospace", backgroundColor: "#ffffff12", borderRadius: "4px", padding: "0 3px" },
+  ".cm-lp-codeblock": { fontFamily: "ui-monospace, SFMono-Regular, monospace", fontSize: "0.9em", backgroundColor: "#ffffff0d" },
+  ".cm-lp-link, .cm-lp-link *": { color: "var(--accent)", textDecoration: "none" },
+  ".cm-lp-quote": { borderLeft: "3px solid var(--line)", paddingLeft: "12px", opacity: "0.9" },
+  ".cm-lp-fm *": { textDecoration: "none" },
+  ".cm-lp-fm": { fontFamily: "ui-monospace, SFMono-Regular, monospace", fontSize: "0.85em", opacity: "0.6" },
+  ".cm-lp-bullet": { display: "inline-block", width: "0.8em", fontWeight: "700" },
+  ".cm-lp-task": { margin: "0 6px 0 0", verticalAlign: "middle", cursor: "pointer" },
+  ".cm-lp-hr": { display: "inline-block", width: "100%", borderTop: "1px solid var(--line)", verticalAlign: "middle" },
 }, { dark: true });
 
+// Live preview on or off; the class switches the editor to the reading layout.
+const liveMode = (on) => on ? [livePreview, EditorView.editorAttributes.of({ class: "cm-live" })] : [];
+
 function create(host, options = {}) {
-  const { doc = "", onChange, onSave, onScroll, linkSource, placeholder } = options;
+  const { doc = "", onChange, onSave, onScroll, linkSource, placeholder, live = false } = options;
+  const mode = new Compartment();
   // [[ … completes note names from linkSource(query) → Promise<string[]>.
   const wikilinks = async (context) => {
     const before = context.matchBefore(/\[\[[^\]\n|#]*$/);
@@ -71,7 +95,8 @@ function create(host, options = {}) {
         EditorState.allowMultipleSelections.of(true), indentOnInput(),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }), bracketMatching(),
         closeBrackets(), rectangularSelection(), highlightActiveLine(),
-        highlightSelectionMatches(), EditorView.lineWrapping, markdown({ completeHTMLTags: false }),
+        highlightSelectionMatches(), EditorView.lineWrapping, markdown({ base: markdownLanguage, completeHTMLTags: false }),
+        mode.of(liveMode(live)),
         consoleTheme,
         autocompletion({ override: [wikilinks], activateOnTyping: true }),
         placeholder ? placeholderExt(placeholder) : [],
@@ -107,6 +132,7 @@ function create(host, options = {}) {
     get value() { return view.state.doc.toString(); },
     set value(text) { view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } }); },
     focus: () => view.focus(),
+    setLive: (on) => view.dispatch({ effects: mode.reconfigure(liveMode(on)) }),
     destroy: () => view.destroy(),
     view,
   };

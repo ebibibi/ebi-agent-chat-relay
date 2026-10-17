@@ -4,7 +4,8 @@
 // differs, then lets the human reload theirs away or overwrite on purpose.
 // It starts as a plain textarea, which always works; CodeMirror 6 (vendored single file,
 // loaded on the first edit only) then takes its place with Markdown highlighting, list
-// continuation, search and [[wikilink]] completion. If it cannot load, the textarea stays.
+// continuation, search, [[wikilink]] completion and an Obsidian-style live preview. If it
+// cannot load, the textarea stays.
 // Loaded after notes.js, which calls start() and supplies the renderer.
 "use strict";
 
@@ -12,12 +13,14 @@ window.ConsoleNoteEdit = (() => {
   const ja = () => document.documentElement.lang === "ja";
   const L = () => ja() ? {
     save: "💾 保存", cancel: "やめる", log: "作業ログにも記録", edit: "編集", preview: "プレビュー",
+    toLive: "👁 ライブプレビュー", toSplit: "⇆ ソースとプレビュー",
     saved: "保存しました", leave: "保存していない変更があります。破棄しますか？",
     conflict: "⚠️ 編集中にこのノートが別の場所で変更されました（AI や Obsidian）。",
     conflictHint: "− は今ディスクにある内容、＋ はあなたの編集です。",
     reload: "ディスクの内容を読み込む（自分の編集は破棄）", overwrite: "自分の編集で上書き保存", back: "編集に戻る",
   } : {
     save: "💾 Save", cancel: "Cancel", log: "Also record in the work log", edit: "Edit", preview: "Preview",
+    toLive: "👁 Live preview", toSplit: "⇆ Source and preview",
     saved: "Saved", leave: "You have unsaved changes. Discard them?",
     conflict: "⚠️ This note changed elsewhere while you were editing (an agent or Obsidian).",
     conflictHint: "− is what is on disk now, + is your edit.",
@@ -80,13 +83,13 @@ window.ConsoleNoteEdit = (() => {
     } catch { return []; }
   }
   // Swap the textarea for CodeMirror, keeping whatever was typed meanwhile.
-  async function upgrade(area, use, { onChange, onSave, onScroll }) {
+  async function upgrade(area, use, { onChange, onSave, onScroll, live }) {
     let lib;
     try { lib = await loadLibrary(); } catch { return; }
     if (!area.isConnected) return;
     const holder = h("div", { class: "note-edit-cm" });
     area.after(holder);
-    const editor = lib.create(holder, { doc: area.value, onChange, onSave, onScroll, linkSource });
+    const editor = lib.create(holder, { doc: area.value, onChange, onSave, onScroll, linkSource, live });
     area.hidden = true;
     use(editor);
     editor.focus();
@@ -148,6 +151,8 @@ window.ConsoleNoteEdit = (() => {
     return { use: (next) => { source = next; }, fromEditor };
   }
 
+  const MODE_KEY = "ccdb.noteEditMode";
+
   /** Replace *host*'s content with an editor for *note*; *render* turns Markdown into nodes. */
   function start(note, host, { render, done }) {
     const l = L();
@@ -163,7 +168,7 @@ window.ConsoleNoteEdit = (() => {
     sync.use(source);
     area.addEventListener("scroll", sync.fromEditor, { passive: true });
     // Re-rendering resets the preview's layout, so it is aligned with the editor again.
-    const draw = () => { preview.replaceChildren(render(source.value)); sync.fromEditor(); };
+    const draw = () => { if (living()) return; preview.replaceChildren(render(source.value)); sync.fromEditor(); };
     let timer = 0;
     area.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(draw, 250); });
     const log = h("input", { type: "checkbox", class: "note-edit-log" });
@@ -171,6 +176,22 @@ window.ConsoleNoteEdit = (() => {
     const tab = (mode, label) => h("button", { type: "button", class: "chip note-edit-tab", "data-mode": mode, text: label,
       onclick: () => { split.className = `note-edit-split show-${mode}`; if (mode === "preview") draw(); } });
     const dirty = () => source.value !== original;
+    // Live preview (CodeMirror only) draws the note in the editor itself, so the preview pane
+    // goes away; the choice is remembered. The textarea fallback always shows both panes.
+    let live = localStorage.getItem(MODE_KEY) !== "split";
+    const living = () => live && Boolean(source.setLive);
+    const modeBtn = h("button", { type: "button", class: "chip note-edit-mode", hidden: true, onclick: () => {
+      live = !live;
+      localStorage.setItem(MODE_KEY, live ? "live" : "split");
+      showMode();
+      draw();
+      source.focus();
+    } });
+    const showMode = () => {
+      modeBtn.textContent = live ? l.toSplit : l.toLive;
+      host.classList.toggle("note-edit-live", living());
+      if (source.setLive) source.setLive(live);
+    };
 
     async function save(force = false) {
       if (saving) return;
@@ -221,11 +242,13 @@ window.ConsoleNoteEdit = (() => {
         h("button", { type: "button", class: "btn primary", text: l.save, onclick: () => save() }),
         h("button", { type: "button", class: "btn", text: l.cancel, onclick: cancel }),
         h("label", { class: "note-edit-logl" }, log, ` ${l.log}`),
+        modeBtn,
         h("span", { class: "note-edit-tabs" }, tab("edit", l.edit), tab("preview", l.preview))),
       split);
     draw();
     area.focus();
-    upgrade(area, (editor) => { source = editor; sync.use(editor); }, {
+    upgrade(area, (editor) => { source = editor; sync.use(editor); modeBtn.hidden = false; showMode(); }, {
+      live,
       onChange: () => { clearTimeout(timer); timer = setTimeout(draw, 250); },
       onScroll: () => sync.fromEditor(),
       onSave: () => save(),
