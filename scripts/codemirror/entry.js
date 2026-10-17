@@ -19,7 +19,10 @@ import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 
 const consoleTheme = EditorView.theme({
-  "&": { color: "var(--text)", backgroundColor: "var(--panel)", height: "100%", minHeight: "60vh", fontSize: "13px" },
+  // A fixed-height box that scrolls inside itself; growing with the text would let the host
+  // clip the lower lines out of reach of the wheel and the mouse.
+  "&": { color: "var(--text)", backgroundColor: "var(--panel)", height: "100%", fontSize: "13px" },
+  ".cm-scroller": { overflow: "auto" },
   "&.cm-focused": { outline: "none" },
   ".cm-scroller": { fontFamily: "ui-monospace, SFMono-Regular, monospace", lineHeight: "1.55" },
   ".cm-content": { caretColor: "var(--text)", padding: "10px 0" },
@@ -33,7 +36,7 @@ const consoleTheme = EditorView.theme({
 }, { dark: true });
 
 function create(host, options = {}) {
-  const { doc = "", onChange, onSave, linkSource, placeholder } = options;
+  const { doc = "", onChange, onSave, onScroll, linkSource, placeholder } = options;
   // [[ … completes note names from linkSource(query) → Promise<string[]>.
   const wikilinks = async (context) => {
     const before = context.matchBefore(/\[\[[^\]\n|#]*$/);
@@ -56,6 +59,7 @@ function create(host, options = {}) {
   };
   const root = host.shadowRoot || host.attachShadow({ mode: "open" });
   const parent = document.createElement("div");
+  parent.style.height = "100%"; // a CSSOM write, which style-src 'self' allows
   root.append(parent);
   const view = new EditorView({
     parent,
@@ -80,7 +84,26 @@ function create(host, options = {}) {
       ],
     }),
   });
+  if (onScroll) view.scrollDOM.addEventListener("scroll", onScroll, { passive: true });
+  // Scroll sync with the preview works in source lines (1-based, fractional within a line).
+  // Heights are measured from the top of the document, so they hold however far it scrolled.
+  const viewTop = () => view.scrollDOM.getBoundingClientRect().top - view.documentTop;
+  const topLine = () => {
+    const y = viewTop();
+    const block = view.lineBlockAtHeight(y);
+    return view.state.doc.lineAt(block.from).number + Math.min(1, Math.max(0, (y - block.top) / Math.max(1, block.height)));
+  };
+  const scrollToLine = (line) => {
+    const doc = view.state.doc;
+    const n = Math.min(doc.lines, Math.max(1, Math.floor(line)));
+    const block = view.lineBlockAt(doc.line(n).from);
+    view.scrollDOM.scrollTop += block.top + (line - n) * block.height - viewTop();
+  };
   return {
+    topLine,
+    scrollToLine,
+    atEnd: () => view.scrollDOM.scrollTop + view.scrollDOM.clientHeight >= view.scrollDOM.scrollHeight - 2,
+    scrollToEnd: () => { view.scrollDOM.scrollTop = view.scrollDOM.scrollHeight; },
     get value() { return view.state.doc.toString(); },
     set value(text) { view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } }); },
     focus: () => view.focus(),
