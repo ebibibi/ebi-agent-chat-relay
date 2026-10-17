@@ -44,6 +44,8 @@ test('CodeMirror editor under the real CSP', {timeout: 40000}, async t => {
     else if (p.endsWith('/workspace')) data = {available:true,entries:[]};
     return route.fulfill({contentType:'application/json',body:JSON.stringify(data),headers:{'Content-Security-Policy':CSP}});
   });
+  // The side-by-side layout (live preview has its own test).
+  await page.addInitScript(() => localStorage.setItem('ccdb.noteEditMode', 'split'));
   await page.goto('http://console.test/#focus');
   await page.evaluate(() => window.ConsoleNotes.open('A/Note.md'));
   await page.locator('.note-content > h1').waitFor();

@@ -38,6 +38,8 @@ test('long note: the editor scrolls and the preview follows it', {timeout: 40000
     else if (p.endsWith('/workspace')) data = {available: true, entries: []};
     return route.fulfill({contentType: 'application/json', body: JSON.stringify(data)});
   });
+  // The side-by-side layout (live preview has its own test).
+  await page.addInitScript(() => localStorage.setItem('ccdb.noteEditMode', 'split'));
   await page.goto('http://console.test/#focus');
   await page.evaluate(() => window.ConsoleNotes.open('A/Long.md'));
   await page.locator('.note-content > h1').waitFor();
