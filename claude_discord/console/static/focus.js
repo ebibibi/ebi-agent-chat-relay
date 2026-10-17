@@ -124,6 +124,7 @@ window.ConsoleFocus = (() => {
     add(T.focus_first, now.slice(0, 1));
     add(T.focus_next, now.slice(1));
     node(ws?.tasksCard());
+    node(ws?.stalledCard());
     add(T.focus_elsewhere, away);
     add(T.focus_waiting, later);
     node(ws?.waitingCard());

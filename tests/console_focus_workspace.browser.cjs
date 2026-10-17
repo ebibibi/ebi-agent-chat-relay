@@ -18,6 +18,15 @@ function planFixture() {
       {kind:'single',path:'Work',text:'Call back',score:40,line:2,raw:'[P2] Call back 📅2026-10-17',
         revision:'v2',priority:'P2',due:'2026-10-17',days:1},
     ],
+    stalled_total:7,
+    stalled:[
+      {kind:'project',path:'Old/Long',text:'Restart it',score:10,line:4,raw:'Restart it',revision:'v3',
+        priority:'P2',status:null,stale_days:30,due:null,days:null},
+      {kind:'no_next',path:'Old/Plain',text:null,score:20,line:null,raw:null,revision:null,
+        priority:'P2',status:null,stale_days:null,due:null,days:null},
+      ...[1,2,3,4,5].map(n => ({kind:'no_next',path:`Old/More${n}`,text:null,score:10,line:null,raw:null,
+        revision:null,priority:'P3',status:null,stale_days:8,due:null,days:null})),
+    ],
     waiting:[
       {path:'Work/Website',who:'Client',what:'Feedback',since:'2026-10-01',due:'2026-10-16',days:0},
       {path:'Work/Website',who:'Vendor',what:'Quote',since:null,due:'2026-10-30',days:14},
@@ -73,13 +82,22 @@ for (const mode of ['available','plugin-missing']) {
     await summary.click();
     await page.getByText('Ship the website').waitFor();
     // Ranked rows: Markdown flattened, tags, and rows without a line offer only "open".
-    const rows = page.locator('.ws-focus:not(.ws-focus-waiting) .ws-focus-item');
+    const rows = page.locator('.ws-focus:not(.ws-focus-waiting):not(.ws-focus-stalled) .ws-focus-item');
     assert.equal(await rows.count(), 3);
     assert.equal(await rows.nth(0).locator('.ws-focus-text').innerText(), 'Ship the guide');
     assert.match(await rows.nth(0).innerText(), /期限2日超過/);
     assert.match(await rows.nth(0).innerText(), /ほか 1 件/);
     assert.equal(await rows.nth(1).getByRole('button', {name:'✅ 完了'}).count(), 0);
     assert.match(await page.locator('.ws-focus-lapsed').innerText(), /2 件/);
+    // Stalled card: first five open with a stall tag, the rest folded; no next action says so.
+    const stalled = page.locator('.ws-focus-stalled > .ws-focus-list > .ws-focus-item');
+    assert.equal(await stalled.count(), 5);
+    assert.match(await page.locator('.ws-focus-stalled .ws-focus-head').innerText(), /停滞中のプロジェクト（7件）/);
+    assert.match(await stalled.nth(0).innerText(), /30日停滞/);
+    assert.equal(await stalled.nth(0).getByRole('button', {name:'▶ AIに実行'}).count(), 1);
+    assert.match(await stalled.nth(1).innerText(), /次のアクションが未設定/);
+    assert.equal(await stalled.nth(1).getByRole('button', {name:'✅ 完了'}).count(), 0);
+    assert.match(await page.locator('.ws-focus-stalled-more summary').innerText(), /ほか 2 件/);
     // Waiting list shows only entries whose follow-up has not come yet.
     const waiting = page.locator('.ws-focus-waiting .ws-focus-item');
     assert.equal(await waiting.count(), 1);
@@ -87,13 +105,13 @@ for (const mode of ['available','plugin-missing']) {
     // Re-date keeps the recurrence rule after the new date.
     await rows.nth(0).getByRole('button', {name:'📅 期限'}).click();
     await rows.nth(0).locator('input[type=date]').fill('2026-10-20');
-    await page.waitForFunction(() => document.querySelectorAll('.ws-focus:not(.ws-focus-waiting) .ws-focus-item').length === 2);
+    await page.waitForFunction(() => document.querySelectorAll('.ws-focus:not(.ws-focus-waiting):not(.ws-focus-stalled) .ws-focus-item').length === 2);
     assert.deepEqual(writes.at(-1), {path:'Work/Website',line:3,revision:'v1',
       text:'**Ship** the [[Docs/guide|guide]] 📅2026-10-20 🔁毎週'});
     // Complete writes done:true for the exact line and revision.
     plan = planFixture(); plan.items = plan.items.slice(2);
     await page.evaluate(() => window.ConsoleFocusWorkspace.load());
-    await page.waitForFunction(() => document.querySelectorAll('.ws-focus:not(.ws-focus-waiting) .ws-focus-item').length === 1);
+    await page.waitForFunction(() => document.querySelectorAll('.ws-focus:not(.ws-focus-waiting):not(.ws-focus-stalled) .ws-focus-item').length === 1);
     await rows.nth(0).getByRole('button', {name:'▶ AIに実行'}).click();
     await page.waitForFunction(() => state.open === 't1');
     assert.deepEqual(writes.at(-1), {path:'Work',line:2,revision:'v2'});
@@ -101,7 +119,7 @@ for (const mode of ['available','plugin-missing']) {
     await page.evaluate(() => window.ConsoleFocusWorkspace.load());
     await page.locator('.ws-focus-item').first().waitFor();
     await rows.nth(2).getByRole('button', {name:'✅ 完了'}).click();
-    await page.waitForFunction(() => document.querySelectorAll('.ws-focus:not(.ws-focus-waiting) .ws-focus-item').length === 2);
+    await page.waitForFunction(() => document.querySelectorAll('.ws-focus:not(.ws-focus-waiting):not(.ws-focus-stalled) .ws-focus-item').length === 2);
     assert.deepEqual(writes.at(-1), {path:'Work',line:2,revision:'v2',done:true});
     await page.setViewportSize({width:390,height:844});
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 390));

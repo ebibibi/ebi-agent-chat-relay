@@ -46,6 +46,8 @@
 .ws-focus-actions .btn { padding:3px 8px; font-size:12px; }
 .ws-focus-date[hidden] { display:none; }
 .ws-focus-lapsed { padding:6px 14px; font-size:12px; }
+.ws-stale { color:var(--me); border-color:currentColor; }
+.ws-focus-stalled-more summary { cursor:pointer; padding:6px 14px; font-size:12px; }
 .ws-focus-plan details { padding:8px 14px; }
 .ws-focus-plan summary { cursor:pointer; font-weight:600; }
 .ws-focus-plan-body { margin-top:6px; font-size:13px; overflow-wrap:anywhere; }

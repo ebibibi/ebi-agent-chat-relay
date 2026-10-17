@@ -243,3 +243,63 @@ def test_equal_scores_keep_goodmornings_order(notes, plugin):
     scan["single_actions"][0]["score"] = 80
     shaped = plan.shape(scan)
     assert [i["kind"] for i in shaped["items"]] == ["project", "single", "follow_up"]
+
+
+def _project(rel_path: str, score: int, category: str, *, days: int = 0, actions=("Do it",)):
+    return {
+        "rel_path": rel_path,
+        "score": score,
+        "category": category,
+        "priority": "P2",
+        "next_actions": list(actions),
+        "current_status": "",
+        "staleness_days": days,
+        "nearest_deadline": None,
+        "due_follow_ups": [],
+        "follow_up_scores": [],
+        "waiting": [],
+        "lapsed_milestones": [],
+    }
+
+
+def test_stale_projects_stay_ranked_and_one_always_gets_a_slot(notes, plugin):
+    plan = WorkspacePlan(Workspace(notes), plugin)
+    scan = plan._scan()
+    busy = [_project(f"Busy/{n}", 20, "active") for n in range(plan_module.MAX_ITEMS + 2)]
+    scan["projects"] = [
+        *busy,
+        _project("Old/Mild", 10, "stale", days=9),
+        _project("Old/Long", 10, "stale", days=30),
+        _project("Old/Plain", 20, "no_next_action", actions=()),
+        _project("Old/Empty", 10, "stale", days=12, actions=()),
+    ]
+    scan["single_actions"] = []
+    shaped = plan.shape(scan)
+    assert len(shaped["items"]) == plan_module.MAX_ITEMS
+    last = shaped["items"][-1]
+    # Equal scores: the longest-stalled one takes the reserved slot.
+    assert last["path"] == "Old/Long" and last["stale_days"] == 30
+    assert all(i["stale_days"] is None for i in shaped["items"][:-1])
+    assert shaped["total"] == len(busy) + 2
+    stalled = [(s["path"], s["kind"]) for s in shaped["stalled"]]
+    assert stalled == [
+        ("Old/Long", "project"),
+        ("Old/Mild", "project"),
+        ("Old/Empty", "no_next"),
+        ("Old/Plain", "no_next"),
+    ]
+    assert shaped["stalled_total"] == 4
+    assert shaped["stalled"][3]["stale_days"] is None
+
+
+def test_a_stale_project_already_shown_is_not_duplicated(notes, plugin):
+    plan = WorkspacePlan(Workspace(notes), plugin)
+    scan = plan._scan()
+    scan["projects"] = [_project("Old/Urgent", 50, "stale", days=11)] + [
+        _project(f"Busy/{n}", 20, "active") for n in range(plan_module.MAX_ITEMS + 2)
+    ]
+    scan["single_actions"] = []
+    items = plan.shape(scan)["items"]
+    assert items[0]["path"] == "Old/Urgent" and items[0]["stale_days"] == 11
+    assert [i["path"] for i in items].count("Old/Urgent") == 1
+    assert sum(1 for i in items if i["stale_days"] is not None) == 1
