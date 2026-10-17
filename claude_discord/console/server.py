@@ -1044,7 +1044,7 @@ class ConsoleServer:
     async def _deliver(self, item_id: str, text: str, who: str) -> web.Response:
         """Queue *text* as the human's next message in the item's conversation."""
         try:
-            text = await self._workspace_prompt(item_id, text)
+            brief = await self._workspace_brief(item_id)
         except WorkspaceError as exc:
             return _error(str(exc), 400)
         busy = _error("the conversation is being compacted; send again in a moment", 409)
@@ -1053,7 +1053,7 @@ class ConsoleServer:
             return (
                 busy
                 if key in self._compacting
-                else await self._reply_in_console(item_id, key, text, who)
+                else await self._reply_in_console(item_id, key, text, who, brief)
             )
         thread, err = await self._thread_for(item_id)
         if err:
@@ -1070,7 +1070,9 @@ class ConsoleServer:
         schedule_thread_outcome(thread, None)
         prompt = f"{text}\n\n-# 🖥️ via Ebi AI Console ({who})"
         self._background(
-            cog.deliver_relayed_message(thread, prompt, interrupt=False, into_running_turn=True)
+            cog.deliver_relayed_message(
+                thread, prompt, interrupt=False, into_running_turn=True, brief=brief
+            )
         )
         logger.info("console: %s replied in thread %s", _q(who), thread.id)
         return web.json_response({"status": "delivered"}, status=202)
@@ -1329,7 +1331,7 @@ class ConsoleServer:
         if self.sessions is None:
             return _error("the console cannot run agents in this deployment", 503)
         try:
-            prompt = await self._workspace_prompt(item_id, prompt)
+            brief = await self._workspace_brief(item_id)
         except WorkspaceError as exc:
             return _error(str(exc), 400)
         prompt, err = await self._attach_long_text(prompt)
@@ -1344,6 +1346,7 @@ class ConsoleServer:
                 title=item.title or prompt[:100],
                 prompt=prompt,
                 author=who,
+                brief=brief,
             )
         except Exception:
             logger.exception("console: start of %s failed", _q(item_id))
@@ -1367,7 +1370,7 @@ class ConsoleServer:
         return web.json_response({"item": overlay.as_dict()}, status=201)
 
     async def _reply_in_console(
-        self, item_id: str, thread_key: int, text: str, who: str
+        self, item_id: str, thread_key: int, text: str, who: str, brief: str | None
     ) -> web.Response:
         if self.sessions is None:
             return _error("the console cannot run agents in this deployment", 503)
@@ -1376,7 +1379,9 @@ class ConsoleServer:
         except WorkItemError as exc:
             return _error(str(exc), 400)
         try:
-            injected = await self.sessions.reply(thread_key, text, who, into_running_turn=True)
+            injected = await self.sessions.reply(
+                thread_key, text, who, into_running_turn=True, brief=brief
+            )
         except LookupError:
             return _error("unknown conversation", 404)
         logger.info("console: %s replied in conversation %s", _q(who), thread_key)
@@ -1411,11 +1416,12 @@ class ConsoleServer:
                 body["workspace_source"] = "heuristic"
                 body["workspace_reason"] = bound[-1].get("workspace_reason")
 
-    async def _workspace_prompt(self, item_id: str, text: str) -> str:
+    async def _workspace_brief(self, item_id: str) -> str | None:
+        """The Workspace instructions for the item's agent, sent beside the human's text."""
         if self.workspace.root is None:
-            return text
+            return None
         path = await self._workspace_path(item_id)
-        return await asyncio.to_thread(self.workspace.prompt, path, text) if path else text
+        return await asyncio.to_thread(self.workspace.brief, path) if path else None
 
     async def _workspace_finish(self, item: WorkItem, *, done: bool) -> dict[str, Any] | None:
         """Mirror a human's done/reopen into the bound Workspace entry, never failing it.

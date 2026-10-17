@@ -76,18 +76,26 @@ class ConsoleSessionHost:
         )
         return True
 
-    async def start(self, *, external_id: str, title: str, prompt: str, author: str) -> int:
+    async def start(
+        self, *, external_id: str, title: str, prompt: str, author: str, brief: str | None = None
+    ) -> int:
         """Open a conversation for *external_id* and start its first turn.
 
         Returns as soon as the conversation exists; the turn runs in the
-        background.
+        background. *brief* goes to the agent with the prompt (see ``_submit``).
         """
         surface = await self.frontend.open(external_id=external_id, title=title)
-        await self._submit(surface, prompt, author)
+        await self._submit(surface, prompt, author, brief=brief)
         return surface.thread_key
 
     async def reply(
-        self, thread_key: int, prompt: str, author: str, *, into_running_turn: bool = False
+        self,
+        thread_key: int,
+        prompt: str,
+        author: str,
+        *,
+        into_running_turn: bool = False,
+        brief: str | None = None,
     ) -> bool:
         """Continue a conversation with the human's message.
 
@@ -99,7 +107,9 @@ class ConsoleSessionHost:
             raise LookupError(f"unknown console conversation {thread_key}")
         # A reply answers whatever the marker asked; clear it like a chat reply would.
         await apply_outcome(self.frontend.repo, thread_key, None)
-        return await self._submit(surface, prompt, author, into_running_turn=into_running_turn)
+        return await self._submit(
+            surface, prompt, author, into_running_turn=into_running_turn, brief=brief
+        )
 
     async def resume_queued(self, thread_key: int, prompt: str) -> None:
         """Run a turn that was queued when the bot restarted.
@@ -122,10 +132,22 @@ class ConsoleSessionHost:
         author: str,
         *,
         into_running_turn: bool = False,
+        brief: str | None = None,
     ) -> bool:
+        """Record the human's message and run it.
+
+        *brief* (Workspace instructions) is recorded as a bot message of its own, so
+        the conversation keeps only what the person wrote and the Console shows the
+        brief under activity. The agent receives both.
+        """
         await self.frontend.repo.append(
             surface.thread_key, author=author, is_bot=False, content=prompt
         )
+        if brief:
+            await self.frontend.repo.append(
+                surface.thread_key, author="Ebi Workspace", is_bot=True, content=brief
+            )
+            prompt = f"{prompt}\n\n{brief}"
         if into_running_turn and await self._inject(surface.thread_key, prompt):
             return True
         self._spawn(surface, prompt)
