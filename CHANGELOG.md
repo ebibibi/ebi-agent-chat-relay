@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Google Antigravity CLI (`agy`) as a sixth backend** (#1153) — `/backend antigravity`,
+  `/model <id from agy models>` and `/effort low|medium|high|xhigh|max` work as they do for the
+  other backends, from Discord, Teams and the console picker. `CCDB_AGY_COMMAND` points at the
+  binary (default `agy`). The prompt goes over stdin as a stream-json message. Permissions map
+  onto agy's own flags (`--dangerously-skip-permissions`, `--mode`); because agy's headless default
+  auto-denies approval-gated tools, a denied tool is reported instead of rendering as a successful
+  empty answer, and `CCDB_ALLOWED_TOOLS` is refused in any mode where agy approves tools on its
+  own (skipped permissions, `acceptEdits`, `auto`), since agy cannot enforce it. The parser is built from
+  recorded agy 1.3.5 runs; per-turn usage is rebuilt from steps because `result.usage` is the
+  conversation's running total (ADR-0016).
+
 ### Fixed
 
 - Console: buttons on Discord messages (such as the restart approval in an upgrade thread) work

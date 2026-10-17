@@ -1,6 +1,6 @@
 """Persistent, runtime-mutable backend/model selection.
 
-Reads and writes the current backend (claude/codex/local/agui/pi) and per-backend
+Reads and writes the current backend (claude/codex/local/agui/pi/antigravity) and per-backend
 model preference to ``SettingsRepository`` (sqlite key-value store).
 
 Resolution order for any field:
@@ -18,7 +18,7 @@ from .database.settings_repo import SettingsRepository
 logger = logging.getLogger(__name__)
 
 # Valid backend names. Keep in sync with claude_code_core.backend.create_backend().
-ALL_BACKENDS = ("claude", "codex", "local", "agui", "pi")
+ALL_BACKENDS = ("claude", "codex", "local", "agui", "pi", "antigravity")
 
 # Settings keys
 BACKEND_GLOBAL = "backend.global"
@@ -97,6 +97,8 @@ class BackendSettings:
             # one (fully qualified, "provider/id") without the pi TUI; empty
             # still means "let pi decide".
             "pi": env_model_for_pi or "",
+            # agy uses its own configured default when --model is omitted.
+            "antigravity": "",
         }
 
     def for_children(self) -> BackendSettings:

@@ -342,13 +342,14 @@ for idle deadlines, attachment retries, credentials and startup rollback.
 |----------|-------------|---------|
 | `DISCORD_BOT_TOKEN` | Your Discord bot token | (required) |
 | `DISCORD_CHANNEL_ID` | Channel ID for Claude chat | (required) |
-| `CCDB_BACKEND` | Backend to use: `claude`, `codex`, `local`, `agui`, or `pi` | `claude` |
+| `CCDB_BACKEND` | Backend to use: `claude`, `codex`, `local`, `agui`, `pi`, or `antigravity` | `claude` |
 | `CCDB_COMMAND` | Path or name of the CLI binary (overrides `CLAUDE_COMMAND`). Used by the initial runner picked from `CCDB_BACKEND`; superseded by the two per-backend variables below when `/backend` switches at runtime. | _(auto: `claude` or `codex`)_ |
 | `CCDB_CLAUDE_COMMAND` | Explicit path to the Claude CLI binary. Used by `BackendFactory` whenever `/backend claude` is active, regardless of the initial `CCDB_BACKEND`. Falls back to `CLAUDE_COMMAND`, then `claude` (PATH). | (optional) |
 | `CCDB_CODEX_COMMAND` | Explicit path to the OpenAI Codex CLI binary. Required when running the bot under systemd (default service PATH does not include `~/.npm-global/bin`). Falls back to `codex` (PATH). | (optional) |
 | `CCDB_CODEX_SANDBOX_OVERRIDE` | Optional deployment-wide Codex `--sandbox` override: `read-only`, `workspace-write`, or `danger-full-access`. Leave unset to use the Codex CLI default. Use `danger-full-access` only when the host's outer isolation is trusted and OS namespace restrictions prevent Codex's own sandbox from starting. This setting is intentionally not exposed per thread. | (optional) |
 | `CCDB_AGUI_URL` | Exact HTTP(S) run endpoint for `/backend agui`. Redirects are rejected. | (required for `agui`) |
 | `CCDB_AGUI_TOKEN` | Optional bearer token for the AG-UI endpoint. Stripped from Claude/Codex subprocess environments. | (optional) |
+| `CCDB_AGY_COMMAND` | Explicit path to the Google Antigravity CLI (`agy`) used by `/backend antigravity`. agy installs to `~/.local/bin`, which a systemd unit's PATH usually lacks. Falls back to `agy` (PATH). See [Antigravity](../backends.md#google-antigravity-agy). | (optional) |
 | `CCDB_PI_COMMAND` | Explicit path to the [pi](https://github.com/earendil-works/pi) CLI binary. Falls back to `pi` (PATH). | (optional) |
 | `CCDB_PI_ALLOW_UNSANDBOXED` | Set to `1` to allow `/backend pi` to spawn at all. pi has no sandbox and no approval loop in its non-interactive modes, so ccdb refuses the turn instead of running unsandboxed by default. See [pi backend](../pi-backend.md). | `0` (backend refuses) |
 | `CCDB_PI_MODEL` | Default pi model, fully qualified (`anthropic/claude-opus-5`, `ollama/gpt-oss:120b`). Unset means pi picks its own default, which is not necessarily one the account's credentials can call. `/model set` overrides it per thread or globally. See [pi backend](../pi-backend.md). | (optional) |

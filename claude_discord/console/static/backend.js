@@ -6,7 +6,7 @@
 "use strict";
 
 window.ConsoleBackend = (() => {
-  const LABELS = { claude: "Claude", codex: "Codex", local: "Local", agui: "AG-UI", pi: "pi" };
+  const LABELS = { claude: "Claude", codex: "Codex", local: "Local", agui: "AG-UI", pi: "pi", antigravity: "Antigravity" };
   let panel = null;
   let defaults = null; // the default catalog, for the nav line
 

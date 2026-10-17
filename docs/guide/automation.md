@@ -135,7 +135,7 @@ curl -X POST http://localhost:8080/api/tasks \
        "backend": "codex", "model": "gpt-5.6-sol"}'
 ```
 
-- `backend` must be one of `claude`, `codex`, `local`, `agui`, `pi`.
+- `backend` must be one of `claude`, `codex`, `local`, `agui`, `pi`, `antigravity`.
 - `model` is free text — the same ids `/model set` accepts — but is only valid
   **together with a backend**, because a model id belongs to one backend. Sending a
   model alone is a `400` rather than a task that fails every night on whichever backend

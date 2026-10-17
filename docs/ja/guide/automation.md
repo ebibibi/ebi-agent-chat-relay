@@ -133,7 +133,7 @@ curl -X POST http://localhost:8080/api/tasks \
        "backend": "codex", "model": "gpt-5.6-sol"}'
 ```
 
-- `backend` は `claude`、`codex`、`local`、`agui`、`pi` のいずれかです。
+- `backend` は `claude`、`codex`、`local`、`agui`、`pi`、`antigravity` のいずれかです。
 - `model` は自由記述（`/model set` が受け付けるのと同じ ID）ですが、**バックエンドと一緒に指定したときだけ**有効です。モデル ID は 1 つのバックエンドに属するためです。モデルだけを送ると、その時たまたま有効だったバックエンドで毎晩失敗するタスクを作るのではなく、`400` を返します。
 - 両方を省略すれば何も変わりません。既存のタスクと同じく、スレッド／グローバルの設定に従います。
 - `PATCH /api/tasks/{id}` で固定を設定・変更でき、`null` で解除できます。モデルを固定したままバックエンドだけを解除する操作も、同じ理由で拒否されます。

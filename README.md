@@ -80,11 +80,11 @@ Where you talk and which agent works are two independent choices. Any frontend w
 agent, and one relay process can serve several frontends at once
 (`CCDB_FRONTENDS=discord,teams,console`) over the same sessions, scheduler and API.
 
-| Frontend × backend | Claude Code | OpenAI Codex | Local (Ollama etc.) | pi | AG-UI |
-|---|:---:|:---:|:---:|:---:|:---:|
-| **Ebi AI Console** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Discord** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Microsoft Teams** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Frontend × backend | Claude Code | OpenAI Codex | Local (Ollama etc.) | pi | AG-UI | Antigravity |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Ebi AI Console** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Discord** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Microsoft Teams** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 - **Ebi AI Console** — the dedicated GUI shown above, for desktop and phone. It can be your only
   frontend: no chat account needed.

@@ -343,13 +343,14 @@ CHAT_ONLY_CHANNEL_IDS=444,555
 |--------|------|-----------|
 | `DISCORD_BOT_TOKEN` | Discord Bot トークン | （必須） |
 | `DISCORD_CHANNEL_ID` | Claude チャット用チャンネル ID | （必須） |
-| `CCDB_BACKEND` | 使用するバックエンド: `claude`、`codex`、`local`、`agui`、または `pi` | `claude` |
+| `CCDB_BACKEND` | 使用するバックエンド: `claude`、`codex`、`local`、`agui`、`pi`、または `antigravity` | `claude` |
 | `CCDB_COMMAND` | CLI バイナリのパスまたは名前（`CLAUDE_COMMAND` より優先）。`CCDB_BACKEND` で選択された初期ランナーに使用され、実行時に `/backend` で切り替えた際は以下の 2 つのバックエンド別変数が優先されます。 | _（自動: `claude` or `codex`）_ |
 | `CCDB_CLAUDE_COMMAND` | Claude CLI バイナリの明示的なパス。`/backend claude` がアクティブなとき `BackendFactory` が使用（`CCDB_BACKEND` の初期値に依存しない）。`CLAUDE_COMMAND`、次に `claude`（PATH）へのフォールバックあり。 | （オプション） |
 | `CCDB_CODEX_COMMAND` | OpenAI Codex CLI バイナリの明示的なパス。systemd 下で Bot を実行する場合に必須（デフォルトのサービス PATH に `~/.npm-global/bin` が含まれない）。`codex`（PATH）へのフォールバックあり。 | （オプション） |
 | `CCDB_CODEX_SANDBOX_OVERRIDE` | Codex の `--sandbox` をデプロイ全体で上書きする任意設定: `read-only`、`workspace-write`、`danger-full-access`。未設定なら Codex CLI のデフォルトを使用します。`danger-full-access` は、ホスト側の外側の隔離が信頼でき、かつ OS の namespace 制限によって Codex 自身の sandbox が起動できない場合にのみ使ってください。この設定はスレッド単位では意図的に公開していません。 | （オプション） |
 | `CCDB_AGUI_URL` | `/backend agui` で使用する正確な HTTP(S) run endpoint。redirect は拒否されます。 | （`agui` では必須） |
 | `CCDB_AGUI_TOKEN` | AG-UI endpoint 用の任意の bearer token。Claude/Codex subprocess の環境から除去されます。 | （オプション） |
+| `CCDB_AGY_COMMAND` | `/backend antigravity` が使う Google Antigravity CLI（`agy`）の明示的なパス。agy は `~/.local/bin` に入るため、systemd ユニットの PATH には通常含まれません。`agy`（PATH）へのフォールバックあり。[Antigravity](../../backends.md#google-antigravity-agy) 参照。 | （オプション） |
 | `CCDB_PI_COMMAND` | [pi](https://github.com/earendil-works/pi) CLI バイナリの明示的なパス。`pi`（PATH）へのフォールバックあり。 | （オプション） |
 | `CCDB_PI_ALLOW_UNSANDBOXED` | `/backend pi` の起動を許可する場合に `1`。pi は非対話モードで sandbox も承認ループも持たないため、既定では ccdb がターンを拒否します。[pi バックエンド](../../pi-backend.md) 参照。 | `0`（バックエンドは拒否） |
 | `CCDB_PI_MODEL` | pi の既定モデル。プロバイダ込みの完全修飾名で指定します（`anthropic/claude-opus-5`、`ollama/gpt-oss:120b`）。未設定の場合は pi 自身の既定モデルが選ばれますが、それはアカウントの認証情報で呼び出せるモデルとは限りません。`/model set` はスレッド単位・全体のいずれでもこの値を上書きします。[pi バックエンド](../../pi-backend.md) 参照。 | （オプション） |
