@@ -2,7 +2,7 @@
 type: adr
 id: ADR-0016
 title: Map ccdb permissions onto agy's own flags instead of gating the Antigravity backend
-decision: Ship the Google Antigravity CLI as a sixth CLI SessionBackend whose permissions follow ccdb's existing settings (skip-permissions and permission mode), without a pi-style opt-in, and surface agy's headless auto-denials as errors.
+decision: Ship the Google Antigravity CLI as a sixth CLI SessionBackend whose permissions follow ccdb's existing settings (skip-permissions and permission mode), without a pi-style opt-in, surface agy's headless auto-denials as errors, and refuse a tool allowlist in any mode where agy approves tools on its own.
 status: accepted
 date: 2026-10-17
 deciders: [Masahiko Ebisuda, Claude]
@@ -32,8 +32,11 @@ no ccdb setting described what a pi thread could do.
   for Claude describe an agy thread truthfully.
 - A turn whose only outcome is a denial is reported as an error naming the denied action and the
   two ways to allow it. A denial alongside an answer is reported as a warning.
-- `allowed_tools` with skipped permissions is refused: agy cannot enforce the list, and running
-  every tool while the operator believes a list is in force is the false claim ADR-0007 rejected.
+- `allowed_tools` is refused whenever agy may approve tools on its own: skipped permissions,
+  `acceptEdits` (`--mode accept-edits`) and `auto` (`--mode auto`). agy cannot enforce the list,
+  and exceeding it while the operator believes it is in force is the false claim ADR-0007
+  rejected. Only agy's default (auto-deny) and `plan` run with an allowlist; an unknown mode is
+  treated as self-approving.
 
 ## Consequences
 

@@ -254,6 +254,24 @@ class TestRun:
         assert events[0].error is not None and "CCDB_ALLOWED_TOOLS" in events[0].error
         runner.last_spawn.assert_not_called()  # type: ignore[attr-defined]
 
+    @pytest.mark.parametrize("mode", ["auto", "acceptEdits", "bypassPermissions"])
+    async def test_allowlist_is_refused_when_agy_approves_on_its_own(self, mode: str) -> None:
+        """`--mode auto` / `accept-edits` let agy approve tools itself, bypassing the list."""
+        runner = AntigravityRunner(permission_mode=mode, allowed_tools=["Read"])
+        events = await _collect(runner, _FakeProcess())
+        assert len(events) == 1
+        assert events[0].error is not None and "CCDB_ALLOWED_TOOLS" in events[0].error
+        runner.last_spawn.assert_not_called()  # type: ignore[attr-defined]
+
+    @pytest.mark.parametrize("mode", ["default", "plan"])
+    async def test_allowlist_runs_when_agy_denies_by_default(self, mode: str) -> None:
+        """Default (auto-deny) and plan approve nothing, so the list cannot be exceeded."""
+        lines = [(line + "\n").encode() for line in _lines("agy_turn_resumed.jsonl")]
+        runner = AntigravityRunner(permission_mode=mode, allowed_tools=["Read"])
+        events = await _collect(runner, _FakeProcess(stdout_lines=lines))
+        runner.last_spawn.assert_called_once()  # type: ignore[attr-defined]
+        assert events[-1].is_complete and events[-1].error is None
+
     async def test_exit_without_result_is_an_error(self) -> None:
         process = _FakeProcess(stdout_lines=[], stderr=b"boom", returncode=2)
         events = await _collect(AntigravityRunner(), process)

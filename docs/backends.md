@@ -192,8 +192,9 @@ auto-denied and the turn ends without doing the work. ccdb maps its own settings
 Because the default fails closed, no extra opt-in is needed to spawn agy (unlike pi). A denied
 tool is reported in the thread instead of rendering as an empty answer; allow-rules under
 `permissions.allow` in agy's own `settings.json` are honoured. agy has no tool allowlist flag, so
-ccdb refuses a turn that combines `CCDB_ALLOWED_TOOLS` with skipped permissions rather than run
-every tool.
+ccdb refuses a turn that combines `CCDB_ALLOWED_TOOLS` with any mode in which agy approves tools
+on its own (skipped permissions, `acceptEdits`, `auto`) rather than silently exceed the list. With
+an allowlist, only permission mode `default` (auto-deny) or `plan` runs.
 
 **Limits.** The prompt is sent over stdin as one stream-json message, never in argv.
 `APPEND_SYSTEM_PROMPT` is not passed (agy has no flag for it), images are not forwarded,

@@ -24,8 +24,10 @@ Permissions: ``dangerously_skip_permissions`` (or ``bypassPermissions``) maps
 to ``--dangerously-skip-permissions``; ``acceptEdits``/``plan``/``auto`` map to
 ``--mode``. Without the skip flag agy fails closed (auto-deny), so unlike pi
 no separate opt-in is needed to spawn it. agy has no tool allowlist flag, so a
-configured ``allowed_tools`` cannot be enforced once permissions are skipped;
-the runner refuses that combination instead of silently running every tool.
+configured ``allowed_tools`` cannot be enforced whenever agy may approve tools
+on its own (skipped permissions, ``acceptEdits``, ``auto``); the runner refuses
+that combination instead of silently exceeding the list. Only agy's default
+(auto-deny) and ``plan`` run with an allowlist.
 """
 
 from __future__ import annotations
@@ -56,10 +58,16 @@ VALID_AGY_EFFORTS: frozenset[str] = frozenset({"low", "medium", "high", "xhigh",
 # (request-review, which auto-denies in headless mode).
 _MODE_MAP: dict[str, str] = {"acceptEdits": "accept-edits", "plan": "plan", "auto": "auto"}
 
+# Modes in which agy approves nothing on its own, so a ccdb tool allowlist cannot
+# be exceeded: agy's default (headless auto-deny) and plan. Every other mapping
+# (skip-permissions, accept-edits, auto) lets agy approve tools by itself.
+_ALLOWLIST_SAFE_MODES: frozenset[str] = frozenset({"default", "plan"})
+
 ALLOWLIST_REFUSAL = (
     "The antigravity backend cannot enforce CCDB_ALLOWED_TOOLS: agy has no tool allowlist, "
-    "and with permissions skipped it would run every tool. Unset CCDB_ALLOWED_TOOLS or "
-    "CCDB_DANGEROUSLY_SKIP_PERMISSIONS for this deployment, or use another backend."
+    "and with permissions skipped or permission mode acceptEdits/auto it approves tools on "
+    "its own. Unset CCDB_ALLOWED_TOOLS, use permission mode default or plan without "
+    "CCDB_DANGEROUSLY_SKIP_PERMISSIONS, or use another backend."
 )
 
 # agy tool names -> the names ccdb renders and categorises. Only ``run_command``
@@ -304,11 +312,18 @@ class AntigravityRunner:
     def _skips_permissions(self) -> bool:
         return self.dangerously_skip_permissions or self.permission_mode == "bypassPermissions"
 
+    def _self_approves(self) -> bool:
+        """True when agy may approve a tool without asking (the allowlist would not hold).
+
+        Unknown modes count as self-approving: refusing is the safe direction.
+        """
+        return self._skips_permissions() or self.permission_mode not in _ALLOWLIST_SAFE_MODES
+
     async def run(
         self, prompt: str, session_id: str | None = None
     ) -> AsyncGenerator[StreamEvent, None]:
         """Run agy for one turn and yield stream events."""
-        if self.allowed_tools and self._skips_permissions():
+        if self.allowed_tools and self._self_approves():
             yield StreamEvent(
                 raw={}, message_type=MessageType.RESULT, is_complete=True, error=ALLOWLIST_REFUSAL
             )
