@@ -50,7 +50,9 @@ test('Note search and links in replies', {timeout: 30000}, async t => {
   await input.press('ArrowDown');
   await input.press('Enter');
   await page.waitForFunction(() => location.hash === '#note/B/Plan%20old.md');
+  await page.locator('#note-viewer:not([hidden]) .note-content').waitFor();
   await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.getElementById('note-viewer').hidden);
   // Ctrl+Shift+F: text with snippet; Tab switches modes.
   await page.keyboard.press('Control+Shift+F');
   await page.locator('.nsearch-input').fill('viewer');
@@ -69,13 +71,18 @@ test('Note search and links in replies', {timeout: 30000}, async t => {
   assert.equal(await msg.locator('pre a').count(), 0);
   await msg.locator('a.note-ref', {hasText:'log.md'}).click();
   await page.waitForFunction(() => location.hash.startsWith('#note/02_Contexts/Work/Site/log.md'));
+  await page.locator('#note-viewer:not([hidden]) .note-content').waitFor();
   await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.getElementById('note-viewer').hidden);
   await msg.locator('a.note-ref', {hasText:'the plan'}).click();
   await page.waitForFunction(() => location.hash === '#note/A/Plan.md');
+  await page.locator('#note-viewer:not([hidden]) .note-content').waitFor();
   await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.getElementById('note-viewer').hidden);
   await msg.locator('a.note-ref', {hasText:'Gone'}).click();
   await page.locator('.toast', {hasText:'リンク先のノートがありません'}).waitFor();
   await msg.locator('a.note-ref', {hasText:'My Note'}).click();
   await page.waitForFunction(() => location.hash === '#note/04_Knowledge/My%20Note.md');
+  await page.locator('#note-viewer:not([hidden]) .note-content').waitFor();
   assert.ok(opened.includes('04_Knowledge/My Note.md'));
 });

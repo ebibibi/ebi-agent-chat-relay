@@ -1057,7 +1057,9 @@ function wire() {
   $("help").addEventListener("click", () => { if ($("help").dataset.mode !== "login") showHelp(false); });
 
   document.addEventListener("keydown", (e) => {
-    const typing = e.target.matches("input, textarea, select");
+    // A rich editor (contenteditable, possibly inside a shadow root) is typing too.
+    const typing = e.target.matches("input, textarea, select, [contenteditable]")
+      || e.composedPath().some((n) => n.isContentEditable);
     if (e.key === "Escape") {
       if (typing) { e.target.blur(); return; }
       if (!$("help").hidden) showHelp(false); else closeItem();

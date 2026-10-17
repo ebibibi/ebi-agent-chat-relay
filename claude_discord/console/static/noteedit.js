@@ -2,7 +2,9 @@
 // phone). Ctrl+S / ⌘S saves. The save carries the revision the edit started from; if an
 // agent or Obsidian changed the file meanwhile, the server refuses (409) and this shows what
 // differs, then lets the human reload theirs away or overwrite on purpose.
-// No dependency: a plain textarea. (An optional richer editor can replace it later.)
+// It starts as a plain textarea, which always works; CodeMirror 6 (vendored single file,
+// loaded on the first edit only) then takes its place with Markdown highlighting, list
+// continuation, search and [[wikilink]] completion. If it cannot load, the textarea stays.
 // Loaded after notes.js, which calls start() and supplies the renderer.
 "use strict";
 
@@ -58,6 +60,38 @@ window.ConsoleNoteEdit = (() => {
     return h("div", { class: "note-diff" }, ...rows);
   }
 
+  let library = null;
+  function loadLibrary() {
+    library ||= new Promise((resolve, reject) => {
+      if (window.ConsoleCodeMirror) { resolve(window.ConsoleCodeMirror); return; }
+      const s = document.createElement("script");
+      s.src = "/static/vendor-codemirror.min.js";
+      s.onload = () => (window.ConsoleCodeMirror ? resolve(window.ConsoleCodeMirror) : reject(new Error("no editor")));
+      s.onerror = () => { library = null; reject(new Error("editor did not load")); };
+      document.head.append(s);
+    });
+    return library;
+  }
+  // Note names for [[ completion, from the same index the quick switcher uses.
+  async function linkSource(query) {
+    try {
+      const data = await api(`/workspace/notes?q=${encodeURIComponent(query)}`);
+      return data.notes.slice(0, 30).map((p) => p.split("/").pop().replace(/\.md$/, ""));
+    } catch { return []; }
+  }
+  // Swap the textarea for CodeMirror, keeping whatever was typed meanwhile.
+  async function upgrade(area, use, { onChange, onSave }) {
+    let lib;
+    try { lib = await loadLibrary(); } catch { return; }
+    if (!area.isConnected) return;
+    const holder = h("div", { class: "note-edit-cm" });
+    area.after(holder);
+    const editor = lib.create(holder, { doc: area.value, onChange, onSave, linkSource });
+    area.hidden = true;
+    use(editor);
+    editor.focus();
+  }
+
   /** Replace *host*'s content with an editor for *note*; *render* turns Markdown into nodes. */
   function start(note, host, { render, done }) {
     const l = L();
@@ -67,21 +101,23 @@ window.ConsoleNoteEdit = (() => {
     const area = h("textarea", { class: "note-edit-text", spellcheck: "false", "aria-label": l.edit });
     area.value = note.text;
     const preview = h("div", { class: "note-edit-preview note-content" });
-    const draw = () => preview.replaceChildren(render(area.value));
+    // What the editor holds: the textarea until CodeMirror replaces it.
+    let source = { get value() { return area.value; }, focus: () => area.focus() };
+    const draw = () => preview.replaceChildren(render(source.value));
     let timer = 0;
     area.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(draw, 250); });
     const log = h("input", { type: "checkbox", class: "note-edit-log" });
     const split = h("div", { class: "note-edit-split show-edit" }, area, preview);
     const tab = (mode, label) => h("button", { type: "button", class: "chip note-edit-tab", "data-mode": mode, text: label,
       onclick: () => { split.className = `note-edit-split show-${mode}`; if (mode === "preview") draw(); } });
-    const dirty = () => area.value !== original;
+    const dirty = () => source.value !== original;
 
     async function save(force = false) {
       if (saving) return;
       saving = true;
       try {
         const saved = await api("/workspace/note", { method: "PUT",
-          body: { path: note.path, revision, text: area.value, log: log.checked } });
+          body: { path: note.path, revision, text: source.value, log: log.checked } });
         toast(l.saved);
         window.removeEventListener("beforeunload", guard);
         done(saved);
@@ -96,7 +132,7 @@ window.ConsoleNoteEdit = (() => {
     function conflict(current) {
       const panel = h("div", { class: "note-conflict" },
         h("p", { text: l.conflict }), h("p", { class: "dim", text: l.conflictHint }),
-        diffNode(current.text, area.value),
+        diffNode(current.text, source.value),
         h("div", { class: "note-edit-bar" },
           h("button", { type: "button", class: "btn", text: l.reload, onclick: () => {
             window.removeEventListener("beforeunload", guard);
@@ -129,6 +165,10 @@ window.ConsoleNoteEdit = (() => {
       split);
     draw();
     area.focus();
+    upgrade(area, (editor) => { source = editor; }, {
+      onChange: () => { clearTimeout(timer); timer = setTimeout(draw, 250); },
+      onSave: () => save(),
+    });
     return { dirty, cancel };
   }
 

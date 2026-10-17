@@ -1,4 +1,5 @@
-// Editing a note: source + live preview, Ctrl+S, revision conflict with a diff, mobile tabs.
+// Editing a note: source + live preview, Ctrl+S, revision conflict with a diff, mobile tabs —
+// with the plain textarea that stays when the CodeMirror bundle cannot load.
 // Run: NODE_PATH=<dir with playwright> node --test tests/console_noteedit.browser.cjs
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
@@ -20,6 +21,8 @@ test('Edit a note with conflict handling', {timeout: 30000}, async t => {
     const req = route.request();
     const url = new URL(req.url());
     const p = url.pathname;
+    // The textarea path: CodeMirror's bundle is unavailable here (its own test covers it).
+    if (p.endsWith('/vendor-codemirror.min.js')) return route.fulfill({status: 404, body: ''});
     if (p === '/' || p.startsWith('/static/')) {
       const file = p === '/' ? 'index.html' : path.basename(p);
       return route.fulfill({body:fs.readFileSync(path.join(root,file)),contentType:
