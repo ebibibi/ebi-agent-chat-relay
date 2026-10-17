@@ -26,6 +26,7 @@ from claude_discord.discord_ui.embeds import COLOR_ASK, COLOR_TOOL
         "-# 📎 Files attached",
         "[WAIT FINISHED — automatic continuation]\nWait #12 ended",
         "[PR COMPLETION GATE — automatic continuation]",
+        "[MESSAGE FROM ANOTHER AI SESSION — thread 123]\nhello",
         "[MESSAGE FROM ANOTHER CLAUDE SESSION — thread 123]\nhello",
         "🟡 <@418192003549888523> The agent has finished — your reply is needed here.",
         "```\n🔗 API: Anthropic API (direct)\n📁 ~ | 💪 opus\n```",

@@ -483,7 +483,7 @@ class ClaudeChatCog(commands.Cog):
             sections.setdefault(section, []).append(f"`/{cmd.name}` — {cmd.description}")
 
         embed = discord.Embed(
-            title="🤖 Claude & Codex Bot — Help",
+            title="🤖 AI Agent Bot — Help",
             description=(
                 "**Getting started**: type a message in the configured channel.\n"
                 "A new thread is created and your selected AI backend begins working.\n\n"
@@ -508,7 +508,7 @@ class ClaudeChatCog(commands.Cog):
         """
         if not isinstance(interaction.channel, discord.Thread):
             await interaction.response.send_message(
-                "This command can only be used in a Claude chat thread.", ephemeral=True
+                "This command can only be used in an agent chat thread.", ephemeral=True
             )
             return
 
@@ -537,7 +537,7 @@ class ClaudeChatCog(commands.Cog):
         """Trigger manual context compaction via the CLI's /compact command."""
         if not isinstance(interaction.channel, discord.Thread):
             await interaction.response.send_message(
-                "This command can only be used in a Claude chat thread.", ephemeral=True
+                "This command can only be used in an agent chat thread.", ephemeral=True
             )
             return
 
@@ -571,7 +571,7 @@ class ClaudeChatCog(commands.Cog):
 
     @app_commands.command(
         name="goal",
-        description="Set a completion condition — Claude keeps working until it's met",
+        description="Set a completion condition — the agent keeps working until it's met",
     )
     @app_commands.describe(condition="Goal condition (omit to check status, 'clear' to cancel)")
     async def goal_session(
@@ -582,7 +582,7 @@ class ClaudeChatCog(commands.Cog):
         """Set, check, or clear a goal via the CLI's /goal command."""
         if not isinstance(interaction.channel, discord.Thread):
             await interaction.response.send_message(
-                "This command can only be used in a Claude chat thread.", ephemeral=True
+                "This command can only be used in an agent chat thread.", ephemeral=True
             )
             return
 
@@ -629,12 +629,12 @@ class ClaudeChatCog(commands.Cog):
             working_dir_override=record.working_dir,
         )
 
-    @app_commands.command(name="clear", description="Reset the Claude Code session for this thread")
+    @app_commands.command(name="clear", description="Reset the agent session for this thread")
     async def clear_session(self, interaction: discord.Interaction) -> None:
         """Reset the session for the current thread."""
         if not isinstance(interaction.channel, discord.Thread):
             await interaction.response.send_message(
-                "This command can only be used in a Claude chat thread.", ephemeral=True
+                "This command can only be used in an agent chat thread.", ephemeral=True
             )
             return
 
@@ -678,7 +678,7 @@ class ClaudeChatCog(commands.Cog):
         """
         if not isinstance(interaction.channel, discord.Thread):
             await interaction.response.send_message(
-                "This command can only be used in a Claude chat thread.", ephemeral=True
+                "This command can only be used in an agent chat thread.", ephemeral=True
             )
             return
 
@@ -752,7 +752,7 @@ class ClaudeChatCog(commands.Cog):
         """
         if not isinstance(interaction.channel, discord.Thread):
             await interaction.response.send_message(
-                "This command can only be used in a Claude chat thread.", ephemeral=True
+                "This command can only be used in an agent chat thread.", ephemeral=True
             )
             return
 

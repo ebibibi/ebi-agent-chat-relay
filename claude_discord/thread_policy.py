@@ -15,7 +15,7 @@ THREAD_AUTO_ARCHIVE_MINUTES = 10080
 
 # What a thread opened by a message is called before any rename: the message's
 # opening text, which is what Discord shows in the sidebar.
-DEFAULT_THREAD_NAME = "Claude Chat"
+DEFAULT_THREAD_NAME = "AI Chat"
 THREAD_NAME_LIMIT = 100
 
 

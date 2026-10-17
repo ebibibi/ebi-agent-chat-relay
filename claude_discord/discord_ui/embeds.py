@@ -272,7 +272,7 @@ def timeout_embed(seconds: int) -> discord.Embed:
 
 def ask_embed(question: str, header: str = "") -> discord.Embed:
     """Create an embed for an AskUserQuestion interactive prompt."""
-    title = f"❓ {header}" if header else "❓ Claude needs your input"
+    title = f"❓ {header}" if header else "❓ The agent needs your input"
     return discord.Embed(
         title=title[:256],
         description=question[:4096],
