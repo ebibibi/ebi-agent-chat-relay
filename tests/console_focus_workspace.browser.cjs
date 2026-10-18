@@ -125,3 +125,84 @@ for (const mode of ['available','plugin-missing']) {
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 390));
   });
 }
+
+// Every line of today's plan can be handed to an agent: a line that names a known task runs
+// that task (bound to its Markdown line), anything else becomes a new item that starts at once.
+test('Focus plan lines hand off to AI', {timeout: 30000}, async t => {
+  const browser = await chromium.launch({headless:true,args:['--no-sandbox']});
+  t.after(() => browser.close());
+  const page = await browser.newPage({viewport:{width:1440,height:900},locale:'ja-JP'});
+  const runs = [];
+  const created = [];
+  const plan = {...planFixture(), today_plan: [
+    '### 今日が期限', '',
+    '- 動画の概要欄に記事を貼る（[[02_Contexts/Work/single-actions.md|Work]]）', '',
+    '### オススメ着手順', '',
+    '1. [[02_Contexts/Work/Website/status.md|Work/Website]] — P1・期限超過',
+    '2. 新しいこと（[[02_Contexts/Nowhere/status.md|Nowhere]]）', '',
+    '### アクティブ', '',
+    '- [[02_Contexts/Work/single-actions.md|Work]] · P2 · 期限: 2026-10-18 — 動画の概要欄に記事を貼る',
+  ].join('\n')};
+  const entries = [
+    {path:'Work',name:'Work',kind:'context',revision:'w1',
+      tasks:[{line:5,text:'[P2] 動画の概要欄に記事を貼る 📅2026-10-18',done:false}]},
+    {path:'Work/Website',name:'Website',kind:'project',revision:'v1',tasks:[]},
+  ];
+  let items = [];
+  await page.route('http://console.test/**', async route => {
+    const p = new URL(route.request().url()).pathname;
+    if (p === '/' || p.startsWith('/static/')) {
+      const file = p === '/' ? 'index.html' : path.basename(p);
+      return route.fulfill({body:fs.readFileSync(path.join(root,file)),contentType:
+        file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html'});
+    }
+    let data = {};
+    if (p.endsWith('/board')) data = {items,slots:{},places:[]};
+    else if (p.endsWith('/workspace/plan')) data = plan;
+    else if (p.endsWith('/workspace')) data = {available:true,entries};
+    else if (p.endsWith('/workspace/run')) {
+      runs.push(route.request().postDataJSON());
+      items = [{id:`r${runs.length}`,thread_id:'1',title:'run',status:'running',bucket:'ai',running:true,priority:2}];
+      data = {item:items[0]};
+    } else if (p.endsWith('/items') && route.request().method() === 'POST') {
+      created.push(route.request().postDataJSON());
+      items = [{id:'n1',thread_id:'2',title:'new',status:'running',bucket:'ai',running:true,priority:2}];
+      data = {item:items[0]};
+    } else if (p.endsWith('/messages')) data = {messages:[]};
+    return route.fulfill({contentType:'application/json',body:JSON.stringify(data)});
+  });
+  await page.goto('http://console.test/');
+  await page.evaluate(() => setView('focus'));
+  await page.locator('.ws-focus-plan summary').click();
+  const buttons = page.locator('.ws-focus-plan-body li').getByRole('button', {name:'▶ AIに任せる'});
+  await buttons.first().waitFor();
+  assert.equal(await buttons.count(), 4);
+  // Wiki links read as their label, not as a vault path.
+  const shown = await page.locator('.ws-focus-plan-body').innerText();
+  assert.match(shown, /動画の概要欄に記事を貼る（Work）/);
+  assert.doesNotMatch(shown, /02_Contexts|\[\[/);
+  // A task named in the plan runs that exact line of its single-actions file.
+  await buttons.nth(0).click();
+  await page.waitForFunction(() => state.open === 'r1');
+  assert.deepEqual(runs.at(-1), {path:'Work',line:5,revision:'w1'});
+  // A project line runs the project's ranked next action.
+  await page.evaluate(() => setView('focus'));
+  await buttons.nth(1).click();
+  await page.waitForFunction(() => state.open === 'r2');
+  assert.deepEqual(runs.at(-1), {path:'Work/Website',line:3,revision:'v1'});
+  // Anything else becomes a new item that an agent starts right away.
+  await page.evaluate(() => setView('focus'));
+  await buttons.nth(2).click();
+  await page.waitForFunction(() => state.open === 'n1');
+  assert.equal(created.length, 1);
+  assert.equal(created[0].title, '新しいこと');
+  assert.equal(created[0].start, true);
+  assert.equal(created[0].workspace_path, undefined);
+  assert.match(created[0].note, /今日のプラン/);
+  assert.match(created[0].note, /\[\[02_Contexts\/Nowhere\/status\.md\|Nowhere\]\]/);
+  // "[[entry]] · P2 · 期限 — task" names the task after the dash.
+  await page.evaluate(() => setView('focus'));
+  await buttons.nth(3).click();
+  await page.waitForFunction(() => state.open === 'r3');
+  assert.deepEqual(runs.at(-1), {path:'Work',line:5,revision:'w1'});
+});
