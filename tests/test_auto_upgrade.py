@@ -1366,3 +1366,73 @@ class TestUnloadWhileWaiting:
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+
+
+class TestThreadOutcome:
+    """The upgrade thread's title says whether it waits on a person or is finished."""
+
+    @staticmethod
+    def _record() -> tuple[list[str], MagicMock]:
+        seen: list[str] = []
+
+        def request(thread, outcome):
+            seen.append(outcome)
+            done = asyncio.get_running_loop().create_future()
+            done.set_result(None)
+            return done
+
+        return seen, MagicMock(side_effect=request)
+
+    @pytest.mark.asyncio
+    async def test_waiting_for_approval_is_action_and_restart_is_done(self, bot: MagicMock) -> None:
+        config = UpgradeConfig(
+            package_name="pkg",
+            trigger_prefix="🔄 ebibot-upgrade",
+            restart_command=["true"],
+            working_dir="/tmp",
+            restart_approval=True,
+        )
+        cog = AutoUpgradeCog(bot=bot, config=config)
+        msg = _make_message()
+        approval = MagicMock(id=7)
+        approval.add_reaction = AsyncMock()
+        msg.create_thread.return_value.send = AsyncMock(return_value=approval)
+        msg.create_thread.return_value.parent = None
+        bot.user = MagicMock(id=1)
+        bot.wait_for = AsyncMock(return_value=MagicMock(message_id=7, emoji="✅", user_id=42))
+        seen, request = self._record()
+        with (
+            patch("claude_discord.cogs.auto_upgrade.request_thread_outcome", request),
+            patch(_PATCH_EXEC, new_callable=AsyncMock, return_value=_make_process()),
+            patch(_PATCH_SLEEP, new_callable=AsyncMock),
+        ):
+            await cog.on_message(msg)
+        assert seen == ["action", "done"]
+
+    @pytest.mark.asyncio
+    async def test_a_failed_upgrade_is_marked_as_an_error(self, bot: MagicMock) -> None:
+        config = UpgradeConfig(
+            package_name="pkg", trigger_prefix="🔄 ebibot-upgrade", working_dir="/tmp"
+        )
+        cog = AutoUpgradeCog(bot=bot, config=config)
+        seen, request = self._record()
+        with (
+            patch("claude_discord.cogs.auto_upgrade.request_thread_outcome", request),
+            patch(_PATCH_EXEC, new_callable=AsyncMock, return_value=_make_process(returncode=1)),
+        ):
+            await cog.on_message(_make_message())
+        assert seen == ["error"]
+
+    @pytest.mark.asyncio
+    async def test_a_prompt_abandoned_by_a_restart_is_closed_as_done(self, bot: MagicMock) -> None:
+        cog, thread, _ = TestUnloadWhileWaiting()._make(bot)
+        seen, request = self._record()
+        with patch("claude_discord.cogs.auto_upgrade.request_thread_outcome", request):
+            task = asyncio.create_task(cog._wait_for_approval(MagicMock(), thread))
+            for _ in range(5):
+                await asyncio.sleep(0)
+            await cog.cog_unload()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        assert seen == ["action", "done"]
