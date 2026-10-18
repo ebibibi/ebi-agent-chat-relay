@@ -19,6 +19,7 @@ from claude_discord.console.triage import (
     apply_triage,
     ask_model,
     build_prompt,
+    collapse_series,
     focus_score,
     parse_reply,
     triage_env,
@@ -33,7 +34,8 @@ TOKEN = "t" * 40
 def _item(item_id: str = "t1", **over):
     base = {
         "id": item_id,
-        "title": "Ship the report",
+        # Distinct per item: same-title items fold into one series in Focus.
+        "title": "Ship the report" if item_id == "t1" else f"Ship the report ({item_id})",
         "status": "idle",
         "bucket": "idle",
         "priority": 2,
@@ -545,3 +547,45 @@ async def test_an_override_does_not_rank_work_that_is_not_the_persons(repo) -> N
     )
     [out] = apply_triage([item], {}, now=NOW)
     assert (out["focus"], out["actionable"]) == (None, None)
+
+
+# -- a job that opens a fresh thread every run is one row in Focus ------------------
+
+
+def test_same_title_items_fold_into_the_newest_in_focus() -> None:
+    def upgrade(item_id: str, at: str, **over):
+        return _item(item_id, title="🔄 ebibot-upgrade", last_activity_at=at, **over)
+
+    items = [
+        upgrade("t1", "2026-10-16T01:00:00Z"),
+        upgrade("t2", "2026-10-18T01:00:00Z"),
+        upgrade("t3", "2026-10-17T01:00:00Z"),
+        upgrade("t4", "2026-10-15T01:00:00Z", pinned_at="2026-10-15T02:00:00Z"),
+        upgrade("t5", "2026-10-18T05:00:00Z", status="done", bucket="done"),
+        _item("t6"),
+    ]
+
+    old, newest, middle, pinned, done, other = apply_triage(items, {}, now=NOW)
+
+    assert (newest["series"], newest["focus"] is not None) == (3, True)
+    assert all(i["focus"] is None and i["series_of"] == "t2" for i in (old, middle))
+    assert old["actionable"] is None
+    # A pinned item stays on its own, a finished one was never in Focus.
+    assert pinned["focus"] is not None and "series_of" not in pinned
+    assert "series_of" not in done and done["focus"] is None
+    assert "series" not in other and other["focus"] is not None
+    assert items[0].get("series_of") is None  # the input is not changed
+
+
+def test_collapse_needs_a_shared_non_empty_title() -> None:
+    later = "2026-10-12T02:30:00Z"
+    items = [
+        _item("t1", title=""),
+        _item("t2", title="  "),
+        _item("t3", title="Ship The  report"),
+        _item("t4", title="ship the report", last_activity_at=later),
+    ]
+    out = collapse_series([{**i, "focus": 100} for i in items])
+    # Blank titles never fold; case and spacing do not make a title different.
+    assert [i.get("series_of") for i in out] == [None, None, "t4", None]
+    assert out[3]["series"] == 2
