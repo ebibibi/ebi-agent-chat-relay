@@ -1,0 +1,12 @@
+# One-shot reset of the demo instance. Start it from your scheduler (nightly)
+# and after deploying a new version: systemctl start ccdb-demo-reset.service
+[Unit]
+Description=Reset the Ebi AI Console demo to its scenario
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=DEMO_USER=ccdb-demo DEMO_SERVICE=ccdb-demo.service DEMO_BRANCH=main
+# Root runs this: point it at a root-owned copy, never at the demo user's checkout.
+ExecStart=/usr/local/sbin/ccdb-demo-reset
+TimeoutStartSec=900

@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A demo instance for screencasts** (#1179) — `python -m claude_discord.demo reset|seed` rebuilds a
+  separate, Console-only deployment from a versioned scenario (an Ebi Workspace vault plus Console
+  items, dated relative to the reset day), keeping the passkey sign-in. The reset refuses folders it
+  did not mark as demo data, follows a branch so new releases bring new demo items, and runs
+  instance-specific clean-up hooks. Ships a Japanese one-person-IT scenario and systemd templates.
+  See `docs/demo.md`.
 - **Google Antigravity CLI (`agy`) as a sixth backend** (#1153) — `/backend antigravity`,
   `/model <id from agy models>` and `/effort low|medium|high|xhigh|max` work as they do for the
   other backends, from Discord, Teams and the console picker. `CCDB_AGY_COMMAND` points at the
