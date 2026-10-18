@@ -13,8 +13,9 @@ Four parts:
   one sitting with the parent settles all of them.
 * ``calm`` — nothing is the human's to do right now. Saying so is the point:
   an empty list reads as "something is broken", not as "you can stop".
-* ``drift`` — only when an Ebi Workspace is configured: finished threads whose
-  Workspace task is still open, or whose records predate the conversation.
+* ``drift`` — only when an Ebi Workspace is configured: threads marked done whose
+  Workspace task is still open, or whose records predate the conversation. The
+  board writes these back itself, so what reaches a person is what it could not.
   ``None`` means "no Workspace", which the client shows as nothing at all,
   so the guide works the same for someone who never set one up.
 
@@ -37,7 +38,6 @@ DUE_SOON = timedelta(hours=24)
 
 #: Statuses where the next move is the human's, with the reason each one gives.
 _STATUS_REASON = {"waiting": "asked", "review": "review", "action": "action", "error": "error"}
-_FINISHED = frozenset({"candidate", "done"})
 
 
 def _parse(value: str | None) -> datetime | None:
@@ -125,7 +125,8 @@ def _drift(
         activity = _parse(item.get("last_activity_at"))
         if (
             record is None
-            or item.get("status") not in _FINISHED
+            # A candidate is written back when a person confirms it; only done lags.
+            or item.get("status") != "done"
             or activity is None
             or now - activity > DRIFT_WINDOW
         ):

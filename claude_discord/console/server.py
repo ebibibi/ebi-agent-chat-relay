@@ -248,6 +248,8 @@ class ConsoleServer:
         #: Reads session transcripts for the Workspace records each thread wrote.
         self.workspace_records = RecordWatcher()
         self._records_seen: dict[int, str] = {}
+        #: Item id → the activity whose drifted records the board already wrote back.
+        self._written_back: dict[str, str] = {}
         self._records_task: asyncio.Task[None] | None = None
         self._vault: Vault | None = None
         self._note_index: NoteIndex | None = None
@@ -551,7 +553,10 @@ class ConsoleServer:
         items = await self._board_items()
         records = None
         if self.workspace.root is not None:
-            items, records = await asyncio.to_thread(self._bind_workspace, items)
+            bound, records = await asyncio.to_thread(self._bind_workspace, items)
+            if await self._write_back_drift(bound, records):
+                bound, records = await asyncio.to_thread(self._bind_workspace, items)
+            items = bound
         if self.triage is not None:
             try:
                 items = apply_triage(items, await self.triage.all())
@@ -574,6 +579,34 @@ class ConsoleServer:
         """Bind items to Workspace entries and read their records, from one snapshot."""
         entries = self.workspace.snapshot()["entries"]
         return self.workspace.bind_items(items, entries), self.workspace.records(entries)
+
+    async def _write_back_drift(
+        self, items: list[dict[str, Any]], records: dict[str, dict[str, Any]]
+    ) -> bool:
+        """Write back the records of done threads that ended without them, once per activity.
+
+        It is the same writeback the ✅ button does, for threads marked done elsewhere
+        (chat, the agent) or whose first writeback failed. Telling a person to ask the
+        agent for it would be busywork; only what fails here stays in the guide.
+        """
+        by_id = {i["id"]: i for i in items}
+        changed = False
+        for entry in build_guide(items, records=records)["drift"] or []:
+            item = by_id[entry["id"]]
+            stamp = item.get("last_activity_at") or ""
+            if self._written_back.get(item["id"]) == stamp:
+                continue
+            self._written_back[item["id"]] = stamp
+            title = item.get("title") or item.get("thread_name")
+            result = await self._finish_records(
+                item["id"],
+                entry["workspace_path"],
+                [item.get("note"), title],
+                title or item.get("note") or item["id"],
+                done=True,
+            )
+            changed = changed or bool(result.get("changed"))
+        return changed
 
     # -- places ------------------------------------------------------------
     async def _place_list(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1439,16 +1472,21 @@ class ConsoleServer:
             # A thread nobody retitled carries its name only on the board.
             board = next((i for i in await self._board_items() if i["id"] == item.id), {})
             title = board.get("title") or board.get("thread_name")
-        texts = [t for t in (item.note, title) if t]
-        label = title or item.note or item.id
+        return await self._finish_records(
+            item.id, path, [item.note, title], title or item.note or item.id, done=done
+        )
+
+    async def _finish_records(
+        self, item_id: str, path: str, texts: list[str | None], label: str, *, done: bool
+    ) -> dict[str, Any]:
         try:
             result = await asyncio.to_thread(
-                self.workspace.finish, path, texts, label[:200], done=done
+                self.workspace.finish, path, [t for t in texts if t], label[:200], done=done
             )
             self.workspace_plan.invalidate()
             return result
         except (WorkspaceError, OSError, UnicodeError) as exc:
-            logger.warning("console: Workspace not updated for %s: %s", _q(item.id), exc)
+            logger.warning("console: Workspace not updated for %s: %s", _q(item_id), exc)
             # A file-system error's text can name paths; only our own messages travel.
             error = str(exc) if isinstance(exc, WorkspaceError) else "Could not update Workspace"
             return {"path": path, "error": error}

@@ -43,7 +43,7 @@ test('the guide names the next move, why, batches and drift', {timeout: 20000}, 
   await card.waitFor();
   const text = await card.innerText();
   for (const s of ['今やる一手','Answer the customer','期限超過','AIが質問中','→ Reply with the date','返すとAIが続きを進めます',
-    'まとめて判断','Release — 2件の判断','記録の食い違い','「Ship it」は未完了']) assert.ok(text.includes(s), s);
+    'まとめて判断','Release — 2件の判断','記録を自動で直せなかった会話','「Ship it」は未完了']) assert.ok(text.includes(s), s);
   await card.locator('.guide-next').click();
   await page.waitForFunction(() => state.open === 'a');
 });
@@ -58,7 +58,7 @@ test('nothing for the human: the guide says so, and shows no drift without a Wor
   assert.match(text, /Nothing needs you right now/);
   assert.match(text, /1 running · 2 waiting/);
   assert.match(text, /You can stop here/);
-  assert.doesNotMatch(text, /Records out of step/);
+  assert.doesNotMatch(text, /Records the Console could not write back/);
 });
 
 test('a board without a guide (older server) renders Focus as before', {timeout: 20000}, async t => {

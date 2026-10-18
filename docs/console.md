@@ -65,12 +65,15 @@ model call, so it costs nothing per poll and gives the same answer twice
   how much is running, waiting and awaiting a "Done?" confirmation, instead of an empty list.
 - **Decide together** — two or more decisions in one family are gathered under the root
   thread, so one sitting settles them all.
-- **Records out of step** (only with an [Ebi Workspace](#optional-ebi-workspace)) — a
-  finished or candidate thread from the last three days whose Workspace task with the same
-  text is still open, or whose project records (`status.md` / `single-actions.md` and
-  `log.md`) were last changed before the conversation ended. The second check needs a
-  binding a person chose; a binding guessed from the working directory is too loose to
-  accuse a record of being stale.
+- **Records the Console could not write back** (only with an [Ebi Workspace](#optional-ebi-workspace)) —
+  a thread marked done in the last three days whose Workspace task with the same text is
+  still open, or whose project records (`status.md` / `single-actions.md` and `log.md`)
+  were last changed before the conversation ended. The board first does the ✅ writeback
+  itself (checks the task, or records the conversation in `log.md` and the daily note),
+  once per conversation activity, so only what that could not settle is listed. A "Done?"
+  candidate is not listed: confirming it with ✅ writes it back. The stale-records check
+  needs a binding a person chose; a binding guessed from the working directory is too
+  loose to accuse a record of being stale.
 
 Everything except the last part works without a Workspace; without one the board sends
 `guide.drift: null` and the card leaves that section out.
