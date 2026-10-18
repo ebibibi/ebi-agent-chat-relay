@@ -404,6 +404,7 @@ function renderNav() {
   nav.replaceChildren(
     ...VIEWS.map((v) => v.sep ? h("div", { class: "sep" }) : h("button", {
       class: state.view === v.key ? "active" : "",
+      "aria-current": state.view === v.key ? "page" : null,
       onclick: () => setView(v.key),
     }, h("span", { text: T[v.key] }), h("span", {
       class: "count" + (v.hot && counts[v.key] ? " hot" : ""), text: counts[v.key] || "",
