@@ -245,3 +245,28 @@ async def test_context_route_is_authenticated_and_checks_the_path(env, notes):
     assert (await ok.json())["current"] == "Ready"
     bad = await env.client.get(url, headers=AUTH, params={"path": "../x"})
     assert bad.status == 400
+
+
+async def test_the_board_writes_back_a_done_thread_whose_task_is_still_open(env, notes):
+    env.console.workspace = Workspace(notes)
+    created = await env.client.post(
+        "/console/api/items",
+        headers=WRITE,
+        json={"title": "🤖 Ship it #auto", "workspace_path": "Work/Client/Website"},
+    )
+    item_id = (await created.json())["item"]["id"]
+    # Marked done somewhere other than the ✅ button, so nothing wrote the task back.
+    await env.console.work_repo.update(item_id, {"state": "done"})
+    board = await (await env.client.get("/console/api/board", headers=AUTH)).json()
+    assert board["guide"]["drift"] == []
+    assert env.console.workspace.entry("Work/Client/Website")["tasks"][0]["done"] is True
+    log = (notes / "02_Contexts/Work/Client/Website/log.md").read_text(encoding="utf-8")
+    assert log.count("タスク完了: 🤖 Ship it #auto") == 1
+    # A person unchecking it again is their call; the board does not fight them.
+    entry = env.console.workspace.entry("Work/Client/Website")
+    env.console.workspace.update_task(
+        entry["path"], entry["tasks"][0]["line"], entry["revision"], done=False
+    )
+    board = await (await env.client.get("/console/api/board", headers=AUTH)).json()
+    assert [d["id"] for d in board["guide"]["drift"]] == [item_id]
+    assert env.console.workspace.entry("Work/Client/Website")["tasks"][0]["done"] is False

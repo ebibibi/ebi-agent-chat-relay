@@ -98,7 +98,7 @@ def test_drift_is_absent_without_a_workspace() -> None:
     assert build_guide([_item("a")], now=NOW)["drift"] is None
 
 
-def test_a_finished_thread_with_its_task_still_open_is_drift() -> None:
+def test_a_done_thread_with_its_task_still_open_is_drift() -> None:
     records = {
         "Work/Site": {
             "tasks": [{"line": 7, "text": "Ship it", "done": False}],
@@ -109,13 +109,22 @@ def test_a_finished_thread_with_its_task_still_open_is_drift() -> None:
         _item(
             "a",
             title="Ship it",
-            status="candidate",
-            bucket="candidate",
+            status="done",
+            bucket="done",
             focus=None,
             workspace_path="Work/Site",
         ),
         # Still in progress: an open task is expected.
         _item("b", title="Ship it", workspace_path="Work/Site"),
+        # A candidate is written back when a person confirms it with ✅.
+        _item(
+            "c",
+            title="Ship it",
+            status="candidate",
+            bucket="candidate",
+            focus=None,
+            workspace_path="Work/Site",
+        ),
     ]
     drift = build_guide(items, records=records, now=NOW)["drift"]
     assert drift == [
@@ -143,7 +152,5 @@ def test_records_older_than_the_finished_conversation_are_drift_only_when_bound_
 
 def test_records_updated_after_the_conversation_are_not_drift() -> None:
     records = {"Work/Site": {"tasks": [], "updated_at": _ts(timedelta(minutes=5))}}
-    item = _item(
-        "a", status="candidate", bucket="candidate", focus=None, workspace_path="Work/Site"
-    )
+    item = _item("a", status="done", bucket="done", focus=None, workspace_path="Work/Site")
     assert build_guide([item], records=records, now=NOW)["drift"] == []
