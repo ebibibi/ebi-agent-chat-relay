@@ -10,6 +10,8 @@ It was called the Relay Console until v5. Only the name changed: the URLs (`/con
 existing setup keeps working as it is.
 
 The JSON API under `/console/api` is the contract. The bundled web client is one consumer of it.
+For recording a demo without your own data on screen, see [docs/demo.md](demo.md).
+
 See [ADR-0010](adr/0010-add-an-api-first-console-on-its-own-listener.md) and, for sign-in,
 [ADR-0012](adr/0012-sign-in-to-the-console-with-passkeys-by-default.md).
 

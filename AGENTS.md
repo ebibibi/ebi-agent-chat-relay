@@ -153,6 +153,12 @@ make pr        # ブランチをpushしてGitHub PRを作成
 `~/.ccdb-dev-worktree` が存在しない場合、フックは何もしない。
 mainブランチで変更なしの場合、`pre-start.sh` が `git pull` して最新コードを取得する。
 
+### Demo scenarios
+
+When a change adds or reshapes something a user sees in the Console, update a scenario under
+`examples/demo/` so the feature shows up in the first minute of a demo (see `docs/demo.md`).
+`tests/test_demo.py` loads every bundled scenario.
+
 ## Code Conventions
 
 ### Style
