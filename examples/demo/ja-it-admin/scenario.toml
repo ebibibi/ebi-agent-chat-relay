@@ -1,0 +1,48 @@
+# Demo scenario: a one-person IT department at a fictional 30-person company.
+# Dates are relative to the reset day: due = "+N" (a date) or "+N@HH:MM" (local time),
+# and {{today}} / {{date:+N}} inside text. See docs/demo.md.
+name = "一人情シス（みなとテック）"
+timezone = "Asia/Tokyo"
+places = ["事務所", "自宅"]
+
+[[items]]
+title = "新入社員3名のアカウントを作って（明後日入社）"
+note = "名簿は M365運用/入社者名簿_10月.md。E5ライセンスと部署グループもお願い。終わったら名簿の人に送る初回サインイン案内の文面も。"
+priority = 0
+due = "+0@17:00"
+project = "M365運用"
+
+[[items]]
+title = "Azure の請求が予算の80%に。何が増えたか調べて"
+note = "リソースグループ別に、先月との差が大きい順で。止めてよさそうなものがあれば候補として挙げて（止めるのは確認してから）。"
+priority = 1
+due = "+1@12:00"
+project = "Azure環境"
+
+[[items]]
+title = "退職した Nestor Wilke さんのサインインを止めて、グループから外す"
+note = "退職日は昨日。メールボックスは消さない。"
+priority = 1
+due = "+1"
+project = "M365運用"
+
+[[items]]
+title = "検証ラボの VM をクリーンな状態に戻して"
+note = "demo- で始まる VM の一覧と状態を見て、チェックポイントがあればそこへ戻す。"
+priority = 2
+due = "+3"
+project = "検証ラボ"
+place = "事務所"
+
+[[items]]
+title = "社内勉強会の告知文を作って（テーマ: パスキー）"
+note = "日時は {{date:+7}} 12:15〜12:45。Teams の全社チャネルに貼る想定。堅すぎない感じで。"
+priority = 2
+due = "+2"
+project = "社内勉強会"
+
+[[items]]
+title = "パスワードポリシーの見直し案"
+note = "パスキーを入れたあとに考える。"
+priority = 3
+snoozed_until = "{{date:+3}}"
