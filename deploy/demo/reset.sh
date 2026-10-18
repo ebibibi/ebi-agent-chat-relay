@@ -1,6 +1,10 @@
 #!/bin/bash
 # Reset a demo instance to its scenario. Run as root (it stops and starts the service).
 #
+# Install this file where only root can write (/usr/local/sbin/ccdb-demo-reset,
+# root:root 0755). Never run it from the demo user's checkout: the agents in a demo
+# act as that user, and nothing they can edit may be executed by root.
+#
 #   DEMO_USER     OS user that owns the demo instance        (default: ccdb-demo)
 #   DEMO_SERVICE  systemd unit of the demo relay             (default: ccdb-demo.service)
 #   DEMO_BRANCH   branch the demo checkout follows           (default: main)
@@ -23,8 +27,9 @@ main() {
   RELAY="$HOME_DIR/relay"
 
   as_demo() {
-    runuser -u "$DEMO_USER" -- env HOME="$HOME_DIR" \
-      PATH="$HOME_DIR/.local/bin:/usr/local/bin:/usr/bin:/bin" bash -c "$1"
+    # setsid + no stdin: a demo-user process must not reach root's terminal (TIOCSTI).
+    runuser -u "$DEMO_USER" -- setsid -w env HOME="$HOME_DIR" \
+      PATH="$HOME_DIR/.local/bin:/usr/local/bin:/usr/bin:/bin" bash -c "$1" </dev/null
   }
 
   systemctl stop "$DEMO_SERVICE"
