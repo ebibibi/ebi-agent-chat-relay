@@ -1,0 +1,21 @@
+# A demo instance of the relay: Console only, its own OS user, data and vault.
+# Copy to /etc/systemd/system/ and adjust the user and paths. See docs/demo.md.
+[Unit]
+Description=Ebi AI Console demo (ccdb)
+After=network.target
+
+[Service]
+Type=simple
+User=ccdb-demo
+WorkingDirectory=/home/ccdb-demo/relay
+EnvironmentFile=/home/ccdb-demo/demo.env
+ExecStart=/home/ccdb-demo/relay/.venv/bin/python -m claude_discord.main
+Restart=always
+RestartSec=10
+ProtectSystem=strict
+ReadWritePaths=/home/ccdb-demo /tmp /var/tmp
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
