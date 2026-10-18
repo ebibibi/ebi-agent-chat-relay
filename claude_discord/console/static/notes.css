@@ -97,3 +97,4 @@
 .note-edit.note-edit-live .note-edit-split .note-edit-cm { display:block; }
 .note-edit-mode { margin-left:auto; }
 @media(max-width:800px) { .note-edit-mode { margin-left:0; } }
+.note-body .note-img-missing { color:var(--dim); font-style:italic; }

@@ -13,7 +13,8 @@ const CSP = server.split('"Content-Security-Policy": (')[1].split(')')[0]
   .split('\n').map(l => (l.match(/"([^"]*)"/) || [])[1]).filter(Boolean).join('');
 
 const TEXT = '---\ntags: [a]\n---\n# Plan\n\nSome **bold**, `code`, [site](https://example.com) and [[Design|the design]].\n\n'
-  + '- [ ] write it\n- plain item\n\n> quoted\n';
+  + '- [ ] write it\n- plain item\n\n> quoted\n\n![図1 構成](%E5%9B%B3%201.png)\n\n![[shot.png]]\n\nSee https://example.com/x here.\n';
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
 
 test('live preview draws the note and saves its exact text', {timeout: 40000}, async t => {
   const browser = await chromium.launch({headless: true, args: ['--no-sandbox']});
@@ -23,7 +24,7 @@ test('live preview draws the note and saves its exact text', {timeout: 40000}, a
   const violations = [];
   page.on('console', m => { if (/Content Security Policy/i.test(m.text()) && !/directive name/.test(m.text())) violations.push(m.text()); });
   const puts = [];
-  let disk = {path: 'A/Plan.md', text: TEXT, revision: 'r1', links: {}, modified: 0};
+  let disk = {path: 'A/Plan.md', text: TEXT, revision: 'r1', links: {'shot.png': 'img/shot.png'}, modified: 0};
   await page.route('http://console.test/**', async route => {
     const req = route.request();
     const p = new URL(req.url()).pathname;
@@ -32,6 +33,7 @@ test('live preview draws the note and saves its exact text', {timeout: 40000}, a
       return route.fulfill({body: fs.readFileSync(path.join(root, file)), headers: {'Content-Security-Policy': CSP},
         contentType: file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html'});
     }
+    if (p.endsWith('/workspace/file')) return route.fulfill({body: PNG, contentType: 'image/png'});
     let data = {};
     if (p.endsWith('/board')) data = {items: [], slots: {}, places: []};
     else if (p.endsWith('/workspace/note') && req.method() === 'PUT') {
@@ -58,6 +60,15 @@ test('live preview draws the note and saves its exact text', {timeout: 40000}, a
   assert.equal(await lineText('Some'), 'Some bold, code, site and the design.');
   assert.equal(await page.locator('.note-edit-cm .cm-lp-h1').count(), 1);
   assert.equal(await page.locator('.note-edit-cm .cm-lp-quote').textContent(), 'quoted');
+  // Images are drawn in place: a relative path from the note's folder, an embed by its link.
+  const srcs = await page.locator('.note-edit-cm img.cm-lp-img').evaluateAll(els => els.map(e => e.getAttribute('src')));
+  assert.deepEqual(srcs, ['/console/api/workspace/file?path=A%2F%E5%9B%B3%201.png', '/console/api/workspace/file?path=img%2Fshot.png']);
+  assert.equal(await page.locator('.note-edit-cm .cm-line', {hasText: '構成'}).count(), 0); // markup replaced
+  // Links and bare URLs are drawn in the accent colour, readable on the dark panel.
+  const accent = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim());
+  const urlColor = await page.locator('.note-edit-cm .cm-line', {hasText: 'See'}).locator('span', {hasText: 'https://example.com/x'}).last()
+    .evaluate(e => getComputedStyle(e).color);
+  assert.equal(urlColor, await page.evaluate(c => { const d = document.createElement('i'); d.style.color = c; document.body.append(d); const v = getComputedStyle(d).color; d.remove(); return v; }, accent));
   // The cursor's line shows its markup again.
   await page.locator('.note-edit-cm .cm-line', {hasText: 'Some'}).click();
   assert.equal(await lineText('Some'), 'Some **bold**, `code`, [site](https://example.com) and [[Design|the design]].');
@@ -68,6 +79,7 @@ test('live preview draws the note and saves its exact text', {timeout: 40000}, a
   // Switch to source + preview; the choice is remembered.
   await page.getByRole('button', {name: '⇆ ソースとプレビュー'}).click();
   await page.locator('.note-edit-preview h1').waitFor();
+  assert.equal(await page.locator('.note-edit-preview img.note-img').first().getAttribute('src'), '/console/api/workspace/file?path=A%2F%E5%9B%B3%201.png');
   assert.equal(await page.locator('.note-edit-cm .cm-lp-task').count(), 0);
   assert.equal(await page.evaluate(() => localStorage.getItem('ccdb.noteEditMode')), 'split');
   await page.getByRole('button', {name: '👁 ライブプレビュー'}).click();

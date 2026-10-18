@@ -13,8 +13,9 @@ import {
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import {
-  syntaxHighlighting, defaultHighlightStyle, bracketMatching, indentOnInput,
+  syntaxHighlighting, HighlightStyle, bracketMatching, indentOnInput,
 } from "@codemirror/language";
+import { tags as t } from "@lezer/highlight";
 import { markdown, markdownKeymap, markdownLanguage } from "@codemirror/lang-markdown";
 import { livePreview } from "./livepreview.js";
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
@@ -52,14 +53,34 @@ const consoleTheme = EditorView.theme({
   ".cm-lp-fm": { fontFamily: "ui-monospace, SFMono-Regular, monospace", fontSize: "0.85em", opacity: "0.6" },
   ".cm-lp-bullet": { display: "inline-block", width: "0.8em", fontWeight: "700" },
   ".cm-lp-task": { margin: "0 6px 0 0", verticalAlign: "middle", cursor: "pointer" },
+  ".cm-lp-img": { display: "block", maxWidth: "100%", maxHeight: "70vh", margin: "6px 0", borderRadius: "6px" },
+  ".cm-lp-img-missing": { color: "var(--dim)", fontStyle: "italic" },
   ".cm-lp-hr": { display: "inline-block", width: "100%", borderTop: "1px solid var(--line)", verticalAlign: "middle" },
 }, { dark: true });
 
+// Syntax colours for the Console's dark panel. CodeMirror's defaultHighlightStyle is made for
+// a white page: its URL blue (#219) and meta grey are unreadable on var(--panel).
+const consoleHighlight = HighlightStyle.define([
+  { tag: t.heading, fontWeight: "700" },
+  { tag: t.strong, fontWeight: "700" },
+  { tag: t.emphasis, fontStyle: "italic" },
+  { tag: t.strikethrough, textDecoration: "line-through" },
+  { tag: [t.link, t.url], color: "var(--accent)" },
+  { tag: [t.processingInstruction, t.meta, t.contentSeparator, t.comment], color: "var(--dim)" },
+  { tag: t.monospace, color: "#e5c07b" },
+  { tag: t.quote, color: "var(--text)" },
+  { tag: [t.keyword, t.atom, t.bool, t.labelName], color: "#c678dd" },
+  { tag: [t.string, t.inserted], color: "#98c379" },
+  { tag: [t.number, t.literal], color: "#d19a66" },
+  { tag: t.deleted, color: "#e06c75" },
+  { tag: t.invalid, color: "#ff6b6b" },
+]);
+
 // Live preview on or off; the class switches the editor to the reading layout.
-const liveMode = (on) => on ? [livePreview, EditorView.editorAttributes.of({ class: "cm-live" })] : [];
+const liveMode = (on, imageUrl) => on ? [livePreview(imageUrl), EditorView.editorAttributes.of({ class: "cm-live" })] : [];
 
 function create(host, options = {}) {
-  const { doc = "", onChange, onSave, onScroll, linkSource, placeholder, live = false } = options;
+  const { doc = "", onChange, onSave, onScroll, linkSource, placeholder, live = false, imageUrl } = options;
   const mode = new Compartment();
   // [[ … completes note names from linkSource(query) → Promise<string[]>.
   const wikilinks = async (context) => {
@@ -93,10 +114,10 @@ function create(host, options = {}) {
       extensions: [
         highlightSpecialChars(), history(), drawSelection(), dropCursor(),
         EditorState.allowMultipleSelections.of(true), indentOnInput(),
-        syntaxHighlighting(defaultHighlightStyle, { fallback: true }), bracketMatching(),
+        syntaxHighlighting(consoleHighlight), bracketMatching(),
         closeBrackets(), rectangularSelection(), highlightActiveLine(),
         highlightSelectionMatches(), EditorView.lineWrapping, markdown({ base: markdownLanguage, completeHTMLTags: false }),
-        mode.of(liveMode(live)),
+        mode.of(liveMode(live, imageUrl)),
         consoleTheme,
         autocompletion({ override: [wikilinks], activateOnTyping: true }),
         placeholder ? placeholderExt(placeholder) : [],
@@ -132,7 +153,7 @@ function create(host, options = {}) {
     get value() { return view.state.doc.toString(); },
     set value(text) { view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } }); },
     focus: () => view.focus(),
-    setLive: (on) => view.dispatch({ effects: mode.reconfigure(liveMode(on)) }),
+    setLive: (on) => view.dispatch({ effects: mode.reconfigure(liveMode(on, imageUrl)) }),
     destroy: () => view.destroy(),
     view,
   };
