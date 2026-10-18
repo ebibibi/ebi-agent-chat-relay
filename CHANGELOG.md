@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Focus folds same-title threads into one row** (#1167) — a job that opens a fresh thread on
+  every run (`🔄 ebibot-upgrade`, docs sync) no longer fills Focus with identical idle rows. The
+  newest one stands for the series with a `×N` tag; older ones leave Focus and the guide but stay
+  in every other list. Pinned items are never folded.
+
 - Console: buttons on Discord messages (such as the restart approval in an upgrade thread) work
   again. Message ids are now sent to the browser as strings; as JSON numbers they exceeded 2**53,
   were rounded, and every press answered 404 (#1131).

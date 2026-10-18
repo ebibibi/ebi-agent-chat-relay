@@ -496,6 +496,49 @@ def apply_triage(
             new["readiness_by"] = "you"
         new["actionable"] = ready if new["focus"] is not None else None
         out.append(new)
+    return collapse_series(out)
+
+
+def _series_key(item: dict[str, Any]) -> str | None:
+    """Items that share this key are one series in Focus; None keeps the item on its own."""
+    if item.get("focus") is None or item.get("pinned_at"):
+        return None
+    title = " ".join(str(item.get("title") or "").split()).casefold()
+    return title or None
+
+
+def collapse_series(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Let the newest of several same-title items stand for all of them in Focus.
+
+    A job that opens a fresh thread on every run (a bot upgrade, a docs sync)
+    leaves a row of identical items, each idle and so each ranked; the older
+    ones are superseded by the newest. The newest keeps its rank and carries
+    ``series`` (how many it stands for); the rest leave Focus but stay on the
+    board, so the other lists still show every one. A pinned item is the
+    human's choice and is never folded away.
+    """
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        key = _series_key(item)
+        if key is not None:
+            groups.setdefault(key, []).append(item)
+    folded: dict[str, str] = {}
+    counts: dict[str, int] = {}
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        newest = max(members, key=lambda i: i.get("last_activity_at") or i.get("created_at") or "")
+        counts[newest["id"]] = len(members)
+        folded.update({m["id"]: newest["id"] for m in members if m is not newest})
+    if not folded:
+        return items
+    out = []
+    for item in items:
+        if item["id"] in counts:
+            item = {**item, "series": counts[item["id"]]}
+        elif item["id"] in folded:
+            item = {**item, "focus": None, "actionable": None, "series_of": folded[item["id"]]}
+        out.append(item)
     return out
 
 
