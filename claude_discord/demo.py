@@ -199,7 +199,12 @@ def _post(url: str, token: str, body: dict[str, Any]) -> None:
     request = urllib.request.Request(
         url,
         data=json.dumps(body).encode(),
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            # The Console's CSRF guard: every state-changing call must carry it.
+            "X-Console-Request": "1",
+        },
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=30) as response:

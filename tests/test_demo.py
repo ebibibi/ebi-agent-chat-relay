@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import urllib.request
 from datetime import date
 from pathlib import Path
 
@@ -189,3 +190,28 @@ class TestBundledScenarios:
         demo.build_vault(scenario, tmp_path / "vault", TODAY)
         rendered = [p for p in (tmp_path / "vault").rglob("*") if "{{" in p.name]
         assert rendered == []
+
+
+class TestPost:
+    def test_sends_the_console_csrf_header_and_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        seen: list[urllib.request.Request] = []
+
+        class _Response:
+            def __enter__(self) -> _Response:
+                return self
+
+            def __exit__(self, *exc: object) -> None:
+                return None
+
+            def read(self) -> bytes:
+                return b"{}"
+
+        def fake_urlopen(request: urllib.request.Request, timeout: float = 0) -> _Response:
+            seen.append(request)
+            return _Response()
+
+        monkeypatch.setattr(demo.urllib.request, "urlopen", fake_urlopen)
+        demo._post("http://127.0.0.1:1/console/api/items", "tok", {"title": "t"})
+        headers = {k.lower(): v for k, v in seen[0].header_items()}
+        assert headers["x-console-request"] == "1"
+        assert headers["authorization"] == "Bearer tok"
