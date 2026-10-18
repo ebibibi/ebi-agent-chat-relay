@@ -87,3 +87,4 @@
 .ws-exclude-text { width:100%; box-sizing:border-box; font-family:ui-monospace,monospace; font-size:13px; padding:8px; background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:6px; }
 .ws-exclude-file { font-family:ui-monospace,monospace; font-size:11px; overflow-wrap:anywhere; }
 .ws-exclude-actions { display:flex; gap:8px; margin-top:8px; }
+.ws-focus-plan-body li > .ws-plan-run { margin-left:6px; padding:1px 8px; font-size:12px; vertical-align:baseline; }
