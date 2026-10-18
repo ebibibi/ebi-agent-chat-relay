@@ -51,7 +51,10 @@ button { cursor: pointer; }
 .nav button { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px;
   background: none; border: 0; border-radius: 6px; padding: 7px 10px; text-align: left; }
 .nav button:hover { background: var(--raise); }
-.nav button.active { background: var(--raise); color: #fff; }
+/* Selected must not look like hover: accent bar + tint, so the open view is readable at a glance. */
+.nav button.active { background: rgb(122 162 255 / .16); color: #fff; font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--accent); }
+.nav button.active:hover { background: rgb(122 162 255 / .22); }
 .nav .count { color: var(--dim); font-variant-numeric: tabular-nums; }
 .nav .count.hot { color: var(--me); font-weight: 700; }
 .nav .slots { color: var(--dim); font-size: 12px; padding: 14px 10px 4px; display: flex; align-items: center;
