@@ -24,7 +24,9 @@ from discord.ext import commands
 
 from ..message_actions import STYLE_SUCCESS, MessageAction, message_actions
 from ..protocols import DrainAware
+from ..thread_marker import OUTCOME_ACTION, OUTCOME_DONE, OUTCOME_ERROR
 from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
+from ..thread_status import request_thread_outcome
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,26 @@ logger = logging.getLogger(__name__)
 _STEP_TIMEOUT = 120
 
 # Posted when the bot shuts down while a prompt is still waiting for approval.
+#: How long a final title change may hold up a restart or shutdown. A rename can
+#: sit in a rate-limit sleep for minutes; the restart must not wait for it.
+_FINAL_OUTCOME_TIMEOUT = 5.0
+
+
+async def _mark_outcome(thread: object, outcome: str, *, wait: bool = False) -> None:
+    """Show where the upgrade stands in the thread title, the way agent threads do.
+
+    Every upgrade thread has the same name, so without the marker the Console
+    cannot tell the one waiting for approval from the finished ones. With
+    *wait*, give the rename a moment to land before the process goes away.
+    """
+    if not isinstance(thread, discord.Thread):
+        return
+    task = request_thread_outcome(thread, outcome)
+    if wait:
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(asyncio.shield(task), _FINAL_OUTCOME_TIMEOUT)
+
+
 _ABANDONED_NOTE = (
     "⏹️ The bot restarted before this was approved, so this request is no longer "
     "waiting — reacting ✅ above does nothing now. Run `/upgrade` if the new release "
@@ -224,6 +246,8 @@ class AutoUpgradeCog(commands.Cog):
                 await entry.thread.send(_ABANDONED_NOTE)
             except discord.HTTPException:
                 logger.info("Could not close approval prompt in thread %d", entry.thread.id)
+            # Nothing is left to approve; the next release opens a new thread.
+            await _mark_outcome(entry.thread, OUTCOME_DONE, wait=True)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
@@ -345,6 +369,7 @@ class AutoUpgradeCog(commands.Cog):
             if not ok:
                 if status_target is not None:
                     await status_target.add_reaction("❌")
+                await _mark_outcome(thread, OUTCOME_ERROR)
                 return
 
             # Step 2: Sync dependencies
@@ -353,6 +378,7 @@ class AutoUpgradeCog(commands.Cog):
             if not ok:
                 if status_target is not None:
                     await status_target.add_reaction("❌")
+                await _mark_outcome(thread, OUTCOME_ERROR)
                 return
 
             # Step 3: Optional restart
@@ -368,6 +394,7 @@ class AutoUpgradeCog(commands.Cog):
                 if status_target is not None:
                     await status_target.add_reaction("✅")
                 await thread.send("✅ Upgrade complete (no restart configured).")
+                await _mark_outcome(thread, OUTCOME_DONE)
 
         except discord.NotFound:
             # The thread was deleted mid-pipeline (e.g. swept while awaiting approval).
@@ -391,6 +418,7 @@ class AutoUpgradeCog(commands.Cog):
             await thread.send(text)
             if status_target is not None:
                 await status_target.add_reaction("❌")
+            await _mark_outcome(thread, OUTCOME_ERROR)
         except discord.NotFound:
             logger.info("Upgrade thread %d vanished before failure was reported", thread.id)
 
@@ -524,6 +552,7 @@ class AutoUpgradeCog(commands.Cog):
         text = prompt or "📦 Update installed. React ✅ on this message to restart."
         approval_msg = await thread.send(text)
         await approval_msg.add_reaction("✅")
+        await _mark_outcome(thread, OUTCOME_ACTION)
 
         # Shared event — set by either the reaction loop or the button callback.
         approved = asyncio.Event()
@@ -643,6 +672,7 @@ class AutoUpgradeCog(commands.Cog):
         await thread.send("🔄 Restarting...")
         if status_target is not None:
             await status_target.add_reaction("✅")
+        await _mark_outcome(thread, OUTCOME_DONE, wait=True)
         await asyncio.sleep(1)
         assert self.config.restart_command is not None  # Caller checks this
         await asyncio.create_subprocess_exec(

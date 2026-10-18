@@ -170,6 +170,8 @@ await bot.add_cog(AutoUpgradeCog(bot, config))
 
 When `slash_command_enabled=True`, any authorised user can run `/upgrade` directly in Discord to trigger the same upgrade pipeline — no webhook required. The command works from both text channels and threads (running it inside a thread creates the upgrade thread in the parent channel). It respects `upgrade_approval` and `restart_approval` gates, creates a progress thread, and gracefully handles concurrent runs (replies ephemerally if an upgrade is already in progress).
 
+The upgrade thread's title carries the same outcome marker as agent threads: 📋 while it waits for an approval, ✅ once the restart starts (or the upgrade completes without one), ⚠️ when a step fails. A prompt left behind because the bot restarted before anyone approved it is closed as ✅ — the next release opens a new thread. So the Console lists only the upgrade that actually waits for you.
+
 Before restarting, `AutoUpgradeCog`:
 
 1. **Snapshots active sessions** — Collects all threads with running Claude sessions (duck-typed: any Cog with `_active_runners` dict is discovered automatically).
