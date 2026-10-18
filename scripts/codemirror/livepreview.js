@@ -37,6 +37,30 @@ class TaskBox extends WidgetType {
   ignoreEvent() { return false; }
 }
 
+// An embedded image: shown in place of ![alt](src) / ![[name.png]], and under it while the
+// cursor is on that line. *src* is null when the note's editor cannot serve the file.
+class Picture extends WidgetType {
+  constructor(src, alt) { super(); this.src = src; this.alt = alt; }
+  eq(other) { return other.src === this.src && other.alt === this.alt; }
+  toDOM(view) {
+    const missing = () => {
+      const s = document.createElement("span");
+      s.className = "cm-lp-img-missing";
+      s.textContent = `🖼 ${this.alt || this.src || ""}`;
+      return s;
+    };
+    if (!this.src) return missing();
+    const img = document.createElement("img");
+    img.className = "cm-lp-img";
+    img.alt = this.alt;
+    img.src = this.src;
+    img.addEventListener("load", () => view.requestMeasure());
+    img.addEventListener("error", () => { img.replaceWith(missing()); view.requestMeasure(); });
+    return img;
+  }
+  ignoreEvent() { return false; }
+}
+
 // Line numbers that hold a selection: their markup stays visible so it can be edited.
 function activeLines(state) {
   const lines = new Set();
@@ -46,7 +70,7 @@ function activeLines(state) {
   return lines;
 }
 
-function build(view) {
+function build(view, imageUrl) {
   const { state } = view;
   const doc = state.doc;
   const active = activeLines(state);
@@ -54,6 +78,15 @@ function build(view) {
   const fmEnd = fm ? fm[0].length : 0;
   const isActive = (pos) => active.has(doc.lineAt(pos).number);
   const decos = []; // [from, to, decoration]; sorted before building
+  const resolve = (src, wikilink) => {
+    try { return imageUrl ? imageUrl(src, wikilink) : null; } catch { return null; }
+  };
+  // Replace the markup with the picture, or show it after the markup on the cursor's line.
+  const picture = (from, to, src, alt) => {
+    const widget = new Picture(src, alt);
+    if (isActive(from)) decos.push([to, to, Decoration.widget({ widget, side: 1 })]);
+    else decos.push([from, to, Decoration.replace({ widget })]);
+  };
 
   if (fmEnd) {
     for (let n = 1; n <= doc.lineAt(Math.max(0, fmEnd - 1)).number; n += 1) decos.push([doc.line(n).from, doc.line(n).from, line("cm-lp-fm")]);
@@ -66,7 +99,7 @@ function build(view) {
     syntaxTree(state).iterate({ from: Math.max(from, fmEnd), to, enter: (node) => {
       const name = node.name;
       if (node.from < fmEnd) return;
-      if (inWikilink(node.from) && /^(Link|LinkMark|URL|LinkTitle|LinkLabel)$/.test(name)) return false;
+      if (inWikilink(node.from) && /^(Link|Image|LinkMark|URL|LinkTitle|LinkLabel)$/.test(name)) return false;
       const heading = /^ATXHeading(\d)$/.exec(name);
       if (heading) { decos.push([doc.lineAt(node.from).from, doc.lineAt(node.from).from, line(`cm-lp-h cm-lp-h${heading[1]}`)]); return; }
       if (name === "FencedCode" || name === "CodeBlock") {
@@ -76,6 +109,13 @@ function build(view) {
       if (name === "Blockquote") {
         for (let n = doc.lineAt(node.from).number; n <= doc.lineAt(node.to).number; n += 1) decos.push([doc.line(n).from, doc.line(n).from, line("cm-lp-quote")]);
         return;
+      }
+      if (name === "Image") {
+        const url = node.node.getChild("URL");
+        const label = /^!\[([^\]]*)\]/.exec(doc.sliceString(node.from, node.to));
+        if (!url) return;
+        picture(node.from, node.to, resolve(doc.sliceString(url.from, url.to), false), label ? label[1] : "");
+        return isActive(node.from) ? undefined : false;
       }
       if (MARKS[name] && node.from < node.to) decos.push([node.from, node.to, MARKS[name]]);
       if (isActive(node.from)) return;
@@ -117,6 +157,11 @@ function build(view) {
       const end = start + m[0].length;
       const inner = start + m[0].indexOf("[[") + 2;
       const bar = m[1].indexOf("|");
+      const target = m[1].split("|")[0].split("#")[0].trim();
+      if (m[0].startsWith("!") && /\.(png|jpe?g|gif|webp)$/i.test(target)) {
+        picture(start, end, resolve(target, true), bar >= 0 ? m[1].slice(bar + 1) : target);
+        continue;
+      }
       decos.push([inner, end - 2, mark("cm-lp-link")]);
       if (isActive(start)) continue;
       decos.push([start, inner, hide]);
@@ -145,11 +190,11 @@ function build(view) {
   return builder.finish();
 }
 
-const plugin = ViewPlugin.fromClass(class {
-  constructor(view) { this.decorations = build(view); }
+const makePlugin = (imageUrl) => ViewPlugin.fromClass(class {
+  constructor(view) { this.decorations = build(view, imageUrl); }
   update(u) {
     if (u.docChanged || u.selectionSet || u.viewportChanged || syntaxTree(u.startState) !== syntaxTree(u.state)) {
-      this.decorations = build(u.view);
+      this.decorations = build(u.view, imageUrl);
     }
   }
 }, {
@@ -168,4 +213,5 @@ const plugin = ViewPlugin.fromClass(class {
   },
 });
 
-export const livePreview = [plugin];
+// *imageUrl(src, wikilink)* turns an embed's target into a URL the page may load, or null.
+export const livePreview = (imageUrl) => [makePlugin(imageUrl)];

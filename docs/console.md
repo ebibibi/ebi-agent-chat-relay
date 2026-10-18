@@ -712,7 +712,10 @@ inline code, links, `[[wikilinks]]`, quotes, bullets and task boxes are drawn in
 markup shows only on the lines holding the cursor; a task box toggles `[ ]` ↔ `[x]` on click. It
 only decorates the text, so a save sends exactly what was typed. **⇆ Source and preview** switches
 to the side-by-side layout (and **👁 Live preview** back); the choice is kept in `localStorage`
-(`ccdb.noteEditMode`).
+(`ccdb.noteEditMode`). Images are drawn too: `![alt](path)` relative to the note's folder (as
+Obsidian reads it) and `![[name.png]]` by the server's link resolution, both served by
+`/workspace/file`; the reading view resolves `![alt](path)` the same way. Syntax colours are a dark
+palette on the Console's variables — CodeMirror's default style is made for a white page.
 
 **Notes a thread changed.** Under a conversation, **📝 Notes this thread changed** (folded, read
 when opened) lists the vault notes its session wrote — found in the session transcript like the

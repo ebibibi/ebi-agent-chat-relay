@@ -43,6 +43,31 @@ window.ConsoleNotes = (() => {
   const noteHref = (path) => PREFIX + path.split("/").map(encodeURIComponent).join("/");
   const IMAGE = /\.(png|jpe?g|gif|webp)$/i;
 
+  // Where an image the open note embeds is served from: ![[name.png]] by the server's link
+  // resolution, ![alt](path) relative to the note's folder (as Obsidian reads it). Web images
+  // pass through for the CSP to decide; anything else (or a path above the vault) is null.
+  function imageUrl(src, wikilink = false) {
+    const raw = String(src || "").trim();
+    if (!raw) return null;
+    if (wikilink) {
+      const resolved = current && current.links ? current.links[raw] : undefined;
+      if (resolved) return IMAGE.test(resolved) ? fileUrl(resolved) : null;
+    } else if (/^(https?:|data:image\/)/i.test(raw)) {
+      return raw;
+    }
+    if (/^[a-z][\w+.-]*:/i.test(raw) || raw.startsWith("//")) return null;
+    let rel = raw.split(/[?#]/)[0];
+    try { rel = decodeURIComponent(rel); } catch { /* keep it as written */ }
+    if (!IMAGE.test(rel)) return null;
+    const parts = rel.startsWith("/") || !current ? [] : current.path.split("/").slice(0, -1);
+    for (const part of rel.split("/")) {
+      if (!part || part === ".") continue;
+      if (part !== "..") parts.push(part);
+      else if (!parts.pop()) return null;
+    }
+    return fileUrl(parts.join("/"));
+  }
+
   function build() {
     const m = window.markdownit({ html: false, linkify: true, breaks: true, typographer: false });
     const esc = m.utils.escapeHtml;
@@ -81,6 +106,14 @@ window.ConsoleNotes = (() => {
       const href = resolved ? noteHref(resolved) : "#";
       const heading = left.includes("#") ? ` data-heading="${esc(left.split("#")[1])}"` : "";
       return `<a class="${cls}" href="${esc(href)}" data-target="${esc(target)}"${heading}>${esc(label)}</a>`;
+    };
+
+    // ![alt](relative.png) → the vault file next to the note
+    m.renderer.rules.image = (tokens, idx) => {
+      const token = tokens[idx];
+      const src = imageUrl(token.attrGet("src"));
+      const alt = token.children ? m.renderer.renderInlineAsText(token.children, m.options, {}) : token.content;
+      return src ? `<img class="note-img" alt="${esc(alt)}" src="${esc(src)}">` : `<span class="note-img-missing">${esc(alt)}</span>`;
     };
 
     // - [ ] task / - [x] done → a read-only checkbox
@@ -205,6 +238,7 @@ window.ConsoleNotes = (() => {
     frame(note.path, host);
     editing = window.ConsoleNoteEdit.start(note, host, {
       render: (text) => render(text),
+      imageUrl,
       done: (saved) => {
         editing = null;
         if (saved) cache(saved);

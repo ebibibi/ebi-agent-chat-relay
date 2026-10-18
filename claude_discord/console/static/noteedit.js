@@ -83,13 +83,13 @@ window.ConsoleNoteEdit = (() => {
     } catch { return []; }
   }
   // Swap the textarea for CodeMirror, keeping whatever was typed meanwhile.
-  async function upgrade(area, use, { onChange, onSave, onScroll, live }) {
+  async function upgrade(area, use, { onChange, onSave, onScroll, live, imageUrl }) {
     let lib;
     try { lib = await loadLibrary(); } catch { return; }
     if (!area.isConnected) return;
     const holder = h("div", { class: "note-edit-cm" });
     area.after(holder);
-    const editor = lib.create(holder, { doc: area.value, onChange, onSave, onScroll, linkSource, live });
+    const editor = lib.create(holder, { doc: area.value, onChange, onSave, onScroll, linkSource, live, imageUrl });
     area.hidden = true;
     use(editor);
     editor.focus();
@@ -154,7 +154,7 @@ window.ConsoleNoteEdit = (() => {
   const MODE_KEY = "ccdb.noteEditMode";
 
   /** Replace *host*'s content with an editor for *note*; *render* turns Markdown into nodes. */
-  function start(note, host, { render, done }) {
+  function start(note, host, { render, imageUrl, done }) {
     const l = L();
     let revision = note.revision;
     let saving = false;
@@ -252,6 +252,7 @@ window.ConsoleNoteEdit = (() => {
       onChange: () => { clearTimeout(timer); timer = setTimeout(draw, 250); },
       onScroll: () => sync.fromEditor(),
       onSave: () => save(),
+      imageUrl,
     });
     return { dirty, cancel };
   }
