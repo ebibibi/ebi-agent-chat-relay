@@ -33,7 +33,7 @@ vm.runInContext(fs.readFileSync('claude_discord/console/static/paste.js', 'utf8'
   const apiCalls = [];
   const captureElements = {
     capture: { setAttribute: () => {}, querySelectorAll: () => [] },
-    'capture-input': {}, 'capture-status': {},
+    'capture-input': {}, 'capture-status': {}, 'capture-pin': { checked: false },
   };
   Object.assign(context, {
     $: id => captureElements[id],

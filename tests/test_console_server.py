@@ -112,6 +112,18 @@ async def test_capture_then_board_then_patch(client) -> None:
     assert (await done.json())["item"]["state"] == "done"
 
 
+async def test_capture_can_be_pinned(client) -> None:
+    created = await client.post(
+        "/console/api/items", json={"title": "Plan Sunday", "pinned": True}, headers=WRITE
+    )
+    assert created.status == 201
+    assert (await created.json())["item"]["pinned_at"]
+
+    board = await (await client.get("/console/api/board", headers=AUTH)).json()
+    [item] = board["items"]
+    assert item["pinned_at"]
+
+
 async def test_reply_is_refused_for_threads_not_on_the_board(client) -> None:
     response = await client.post(
         "/console/api/items/t123/reply", json={"text": "hi"}, headers=WRITE

@@ -252,6 +252,9 @@ interrupt with the slot it holds (`POST /console/api/items/{id}/stop`, `/pause`,
 open every list but Done under a highlighted "📌 Working on now" strip, newest pin first, and
 bring their family with them rather than duplicating it in the tree. The pin is stored with the item
 (`PATCH /console/api/items/{id}` with `pinned: true|false`), so every device sees it.
+Ticking "📌 Pin" next to the capture box pins the request you are writing as it is added
+(`POST /console/api/items` with `pinned: true`); the tick applies to that one request only, and the
+pin stays when the request is handed to an agent.
 
 "✅ Done hidden" in the list header (or `h`) leaves finished items out of every list — Recent and
 the tree included, and filtering does not bring them back. The Done list always shows them. The

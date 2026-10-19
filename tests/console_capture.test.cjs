@@ -8,12 +8,13 @@ function setup() {
   const code = source.slice(begin, source.indexOf('// The capture box', begin));
   let release, calls = 0;
   const form = {setAttribute(k,v) {this[k]=v;},querySelectorAll:() => []};
-  const elements = {'capture':form,'capture-input':{},'capture-status':{textContent:''}};
+  const elements = {'capture':form,'capture-input':{},'capture-status':{textContent:''},'capture-pin':{checked:false}};
+  const bodies = [];
   const ctx = {window:{ConsolePaste:{ready:()=>[],clear:()=>{},prepareText:() => new Promise(r => {release=()=>r({text:'task',files:[]});})}},
     $:id=>elements[id],CAPTURE:'__capture__',autostart:()=>true,T:{capturing:'Adding…',paste_wait:'Uploading'},
-    api:async()=>{calls++;return {item:{id:'c1'}};},refresh:async()=>{},state:{view:'todo'},setView:()=>{},renderList:()=>{},revealSelection:()=>{},toast:()=>{}};
+    api:async(_path,opts)=>{calls++;bodies.push(opts.body);return {item:{id:'c1'}};},refresh:async()=>{},state:{view:'todo'},setView:()=>{},renderList:()=>{},revealSelection:()=>{},toast:()=>{}};
   vm.createContext(ctx); vm.runInContext(code,ctx);
-  return {ctx,elements,calls:()=>calls,release:()=>release()};
+  return {ctx,elements,bodies,calls:()=>calls,release:()=>release()};
 }
 test('capture blocks repeated submissions before upload and API response finish',async()=>{
   const f=setup();
@@ -66,4 +67,17 @@ test('a rejected request releases controls and keeps attachments',async()=>{
   assert.equal(await promise,false);
   assert.equal(cleared,0);
   assert.equal(f.elements['capture-input'].readOnly,false);
+});
+test('a pinned capture is sent pinned and the pin is for that request only',async()=>{
+  const f=setup(); f.elements['capture-pin'].checked=true;
+  const promise=f.ctx.capture('task'); f.release();
+  assert.equal(await promise,true);
+  assert.equal(f.bodies[0].pinned,true);
+  assert.equal(f.elements['capture-pin'].checked,false);
+});
+test('an unpinned capture does not send a pin',async()=>{
+  const f=setup();
+  const promise=f.ctx.capture('task'); f.release();
+  assert.equal(await promise,true);
+  assert.equal('pinned' in f.bodies[0],false);
 });

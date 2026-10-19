@@ -40,7 +40,10 @@
       <textarea id="capture-input" rows="1" autocomplete="off" maxlength="4200" aria-describedby="capture-status"></textarea>
       <span id="capture-attach"></span>
       <button id="capture-send" class="btn primary" type="submit"></button>
-      <label class="autostart"><input id="capture-start" type="checkbox"> <span id="capture-start-label"></span></label>
+      <span class="capture-options">
+        <label class="autostart"><input id="capture-start" type="checkbox"> <span id="capture-start-label"></span></label>
+        <label class="autostart"><input id="capture-pin" type="checkbox"> <span id="capture-pin-label"></span></label>
+      </span>
     </form>
     <span id="capture-status" class="capture-status" role="status" aria-live="polite"></span>
     <div id="bulk-bar" class="bulk-bar"></div>
