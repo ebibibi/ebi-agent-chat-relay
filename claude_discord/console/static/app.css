@@ -97,6 +97,7 @@ button.slash-now:hover { border-color: var(--accent); }
 .capture #capture-input { flex: 1; min-width: 0; min-height: 36px; max-height: 30vh; resize: none; background: transparent;
   border: 1px dashed var(--line); border-radius: 6px; padding: 7px 10px; }
 .capture #capture-send { flex: none; }
+.capture .capture-options { flex: none; display: flex; gap: 10px; }
 .capture .autostart { flex: none; font-size: 12px; color: var(--dim); cursor: pointer; white-space: nowrap; padding-top: 9px; }
 .capture #capture-input:focus { outline: none; border-color: var(--accent); border-style: solid; min-height: 84px; }
 

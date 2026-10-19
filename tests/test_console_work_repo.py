@@ -36,6 +36,20 @@ async def test_capture_round_trips(repo) -> None:
     assert stored.due_at == "2026-10-11T00:00:00Z"
 
 
+async def test_capture_can_be_pinned_when_written_down(repo) -> None:
+    item = await repo.create_capture({"title": "Ship it", "pinned": True})
+    assert item.pinned_at is not None
+    assert (await repo.get(item.id)).pinned_at == item.pinned_at
+    # Starting it keeps the pin under the thread's id.
+    started = await repo.attach_thread(item.id, 77)
+    assert started.pinned_at == item.pinned_at
+
+
+async def test_capture_is_not_pinned_by_default(repo) -> None:
+    item = await repo.create_capture({"title": "Later"})
+    assert item.pinned_at is None
+
+
 async def test_first_touch_of_a_thread_creates_its_overlay(repo) -> None:
     item = await repo.update(thread_item_id(42), {"priority": 0})
     assert item.thread_id == 42

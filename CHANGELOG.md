@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Pin a request as you write it** (#1182) — the Console capture box has a one-shot "📌 Pin" tick, so
+  work handed over from there lands in "📌 Working on now" straight away; `POST /console/api/items`
+  accepts `pinned: true`, and the pin carries over when the request starts as a thread.
 - **A demo instance for screencasts** (#1179) — `python -m claude_discord.demo reset|seed` rebuilds a
   separate, Console-only deployment from a versioned scenario (an Ebi Workspace vault plus Console
   items, dated relative to the reset day), keeping the passkey sign-in. The reset refuses folders it

@@ -332,6 +332,7 @@ class WorkItemRepository:
             created_at=now,
             updated_at=now,
             place=clean.get("place"),
+            pinned_at=clean.get("pinned_at"),
             workspace_path=clean.get("workspace_path"),
             workspace_source=clean.get("workspace_source"),
             workspace_reason=clean.get("workspace_reason"),
