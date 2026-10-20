@@ -35,7 +35,11 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SYNC_SUBDIR = "teams"
 ORGS_FILE = "orgs.json"
-_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+# One Teams attachment, decoded. Diagnostic zips shared in threads are routinely
+# 30MB+; at 25MB they stayed pending forever. The browser extension
+# (teams-channel-exporter, MAX_EMBED_BYTES) uses the same value and batches its
+# pushes so one request carries at most one file of this size.
+MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024
 
 
 def default_vault_root(working_dir: str | Path | None = None) -> Path:
@@ -424,7 +428,7 @@ class TeamsVaultStore:
             except (binascii.Error, ValueError):
                 pending.append({"mid": msg.mid, "name": name, "reason": "base64が不正"})
                 continue
-            if len(blob) > _MAX_ATTACHMENT_BYTES:
+            if len(blob) > MAX_ATTACHMENT_BYTES:
                 pending.append(
                     {
                         "mid": msg.mid,

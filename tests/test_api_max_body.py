@@ -14,7 +14,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from claude_discord.database.notification_repo import NotificationRepository
-from claude_discord.ext.api_server import _DEFAULT_MAX_BODY_BYTES, ApiServer
+from claude_discord.ext.api_server import (
+    _DEFAULT_MAX_BODY_BYTES,
+    _MAX_INGEST_TOTAL_BYTES,
+    ApiServer,
+)
+from claude_discord.ext.teams_store import MAX_ATTACHMENT_BYTES
 
 
 @pytest.fixture
@@ -33,6 +38,12 @@ class TestMaxBodySize:
     def test_default_is_well_above_one_mib(self) -> None:
         # The aiohttp default (1 MiB) is the bug we are fixing.
         assert _DEFAULT_MAX_BODY_BYTES > 1024 * 1024
+
+    def test_default_fits_the_largest_teams_attachment_and_the_ingest_total(self) -> None:
+        # A Teams sync push carries one attachment of up to MAX_ATTACHMENT_BYTES
+        # as base64 (4/3) plus the message JSON; /api/ingest carries its total.
+        assert _DEFAULT_MAX_BODY_BYTES >= MAX_ATTACHMENT_BYTES * 4 // 3 + 4 * 1024 * 1024
+        assert _DEFAULT_MAX_BODY_BYTES >= _MAX_INGEST_TOTAL_BYTES * 4 // 3
 
     def test_both_apps_use_the_raised_default(
         self, repo: NotificationRepository, bot: MagicMock
