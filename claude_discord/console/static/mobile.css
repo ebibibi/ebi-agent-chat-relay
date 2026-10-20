@@ -54,13 +54,10 @@
   .list-head h1 { flex: 1; }
   .list-head .filter { order: 5; flex: 1 0 100%; min-width: 0; font-size: 16px; min-height: 40px; }
   .bulk-bar[data-active="false"] { display: none; }
-  .capture { padding: 8px; display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 4px 6px; }
-  .capture #capture-input { grid-column: 1; grid-row: span 2; }
-  .capture #capture-attach, .capture #capture-send { grid-column: 2; }
-  .capture #capture-send { min-height: 40px; padding: 0; }
-  .capture .capture-options { grid-column: 1 / -1; gap: 14px; }
-  .capture .autostart { padding-top: 0; }
-  .capture-tray { grid-column: 1 / -1; }
+  .capture { padding: 8px; }
+  .capture #capture-input { min-height: 64px; }
+  .capture #capture-send { min-height: 40px; min-width: 64px; }
+  .capture .capture-options { gap: 4px 14px; }
   .capture .attach { min-width: 44px; min-height: 40px; }
   .capture textarea { font-size: 16px; }
   .jump { min-height: 40px; right: 10px; bottom: 8px; }

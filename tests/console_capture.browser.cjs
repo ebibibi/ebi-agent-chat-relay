@@ -34,6 +34,11 @@ const root = require('node:path').resolve(__dirname, '../claude_discord/console/
       await page.evaluate(() => {localStorage.setItem('lang','ja'); localStorage.setItem('autostart','0');});
       await page.reload();
       const input = page.locator('#capture-input');
+      const box = await input.boundingBox(), form = await page.locator('#capture').boundingBox();
+      const send = await page.locator('#capture-send').boundingBox(), start = await page.locator('#capture-start').boundingBox();
+      assert.ok(box.width > form.width*.85, 'the box spans the capture form');
+      assert.ok(send.y >= box.y+box.height && start.y >= box.y+box.height, 'options and buttons sit under the box');
+      assert.ok(start.x < send.x, 'options left, send right');
       await input.fill('モバイルのタスク');
       await input.press('Enter');
       assert.equal(requests,0, 'plain Enter is a newline');

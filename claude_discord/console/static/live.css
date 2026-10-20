@@ -33,8 +33,6 @@
 .pv-table th, .pv-table td { border: 1px solid var(--line); padding: 3px 8px; text-align: left; vertical-align: top; }
 .pv-table th { background: var(--raise); position: sticky; top: 0; }
 .file-look { margin-left: 8px; font-size: 12px; padding: 1px 8px; }
-.capture { flex-wrap: wrap; }
-.capture-tray { flex: 1 0 100%; }
 .capture .attach-wrap .btn.attach { padding: 4px 8px; font-size: 14px; }
 .lightbox-bar { display: flex; align-items: center; gap: 8px; max-width: 100%; }
 .lightbox-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
