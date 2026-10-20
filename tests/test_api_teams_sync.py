@@ -25,7 +25,7 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from claude_discord.database.notification_repo import NotificationRepository
-from claude_discord.ext import teams_sync
+from claude_discord.ext import teams_store, teams_sync
 from claude_discord.ext.api_server import ApiServer
 from claude_discord.ext.teams_store import TeamsVaultStore
 
@@ -264,6 +264,69 @@ async def test_embedded_attachment_lands_next_to_its_message(
     assert body["attachments_saved"] == 1
     assert body["pending"] == []
     assert (folder / "messages" / ROOT / "admin.evtx").read_bytes() == b"evtx-bytes"
+
+
+async def test_a_33mb_attachment_is_stored_through_the_default_body_limit(
+    client: TestClient,
+) -> None:
+    # Diagnostic zips shared in Teams are routinely 30MB+. At 25MB per file
+    # (and a ~68MB body limit) they stayed pending on every sync.
+    blob = os.urandom(33 * 1024 * 1024)
+    resp = await client.post(
+        "/api/teams/sync/push",
+        headers=AUTH,
+        json=thread_body(
+            messages=[
+                msg(
+                    ROOT,
+                    "ログを添付します",
+                    "h1",
+                    attachments=[
+                        {
+                            "name": "device.zip",
+                            "status": "embedded",
+                            "data": base64.b64encode(blob).decode(),
+                        }
+                    ],
+                )
+            ]
+        ),
+    )
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["attachments_saved"] == 1
+    assert body["pending"] == []
+    assert (Path(body["folder"]) / "messages" / ROOT / "device.zip").read_bytes() == blob
+
+
+async def test_an_attachment_over_the_cap_is_pending_not_dropped(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(teams_store, "MAX_ATTACHMENT_BYTES", 1024)
+    resp = await client.post(
+        "/api/teams/sync/push",
+        headers=AUTH,
+        json=thread_body(
+            messages=[
+                msg(
+                    ROOT,
+                    "大きいファイル",
+                    "h1",
+                    attachments=[
+                        {
+                            "name": "big.zip",
+                            "status": "embedded",
+                            "data": base64.b64encode(b"x" * 2048).decode(),
+                        }
+                    ],
+                )
+            ]
+        ),
+    )
+    body = await resp.json()
+    assert body["attachments_saved"] == 0
+    assert [p["name"] for p in body["pending"]] == ["big.zip"]
+    assert "サイズ上限超過" in body["pending"][0]["reason"]
 
 
 async def test_unfetched_attachment_is_reported_and_asked_for_again(

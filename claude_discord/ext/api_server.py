@@ -57,6 +57,7 @@ from ..thread_status import request_thread_outcome
 from . import ingest_manifest, teams_sync
 from .attention_api import handle_attention
 from .restart_api import handle_cancel_restart, handle_get_restart, handle_reserve_restart
+from .teams_store import MAX_ATTACHMENT_BYTES as TEAMS_MAX_ATTACHMENT_BYTES
 from .teams_store import TeamsVaultStore
 from .teams_sync import ThreadRef
 from .wait_api import handle_cancel_wait, handle_create_wait, handle_list_waits
@@ -139,7 +140,12 @@ def _serialize_thread_message(message: Any) -> dict[str, object]:
 # ingest (a full conversation thread plus base64 attachments). Base64 inflates
 # the decoded payload ~4/3, so the body limit must exceed the decoded
 # attachment cap by that factor, plus headroom for the surrounding JSON.
-_DEFAULT_MAX_BODY_BYTES = _MAX_INGEST_TOTAL_BYTES * 4 // 3 + 1024 * 1024
+# /api/teams/sync/push carries one attachment of up to MAX_ATTACHMENT_BYTES
+# as base64 plus the message JSON, so the limit covers whichever is larger.
+_DEFAULT_MAX_BODY_BYTES = max(
+    _MAX_INGEST_TOTAL_BYTES * 4 // 3 + 1024 * 1024,
+    TEAMS_MAX_ATTACHMENT_BYTES * 4 // 3 + 16 * 1024 * 1024,
+)
 # Characters allowed in a saved attachment filename; everything else → "_".
 _UNSAFE_FILENAME_RE = re.compile(r"[^\w.\-]+")
 

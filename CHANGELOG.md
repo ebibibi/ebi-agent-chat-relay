@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Teams sync stores attachments up to 100MB** (#1184) — the per-file cap was 25MB and the default
+  request body limit could not carry one larger file as base64, so diagnostic zips shared in Teams
+  stayed pending on every sync. The default body limit now fits one maximum-size attachment.
 - **Focus folds same-title threads into one row** (#1167) — a job that opens a fresh thread on
   every run (`🔄 ebibot-upgrade`, docs sync) no longer fills Focus with identical idle rows. The
   newest one stands for the series with a `×N` tag; older ones leave Focus and the guide but stay
