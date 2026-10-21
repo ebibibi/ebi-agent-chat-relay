@@ -123,6 +123,53 @@ const MD = (() => {
     return roots;
   }
 
+  // ------------------------------------------------------------ code copy
+  // The button sits outside <pre> so it stays put while a long line scrolls sideways.
+  const COPY = { en: ["Copy", "Copied", "Copy failed"], ja: ["コピー", "コピーしました", "コピーできませんでした"] };
+  const copyLabels = () => COPY[document.documentElement.lang === "ja" ? "ja" : "en"];
+  const COPY_RESET_MS = 1500;
+
+  // navigator.clipboard needs a secure context; plain http and older browsers only have execCommand.
+  function copyByCommand(value) {
+    const buf = el("textarea", "code-copy-buffer");
+    buf.value = value;
+    buf.readOnly = true;
+    buf.setAttribute("aria-hidden", "true");
+    document.body.append(buf);
+    try {
+      buf.select();
+      buf.setSelectionRange(0, value.length);
+      if (!document.execCommand("copy")) throw new Error("copy command refused");
+    } finally { buf.remove(); }
+  }
+
+  async function copyText(value) {
+    if (navigator.clipboard?.writeText) {
+      try { await navigator.clipboard.writeText(value); return; } catch { /* denied: try the old way */ }
+    }
+    copyByCommand(value);
+  }
+
+  function codeBlock(pre, value) {
+    const box = el("div", "code-block");
+    const button = el("button", "code-copy");
+    button.type = "button";
+    button.textContent = copyLabels()[0];
+    let timer = 0;
+    button.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const [idle, done, failed] = copyLabels();
+      let ok = true;
+      try { await copyText(value); } catch { ok = false; }
+      button.textContent = ok ? done : failed;
+      button.classList.toggle("copied", ok);
+      clearTimeout(timer);
+      timer = setTimeout(() => { button.textContent = idle; button.classList.remove("copied"); }, COPY_RESET_MS);
+    });
+    box.append(pre, button);
+    return box;
+  }
+
   function blocks(src) {
     const lines = src.replace(/\r\n?/g, "\n").split("\n");
     const out = [];
@@ -141,7 +188,7 @@ const MD = (() => {
         if (m[1]) code.dataset.lang = m[1];
         code.textContent = body.join("\n");
         pre.append(code);
-        out.push(pre);
+        out.push(codeBlock(pre, code.textContent));
         continue;
       }
       if (line.includes("|") && i + 1 < lines.length && TABLE_SEP.test(lines[i + 1]) && lines[i + 1].includes("-")) {
