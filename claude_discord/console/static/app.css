@@ -290,7 +290,8 @@ a.btn { text-decoration: none; display: inline-block; }
 .help .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 22px; max-width: 420px; }
 .help kbd { background: var(--raise); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font-size: 12px; }
 .help table { border-collapse: collapse; } .help td { padding: 3px 10px 3px 0; }
-.toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--raise); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; z-index: 20; }
+/* Top right, below the pane headers: at the bottom it covered the reply box being typed in. */
+.toast { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 56px); right: 16px; max-width: min(420px, calc(100vw - 32px)); overflow-wrap: anywhere; box-shadow: 0 4px 16px rgba(0,0,0,.35); background: var(--raise); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; z-index: 20; }
 
 .only-narrow { display: none; }
 @media (max-width: 900px) {
