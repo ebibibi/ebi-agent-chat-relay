@@ -21,7 +21,7 @@ project = "Azure環境"
 
 [[items]]
 title = "退職した Nestor Wilke さんのサインインを止めて、グループから外す"
-note = "退職日は昨日。メールボックスは消さない。"
+note = "退職日は昨日。メールボックスは消さない。対象のアカウント:\n```\nNestorW@contoso.onmicrosoft.com\n```"
 priority = 1
 due = "+1"
 project = "M365運用"
