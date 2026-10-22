@@ -125,6 +125,7 @@ environment minus `STRIPPED_ENV_KEYS`:
 | `API_SECRET_KEY` | REST API authentication of a host bot |
 | `CCDB_AGUI_URL`, `CCDB_AGUI_TOKEN` | Remote AG-UI agent credential |
 | `CCDB_INGEST_TOKEN` | `/api/ingest` credential |
+| `CCDB_INGEST_ENTRA_*` | Entra ID tenant / app / user allowlist accepted on the ingest routes (no secret; the allowlist is the access decision) |
 | `CCDB_TEAMS_APP_PASSWORD`, `CCDB_TEAMS_QUEUE_URL` | Teams credentials |
 | `CCDB_API_URL`, `CCDB_API_SECRET` | Inherited control-plane values (see below) |
 

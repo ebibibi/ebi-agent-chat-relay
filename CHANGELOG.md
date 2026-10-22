@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Entra ID access tokens on the external ingest listener** (#1195) — besides the static
+  `CCDB_INGEST_TOKEN`, `/api/ingest*` and `/api/teams/sync/*` accept an Entra ID v2 access token
+  for one app (`CCDB_INGEST_ENTRA_TENANT_ID`, `CCDB_INGEST_ENTRA_CLIENT_ID`), verified against the
+  tenant's signing keys, the required delegated scope (`CCDB_INGEST_ENTRA_SCOPE`, default
+  `access_as_user`) and an explicit allowlist of user object IDs (`CCDB_INGEST_ENTRA_ALLOWED_OIDS`,
+  required). The external listener starts with either method configured.
 - **Pin a request as you write it** (#1182) — the Console capture box has a one-shot "📌 Pin" tick, so
   work handed over from there lands in "📌 Working on now" straight away; `POST /console/api/items`
   accepts `pinned: true`, and the pin carries over when the request starts as a thread.
