@@ -406,6 +406,8 @@ for idle deadlines, attachment retries, credentials and startup rollback.
 | `CCDB_API_SECRET` | Optional control-plane Bearer secret, also supplied to session runners. Required for non-loopback binds | (optional) |
 | `CCDB_CONTROL_PLANE_HOST_GUARD` | Reject nonlocal Host/Origin and forwarding headers on the control plane; `0` opts out for deliberately authenticated proxies | `1` |
 | `CCDB_INGEST_TOKEN` | Bearer token for `POST /api/ingest` (independent of `api_secret`); unset ⇒ the endpoint responds `503` | (optional) |
+| `CCDB_INGEST_ENTRA_TENANT_ID` / `CCDB_INGEST_ENTRA_CLIENT_ID` / `CCDB_INGEST_ENTRA_ALLOWED_OIDS` | Also accept an Entra ID v2 access token as the bearer on the ingest and Teams sync routes. All three are required (allowlist = comma-separated user object IDs); half-set is logged and left off. Either this or `CCDB_INGEST_TOKEN` enables the external listener | (optional) |
+| `CCDB_INGEST_ENTRA_SCOPE` | Delegated scope the token must carry in `scp` | `access_as_user` |
 | `CCDB_INGEST_REQUIRE_COMPLETE` | Set to `1` to reject an ingest with `409` when its `attachments_manifest` proves attachments went missing, instead of starting a session on partial evidence | `0` |
 | `CCDB_TEAMS_VAULT_ROOT` | Directory where `POST /api/teams/sync` mirrors upstream threads (one file per message). Gated by `CCDB_INGEST_TOKEN` | `{working_dir}/teams` |
 | `CCDB_CONSOLE_PORT` | Port for the [Ebi AI Console](../console.md) listener (requires the `console` extra). The console is off unless set and never runs unauthenticated (passkey sign-in by default) | (optional) |

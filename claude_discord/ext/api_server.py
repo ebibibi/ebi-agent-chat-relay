@@ -56,6 +56,7 @@ from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
 from ..thread_status import request_thread_outcome
 from . import ingest_manifest, teams_sync
 from .attention_api import handle_attention
+from .entra_auth import EntraTokenVerifier, looks_like_jwt
 from .restart_api import handle_cancel_restart, handle_get_restart, handle_reserve_restart
 from .teams_store import MAX_ATTACHMENT_BYTES as TEAMS_MAX_ATTACHMENT_BYTES
 from .teams_store import TeamsVaultStore
@@ -270,6 +271,7 @@ class ApiServer:
         port: int = 8080,
         api_secret: str | None = None,
         ingest_token: str | None = None,
+        ingest_entra: EntraTokenVerifier | None = None,
         ingest_host: str | None = None,
         ingest_port: int | None = None,
         max_body_bytes: int | None = None,
@@ -301,6 +303,9 @@ class ApiServer:
         self.port = port
         self.api_secret = api_secret
         self.ingest_token = ingest_token
+        # Optional second way in for the external routes: an Entra ID access
+        # token for one app, scope and allowlist of users (see entra_auth.py).
+        self.ingest_entra = ingest_entra
         self.ingest_host = ingest_host
         self.ingest_port = ingest_port
         self.max_body_bytes = max_body_bytes or _DEFAULT_MAX_BODY_BYTES
@@ -557,11 +562,12 @@ class ApiServer:
         """
         if not (self.ingest_host and self.ingest_port):
             return
-        if not self.ingest_token:
+        if not self.ingest_token and self.ingest_entra is None:
             logger.warning(
-                "External ingest listener requested (%s:%d) but no ingest_token "
-                "is set — refusing to expose an unauthenticated surface. "
-                "Set CCDB_INGEST_TOKEN to enable it.",
+                "External ingest listener requested (%s:%d) but neither an "
+                "ingest_token nor Entra ID auth is set — refusing to expose an "
+                "unauthenticated surface. Set CCDB_INGEST_TOKEN or "
+                "CCDB_INGEST_ENTRA_* to enable it.",
                 self.ingest_host,
                 self.ingest_port,
             )
@@ -2374,14 +2380,8 @@ class ApiServer:
                "attachments_saved": N}``
         """
         # --- Opt-in + auth (independent of the global api_secret middleware) ---
-        if not self.ingest_token:
-            return web.json_response({"error": "Ingest endpoint is disabled"}, status=503)
-
-        auth_header = request.headers.get("Authorization", "")
-        if not auth_header.startswith("Bearer "):
-            return web.json_response({"error": "Missing Authorization header"}, status=401)
-        if not hmac.compare_digest(auth_header[7:], self.ingest_token):
-            return web.json_response({"error": "Invalid token"}, status=401)
+        if err := await self._check_ingest_token(request):
+            return err
 
         try:
             data = await request.json()
@@ -2675,13 +2675,8 @@ class ApiServer:
         independent of the global ``api_secret`` middleware) so the same
         external client that posted the work can retrieve its answer.
         """
-        if not self.ingest_token:
-            return web.json_response({"error": "Ingest endpoint is disabled"}, status=503)
-        auth_header = request.headers.get("Authorization", "")
-        if not auth_header.startswith("Bearer "):
-            return web.json_response({"error": "Missing Authorization header"}, status=401)
-        if not hmac.compare_digest(auth_header[7:], self.ingest_token):
-            return web.json_response({"error": "Invalid token"}, status=401)
+        if err := await self._check_ingest_token(request):
+            return err
 
         if err := self._require_ingest_repo():
             return err
@@ -2718,16 +2713,28 @@ class ApiServer:
             )
         return None
 
-    def _check_ingest_token(self, request: web.Request) -> web.Response | None:
-        """Enforce the dedicated ingest bearer token (shared with /api/ingest)."""
-        if not self.ingest_token:
+    async def _check_ingest_token(self, request: web.Request) -> web.Response | None:
+        """Authenticate an ingest / Teams sync request.
+
+        Two credentials are accepted as the bearer value: the static
+        ``ingest_token`` (constant-time compare, unchanged), or — when
+        configured — an Entra ID access token verified by ``ingest_entra``.
+        With neither configured the surface is disabled (503).
+        """
+        if not self.ingest_token and self.ingest_entra is None:
             return web.json_response({"error": "Ingest endpoint is disabled"}, status=503)
         auth_header = request.headers.get("Authorization", "")
         if not auth_header.startswith("Bearer "):
             return web.json_response({"error": "Missing Authorization header"}, status=401)
-        if not hmac.compare_digest(auth_header[7:], self.ingest_token):
-            return web.json_response({"error": "Invalid token"}, status=401)
-        return None
+        presented = auth_header[7:]
+        if self.ingest_token and hmac.compare_digest(presented, self.ingest_token):
+            return None
+        if self.ingest_entra is not None and looks_like_jwt(presented):
+            ok, reason = await self.ingest_entra.verify(presented)
+            if ok:
+                return None
+            logger.warning("Rejected Entra ID token on %s: %s", request.path, reason)
+        return web.json_response({"error": "Invalid token"}, status=401)
 
     # ------------------------------------------------------------------
     # Teams thread sync (/api/teams/sync) — raw messages, one file each
@@ -2740,7 +2747,7 @@ class ApiServer:
         self, request: web.Request, *, require_body: bool
     ) -> tuple[tuple[ThreadRef, list, dict], None] | tuple[None, web.Response]:
         """Auth + parse the shared body shape of both sync endpoints."""
-        if err := self._check_ingest_token(request):
+        if err := await self._check_ingest_token(request):
             return None, err
         try:
             data = await request.json()
@@ -2939,7 +2946,7 @@ class ApiServer:
         Returns 200 with ``exists=false`` and empty fields when the key is
         unknown — friendlier for a first-run client than a 404.
         """
-        if err := self._check_ingest_token(request):
+        if err := await self._check_ingest_token(request):
             return err
         if err := self._require_summary_repo():
             return err
@@ -3022,7 +3029,7 @@ class ApiServer:
         the next export to be treated as a first run. Token-gated when an ingest
         token is configured, for parity with the other ingest routes.
         """
-        if err := self._check_ingest_token(request):
+        if err := await self._check_ingest_token(request):
             return err
         if err := self._require_summary_repo():
             return err

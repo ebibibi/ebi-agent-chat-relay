@@ -20,6 +20,7 @@ from dotenv import find_dotenv, load_dotenv
 from .bot import ClaudeDiscordBot
 from .cog_loader import load_custom_cogs
 from .deployment import DataLayout
+from .ext.entra_auth import EntraTokenVerifier
 from .setup import setup_bridge
 from .teams_integration import FrontendRouter, build_teams_runtime, parse_frontends
 from .utils.logger import setup_logging
@@ -202,6 +203,7 @@ async def main() -> None:
             port=int(config["api_port"]),
             api_secret=config["api_secret"] or None,
             ingest_token=os.getenv("CCDB_INGEST_TOKEN") or None,
+            ingest_entra=EntraTokenVerifier.from_env(os.environ),
             ingest_host=os.getenv("CCDB_INGEST_HOST") or None,
             ingest_port=int(os.environ["CCDB_INGEST_PORT"])
             if os.getenv("CCDB_INGEST_PORT")
