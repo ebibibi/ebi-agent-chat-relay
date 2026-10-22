@@ -512,7 +512,8 @@ function rowNode({ item, depth, children, rowKey, family }) {
     role: "option", "data-item-id": item.id, "aria-selected": state.selected === item.id ? "true" : "false",
     onclick: (event) => {
       if (window.ConsoleBulk?.click(event, item.id, rowKey)) return;
-      openItem(window.ConsoleFamily.model(state.items,item.id)?.root.id || item.id);
+      // Open the row that was clicked; a child's detail links back to its parent.
+      openItem(item.id);
     },
   },
     h("span", {class:"row-select"}, window.ConsoleBulk?.checkbox(item,rowKey),
@@ -1084,7 +1085,7 @@ function wire() {
     switch (e.key) {
       case "j": case "ArrowDown": move(1); break;
       case "k": case "ArrowUp": move(-1); break;
-      case "Enter": if (id) openItem(window.ConsoleFamily.model(state.items,id)?.root.id || id); break;
+      case "Enter": if (id) openItem(id); break;
       case "e": if (id && state.byId.get(id)?.bucket !== "done") window.ConsoleFinish.finish(id); break;
       case "p": if (id) togglePin(id); break;
       case "1": case "2": case "3": case "4": if (id) patch(id, { priority: Number(e.key) - 1 }); break;

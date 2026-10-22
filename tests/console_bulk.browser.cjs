@@ -102,12 +102,15 @@ test('partial failure stays visible and retry only sends failures; busy clicks d
   assert.deepEqual(app.requests,['a','b','c','b']);
 });
 
-test('child list entry opens the parent; direct child replies require a fresh explicit choice', async t => {
+test('child list entry opens the child; direct child replies require a fresh explicit choice', async t => {
   const app = await setup(t, [fixture('child',{parent_id:'parent'}), fixture('other'),fixture('parent')]);
   assert.deepEqual(await app.page.locator('.row').evaluateAll(nodes=>nodes.map(n=>n.dataset.itemId)), ['parent','child','other']);
   await app.row('child').click();
-  assert.equal(await app.page.evaluate(()=>state.open),'parent');
+  assert.equal(await app.page.evaluate(()=>state.open),'child');
   assert.equal(await app.page.locator('#d-family').isVisible(),true);
+  assert.equal(await app.page.locator('form.reply').isVisible(),false);
+  await app.page.locator('.family-parent').click();
+  assert.equal(await app.page.evaluate(()=>state.open),'parent');
   await app.page.locator('.family-open').click();
   assert.equal(await app.page.evaluate(()=>state.open),'child');
   assert.equal(await app.page.locator('form.reply').isVisible(),false);

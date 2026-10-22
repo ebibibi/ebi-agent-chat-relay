@@ -41,6 +41,14 @@ const items = [fixture('p','サイト公開をまとめる'), fixture('c','画�
   if (process.env.CONSOLE_TEST_SCREENSHOTS) {
     await page.screenshot({path: process.env.CONSOLE_TEST_SCREENSHOTS + '/desktop.png'});
   }
+  // A child row in the sidebar opens that child, not the family root.
+  await page.locator('#list .row[data-item-id="c"]').click();
+  await page.waitForFunction(() => state.open === 'c');
+  assert.equal(await page.locator('#list .row[data-item-id="c"]').getAttribute('aria-selected'),'true');
+  await page.locator('#list .row[data-item-id="p"]').click();
+  await page.waitForFunction(() => state.open === 'p');
+  await page.evaluate(() => { state.selected = 'w'; document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true})); });
+  await page.waitForFunction(() => state.open === 'w');
   await page.evaluate(() => openItem('c'));
   assert.equal(await page.locator('form.reply').isVisible(),false);
   await page.getByRole('button',{name:'この子に直接返信する',exact:true}).click();
