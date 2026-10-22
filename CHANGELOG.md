@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Entra ingest auth no longer refetches the JWKS for every forged token** (#1197) — a bearer
+  whose unverified header is not RS256 with a well-formed `kid` is rejected before any I/O, keys
+  are cached per tenant, the set is refetched at most once per 5 minutes (5 s timeout), and an
+  unknown `kid` inside that window is rejected without a network call.
+
 ### Added
 
 - **Entra ID access tokens on the external ingest listener** (#1195) — besides the static
