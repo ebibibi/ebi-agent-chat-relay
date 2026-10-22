@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A child thread opens from the sidebar** (#1193) — clicking (or pressing Enter on) a child row in a parent/child group opens that child instead of the group's parent. The child view still starts read-only, with buttons back to the parent.
 - **Backend-neutral wording in agent- and user-facing text** (#1163) — the relay header is now `[MESSAGE FROM ANOTHER AI SESSION — thread …]`, and the concurrency notice, lounge invite, ask embed title, default thread name, help title and several slash-command descriptions no longer say "Claude" where every backend is meant. Claude-specific text (`/usage`, CLI session import, transcript search) is unchanged. The Console still classifies the old relay header as activity.
 
 ### Fixed
