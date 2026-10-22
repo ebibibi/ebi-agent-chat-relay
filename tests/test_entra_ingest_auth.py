@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 from claude_discord.database.notification_repo import NotificationRepository
 from claude_discord.ext.api_server import ApiServer
-from claude_discord.ext.entra_auth import EntraTokenVerifier
+from claude_discord.ext.entra_auth import EntraTokenVerifier, UnknownSigningKeyError, _JwksCache
 
 TENANT = "aaaaaaaa-0000-4000-8000-000000000001"
 CLIENT = "bbbbbbbb-0000-4000-8000-000000000002"
@@ -52,7 +52,7 @@ def _token(key=_KEY, **overrides) -> str:
     }
     claims.update(overrides)
     claims = {k: v for k, v in claims.items() if v is not None}
-    return jwt.encode(claims, key, algorithm="RS256")
+    return jwt.encode(claims, key, algorithm="RS256", headers={"kid": "test-kid"})
 
 
 # --- verifier ---------------------------------------------------------------
@@ -222,3 +222,68 @@ async def test_listener_starts_with_entra_only(repo: NotificationRepository) -> 
         assert api._ext_runner is not None
     finally:
         await api.stop()
+
+
+# --- JWKS refetch limit (#1197) ----------------------------------------------
+
+
+def test_token_without_kid_is_rejected_before_key_lookup() -> None:
+    calls = []
+    v = EntraTokenVerifier(
+        tenant_id=TENANT,
+        client_id=CLIENT,
+        allowed_oids=frozenset({OID}),
+        key_resolver=lambda tok: calls.append(tok) or _KEY.public_key(),
+    )
+    no_kid = jwt.encode({"aud": CLIENT}, _KEY, algorithm="RS256")
+    ok, reason = v.verify_sync(no_kid)
+    assert not ok and "kid" in reason
+    assert calls == []
+
+
+def test_non_rs256_header_is_rejected_before_key_lookup() -> None:
+    calls = []
+    v = EntraTokenVerifier(
+        tenant_id=TENANT,
+        client_id=CLIENT,
+        allowed_oids=frozenset({OID}),
+        key_resolver=lambda tok: calls.append(tok) or _KEY.public_key(),
+    )
+    forged = jwt.encode({"aud": CLIENT}, "x" * 32, algorithm="HS256", headers={"kid": "test-kid"})
+    ok, reason = v.verify_sync(forged)
+    assert not ok and reason == "unsupported alg"
+    assert calls == []
+
+
+def _cache(clock):
+    fetches = []
+
+    def fetch():
+        fetches.append(clock[0])
+        return {"known": "KEY"}
+
+    return _JwksCache(
+        "https://example.invalid/keys", fetch=fetch, clock=lambda: clock[0], cooldown=300
+    ), fetches
+
+
+def test_unknown_kids_refetch_at_most_once_per_cooldown() -> None:
+    clock = [1000.0]
+    cache, fetches = _cache(clock)
+    assert cache.key_for_kid("known") == "KEY"
+    for _ in range(50):
+        with pytest.raises(UnknownSigningKeyError):
+            cache.key_for_kid("forged")
+    assert len(fetches) == 1
+    clock[0] += 301
+    with pytest.raises(UnknownSigningKeyError):
+        cache.key_for_kid("forged")
+    assert len(fetches) == 2
+
+
+def test_known_kid_is_served_from_cache() -> None:
+    clock = [0.0]
+    cache, fetches = _cache(clock)
+    for _ in range(10):
+        assert cache.key_for_kid("known") == "KEY"
+    assert len(fetches) == 1
