@@ -71,7 +71,7 @@ window.ConsoleNotify = (() => {
     const more = fresh.length > 1 ? ` (+${fresh.length - 1})` : "";
     const t = h("div", { class: "toast clickable", role: "status", text: `🔔 ${label(first)}${more}`,
       onclick: () => { t.remove(); openItem(first.id); } });
-    document.body.append(t);
+    showToast(t);
     setTimeout(() => t.remove(), 6000);
     if (document.hidden || !document.hasFocus()) {
       missed += fresh.length;
