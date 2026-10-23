@@ -162,8 +162,16 @@ function h(tag, attrs = {}, ...children) {
 const $ = (id) => document.getElementById(id);
 function toast(msg) {
   const t = h("div", { class: "toast", role: "status", text: msg });
-  document.body.append(t);
+  showToast(t);
   setTimeout(() => t.remove(), 2600);
+}
+// Open toasts at the top of the conversation's messages, below the pane header whose
+// buttons wrap onto several rows; with no conversation open the CSS default holds.
+function showToast(t) {
+  document.body.append(t);
+  const msgs = document.getElementById("msgs");
+  const top = msgs && msgs.offsetParent ? msgs.getBoundingClientRect().top : 0;
+  if (top > 0 && top < window.innerHeight / 2) t.style.top = `${Math.round(top) + 8}px`;
 }
 
 // ---------------------------------------------------------------- api

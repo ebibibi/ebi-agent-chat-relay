@@ -108,7 +108,7 @@ window.ConsoleFinish = (() => {
       h("span", { text: `✅ ${T.finished}: ${name.slice(0, 40)}` + (note ? ` · ${note}` : "") }),
       h("button", { class: "btn", type: "button", text: `↩ ${T.undo}`,
         onclick: async () => { t.remove(); for (const key of ids) await reopen(key); } }));
-    document.body.append(t);
+    showToast(t);
     setTimeout(() => t.remove(), UNDO_MS);
   }
 

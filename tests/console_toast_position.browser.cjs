@@ -23,5 +23,7 @@ for(const [width,height] of [[1280,800],[390,844]])test(`toast stays clear of th
  assert.ok(box.y<height/3,`toast top ${box.y}`);
  assert.ok(box.x+box.width<=width-8&&box.x>=8,`toast x ${box.x} w ${box.width}`);
  assert.ok(box.x+box.width>width*0.6,`toast should hug the right edge: ${box.x}+${box.width}`);
+ const head=await page.locator('#d-head').boundingBox();
+ if(head&&head.height)assert.ok(box.y>=head.y+head.height,`toast ${box.y} covers the header buttons ending at ${head.y + head.height}`);
  if(reply)assert.ok(box.y+box.height<reply.y,`toast ${box.y + box.height} overlaps reply ${reply.y}`);
 });
