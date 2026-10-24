@@ -28,6 +28,9 @@ from urllib.parse import quote
 import discord
 from aiohttp import web
 
+from claude_code_core.account_pool import HOME_ENV_VAR
+
+from ..account_turns import session_home
 from ..message_actions import message_actions
 from ..thread_marker import OUTCOME_DONE, thread_outcome
 from ..thread_status import request_thread_outcome, schedule_thread_outcome
@@ -89,6 +92,8 @@ from .workspace_plan import WorkspacePlan
 from .workspace_records import RecordWatcher
 
 if TYPE_CHECKING:
+    from claude_code_core.account_router import AccountRouter
+
     from ..ext.api_server import ApiServer
     from .host import ConsoleSessionHost
 
@@ -234,8 +239,11 @@ class ConsoleServer:
         codex_compactor: Callable[..., Awaitable[None]] | None = None,
         triage: TriageRepository | None = None,
         places: PlaceRepository | None = None,
+        account_router: AccountRouter | None = None,
     ) -> None:
         self.api = api_server
+        #: Account pools: where a pooled session's transcript lives. None: ambient only.
+        self.account_router = account_router
         #: Lists skills per backend for slash-command autocomplete; None reads the disk.
         self._skills = skills
         #: Runs ``/compact`` on a Codex session; injected so tests spawn nothing.
@@ -473,6 +481,10 @@ class ConsoleServer:
                 logger.exception("console: Workspace record pass failed")
             await asyncio.sleep(RECORD_INTERVAL_SECONDS)
 
+    async def session_home(self, thread_key: int, backend: str | None) -> Path | None:
+        """The pool profile directory a thread's session lives in; None for the ambient one."""
+        return await session_home(self.account_router, thread_key, backend or "claude")
+
     async def bind_recorded(self) -> int:
         """Bind threads whose sessions wrote Workspace records since the last pass.
 
@@ -496,7 +508,11 @@ class ConsoleServer:
         bound_count = 0
         for record in fresh:
             hit = await asyncio.to_thread(
-                self.workspace_records.latest, record.session_id, record.backend, entries
+                self.workspace_records.latest,
+                record.session_id,
+                record.backend,
+                entries,
+                await self.session_home(record.thread_id, record.backend),
             )
             self._records_seen[record.thread_id] = record.last_used_at
             if hit is None:
@@ -1257,9 +1273,13 @@ class ConsoleServer:
             return _error("this conversation has no Codex session to compact yet", 409)
         factory = vars(getattr(self.api, "components", None) or object()).get("backend_factory")
         command = getattr(factory, "codex_command", None) or "codex"
+        # A pooled session's rollout is in its profile's CODEX_HOME. Read the pin
+        # only: compaction must not choose (or move to) another account.
+        home = await self.session_home(key, "codex")
+        env = {**os.environ, HOME_ENV_VAR["codex"]: str(home)} if home is not None else None
         self._compacting.add(key)
         try:
-            await self._codex_compact(record.session_id, codex_command=command)
+            await self._codex_compact(record.session_id, codex_command=command, env=env)
         except CompactError as exc:
             logger.warning("console: /compact failed on %s: %s", _q(item_id), _q(exc))
             return _error(str(exc), 502)
@@ -1755,6 +1775,7 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
         api_server,
         work_repo,
         ConsoleAuthenticator(config, sessions=store),
+        account_router=getattr(bot, "account_router", None),
         host=host,
         port=int(raw_port),
         usage=usage,
@@ -1822,6 +1843,7 @@ async def _build_session_host(
         usage_repo=getattr(components, "usage_repo", None),
         registry=getattr(bot, "session_registry", None),
         worktree_manager=getattr(bot, "worktree_manager", None),
+        account_router=getattr(bot, "account_router", None),
     )
     # The wait watcher resumes a conversation after CI; it finds this one here.
     bot.console_sessions = host  # type: ignore[attr-defined]

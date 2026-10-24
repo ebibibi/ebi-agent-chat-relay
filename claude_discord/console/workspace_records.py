@@ -145,17 +145,28 @@ class RecordWatcher:
         self._offsets: dict[str, tuple[Path, int]] = {}
 
     def latest(
-        self, session_id: str, backend: str | None, entries: list[dict[str, Any]]
+        self,
+        session_id: str,
+        backend: str | None,
+        entries: list[dict[str, Any]],
+        home: Path | None = None,
     ) -> tuple[str, str] | None:
-        """The entry and file most recently written by *session_id* since the last call."""
-        key = f"{backend or 'claude'}:{session_id}"
+        """The entry and file most recently written by *session_id* since the last call.
+
+        *home* is the pool profile directory the session runs in; ``None`` is the
+        relay's own login. A session that moved profile is looked up again there.
+        """
+        kind = backend or "claude"
+        key = f"{kind}:{session_id}"
         known = self._offsets.get(key)
         path = known[0] if known else None
-        if path is None or not path.is_file():
+        if (
+            path is None
+            or not path.is_file()
+            or (home is not None and not path.is_relative_to(home))
+        ):
             try:
-                path = find_transcript(
-                    backend or "claude", ambient_home(backend or "claude"), session_id
-                )
+                path = find_transcript(kind, home or ambient_home(kind), session_id)
             except (OSError, ValueError):
                 path = None
             if path is None:

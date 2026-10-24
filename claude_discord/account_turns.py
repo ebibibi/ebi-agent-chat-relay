@@ -11,6 +11,7 @@ import asyncio
 import logging
 import os
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from claude_code_core.account_pool import AccountBinding
@@ -45,10 +46,7 @@ async def plan_account_turn(
     if plan is None:
         return None, session_id, prompt
     if plan.needs_handoff and session_id and plan.source_home is not None:
-        reader = ConversationHistoryReader(
-            claude_sessions_root=plan.source_home / "projects",
-            codex_home=plan.source_home,
-        )
+        reader = history_reader_at(plan.source_home)
         transcript = await asyncio.to_thread(reader.read, backend, session_id)
         if transcript:
             prompt = build_handoff_prompt(
@@ -59,6 +57,26 @@ async def plan_account_turn(
                 label="Account switch session handoff",
             )
     return plan, plan.session_id, prompt
+
+
+def history_reader_at(home: Path) -> ConversationHistoryReader:
+    """A transcript reader for the CLI state in *home* (a pool profile's directory)."""
+    return ConversationHistoryReader(claude_sessions_root=home / "projects", codex_home=home)
+
+
+async def session_home(router: AccountRouter | None, thread_id: int, backend: str) -> Path | None:
+    """Pool profile directory *thread_id*'s *backend* session lives in, if not the ambient one.
+
+    For readers of a transcript (handoff, compaction, record discovery) that must
+    not pick a new profile. ``None`` means: look in the relay's own login.
+    """
+    if router is None or not backend:
+        return None
+    try:
+        return await router.pinned_home(thread_id, backend)
+    except Exception:
+        logger.warning("Account pool: could not read the pin of %d", thread_id, exc_info=True)
+        return None
 
 
 def plan_notice(plan: TurnPlan | None) -> str | None:
@@ -80,9 +98,17 @@ def plan_notice(plan: TurnPlan | None) -> str | None:
     return f"-# 🔀 Account `{plan.moved_from}` → `{plan.profile}` ({how})."
 
 
-def failover_notice(failover: Failover) -> str:
-    """Tell the thread which profile ran out and what happens next."""
-    reset = _format_reset(failover.blocked_until)
+def failover_notice(failover: Failover, *, relative: bool = False) -> str:
+    """Tell the thread which profile ran out and what happens next.
+
+    *relative* writes the reset as "in 2h 5m" for surfaces that do not render
+    Discord's ``<t:…:R>`` timestamps (the console).
+    """
+    reset = (
+        _format_relative(failover.blocked_until)
+        if relative
+        else _format_reset(failover.blocked_until)
+    )
     head = f"-# ⛽ Account `{failover.profile}` hit its usage limit (available again {reset})."
     if failover.next_profile is None:
         return f"{head} No other account has headroom right now."
@@ -93,6 +119,15 @@ def failover_notice(failover: Failover) -> str:
 
 def _format_reset(epoch: int) -> str:
     return f"<t:{int(epoch)}:R>"
+
+
+def _format_relative(epoch: int, *, now: float | None = None) -> str:
+    remaining = int(epoch) - int(time.time() if now is None else now)
+    if remaining <= 0:
+        return "now"
+    hours, rest = divmod(remaining, 3600)
+    minutes = max(1, rest // 60) if not hours else rest // 60
+    return f"in {hours}h {minutes}m" if hours else f"in {minutes}m"
 
 
 def codex_windows(data: dict | None) -> list[RateLimitInfo]:

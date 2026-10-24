@@ -147,3 +147,22 @@ async def test_server_binds_recorded_threads_without_overriding_a_person(
     assert (await env.console.work_repo.get("t22")).workspace_path == "Work/Client/Website"
     # Nothing new since the last pass: no transcript is read again.
     assert await env.console.bind_recorded() == 0
+
+
+def test_watcher_follows_a_session_into_its_pool_profile(tmp_path, monkeypatch):
+    """A pooled session's transcript is in its profile's home; a move is followed."""
+    ambient, profile = tmp_path / "ambient", tmp_path / "work"
+    monkeypatch.setattr(records_module, "ambient_home", lambda backend: ambient)
+    entries = [{"path": "Work/Site"}, {"path": "Home"}]
+    line = claude_line("Edit", {"file_path": f"{VAULT}/Work/Site/log.md"}) + "\n"
+    for home in (ambient, profile):
+        path = home / "projects" / "-x" / "abc-123.jsonl"
+        path.parent.mkdir(parents=True)
+        path.write_text(line, encoding="utf-8")
+    watcher = RecordWatcher()
+    assert watcher.latest("abc-123", "claude", entries) == ("Work/Site", "log.md")
+    # The session moved to a profile: its copy there is read, not the cached ambient file.
+    moved = profile / "projects" / "-x" / "abc-123.jsonl"
+    with moved.open("a", encoding="utf-8") as out:
+        out.write(claude_line("Write", {"file_path": f"{VAULT}/Home/single-actions.md"}) + "\n")
+    assert watcher.latest("abc-123", "claude", entries, profile) == ("Home", "single-actions.md")

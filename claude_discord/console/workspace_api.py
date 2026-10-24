@@ -109,7 +109,8 @@ class WorkspaceRoutes:
             return web.json_response({"notes": []})
         if not item_id.startswith("t") or not item_id[1:].isdigit():
             return web.json_response({"notes": []})
-        record = await repo.get(int(item_id[1:]))
+        key = int(item_id[1:])
+        record = await repo.get(key)
         if record is None:
             return web.json_response({"notes": []})
         notes = await asyncio.to_thread(
@@ -118,6 +119,7 @@ class WorkspaceRoutes:
             record.session_id,
             record.backend,
             record.created_at,
+            await self.server.session_home(key, record.backend),
         )
         return web.json_response({"notes": notes, "since": record.created_at})
 
