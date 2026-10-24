@@ -1,0 +1,28 @@
+/* Focus modes (zen.js): nothing on screen but the conversation. */
+body.zen #usage, body.zen .nav, body.zen .list-pane, body.zen .col-resize { display: none !important; }
+body.zen .app, body.zen .app.no-detail { grid-template-columns: minmax(0, 1fr); }
+body.zen .detail { width: 100%; max-width: 1040px; justify-self: center;
+  border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+.zen-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 12px; flex-shrink: 0;
+  border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--accent) 10%, var(--panel)); font-size: 13px; }
+.zen-title { font-weight: 700; }
+.zen-pos { font-weight: 600; font-variant-numeric: tabular-nums; }
+.zen-gap { flex: 1 1 auto; }
+.zen-next { color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zen-empty { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: var(--bg); }
+.zen-empty-card { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 24px; text-align: center; }
+.zen-empty-title { font-size: 20px; font-weight: 700; }
+
+/* How long the human's part takes (triage estimate). */
+.tag.effort.quick { color: var(--ai); border-color: color-mix(in srgb, var(--ai) 50%, var(--line)); }
+.tag.effort.deep { color: var(--p1); }
+.effort-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 14px 2px; font-size: 12px; list-style: none; }
+.effort-bar .zen-start { margin-left: auto; }
+
+@media (max-width: 900px) {
+  .zen-bar { padding-top: calc(6px + env(safe-area-inset-top)); }
+  body.zen .detail .d-head { padding-top: 4px; }
+  body.zen .detail { border: 0; }
+  .zen-bar .btn { min-height: 40px; }
+  .effort-bar .zen-start { margin-left: 0; flex: 1 1 100%; min-height: 40px; }
+}

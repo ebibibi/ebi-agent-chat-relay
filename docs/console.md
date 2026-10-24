@@ -52,6 +52,23 @@ Each thread also shows how full its context window was after its last turn — �
 on the row (amber from 70%, red from 90%), used / window tokens in the detail header — so a
 thread close to compaction is visible before it happens.
 
+## Focus modes: one thread, or one after another
+
+Two modes hide everything but the conversation — the navigation, the list and the usage strip:
+
+- **🎯 Focus** (the button in a thread's header, or `z`) shows the open thread full screen.
+  Esc, ✕ Exit or leaving the thread returns to the full console.
+- **🔁 Work through** (the button in the Focus view's time bar) runs a queue: the threads you can
+  act on here and now, in Focus order, narrowed to the time bucket chosen in that bar. Each one
+  opens full screen with the reply box focused; the strip at the top shows where you are
+  (`2 / 7`), how many are left, the AI's estimate and the next step. Sending a reply, finishing
+  the thread or ⏭ Skip (`n`) opens the next one — nothing is picked from a list. A thread that
+  starts needing you while the queue runs (a new question, an agent that came back after your
+  reply) joins the end; once the queue is empty the window says so and opens the next thread
+  that arrives on its own. Esc or ✕ Exit leaves the queue and keeps the current thread open.
+
+Both modes are a view of the same board; they change nothing on the server.
+
 ## The Focus guide
 
 A card at the top of Focus turns the ranking into advice. It is computed from data the board
@@ -89,7 +106,8 @@ installed). The choice is made per call, so switching the backend switches triag
 activity, gives the model the title and the latest human and agent messages, and stores its
 answer: a priority (P0–P3), a deadline if the conversation names one, the reason, your next
 step, whether you can take that step now or must wait (and for what, and until when), and
-whether it can only be done in one place or on one device. The model is shown the place labels
+whether it can only be done in one place or on one device, and how many minutes your part of
+the next step takes before you can hand the turn back to the agent. The model is shown the place labels
 already in use so it reuses them. Each call is one-shot and tool-less: `claude -p` with tools, hooks
 and settings off, or `codex exec` ephemeral and read-only without the user's config or rules,
 both in a scratch directory and without relay or console credentials in their environment.
@@ -109,6 +127,13 @@ A guess never overrides a person:
   Written-down work keeps it until you clear it. API: `PATCH /console/api/items/{id}` with
   `readiness: "now" | "waiting" | null`; the board reports `readiness`, `readiness_by: "you"`
   and the resulting `actionable`.
+
+The estimate is shown on Focus rows as ⚡ quick (up to 3 minutes: a yes/no, a choice), ⏱ short
+(up to 20: read a draft, check a result) or 🧘 deep (testing on a machine, a long review, a task
+outside the chat). The "Your time" bar above the Focus list narrows the list to one of them —
+"only the quick ones now" — and its 🔁 Work through button runs that bucket as a queue (see
+[Focus modes](#focus-modes-one-thread-or-one-after-another)). The board reports the minutes as
+`ai.minutes` and the bucket as `effort` (`quick` / `short` / `deep`, absent until triaged).
 
 | Variable | Default | Meaning |
 |---|---|---|

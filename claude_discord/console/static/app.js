@@ -11,7 +11,7 @@ const HISTORY = 100;
 
 const I18N = {
   en: {
-    focus: "🎯 Focus", focus_first: "Do this first", focus_next: "Then", focus_waiting: "⏳ Waiting", focus_elsewhere: "📍 Somewhere else", place_new: "New place", add: "Add", delete: "Delete", place_manage: "Manage places", place_hint: "Where this can only be done", place_count: (n) => `${n} open`, place_unlisted: "in use, not listed", place_unlisted_hint: "Used on items (often guessed by AI) but not on your list", place_manage_hint: "Renaming or deleting a place changes it on every item. A deleted place leaves its items doable anywhere.", place_none: "No places yet.", place_delete_confirm: (n, c) => `Remove "${n}" from ${c} open item(s)?`, here: "I am at:", here_hint: "Pick every place you are at; work bound to any of them counts as here", anywhere: "Anywhere", place: "Place", place_ph: "anywhere", no_due: "No due date", bp_backend: "Backend", bp_model: "Model", bp_effort: "Effort",
+    focus: "🎯 Focus", effort: { quick: "Quick", short: "Short", deep: "Deep" }, effort_all: "All", effort_bar: "Your time:", effort_min: (n) => `${n} min`, effort_hint: "AI estimate of your part before the agent can carry on: ⚡ up to 3 min, ⏱ up to 20 min, 🧘 longer", focus_first: "Do this first", focus_next: "Then", focus_waiting: "⏳ Waiting", focus_elsewhere: "📍 Somewhere else", place_new: "New place", add: "Add", delete: "Delete", place_manage: "Manage places", place_hint: "Where this can only be done", place_count: (n) => `${n} open`, place_unlisted: "in use, not listed", place_unlisted_hint: "Used on items (often guessed by AI) but not on your list", place_manage_hint: "Renaming or deleting a place changes it on every item. A deleted place leaves its items doable anywhere.", place_none: "No places yet.", place_delete_confirm: (n, c) => `Remove "${n}" from ${c} open item(s)?`, here: "I am at:", here_hint: "Pick every place you are at; work bound to any of them counts as here", anywhere: "Anywhere", place: "Place", place_ph: "anywhere", no_due: "No due date", bp_backend: "Backend", bp_model: "Model", bp_effort: "Effort",
     bp_model_other: "other model, Enter", bp_default: "Default", bp_title_thread: "Backend for this conversation",
     bp_title_default: "Default for new conversations", bp_note_thread: "Applies from the next turn of this conversation.",
     bp_note_default: "New conversations start with this; a conversation's own choice wins.", pause: "Pause", stop: "Stop", resume: "Resume", first: "First", later: "Later",
@@ -57,10 +57,10 @@ const I18N = {
           error: "failed", candidate: "done? (AI thinks so)", done: "done", someday: "someday", todo: "to do", idle: "idle" },
     help: [["j / k", "next / previous"], ["Enter", "open"], ["Esc", "close"], ["e", "done"],
            ["1–4", "priority P0–P3"], ["s", "snooze until tomorrow"], ["c", "write down work"],
-           ["r", "reply"], ["/", "filter"], ["h", "hide / show done"], ["p", "pin / unpin (working on now)"], ["g then f/i/c/a/u/t/w/d", "go to a view"], ["?", "this help"]],
+           ["r", "reply"], ["/", "filter"], ["h", "hide / show done"], ["p", "pin / unpin (working on now)"], ["z", "focus mode: only this thread (Esc leaves)"], ["n", "work-through queue: skip to the next"], ["g then f/i/c/a/u/t/w/d", "go to a view"], ["?", "this help"]],
   },
   ja: {
-    focus: "🎯 今やること", focus_first: "まずこれ", focus_next: "次に", focus_waiting: "⏳ 待ち", focus_elsewhere: "📍 別の場所でやること", place_new: "新しい場所", add: "追加", delete: "削除", place_manage: "場所の管理", place_hint: "ここでしかできない場所・端末", place_count: (n) => `未完了 ${n}件`, place_unlisted: "未登録", place_unlisted_hint: "スレッドで使われているが一覧にない場所（多くはAIの推定）", place_manage_hint: "名前の変更・削除はすべてのスレッドに反映されます。削除した場所のスレッドは「どこでも」になります。", place_none: "まだ場所はありません。", place_delete_confirm: (n, c) => `「${n}」を未完了の ${c} 件から外しますか？`, here: "いまいる場所：", here_hint: "いまいる場所を全部選べます。どれかに当てはまるものを「ここでできる」とみなします", anywhere: "どこでも", place: "場所", place_ph: "どこでも", no_due: "期限なし", bp_backend: "バックエンド", bp_model: "モデル", bp_effort: "思考の深さ",
+    focus: "🎯 今やること", effort: { quick: "すぐ", short: "少し", deep: "じっくり" }, effort_all: "すべて", effort_bar: "かかる時間：", effort_min: (n) => `${n}分`, effort_hint: "AIにターンを返すまでにあなたが使う時間の見積もり：⚡ 3分以内、⏱ 20分以内、🧘 それ以上", focus_first: "まずこれ", focus_next: "次に", focus_waiting: "⏳ 待ち", focus_elsewhere: "📍 別の場所でやること", place_new: "新しい場所", add: "追加", delete: "削除", place_manage: "場所の管理", place_hint: "ここでしかできない場所・端末", place_count: (n) => `未完了 ${n}件`, place_unlisted: "未登録", place_unlisted_hint: "スレッドで使われているが一覧にない場所（多くはAIの推定）", place_manage_hint: "名前の変更・削除はすべてのスレッドに反映されます。削除した場所のスレッドは「どこでも」になります。", place_none: "まだ場所はありません。", place_delete_confirm: (n, c) => `「${n}」を未完了の ${c} 件から外しますか？`, here: "いまいる場所：", here_hint: "いまいる場所を全部選べます。どれかに当てはまるものを「ここでできる」とみなします", anywhere: "どこでも", place: "場所", place_ph: "どこでも", no_due: "期限なし", bp_backend: "バックエンド", bp_model: "モデル", bp_effort: "思考の深さ",
     bp_model_other: "ほかのモデル名（Enter）", bp_default: "既定", bp_title_thread: "この会話のバックエンド",
     bp_title_default: "新しい会話の既定", bp_note_thread: "この会話の次のターンから切り替わります。",
     bp_note_default: "新しく始める会話はこの設定で動きます。会話ごとに選んだものが優先されます。", pause: "一時停止", stop: "停止", resume: "再開", first: "先に", later: "後回し",
@@ -106,7 +106,7 @@ const I18N = {
           error: "失敗", candidate: "完了候補（AI判断）", done: "完了", someday: "いつか", todo: "やること", idle: "止まっている" },
     help: [["j / k", "次 / 前"], ["Enter", "開く"], ["Esc", "閉じる"], ["e", "完了"],
            ["1〜4", "優先度 P0〜P3"], ["s", "明日までスヌーズ"], ["c", "仕事を書き留める"],
-           ["r", "返信"], ["/", "絞り込み"], ["h", "完了を隠す／表示"], ["p", "ピン留め／解除（いまやってる）"], ["g → f/i/c/a/u/t/w/d", "画面を移動"], ["?", "このヘルプ"]],
+           ["r", "返信"], ["/", "絞り込み"], ["h", "完了を隠す／表示"], ["p", "ピン留め／解除（いまやってる）"], ["z", "集中モード：このスレッドだけ表示（Escで戻る）"], ["n", "連続処理：スキップして次へ"], ["g → f/i/c/a/u/t/w/d", "画面を移動"], ["?", "このヘルプ"]],
   },
 };
 // ?lang=ja|en pins the language; otherwise the browser's preference decides.
@@ -223,6 +223,7 @@ async function refresh() {
     if (state.open && !document.hidden) markSeen(state.open);
     pruneSeen();
     render();
+    window.ConsoleZen.onBoard();
     if (window.ConsoleNotify) window.ConsoleNotify.onBoard(data.items);
     const open = state.open && state.byId.get(state.open);
     if (open && open.thread_id && (open.running || open.queued)) loadMessages(open.id);
@@ -401,6 +402,7 @@ function render() {
   renderNav();
   renderList();
   renderDetail();
+  window.ConsoleZen.paint();
 }
 
 function renderNav() {
@@ -494,6 +496,8 @@ function rowNode({ item, depth, children, rowKey, family }) {
   if (state.view !== "tree" && item.project) meta.push(h("span", { class: "tag", text: item.project }));
   const place = window.ConsoleFocus.placeTag(item);
   if (place) meta.push(place);
+  const effort = item.focus !== null && item.focus !== undefined ? window.ConsoleFocus.effortTag(item) : null;
+  if (effort) meta.push(effort);
   if (state.view === "focus" && item.series > 1) {
     meta.push(h("span", { class: "tag", title: T.series_hint(item.series), text: T.series(item.series) }));
   }
@@ -566,6 +570,7 @@ function renderDetail() {
   window.ConsoleFamily.render(item);
   window.ConsoleWsPane.render(item);
   window.ConsoleThreadNotes.render(item);
+  window.ConsoleZen.bar(pane);
   const msgs = $("msgs");
   if (item.thread_id) fillMessages(msgs);
   else msgs.replaceChildren(item.note
@@ -618,6 +623,7 @@ function headParts(item) {
     title,
     h("button", { class: "icon-btn only-narrow detail-nav-toggle", "aria-label": "Menu", onclick: () => $("nav").classList.toggle("open"), text: "☰" }),
     window.ConsoleLinks.button(item),
+    window.ConsoleZen.button(item),
   ];
   if (!item.thread_id) parts.push(h("button", { class: "btn primary", onclick: () => startItem(item.id), text: T.start }));
   const ctx = contextTag(item, true);
@@ -893,7 +899,11 @@ async function loadMessages(id) {
     syncActivityToggle();
   } catch (err) { toast(err.message); }
 }
-function closeItem() { markSeen(state.open); state.open = null; render(); }
+function closeItem() {
+  // Working through a queue, leaving a thread means "next one" (zen.js).
+  if (window.ConsoleZen.onClose(state.open)) return;
+  markSeen(state.open); state.open = null; render();
+}
 async function patch(id, changes) {
   try { await api(`/items/${encodeURIComponent(id)}`, { method: "PATCH", body: changes }); toast(T.saved); await refresh(); }
   catch (err) { toast(err.message); }
@@ -925,6 +935,7 @@ async function sendReply(id, box) {
     delete state.drafts[id];
     window.ConsolePaste.clear(id);
     toast(sent && sent.delivery === "injected" ? T.sent_live : T.sent);
+    window.ConsoleZen.sent(id);
     await refresh();
     setTimeout(() => loadMessages(id), 1500);
   } catch (err) { toast(err.message); }
@@ -1081,7 +1092,7 @@ function wire() {
       || e.composedPath().some((n) => n.isContentEditable);
     if (e.key === "Escape") {
       if (typing) { e.target.blur(); return; }
-      if (!$("help").hidden) showHelp(false); else closeItem();
+      if (!$("help").hidden) showHelp(false); else if (!window.ConsoleZen.escape()) closeItem();
       return;
     }
     if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -1102,6 +1113,8 @@ function wire() {
       case "c": $("capture-input").focus(); break;
       case "h": setHideDone(!state.hideDone); break;
       case "r": if ($("reply")) $("reply").focus(); break;
+      case "z": window.ConsoleZen.toggle(); break;
+      case "n": if (window.ConsoleZen.active() === "queue") window.ConsoleZen.skip(); else return; break;
       case "/": $("filter").focus(); break;
       case "g": state.pendingG = true; setTimeout(() => { state.pendingG = false; }, 1200); break;
       case "?": showHelp(true); break;
