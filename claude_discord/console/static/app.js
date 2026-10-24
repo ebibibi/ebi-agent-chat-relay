@@ -710,11 +710,12 @@ function setShowActivity(on) {
   renderDetail();
 }
 // Textareas grow with what is typed, up to the CSS max-height. A reply box the user has
-// dragged taller keeps at least that height (boxsize.js).
+// dragged keeps exactly that height, however long the text (boxsize.js).
 function grow(box) {
-  const floor = window.ConsoleBoxSize.floor(box);
+  const fixed = window.ConsoleBoxSize.fixed(box);
+  if (fixed) { box.style.height = `${fixed}px`; return; }
   box.style.height = "auto";
-  box.style.height = `${Math.max(floor, box.scrollHeight + 2)}px`;
+  box.style.height = `${box.scrollHeight + 2}px`;
 }
 
 function messageNode(m) {

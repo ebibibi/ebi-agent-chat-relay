@@ -1,7 +1,7 @@
 // Draggable reply box: on a desktop the top edge of the reply form can be dragged up or down
-// and the height is remembered per browser. The box still grows with what is typed; the dragged
-// height is its floor, and it may go past the usual 40vh cap. Double-click the edge to go back
-// to the default. Narrow screens and touch keep the plain auto-growing box.
+// and the height is remembered per browser. Once dragged, the box keeps exactly that height —
+// typing or pasting a long text scrolls inside it instead of growing it — and it may go past the
+// usual 40vh cap. Double-click the edge to go back to the auto-growing default. Narrow screens and touch keep the plain auto-growing box.
 "use strict";
 
 window.ConsoleBoxSize = (() => {
@@ -20,14 +20,14 @@ window.ConsoleBoxSize = (() => {
     else localStorage.removeItem(KEY);
   };
 
-  // The height the box must not shrink below, and the cap it may grow to. 0 = no override.
-  function floor(box) {
+  // The height the user fixed the box at. 0 = no override, grow with the text.
+  function fixed(box) {
     if (box.id !== "reply" || !height || !wide.matches) {
       box.style.removeProperty("max-height");
       return 0;
     }
     const h = clamp(height);
-    box.style.maxHeight = `max(40vh, ${h}px)`;
+    box.style.maxHeight = `${h}px`;
     return h;
   }
 
@@ -75,5 +75,5 @@ window.ConsoleBoxSize = (() => {
     form.prepend(edge);
   }
 
-  return { attach, floor };
+  return { attach, fixed };
 })();
