@@ -599,8 +599,9 @@ class EventProcessor:
             return
         account = getattr(self._config.runner, "account", None)
         profile = account.profile if isinstance(account, AccountBinding) else DEFAULT_PROFILE
+        backend = account.backend if isinstance(account, AccountBinding) else "claude"
         for window in windows:
-            await self._config.usage_repo.upsert(window, profile=profile)
+            await self._config.usage_repo.upsert(window, profile=profile, backend=backend)
 
     async def _on_complete(self, event: StreamEvent) -> None:
         """Handle RESULT events — finalize streaming and post a summary notice."""

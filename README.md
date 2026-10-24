@@ -42,6 +42,9 @@ question first: **"what do I do now?"**
 - **Focus view** — a cheap, tool-less model reads each thread with new activity and fills in
   priority, due date, the next step and whether it needs a particular place (📍 office, home).
   Your next move is pinned at the top. Anything a person sets by hand always wins.
+- **Focus modes** — 🎯 one thread full screen, or 🔁 work through everything that needs you one
+  thread at a time: send, and the next one opens. An estimate of your time per item (⚡ quick /
+  ⏱ short / 🧘 deep) lets you clear only the quick ones when you have five minutes.
 - **Sorted by whose move it is** — ❓ waiting for your answer, 👀 to review, 📋 your task,
   ⚠️ failed, running, idle, done. Agents report outcomes through the relay, so the board stays
   accurate without extra prompting.

@@ -351,3 +351,43 @@ async def test_passkey_names_drop_control_characters(tmp_path) -> None:
         credential_id=b"x", public_key=b"k", sign_count=0, rp_id="h", name="pho\x1bne\n 2"
     )
     assert added.name == "phone 2"
+
+
+OIDC_ONLY = ConsoleAuthConfig(
+    oidc_issuer="https://login.example.com/tenant/v2.0",
+    oidc_client_id="client",
+    allowed_emails=frozenset({"owner@example.com"}),
+    origins=(ORIGIN,),
+)
+
+
+@pytest.mark.parametrize(
+    ("config", "status"),
+    [
+        (ConsoleAuthConfig(), 409),  # passkeys are the only way in: keep the last one
+        (OIDC_ONLY, 200),  # OIDC without a token is still another way in
+    ],
+)
+async def test_the_last_passkey_can_go_when_oidc_is_another_way_in(
+    tmp_path, config, status
+) -> None:
+    db = str(tmp_path / "sessions.db")
+    repo = WorkItemRepository(db)
+    await repo.init_db()
+    store = PasskeyStore(db)
+    await store.init_db()
+    only = await store.add(credential_id=b"x", public_key=b"k", sign_count=0, rp_id="h", name="n")
+    authenticator = ConsoleAuthenticator(config, sessions=store)
+    authenticator.identify = AsyncMock(return_value="passkey:laptop")
+    server = ConsoleServer(MagicMock(), repo, authenticator, port=0, passkeys=PasskeyService(store))
+    async with TestClient(TestServer(server.app)) as client:
+        gone = await client.delete(f"/console/api/passkeys/{only.id}", headers=HEADERS)
+        assert gone.status == status
+
+
+def test_missing_passkey_extra_degrades_to_oidc(monkeypatch) -> None:
+    import claude_discord.console.auth as auth_module
+
+    monkeypatch.setattr(auth_module, "passkeys_installed", lambda: False)
+    assert OIDC_ONLY.effective().passkeys is False
+    assert ConsoleAuthConfig().effective().passkeys is True  # no other way in: report it

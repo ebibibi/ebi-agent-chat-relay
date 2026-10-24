@@ -283,6 +283,41 @@ class TestStatuses:
         ]
         assert rows[0].usage[0].utilization == 0.3
 
+    async def test_codex_default_ignores_claude_default_usage(
+        self, tmp_path: Path, homes: dict[str, Path]
+    ) -> None:
+        db = str(tmp_path / "s.db")
+        claude = PoolConfig(backend="claude", profiles=(ProfileSpec("claude-own"),))
+        codex = PoolConfig(
+            backend="codex",
+            profiles=(ProfileSpec("default"), ProfileSpec("second", str(homes["b"]))),
+        )
+        usage = UsageStatsRepository(db)
+        router = AccountRouter(
+            {"claude": claude, "codex": codex},
+            AccountPoolRepository(db),
+            usage,
+            clock=Clock(),
+        )
+        await usage.upsert(_full())
+        rows = await router.statuses()
+        codex_default = next(
+            row for row in rows if row.backend == "codex" and row.profile == "default"
+        )
+        assert codex_default.usage == ()
+        assert codex_default.unavailable_until is None
+        plan = await router.plan_turn(backend="codex", thread_id=1, session_id=None)
+        assert plan is not None and plan.profile == "default"
+
+        await router.record_usage("default", [_full()], backend="codex")
+        rows = await router.statuses()
+        codex_default = next(
+            row for row in rows if row.backend == "codex" and row.profile == "default"
+        )
+        assert codex_default.usage[0].utilization == 0.99
+        plan = await router.plan_turn(backend="codex", thread_id=2, session_id=None)
+        assert plan is not None and plan.profile == "second"
+
 
 async def test_removed_profile_is_still_the_transcript_source(
     tmp_path: Path, homes: dict[str, Path]

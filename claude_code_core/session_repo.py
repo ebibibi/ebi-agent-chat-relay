@@ -218,12 +218,14 @@ class SessionRepository:
 
 
 class UsageStatsRepository:
-    """CRUD for rate limit usage stats, one row per (profile, rate_limit_type).
+    """CRUD for rate limit usage stats, scoped to backend and profile.
 
     The implicit login (:data:`~claude_code_core.account_pool.DEFAULT_PROFILE`)
     is stored in ``usage_stats`` exactly as before, so callers that never pass a
     profile — and older releases sharing the database — see no change. Named
-    account-pool profiles are stored in ``account_usage_stats``.
+    Claude account-pool profiles are stored in ``account_usage_stats``. Other
+    backends use ``backend_usage_stats`` so their ``default`` login cannot
+    inherit Claude's legacy rows.
     """
 
     def __init__(self, db_path: str) -> None:
@@ -243,8 +245,10 @@ class UsageStatsRepository:
             self._ready = True
         return db
 
-    async def upsert(self, info: RateLimitInfo, profile: str = DEFAULT_PROFILE) -> None:
-        """Insert or replace the latest rate limit info for (profile, type)."""
+    async def upsert(
+        self, info: RateLimitInfo, profile: str = DEFAULT_PROFILE, *, backend: str = "claude"
+    ) -> None:
+        """Insert or replace the latest rate limit info for (backend, profile, type)."""
         values = (
             info.rate_limit_type,
             info.status,
@@ -254,7 +258,7 @@ class UsageStatsRepository:
         )
         db = await self._connect()
         try:
-            if profile == DEFAULT_PROFILE:
+            if backend == "claude" and profile == DEFAULT_PROFILE:
                 await db.execute(
                     """INSERT INTO usage_stats
                          (rate_limit_type, status, utilization, resets_at, is_using_overage)
@@ -267,7 +271,7 @@ class UsageStatsRepository:
                          recorded_at = datetime('now', 'localtime')""",
                     values,
                 )
-            else:
+            elif backend == "claude":
                 await db.execute(
                     """INSERT INTO account_usage_stats
                          (profile, rate_limit_type, status, utilization, resets_at,
@@ -281,28 +285,52 @@ class UsageStatsRepository:
                          recorded_at = datetime('now', 'localtime')""",
                     (profile, *values),
                 )
+            else:
+                await db.execute(
+                    """INSERT INTO backend_usage_stats
+                         (backend, profile, rate_limit_type, status, utilization, resets_at,
+                          is_using_overage)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(backend, profile, rate_limit_type) DO UPDATE SET
+                         status = excluded.status,
+                         utilization = excluded.utilization,
+                         resets_at = excluded.resets_at,
+                         is_using_overage = excluded.is_using_overage,
+                         recorded_at = datetime('now', 'localtime')""",
+                    (backend, profile, *values),
+                )
             await db.commit()
         finally:
             await db.close()
 
-    async def get_latest(self, profile: str = DEFAULT_PROFILE) -> list[RateLimitInfo]:
+    async def get_latest(
+        self, profile: str = DEFAULT_PROFILE, *, backend: str = "claude"
+    ) -> list[RateLimitInfo]:
         """Return the stored rate limit entries for one profile (one per type)."""
-        return (await self.get_by_profile()).get(profile, [])
+        return (await self.get_by_profile(backend=backend)).get(profile, [])
 
-    async def get_by_profile(self) -> dict[str, list[RateLimitInfo]]:
-        """Return every stored entry, grouped by profile."""
+    async def get_by_profile(self, *, backend: str = "claude") -> dict[str, list[RateLimitInfo]]:
+        """Return one backend's stored entries, grouped by profile."""
         db = await self._connect()
         try:
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute(
-                f"SELECT '{DEFAULT_PROFILE}' AS profile, * FROM usage_stats "  # noqa: S608
-                "ORDER BY rate_limit_type"
-            )
-            rows = list(await cursor.fetchall())
-            cursor = await db.execute(
-                "SELECT * FROM account_usage_stats ORDER BY profile, rate_limit_type"
-            )
-            rows.extend(await cursor.fetchall())
+            if backend == "claude":
+                cursor = await db.execute(
+                    f"SELECT '{DEFAULT_PROFILE}' AS profile, * FROM usage_stats "  # noqa: S608
+                    "ORDER BY rate_limit_type"
+                )
+                rows = list(await cursor.fetchall())
+                cursor = await db.execute(
+                    "SELECT * FROM account_usage_stats ORDER BY profile, rate_limit_type"
+                )
+                rows.extend(await cursor.fetchall())
+            else:
+                cursor = await db.execute(
+                    "SELECT * FROM backend_usage_stats WHERE backend = ? "
+                    "ORDER BY profile, rate_limit_type",
+                    (backend,),
+                )
+                rows = list(await cursor.fetchall())
         finally:
             await db.close()
         grouped: dict[str, list[RateLimitInfo]] = {}

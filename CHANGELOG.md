@@ -22,6 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shows the model that wrote it next to the author (`agent · gpt-5.5`; the backend name when no
   model is configured). Older messages keep the plain `agent` label.
 
+- **Console focus modes and a time estimate per item** (#1209) — 🎯 Focus (`z`) shows one
+  conversation full screen with the navigation, list and usage strip hidden; Esc leaves it.
+  🔁 Work through runs everything that needs you one thread at a time, full screen: sending a
+  reply, finishing or skipping (`n`) moves straight to the next thread, threads that start
+  needing you join the end, and an emptied queue keeps watching. Triage now also estimates the
+  minutes your part takes before the agent can carry on (`ai.minutes`, `effort`: ⚡ quick ≤3 /
+  ⏱ short ≤20 / 🧘 deep); Focus rows show it and the Focus bar narrows the list, and the queue,
+  to one bucket.
+
 - **Entra ID access tokens on the external ingest listener** (#1195) — besides the static
   `CCDB_INGEST_TOKEN`, `/api/ingest*` and `/api/teams/sync/*` accept an Entra ID v2 access token
   for one app (`CCDB_INGEST_ENTRA_TENANT_ID`, `CCDB_INGEST_ENTRA_CLIENT_ID`), verified against the

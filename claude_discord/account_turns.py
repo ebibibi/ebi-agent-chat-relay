@@ -175,7 +175,7 @@ async def refresh_codex_usage(
         data = await fetch_codex_rate_limits(codex_command, env=env)
         windows = codex_windows(data)
         if windows:
-            await router.record_usage(binding.profile, windows)
+            await router.record_usage(binding.profile, windows, backend=binding.backend)
     except Exception:
         logger.warning("Codex usage probe failed for profile %s", binding.profile, exc_info=True)
 

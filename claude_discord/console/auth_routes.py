@@ -293,8 +293,7 @@ class AuthRoutes:
         if who is None:
             return _MANAGERS_ONLY()
         target = request.match_info["passkey_id"]
-        other_way_in = self._config.access_enabled or bool(self._config.token)
-        outcome = await self.store.delete(target, keep_one=not other_way_in)
+        outcome = await self.store.delete(target, keep_one=not self._config.way_in_besides_passkeys)
         if outcome == "missing":
             return _error("no such passkey", 404)
         if outcome == "last":

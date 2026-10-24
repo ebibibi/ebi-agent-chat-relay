@@ -6,6 +6,10 @@
 // and once the human says where they are — one place or several (home and the work PC) —
 // work bound to none of them moves to its own group, so "Do this first" is always
 // something that can be done here and now.
+// Time: the model also estimates how long your part takes before the agent can carry on —
+// ⚡ quick (a yes/no, a choice), ⏱ short (read or check something), 🧘 deep (real work).
+// Each row shows it; the bar above the list narrows Focus to one bucket, and the
+// "work through" button there runs that bucket one thread at a time (zen.js).
 // Priority, deadline, readiness and place come from a fast model where nobody set them.
 // Readiness can be overridden ("can do now" / "waiting"); on a thread the override lasts
 // until the conversation moves again, then the model's fresh guess takes over.
@@ -41,6 +45,38 @@ window.ConsoleFocus = (() => {
     if (next.has(place)) next.delete(place); else next.add(place);
     saveHere(next);
   };
+
+  // How long your part takes: one bucket at a time, or all. Remembered per browser.
+  const EFFORTS = ["quick", "short", "deep"];
+  const EFFORT_ICON = { quick: "⚡", short: "⏱", deep: "🧘" };
+  let effort = EFFORTS.includes(localStorage.getItem("focusEffort")) ? localStorage.getItem("focusEffort") : "";
+  const effortOk = (i) => !effort || i.effort === effort;
+  const effortChosen = () => effort;
+  const effortLabel = (e) => `${EFFORT_ICON[e]} ${T.effort[e]}`;
+  function setEffort(next) {
+    effort = next;
+    localStorage.setItem("focusEffort", next);
+    render();
+  }
+
+  // "⚡ 2 min" on a row: the model's estimate of the human's part.
+  function effortTag(item) {
+    if (!item.effort) return null;
+    const minutes = item.ai && item.ai.minutes;
+    return h("span", { class: `tag effort ${item.effort}`, title: T.effort_hint,
+      text: `${EFFORT_ICON[item.effort]} ${minutes ? T.effort_min(minutes) : T.effort[item.effort]}` });
+  }
+
+  function effortBar(items) {
+    const here = items.filter((i) => ranked(i) && i.actionable !== false && !elsewhere(i));
+    const n = (e) => here.filter((i) => i.effort === e).length;
+    const chip = (key, label) => h("button", { type: "button", class: "chip" + (effort === key ? " on" : ""),
+      "aria-pressed": effort === key ? "true" : "false", onclick: () => setEffort(key), text: label });
+    return h("li", { class: "effort-bar" }, h("span", { class: "dim", text: T.effort_bar, title: T.effort_hint }),
+      chip("", T.effort_all),
+      ...EFFORTS.map((e) => chip(e, `${effortLabel(e)} ${n(e)}`)),
+      window.ConsoleZen ? window.ConsoleZen.startButton() : null);
+  }
 
   function placeBar() {
     const known = window.ConsolePlaces.names();
@@ -104,7 +140,7 @@ window.ConsoleFocus = (() => {
   }
 
   function rows(items) {
-    const live = items.filter(ranked);
+    const live = items.filter((i) => ranked(i) && effortOk(i));
     const now = live.filter((i) => i.actionable !== false && !elsewhere(i)).sort(byImportance);
     const away = live.filter((i) => i.actionable !== false && elsewhere(i)).sort(byImportance);
     const later = live.filter((i) => i.actionable === false)
@@ -113,6 +149,7 @@ window.ConsoleFocus = (() => {
     const guideCard = card(items);
     if (guideCard) out.push({ node: guideCard });
     out.push({ node: placeBar() });
+    out.push({ node: effortBar(items) });
     // Ebi Workspace (focusws.js): today's plan, its ranked next actions after the AI work
     // that is ready here, and its waiting-for list beside the waiting threads.
     const ws = window.ConsoleFocusWorkspace;
@@ -184,6 +221,7 @@ window.ConsoleFocus = (() => {
     if (ai.due_at) bits.push(`${T.due} ${shortDate(ai.due_at)}`);
     bits.push(ai.ready === false ? waitText(ai) : `▶ ${T.focus_ready}`);
     if (ai.place) bits.push(`📍 ${ai.place}`);
+    if (ai.minutes) bits.push(`${EFFORT_ICON[item.effort] || "⏱"} ${T.effort_min(ai.minutes)}`);
     return h("div", { class: "controls ai-line" },
       h("span", { class: "dim", text: `🤖 ${T.ai_guess}` }),
       h("span", { text: bits.join(" · ") }),
@@ -193,5 +231,6 @@ window.ConsoleFocus = (() => {
         onclick: () => setReadiness(item, null), text: `🤖 ${T.ready_back_ai}` }) : null);
   }
 
-  return { rows, count, note, drawerLine, placeTag, setGuide, readyToggle };
+  return { rows, count, note, drawerLine, placeTag, setGuide, readyToggle,
+    elsewhere, byImportance, effortOk, effortChosen, effortLabel, effortTag };
 })();
