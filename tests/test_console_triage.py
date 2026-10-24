@@ -589,3 +589,57 @@ def test_collapse_needs_a_shared_non_empty_title() -> None:
     # Blank titles never fold; case and spacing do not make a title different.
     assert [i.get("series_of") for i in out] == [None, None, "t4", None]
     assert out[3]["series"] == 2
+
+
+# -- the fourth axis: how long is the person's part? --------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw", "minutes"),
+    [
+        ("2", 2),
+        ("12.4", 12),
+        ("0", 1),
+        ("9999", 480),
+        ('"5"', None),
+        ("true", None),
+        ("null", None),
+    ],
+)
+def test_minutes_are_parsed_and_clamped(raw: str, minutes: int | None) -> None:
+    reply = parse_reply(f'{{"priority": 1, "minutes": {raw}}}', now=NOW)
+    assert reply is not None and reply.minutes == minutes
+
+
+def test_an_infinite_estimate_is_dropped() -> None:
+    reply = parse_reply('{"priority": 1, "minutes": Infinity}', now=NOW)
+    assert reply is not None and reply.minutes is None
+
+
+@pytest.mark.parametrize(
+    ("minutes", "bucket"),
+    [(None, None), (1, "quick"), (3, "quick"), (4, "short"), (20, "short"), (21, "deep")],
+)
+def test_effort_buckets_the_estimate(minutes: int | None, bucket: str | None) -> None:
+    from claude_discord.console.triage import effort
+
+    assert effort(minutes) == bucket
+
+
+def test_the_prompt_asks_for_the_persons_minutes() -> None:
+    prompt = build_prompt(title="t", status="waiting", messages=[], now=NOW)
+    assert '"minutes": 1-480' in prompt and "not the agent's" in prompt
+
+
+async def test_the_estimate_is_stored_and_reported_on_the_board(repo) -> None:
+    await repo.save("t1", TriageResult(1, None, "r", "n", minutes=2), basis="b", model="haiku")
+    await repo.save("t2", TriageResult(1, None, "r", "n", minutes=45), basis="b", model="haiku")
+    await repo.save("t3", TriageResult(1, None, "r", "n"), basis="b", model="haiku")
+    one, two, three = apply_triage(
+        [_item("t1"), _item("t2"), _item("t3")], await repo.all(), now=NOW
+    )
+    assert (one["ai"]["minutes"], one["effort"]) == (2, "quick")
+    assert (two["ai"]["minutes"], two["effort"]) == (45, "deep")
+    assert (three["ai"]["minutes"], three["effort"]) == (None, None)
+    (untriaged,) = apply_triage([_item("t4")], {}, now=NOW)
+    assert "effort" not in untriaged

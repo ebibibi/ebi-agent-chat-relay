@@ -22,6 +22,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import math
 import os
 import re
 import tempfile
@@ -88,14 +89,22 @@ _ADDED_COLUMNS = (
     ("waiting_for", "TEXT"),
     ("place", "TEXT"),
     ("pinned_place", "INTEGER NOT NULL DEFAULT 0"),
+    ("minutes", "INTEGER"),
 )
 #: Part of every basis: a new prompt re-triages everything once.
-PROMPT_VERSION = "3"
+PROMPT_VERSION = "4"
+#: The longest estimate kept; anything beyond a working day is "deep" either way.
+MAX_MINUTES = 480
+#: Effort buckets by the human's minutes before the turn goes back to the agent:
+#: ⚡ quick (a yes/no, a choice), ⏱ short (read and check something), 🧘 deep (the rest).
+QUICK_MINUTES = 3
+SHORT_MINUTES = 20
 
 _PROMPT = """\
-You triage a person's work queue. Read one item and judge three separate things:
+You triage a person's work queue. Read one item and judge four separate things:
 how important it is, whether the person can act on it right now or must wait,
-and whether it can only be done in one place or on one device.
+whether it can only be done in one place or on one device, and how long the person's
+part takes.
 
 Now: {now} (the person's local time)
 Item title: {title}
@@ -107,7 +116,7 @@ Conversation, oldest first (the person and their AI agent):
 Answer with one JSON object and nothing else:
 {{"priority": 0-3, "due": "YYYY-MM-DD" | "YYYY-MM-DDTHH:MM" | null, "reason": "…", "next": "…",
  "ready": true | false, "ready_at": "YYYY-MM-DDTHH:MM" | null, "waiting_for": "…",
- "place": "…" | null}}
+ "place": "…" | null, "minutes": 1-480}}
 
 priority: 0 = must happen today, blocks others, a customer or a hard deadline is waiting;
 1 = this week, or someone is waiting; 2 = normal; 3 = low, someday, or just information.
@@ -124,6 +133,12 @@ place: where "next" can only be done, if it is bound to one: a location (home, t
 a device or network (the company PC, a lab machine, a phone), or similar. Reuse a label from
 "Places this person already uses" when one fits; otherwise at most 12 characters.
 null when it can be done anywhere. Being at a place is not waiting: ready stays true.
+minutes: how long the person needs for "next" before they can hand the turn back to the
+agent — reading what they must read, deciding, checking or doing it, and writing the reply.
+1-2 for a yes/no, a choice between offered options or an "OK"; about 5-15 to read a draft,
+check a result or try something; 30 or more when "next" is real work: testing on a machine,
+reviewing a long deliverable, a meeting, a call or a manual task outside the chat.
+Estimate the person's time, not the agent's, and not the time spent waiting.
 Write reason, next, waiting_for and place in the conversation's language.
 """
 
@@ -158,6 +173,8 @@ class TriageResult:
     ready_at: str | None = None
     waiting_for: str = ""
     place: str | None = None
+    #: The human's minutes for the next step before the agent can carry on.
+    minutes: int | None = None
     #: The Ebi Workspace entry the model thinks this belongs to, and how sure it is.
     workspace_path: str | None = None
     workspace_confidence: float = 0.0
@@ -181,6 +198,7 @@ class Triage:
     waiting_for: str | None = None
     place: str | None = None
     pinned_place: bool = False
+    minutes: int | None = None
 
 
 class TriageRepository:
@@ -208,13 +226,13 @@ class TriageRepository:
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(
                 "INSERT INTO ai_triage (item_id, priority, due_at, reason, next_step, ready,"
-                " ready_at, waiting_for, place, basis, model, updated_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " ready_at, waiting_for, place, minutes, basis, model, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 " ON CONFLICT(item_id) DO UPDATE SET priority = excluded.priority,"
                 " due_at = excluded.due_at, reason = excluded.reason,"
                 " next_step = excluded.next_step, ready = excluded.ready,"
                 " ready_at = excluded.ready_at, waiting_for = excluded.waiting_for,"
-                " place = excluded.place,"
+                " place = excluded.place, minutes = excluded.minutes,"
                 " basis = excluded.basis, model = excluded.model, updated_at = excluded.updated_at",
                 (
                     item_id,
@@ -226,6 +244,7 @@ class TriageRepository:
                     result.ready_at,
                     result.waiting_for,
                     result.place,
+                    result.minutes,
                     basis,
                     model,
                     _now(),
@@ -267,6 +286,7 @@ def _to_triage(row: aiosqlite.Row) -> Triage:
         waiting_for=row["waiting_for"],
         place=row["place"],
         pinned_place=bool(row["pinned_place"]),
+        minutes=row["minutes"],
     )
 
 
@@ -358,9 +378,25 @@ def parse_reply(raw: str, *, now: datetime) -> TriageResult | None:
         ready_at=_parse_due(data.get("ready_at"), now),
         waiting_for=_short(data.get("waiting_for"))[:60],
         place=_short(data.get("place"))[:MAX_PLACE_CHARS] or None,
+        minutes=_minutes(data.get("minutes")),
         workspace_path=_workspace_answer(data.get("workspace")),
         workspace_confidence=_confidence(data.get("workspace_confidence")),
     )
+
+
+def _minutes(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+        return None
+    return max(1, min(MAX_MINUTES, round(value)))
+
+
+def effort(minutes: int | None) -> str | None:
+    """The bucket the Console sorts by: ``quick``, ``short`` or ``deep``; None when unknown."""
+    if minutes is None:
+        return None
+    if minutes <= QUICK_MINUTES:
+        return "quick"
+    return "short" if minutes <= SHORT_MINUTES else "deep"
 
 
 def _workspace_answer(value: Any) -> str | None:
@@ -469,8 +505,10 @@ def apply_triage(
                 "ready_at": row.ready_at,
                 "waiting_for": row.waiting_for,
                 "place": row.place,
+                "minutes": row.minutes,
                 "updated_at": row.updated_at,
             }
+            new["effort"] = effort(row.minutes)
             human_priority = row.pinned_priority or item.get("priority") != DEFAULT_PRIORITY
             if not human_priority:
                 new["priority"] = row.priority
