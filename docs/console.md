@@ -381,6 +381,9 @@ CCDB_CONSOLE_ALLOWED_EMAILS=me@example.com           # required: who may come in
 
 The sign-in screen then shows **Sign in with Google** (or your label) next to the passkey
 button. Set `CCDB_CONSOLE_PASSKEYS=0` if you want the provider to be the only way in.
+To turn token sign-in off, leave `CCDB_CONSOLE_TOKEN` unset: the token form disappears and
+every `Authorization: Bearer` request is refused, including any token a browser kept. OIDC
+then counts as the other way in, so the last passkey can be removed.
 
 What is checked: the authorization code flow with PKCE; `state` bound to the browser by a
 short-lived cookie (a sign-in started elsewhere cannot be completed in your browser); the ID
