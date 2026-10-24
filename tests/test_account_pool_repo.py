@@ -101,6 +101,27 @@ class TestRollbackSafety:
             "work": [0.2],
         }
 
+    async def test_codex_default_does_not_read_or_overwrite_claude_default(self, tmp_path) -> None:
+        repo = UsageStatsRepository(str(tmp_path / "s.db"))
+        await repo.upsert(_info("five_hour", 0.8))
+        await repo.upsert(_info("seven_day_overage_included", 0.9))
+        await repo.upsert(_info("five_hour", 0.2), backend="codex")
+
+        claude = await repo.get_latest()
+        codex = await repo.get_latest(backend="codex")
+        assert {i.rate_limit_type: i.utilization for i in claude} == {
+            "five_hour": 0.8,
+            "seven_day_overage_included": 0.9,
+        }
+        assert {i.rate_limit_type: i.utilization for i in codex} == {"five_hour": 0.2}
+
+    async def test_codex_named_profile_is_separate_from_claude(self, tmp_path) -> None:
+        repo = UsageStatsRepository(str(tmp_path / "s.db"))
+        await repo.upsert(_info("five_hour", 0.8), profile="work")
+        await repo.upsert(_info("five_hour", 0.2), profile="work", backend="codex")
+        assert [i.utilization for i in await repo.get_latest("work")] == [0.8]
+        assert [i.utilization for i in await repo.get_latest("work", backend="codex")] == [0.2]
+
 
 @pytest.fixture()
 def repo(tmp_path) -> AccountPoolRepository:

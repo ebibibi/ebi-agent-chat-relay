@@ -152,7 +152,7 @@ class AccountRouter:
             current = self.ambient_profile(backend)
 
         async with self._select_lock:
-            usage = await self._usage.get_by_profile()
+            usage = await self._usage.get_by_profile(backend=backend)
             blocks = await self._repo.get_blocks()
             cursor = await self._repo.get_cursor(backend)
             selection = select_profile(
@@ -231,7 +231,7 @@ class AccountRouter:
 
         # Peek at the next choice without moving the cursor; the real choice
         # is made (and persisted) when the next turn is planned.
-        usage = await self._usage.get_by_profile()
+        usage = await self._usage.get_by_profile(backend=pool.backend)
         blocks = await self._repo.get_blocks()
         cursor = await self._repo.get_cursor(pool.backend)
         peek = select_profile(pool, usage, blocks, self._clock(), cursor=cursor)
@@ -241,17 +241,19 @@ class AccountRouter:
             turn.binding.profile, until, next_profile=peek.profile, retry=pool.retry_on_exhaustion
         )
 
-    async def record_usage(self, profile: str, windows: list[RateLimitInfo]) -> None:
+    async def record_usage(
+        self, profile: str, windows: list[RateLimitInfo], *, backend: str = "claude"
+    ) -> None:
         for info in windows:
-            await self._usage.upsert(info, profile=profile)
+            await self._usage.upsert(info, profile=profile, backend=backend)
 
     async def statuses(self) -> list[ProfileStatus]:
         """Every configured profile with its latest usage, in pool order."""
-        usage = await self._usage.get_by_profile()
         blocks = await self._repo.get_blocks()
         now = self._clock()
         rows: list[ProfileStatus] = []
         for backend, pool in self.pools.items():
+            usage = await self._usage.get_by_profile(backend=backend)
             for name in pool.names:
                 profile_usage = tuple(usage.get(name, ()))
                 rows.append(
