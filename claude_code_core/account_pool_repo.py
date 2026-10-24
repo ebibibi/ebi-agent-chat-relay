@@ -1,9 +1,10 @@
 """Persistence for account pools: per-profile usage, thread pins, cursors, rejections.
 
 Every table here is new and additive. ``usage_stats`` is deliberately left in
-its original shape (primary key ``rate_limit_type``) and keeps holding the
-implicit login's rows (:data:`DEFAULT_PROFILE`); named profiles live in
-``account_usage_stats``. That keeps the database usable by an older release:
+its original shape (primary key ``rate_limit_type``) and keeps holding Claude's
+implicit login rows (:data:`DEFAULT_PROFILE`); named Claude profiles live in
+``account_usage_stats``, and other backends use ``backend_usage_stats``. That
+keeps the database usable by an older release:
 a revert, or switching a dev worktree off, must not break the old
 ``ON CONFLICT(rate_limit_type)`` upsert that runs on every turn.
 """
@@ -19,7 +20,7 @@ from .account_pool import PoolCursor
 logger = logging.getLogger(__name__)
 
 ACCOUNT_SCHEMA = """
--- Latest rate-limit window per named account-pool profile. The implicit
+-- Latest rate-limit window per named Claude profile. The implicit Claude
 -- login (profile 'default') stays in usage_stats, unchanged.
 CREATE TABLE IF NOT EXISTS account_usage_stats (
     profile TEXT NOT NULL,
@@ -30,6 +31,20 @@ CREATE TABLE IF NOT EXISTS account_usage_stats (
     is_using_overage INTEGER NOT NULL DEFAULT 0,
     recorded_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     PRIMARY KEY (profile, rate_limit_type)
+);
+
+-- Non-Claude pool usage is kept separate from legacy Claude usage. In
+-- particular, Codex profile 'default' must not share usage_stats with Claude.
+CREATE TABLE IF NOT EXISTS backend_usage_stats (
+    backend TEXT NOT NULL,
+    profile TEXT NOT NULL,
+    rate_limit_type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    utilization REAL NOT NULL,
+    resets_at INTEGER NOT NULL,
+    is_using_overage INTEGER NOT NULL DEFAULT 0,
+    recorded_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    PRIMARY KEY (backend, profile, rate_limit_type)
 );
 
 -- Which profile a thread's session currently lives in. The session transcript
