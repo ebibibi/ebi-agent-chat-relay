@@ -712,6 +712,35 @@ async def test_compact_on_codex_runs_through_app_server_not_as_a_reply(env) -> N
     assert len(env.runs) == runs_before  # the agent was not sent "/compact" as words
 
 
+async def test_compact_runs_in_the_pool_profile_of_the_session(env, tmp_path) -> None:
+    """A pooled Codex session is compacted in its own CODEX_HOME, without choosing anew."""
+    settings = FakeSettings()
+    env.console.api.components.backend_settings = settings
+    env.console._skills = lambda backend: []
+    item_id = await _start(env)
+    key = int(item_id[1:])
+    settings.backend[key] = "codex"
+    sessions = FakeSessions()
+    sessions.records[key] = SimpleNamespace(session_id="0a1b-2c", backend="codex")
+    env.console.api.session_repo = sessions
+    router = MagicMock()
+    router.pinned_home = AsyncMock(return_value=tmp_path / "codex-spare")
+    env.console.account_router = router
+    envs: list = []
+
+    async def compactor(session_id, **kw):
+        envs.append(kw.get("env"))
+
+    env.console._codex_compact = compactor
+    done = await env.client.post(
+        f"/console/api/items/{item_id}/command", json={"name": "compact"}, headers=WRITE
+    )
+    assert done.status == 200
+    assert envs[0]["CODEX_HOME"] == str(tmp_path / "codex-spare")
+    router.pinned_home.assert_awaited_once_with(key, "codex")
+    router.plan_turn.assert_not_called()
+
+
 async def test_a_reply_waits_while_the_conversation_is_compacted(env) -> None:
     item_id = await _start(env)
     env.console._compacting.add(int(item_id[1:]))

@@ -130,6 +130,19 @@ class AccountRouter:
                 return spec.name
         return DEFAULT_PROFILE if DEFAULT_PROFILE in pool.names else None
 
+    async def pinned_home(self, thread_id: int, backend: str) -> Path | None:
+        """Where *thread_id*'s *backend* session lives, without choosing a profile.
+
+        ``None`` when *backend* has no pool or the thread was never pinned to it
+        (its session is in the relay's own login).
+        """
+        if backend not in self.pools:
+            return None
+        pin = await self._repo.get_pin_home(thread_id)
+        if pin is None or pin[0] != backend:
+            return None
+        return Path(pin[2]) if pin[2] else self.home_of(backend, pin[1])
+
     async def plan_turn(
         self, *, backend: str, thread_id: int, session_id: str | None
     ) -> TurnPlan | None:

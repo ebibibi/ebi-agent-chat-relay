@@ -49,10 +49,13 @@ def transcript_note_writes(lines: Iterable[str]) -> list[str]:
     return list(seen)
 
 
-def session_note_writes(session_id: str, backend: str | None) -> list[str]:
+def session_note_writes(
+    session_id: str, backend: str | None, home: Path | None = None
+) -> list[str]:
+    """Notes the transcript wrote; *home* is its pool profile directory (None: ambient)."""
     kind = backend or "claude"
     try:
-        path = find_transcript(kind, ambient_home(kind), session_id)
+        path = find_transcript(kind, home or ambient_home(kind), session_id)
     except (OSError, ValueError):
         return []
     if path is None:
@@ -104,7 +107,11 @@ def _diff(root: Path, rel: str, base: str | None) -> tuple[str, str]:
 
 
 def changed_notes(
-    vault: Vault, session_id: str, backend: str | None, since: str | None
+    vault: Vault,
+    session_id: str,
+    backend: str | None,
+    since: str | None,
+    home: Path | None = None,
 ) -> list[dict[str, Any]]:
     """The visible notes *session_id* wrote, each with its diff since *since*."""
     root = vault.root
@@ -112,7 +119,7 @@ def changed_notes(
         return []
     out: list[dict[str, Any]] = []
     base = _base_commit(root, since)
-    for rel in session_note_writes(session_id, backend):
+    for rel in session_note_writes(session_id, backend, home):
         try:
             clean, _ = vault.resolve(rel, {".md"})
         except VaultError:

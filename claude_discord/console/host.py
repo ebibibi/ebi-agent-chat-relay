@@ -22,9 +22,11 @@ from claude_code_core.account_pool import AccountTurn
 from .. import live_runs
 from ..account_turns import (
     failover_notice,
+    history_reader_at,
     plan_account_turn,
     plan_notice,
     refresh_codex_usage,
+    session_home,
 )
 from ..backend_settings import session_is_resumable
 from ..cogs._run_helper import run_claude_with_config
@@ -254,9 +256,14 @@ class ConsoleSessionHost:
         else:
             # A new backend cannot resume the old session natively; carry its
             # text so the conversation continues instead of starting blank.
-            prompt = await carry_history_across_backends(
-                self._conversation_history, record, backend, prompt
-            )
+            # Read it where it was written: a pool profile's home, not the
+            # ambient one. Before planning, which re-pins to the new backend.
+            reader = self._conversation_history
+            if record is not None and record.backend:
+                home = await session_home(self._account_router, thread_key, record.backend)
+                if home is not None:
+                    reader = history_reader_at(home)
+            prompt = await carry_history_across_backends(reader, record, backend, prompt)
 
         effort = await self._settings.current_effort(backend, thread_key)
         if effort is not None and hasattr(runner, "effort"):

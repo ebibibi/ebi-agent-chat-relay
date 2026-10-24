@@ -83,6 +83,7 @@ async def env(tmp_path, monkeypatch):
     )
 
     router = MagicMock()
+    router.pinned_home = AsyncMock(return_value=None)
     router.plan_turn = AsyncMock(return_value=_plan("work"))
     router.finish_turn = AsyncMock(return_value=None)
 
@@ -103,6 +104,7 @@ async def env(tmp_path, monkeypatch):
         probe=probe,
         conversations=conversations,
         settings=settings,
+        sessions=sessions,
         db=db,
     )
 
@@ -212,3 +214,29 @@ async def test_an_existing_transcript_gains_the_model_column(tmp_path) -> None:
         ("old answer", None),
         ("new", "opus"),
     ]
+
+
+async def test_backend_switch_reads_the_transcript_from_the_pool_profile(
+    env, tmp_path, monkeypatch
+) -> None:
+    """The old session ran as a pool profile; its text is read from that profile's home."""
+    readers: list = []
+
+    async def carry(reader, record, backend, prompt):
+        readers.append(reader)
+        return prompt
+
+    monkeypatch.setattr("claude_discord.console.host.carry_history_across_backends", carry)
+    profile_home = tmp_path / "claude-work"
+    env.router.pinned_home.return_value = profile_home
+    host = env.make_host()
+    key = await host.start(external_id="w8", title="t", prompt="hi", author="me")
+    await _settle(host)
+    env.sessions.records[key] = SimpleNamespace(
+        session_id="s-claude", backend="claude", working_dir=None
+    )
+    await host.reply(key, "next", "me")
+    await _settle(host)
+
+    env.router.pinned_home.assert_awaited_with(key, "claude")
+    assert readers[-1]._claude_sessions_root == profile_home / "projects"

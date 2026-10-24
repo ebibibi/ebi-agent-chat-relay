@@ -420,3 +420,16 @@ class TestReviewFollowUps:
         with caplog.at_level(logging.WARNING, logger="claude_code_core.account_router"):
             assert build_account_router(str(tmp_path / "s.db")) is not None
         assert "ANTHROPIC_API_KEY is set" in caplog.text
+
+
+async def test_pinned_home_reads_the_pin_without_choosing(
+    tmp_path: Path, homes: dict[str, Path]
+) -> None:
+    """Transcript readers find a pooled session without moving it to another profile."""
+    router = _router(tmp_path, homes)
+    assert await router.pinned_home(1, "claude") is None  # never pinned: ambient
+    assert await router.pinned_home(1, "codex") is None  # no pool for codex
+    await router._repo.set_pin(1, "claude", "b", str(homes["b"]))
+    assert await router.pinned_home(1, "claude") == homes["b"]
+    assert await router.pinned_home(1, "codex") is None  # pinned to another backend
+    assert await router._repo.get_pin_home(1) == ("claude", "b", str(homes["b"]))

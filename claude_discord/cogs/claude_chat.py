@@ -30,9 +30,11 @@ from claude_code_core.backend import SessionBackend
 from .. import live_runs
 from ..account_turns import (
     failover_notice,
+    history_reader_at,
     plan_account_turn,
     plan_notice,
     refresh_codex_usage,
+    session_home,
 )
 from ..attention_capture import activity_from_message, is_human_message
 from ..backend_factory import BackendFactory
@@ -1620,9 +1622,12 @@ class ClaudeChatCog(commands.Cog):
         if session_is_resumable(record.backend, current):
             return session_id, prompt
 
-        handoff = await carry_history_across_backends(
-            self._conversation_history, record, current, prompt
-        )
+        # Read the transcript where it was written (a pool profile's home).
+        reader = self._conversation_history
+        home = await session_home(self._account_router, thread.id, record.backend)
+        if home is not None:
+            reader = history_reader_at(home)
+        handoff = await carry_history_across_backends(reader, record, current, prompt)
         return None, handoff
 
     async def _build_prompt_and_images(

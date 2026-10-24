@@ -61,7 +61,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Console turns use the account pool** (#1207) — a conversation started from Ebi AI Console
   now runs on the profile the account router chooses, like a Discord thread: it moves to another
   profile with a notice, records quota rejections, retries once when `retry_on_exhaustion` is
-  set, and refreshes Codex usage after the turn. It used to run on the relay's own login.
+  set, and refreshes Codex usage after the turn. It used to run on the relay's own login. Readers
+  of a pooled session's transcript — the cross-backend handoff (console and Discord), Codex
+  `/compact`, Workspace record binding and the thread's changed notes — now look in the profile's
+  home instead of the relay's own.
 
 - **Teams sync stores attachments up to 100MB** (#1184) — the per-file cap was 25MB and the default
   request body limit could not carry one larger file as base64, so diagnostic zips shared in Teams

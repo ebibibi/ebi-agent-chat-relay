@@ -11,6 +11,7 @@ import asyncio
 import logging
 import os
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from claude_code_core.account_pool import AccountBinding
@@ -45,10 +46,7 @@ async def plan_account_turn(
     if plan is None:
         return None, session_id, prompt
     if plan.needs_handoff and session_id and plan.source_home is not None:
-        reader = ConversationHistoryReader(
-            claude_sessions_root=plan.source_home / "projects",
-            codex_home=plan.source_home,
-        )
+        reader = history_reader_at(plan.source_home)
         transcript = await asyncio.to_thread(reader.read, backend, session_id)
         if transcript:
             prompt = build_handoff_prompt(
@@ -59,6 +57,26 @@ async def plan_account_turn(
                 label="Account switch session handoff",
             )
     return plan, plan.session_id, prompt
+
+
+def history_reader_at(home: Path) -> ConversationHistoryReader:
+    """A transcript reader for the CLI state in *home* (a pool profile's directory)."""
+    return ConversationHistoryReader(claude_sessions_root=home / "projects", codex_home=home)
+
+
+async def session_home(router: AccountRouter | None, thread_id: int, backend: str) -> Path | None:
+    """Pool profile directory *thread_id*'s *backend* session lives in, if not the ambient one.
+
+    For readers of a transcript (handoff, compaction, record discovery) that must
+    not pick a new profile. ``None`` means: look in the relay's own login.
+    """
+    if router is None or not backend:
+        return None
+    try:
+        return await router.pinned_home(thread_id, backend)
+    except Exception:
+        logger.warning("Account pool: could not read the pin of %d", thread_id, exc_info=True)
+        return None
 
 
 def plan_notice(plan: TurnPlan | None) -> str | None:
