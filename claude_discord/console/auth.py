@@ -79,14 +79,19 @@ class ConsoleAuthConfig:
         return bool(self.oidc_issuer)
 
     @property
+    def way_in_besides_passkeys(self) -> bool:
+        """Access, OIDC or the token: someone can still sign in with no passkey."""
+        return self.access_enabled or self.oidc_enabled or bool(self.token)
+
+    @property
     def session_lifetime(self) -> timedelta:
         return timedelta(days=self.session_days)
 
     def effective(self) -> ConsoleAuthConfig:
         """This config with passkeys off when their library is missing but
         another way in exists — an upgrade without the extra must not take a
-        working token or Access setup down."""
-        if self.passkeys and not passkeys_installed() and (self.access_enabled or self.token):
+        working token, Access or OIDC setup down."""
+        if self.passkeys and not passkeys_installed() and self.way_in_besides_passkeys:
             logger.warning(
                 "console: passkeys disabled — install the [console] extra to enable them"
             )
@@ -96,16 +101,11 @@ class ConsoleAuthConfig:
     def problems(self) -> list[str]:
         """Why this configuration must not be served. Empty when it is safe."""
         issues: list[str] = []
-        if (
-            not self.passkeys
-            and not self.access_enabled
-            and not self.token
-            and not self.oidc_enabled
-        ):
+        if not self.passkeys and not self.way_in_besides_passkeys:
             issues.append(
                 "CCDB_CONSOLE_PASSKEYS=0 leaves no way in: set CCDB_CONSOLE_ACCESS_TEAM_DOMAIN "
-                "+ CCDB_CONSOLE_ACCESS_AUD, or CCDB_CONSOLE_TOKEN — the console never runs "
-                "unauthenticated"
+                "+ CCDB_CONSOLE_ACCESS_AUD, CCDB_CONSOLE_OIDC_ISSUER, or CCDB_CONSOLE_TOKEN — "
+                "the console never runs unauthenticated"
             )
         issues.extend(self._oidc_problems())
         if self.passkeys and not passkeys_installed():
