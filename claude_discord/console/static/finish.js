@@ -112,13 +112,22 @@ window.ConsoleFinish = (() => {
     setTimeout(() => t.remove(), UNDO_MS);
   }
 
+  // The same state hands back the same node, so a board poll cannot replace the
+  // button while it is being pressed.
+  let cached = { key: null, node: null };
   function button(item) {
+    const on = armed === item.id;
+    const count = item.bucket === "done" ? 0 : targets([item.id]).length;
+    const key = [item.id, item.bucket === "done", on, count, finishing, document.documentElement.lang].join("|");
+    if (cached.key !== key) cached = { key, node: render(item, on, count) };
+    return cached.node;
+  }
+
+  function render(item, on, count) {
     if (item.bucket === "done") {
       return h("button", { class: "btn d-finish", type: "button", title: T.reopen_hint,
         onclick: () => reopen(item.id), text: `↩ ${T.reopen}` });
     }
-    const on = armed === item.id;
-    const count = targets([item.id]).length;
     const label = count > 1 ? (document.documentElement.lang === "ja" ? `親子${count}件を完了` : `Complete family (${count})`) : T.finish;
     return h("button", { class: "btn d-finish" + (on ? " armed" : ""), type: "button",
       title: T.finish_hint, "aria-live": "polite", disabled:finishing,

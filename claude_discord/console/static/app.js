@@ -165,13 +165,23 @@ function toast(msg) {
   showToast(t);
   setTimeout(() => t.remove(), 2600);
 }
-// Open toasts at the top of the conversation's messages, below the pane header whose
-// buttons wrap onto several rows; with no conversation open the CSS default holds.
 function showToast(t) {
   document.body.append(t);
-  const msgs = document.getElementById("msgs");
-  const top = msgs && msgs.offsetParent ? msgs.getBoundingClientRect().top : 0;
-  if (top > 0 && top < window.innerHeight / 2) t.style.top = `${Math.round(top) + 8}px`;
+  placeToasts();
+}
+// Toasts open below the detail header, never over its buttons (Finish holds its top-right
+// corner): at the top of the messages when that is in the upper half, else right under the
+// header. renderDetail() re-places them, so the Undo toast that outlives a finished item
+// moves out of the way of the next item's Finish. With nothing open the CSS default holds.
+function placeToasts() {
+  const box = (id) => { const el = $(id); return el && el.offsetParent ? el.getBoundingClientRect() : null; };
+  const head = box("d-head"), msgs = box("msgs");
+  let top = null;
+  if (msgs && msgs.top > 0 && msgs.top < window.innerHeight / 2) top = msgs.top;
+  else if (head && head.bottom > 0) top = head.bottom;
+  for (const t of document.querySelectorAll("body > .toast")) {
+    t.style.top = top === null ? "" : `${Math.round(top) + 8}px`;
+  }
 }
 
 // ---------------------------------------------------------------- api
@@ -550,7 +560,7 @@ function renderDetail() {
   const item = state.open && state.byId.get(state.open);
   $("app").classList.toggle("no-detail", !item);
   pane.hidden = !item;
-  if (!item) { pane.replaceChildren(); delete pane.dataset.item; return; }
+  if (!item) { pane.replaceChildren(); delete pane.dataset.item; placeToasts(); return; }
   const key = `${item.id}|${item.thread_id ? 1 : 0}|${LANG}`;
   if (pane.dataset.item !== key || !$("msgs")) buildDetail(pane, item, key);
 
@@ -560,9 +570,14 @@ function renderDetail() {
     ($("d-head").contains(active) || $("d-drawer").contains(active));
   if (!editing) {
     // Finish sits outside the wrapping row so it keeps the top-right corner
-    // however many optional controls a thread has.
-    $("d-head").replaceChildren(h("div", { class: "d-head-row" }, ...headParts(item).filter(Boolean)),
-      window.ConsoleFinish.button(item));
+    // however many optional controls a thread has. An unchanged Finish stays the same
+    // node: swapping it between mousedown and mouseup would swallow the click.
+    const head = $("d-head"), finish = window.ConsoleFinish.button(item);
+    const row = h("div", { class: "d-head-row" }, ...headParts(item).filter(Boolean));
+    const oldRow = head.querySelector(":scope > .d-head-row");
+    if (oldRow) oldRow.replaceWith(row); else head.prepend(row);
+    const oldFinish = head.querySelector(":scope > .d-finish");
+    if (oldFinish !== finish) { if (oldFinish) oldFinish.replaceWith(finish); else head.append(finish); }
     $("d-drawer").replaceChildren(...drawerParts(item).filter(Boolean));
   }
   $("d-drawer").hidden = !state.drawerOpen;
@@ -571,6 +586,7 @@ function renderDetail() {
   window.ConsoleWsPane.render(item);
   window.ConsoleThreadNotes.render(item);
   window.ConsoleZen.bar(pane);
+  placeToasts();
   const msgs = $("msgs");
   if (item.thread_id) fillMessages(msgs);
   else msgs.replaceChildren(item.note
