@@ -1822,6 +1822,7 @@ async def _build_session_host(
         usage_repo=getattr(components, "usage_repo", None),
         registry=getattr(bot, "session_registry", None),
         worktree_manager=getattr(bot, "worktree_manager", None),
+        account_router=getattr(bot, "account_router", None),
     )
     # The wait watcher resumes a conversation after CI; it finds this one here.
     bot.console_sessions = host  # type: ignore[attr-defined]

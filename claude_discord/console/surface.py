@@ -215,6 +215,9 @@ class ConsoleSurface:
         self.working_dir = working_dir
         self._live = live or LiveBoard()
         self._files_dir = files_dir
+        #: The model (or, without one, the backend) the running turn uses. The
+        #: host sets it before each turn; the transcript shows it by the author.
+        self.agent_model: str | None = None
 
     @property
     def live(self) -> LiveState:
@@ -240,7 +243,11 @@ class ConsoleSurface:
         if not text.strip():
             return None
         message_id = await self._repo.append(
-            self._thread_key, author=AGENT_AUTHOR, is_bot=True, content=text
+            self._thread_key,
+            author=AGENT_AUTHOR,
+            is_bot=True,
+            content=text,
+            model=self.agent_model,
         )
         return str(message_id)
 

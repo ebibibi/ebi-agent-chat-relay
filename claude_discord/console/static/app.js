@@ -747,7 +747,8 @@ function messageNode(m) {
   }
   if ((m.actions || []).length) body.append(actionRow(m));
   return h("div", { class: `msg ${kind}` },
-    h("div", { class: "who" }, h("span", { text: m.author }), h("span", { text: m.created_at ? shortDate(m.created_at) : "" })),
+    h("div", { class: "who" }, h("span", { text: m.model ? `${m.author} · ${m.model}` : m.author }),
+      h("span", { text: m.created_at ? shortDate(m.created_at) : "" })),
     body);
 }
 

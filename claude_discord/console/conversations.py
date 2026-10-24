@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS console_messages (
     author TEXT NOT NULL,
     is_bot INTEGER NOT NULL,
     content TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    model TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_console_messages_thread ON console_messages(thread_key, id);
 """
@@ -67,6 +68,8 @@ class ConsoleMessage:
     is_bot: bool
     content: str
     created_at: str
+    #: The model that wrote an agent message; None for people and older rows.
+    model: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """The same shape the console returns for a chat thread's message."""
@@ -78,6 +81,7 @@ class ConsoleMessage:
             "truncated": False,
             "created_at": self.created_at,
             "jump_url": None,
+            "model": self.model,
         }
 
 
@@ -94,6 +98,12 @@ class ConversationRepository:
     async def init_db(self) -> None:
         async with aiosqlite.connect(self._db_path) as db:
             await db.executescript(_SCHEMA)
+            # Added after the table shipped; CREATE IF NOT EXISTS keeps old columns.
+            columns = {
+                row[1] for row in await db.execute_fetchall("PRAGMA table_info(console_messages)")
+            }
+            if "model" not in columns:
+                await db.execute("ALTER TABLE console_messages ADD COLUMN model TEXT")
             await db.commit()
 
     async def create(self, thread_key: int, name: str) -> Conversation:
@@ -146,14 +156,23 @@ class ConversationRepository:
             )
             await db.commit()
 
-    async def append(self, thread_key: int, *, author: str, is_bot: bool, content: str) -> int:
+    async def append(
+        self,
+        thread_key: int,
+        *,
+        author: str,
+        is_bot: bool,
+        content: str,
+        model: str | None = None,
+    ) -> int:
         """Store a message and move the conversation's last activity to now."""
         now = _now()
         async with aiosqlite.connect(self._db_path) as db:
             cursor = await db.execute(
-                "INSERT INTO console_messages (thread_key, author, is_bot, content, created_at)"
-                " VALUES (?, ?, ?, ?, ?)",
-                (thread_key, author, int(is_bot), content[:MAX_MESSAGE_CHARS], now),
+                "INSERT INTO console_messages"
+                " (thread_key, author, is_bot, content, created_at, model)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (thread_key, author, int(is_bot), content[:MAX_MESSAGE_CHARS], now, model),
             )
             await db.execute(
                 "UPDATE console_conversations SET last_activity_at = ? WHERE thread_key = ?",
@@ -203,4 +222,5 @@ def _to_message(row: aiosqlite.Row) -> ConsoleMessage:
         is_bot=bool(row["is_bot"]),
         content=row["content"],
         created_at=row["created_at"],
+        model=row["model"],
     )

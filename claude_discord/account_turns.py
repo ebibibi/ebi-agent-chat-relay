@@ -80,9 +80,17 @@ def plan_notice(plan: TurnPlan | None) -> str | None:
     return f"-# 🔀 Account `{plan.moved_from}` → `{plan.profile}` ({how})."
 
 
-def failover_notice(failover: Failover) -> str:
-    """Tell the thread which profile ran out and what happens next."""
-    reset = _format_reset(failover.blocked_until)
+def failover_notice(failover: Failover, *, relative: bool = False) -> str:
+    """Tell the thread which profile ran out and what happens next.
+
+    *relative* writes the reset as "in 2h 5m" for surfaces that do not render
+    Discord's ``<t:…:R>`` timestamps (the console).
+    """
+    reset = (
+        _format_relative(failover.blocked_until)
+        if relative
+        else _format_reset(failover.blocked_until)
+    )
     head = f"-# ⛽ Account `{failover.profile}` hit its usage limit (available again {reset})."
     if failover.next_profile is None:
         return f"{head} No other account has headroom right now."
@@ -93,6 +101,15 @@ def failover_notice(failover: Failover) -> str:
 
 def _format_reset(epoch: int) -> str:
     return f"<t:{int(epoch)}:R>"
+
+
+def _format_relative(epoch: int, *, now: float | None = None) -> str:
+    remaining = int(epoch) - int(time.time() if now is None else now)
+    if remaining <= 0:
+        return "now"
+    hours, rest = divmod(remaining, 3600)
+    minutes = max(1, rest // 60) if not hours else rest // 60
+    return f"in {hours}h {minutes}m" if hours else f"in {minutes}m"
 
 
 def codex_windows(data: dict | None) -> list[RateLimitInfo]:

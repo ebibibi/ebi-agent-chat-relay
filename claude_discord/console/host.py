@@ -15,9 +15,17 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from claude_code_core.account_pool import AccountTurn
 
 from .. import live_runs
+from ..account_turns import (
+    failover_notice,
+    plan_account_turn,
+    plan_notice,
+    refresh_codex_usage,
+)
 from ..backend_settings import session_is_resumable
 from ..cogs._run_helper import run_claude_with_config
 from ..cogs.run_config import RunConfig
@@ -26,6 +34,9 @@ from ..execution_settings import apply_thread_execution_mode, thread_execution_m
 from ..thread_marker import OUTCOME_ERROR
 from .conversations import CONSOLE_FRONTEND
 from .surface import AGENT_AUTHOR, ConsoleFrontend, ConsoleSurface, apply_outcome
+
+if TYPE_CHECKING:
+    from claude_code_core.account_router import AccountRouter, Failover
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +58,12 @@ class ConsoleSessionHost:
         registry: Any = None,
         worktree_manager: Any = None,
         conversation_history: ConversationHistoryReader | None = None,
+        account_router: AccountRouter | None = None,
     ) -> None:
         self.frontend = frontend
+        # Account pools (CCDB_ACCOUNT_POOLS_FILE), the same router Discord turns
+        # use. None = one implicit login per backend.
+        self._account_router = account_router
         self._conversation_history = conversation_history or ConversationHistoryReader()
         self._session_repo = session_repo
         self._factory = backend_factory
@@ -220,7 +235,10 @@ class ConsoleSessionHost:
             # What was live is in the transcript now.
             self.frontend.live.clear(surface.thread_key)
 
-    async def _run(self, surface: ConsoleSurface, prompt: str) -> None:
+    async def _run(
+        self, surface: ConsoleSurface, prompt: str, *, _account_retry: bool = False
+    ) -> None:
+        user_prompt = prompt
         thread_key = surface.thread_key
         record = await self._session_repo.get(thread_key)
         backend = await self._settings.current_backend(thread_key)
@@ -244,6 +262,14 @@ class ConsoleSessionHost:
         if effort is not None and hasattr(runner, "effort"):
             runner.effort = effort
 
+        # The transcript names the model that wrote each answer.
+        model_name = getattr(runner, "model", None)
+        surface.agent_model = model_name if isinstance(model_name, str) and model_name else backend
+
+        account_turn, session_id, prompt = await self._plan_account(
+            surface, runner, backend, session_id, prompt
+        )
+
         await self._run_session(
             RunConfig(
                 surface=surface,
@@ -260,5 +286,67 @@ class ConsoleSessionHost:
                 codex_command=self._factory.codex_command,
                 claude_command=runner.command,
                 session_origin=CONSOLE_FRONTEND,
+                account_turn=account_turn,
             )
         )
+        failover = await self._finish_account_turn(surface, account_turn)
+        # Opt-in failover (retry_on_exhaustion): rerun the same message once on
+        # the next profile, as a Discord thread does. A second rejection just reports.
+        if failover is not None and failover.retry and not _account_retry:
+            await self._run(surface, user_prompt, _account_retry=True)
+
+    async def _plan_account(
+        self,
+        surface: ConsoleSurface,
+        runner: Any,
+        backend: str,
+        session_id: str | None,
+        prompt: str,
+    ) -> tuple[AccountTurn | None, str | None, str]:
+        """Choose the pool login for this turn; pass through without a pool."""
+        if self._account_router is None:
+            return None, session_id, prompt
+        try:
+            plan, session_id, prompt = await plan_account_turn(
+                self._account_router,
+                backend=backend,
+                thread_id=surface.thread_key,
+                session_id=session_id,
+                prompt=prompt,
+            )
+        except Exception:
+            # Never lose the person's turn to pool bookkeeping: run on the
+            # relay's own login and say so in the log.
+            logger.exception("Account pool: planning failed for %d", surface.thread_key)
+            return None, session_id, prompt
+        if plan is None or not hasattr(runner, "account"):
+            return None, session_id, prompt
+        runner.account = plan.binding
+        notice = plan_notice(plan)
+        if notice:
+            await surface.send_text(notice)
+        return AccountTurn(binding=plan.binding), session_id, prompt
+
+    async def _finish_account_turn(
+        self, surface: ConsoleSurface, turn: AccountTurn | None
+    ) -> Failover | None:
+        """Record a quota rejection, tell the conversation, refresh Codex usage."""
+        if turn is None or self._account_router is None:
+            return None
+        if turn.binding.backend == "codex":
+            task = asyncio.create_task(
+                refresh_codex_usage(
+                    self._account_router, turn.binding, self._factory.codex_command
+                ),
+                name=f"codex-usage-{turn.binding.profile}",
+            )
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+        try:
+            failover = await self._account_router.finish_turn(turn)
+        except Exception:
+            logger.exception("Account pool: could not record the outcome of a turn")
+            return None
+        if failover is not None:
+            await surface.send_text(failover_notice(failover, relative=True))
+        return failover
