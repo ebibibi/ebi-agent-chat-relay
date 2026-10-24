@@ -80,6 +80,33 @@ test('desktop: dragging the top edge resizes the reply box and is remembered', a
   assert.deepEqual(errors, []);
 });
 
+test('desktop: pasting a long text keeps the dragged height', async (t) => {
+  const { page, errors } = await openThread(t, { width: 1440, height: 1000 });
+  const edge = page.locator('.reply-resize');
+  const r = await edge.boundingBox();
+  const x = r.x + r.width / 2;
+  const y = r.y + r.height / 2;
+  // Drag it a little taller than the default but well below the usual 40vh cap.
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x, y - 60, { steps: 3 });
+  await page.mouse.up();
+  const dragged = await height(page);
+  assert.ok(dragged < 300, `expected below 40vh, got ${dragged}`);
+
+  await page.locator('#reply').fill('line\n'.repeat(400));
+  await page.locator('#reply').dispatchEvent('input');
+  assert.ok(Math.abs(await height(page) - dragged) < 3,
+    `expected ${dragged}, got ${await height(page)}`);
+  // The text scrolls inside the box instead.
+  assert.ok(await page.locator('#reply').evaluate(b => b.scrollHeight > b.clientHeight));
+
+  // Double-click goes back to growing with the text.
+  await page.locator('.reply-resize').dblclick();
+  assert.ok(await height(page) > dragged + 100);
+  assert.deepEqual(errors, []);
+});
+
 test('phone: no drag edge, the box keeps auto-growing', async (t) => {
   const { page, errors } = await openThread(t, { width: 390, height: 844 },
     { isMobile: true, hasTouch: true });
