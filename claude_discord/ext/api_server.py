@@ -2857,7 +2857,7 @@ class ApiServer:
 
         store = self._teams_store()
         try:
-            thread_dir = store.ensure_thread_dir(ref)
+            thread_dir = store.ensure_thread_dir(ref, authors=[m.author for m in messages])
         except (OSError, ValueError) as exc:
             logger.error("Teams sync could not open a thread folder: %s", exc)
             return web.json_response({"error": "Could not open the thread folder"}, status=500)
