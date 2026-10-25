@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Teams sync files new threads without a typed company** (#1217) — when neither `orgs.json` nor the
+  client names a company, a new thread follows another thread of the same team, or (for chats) the one
+  company its people are already filed under. Ambiguous cases stay at the root.
+
 - **Console transcript names the model** (#1207) — each agent message in a console conversation
   shows the model that wrote it next to the author (`agent · gpt-5.5`; the backend name when no
   model is configured). Older messages keep the plain `agent` label.

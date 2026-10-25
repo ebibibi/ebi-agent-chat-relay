@@ -894,6 +894,135 @@ async def test_a_new_company_label_is_remembered_for_the_team(
     assert Path((await other.json())["folder"]).parent == vault / "Contoso"
 
 
+# Inferring the company when nobody typed one ---------------------------------
+
+TEAM_A = "aaaaaaaa-0000-4000-8000-000000000001"
+TEAM_B = "bbbbbbbb-0000-4000-8000-000000000002"
+TEAM_NEW = "cccccccc-0000-4000-8000-000000000003"
+OPERATOR = "胡田 昌彦"
+
+
+async def _file(client: TestClient, team: str, root: str, org: str, authors: list[str]) -> Path:
+    """Sync one thread under ``org`` with one message per author."""
+    messages = [
+        msg(str(int(root) + i), "本文", f"h{i}", author=author) for i, author in enumerate(authors)
+    ]
+    resp = await client.post(
+        "/api/teams/sync/push",
+        headers=AUTH,
+        json=thread_body(
+            thread={"team": team, "root_mid": root, "title": "件名", "org": org},
+            messages=messages,
+        ),
+    )
+    return Path((await resp.json())["folder"])
+
+
+async def _push_unlabelled(
+    client: TestClient, team: str, root: str, authors: list[str], org: str = ""
+) -> Path:
+    messages = [
+        msg(str(int(root) + i), "本文", f"n{i}", author=author) for i, author in enumerate(authors)
+    ]
+    thread = {"team": team, "root_mid": root, "title": "新しい会話"}
+    if org:
+        thread["org"] = org
+    resp = await client.post(
+        "/api/teams/sync/push",
+        headers=AUTH,
+        json=thread_body(thread=thread, messages=messages),
+    )
+    return Path((await resp.json())["folder"])
+
+
+async def test_a_team_filed_by_hand_files_its_next_thread_too(
+    client: TestClient, vault: Path
+) -> None:
+    """Dragging one thread into a company folder is a filing decision for its team.
+
+    The operator never typed a label, so orgs.json knows nothing — but the vault
+    does. The next thread of that team must follow it instead of landing at the
+    root and waiting to be dragged again.
+    """
+    first = await client.post(
+        "/api/teams/sync/push", headers=AUTH, json=thread_body(messages=[msg(ROOT, "本文", "h1")])
+    )
+    flat = Path((await first.json())["folder"])
+    (vault / "Contoso").mkdir()
+    flat.rename(vault / "Contoso" / flat.name)
+
+    other = await client.post(
+        "/api/teams/sync/push",
+        headers=AUTH,
+        json=thread_body(
+            thread={"team": TEAM, "root_mid": "1784110000999", "title": "別件"},
+            messages=[msg("1784110000999", "本文", "h9")],
+        ),
+    )
+    assert Path((await other.json())["folder"]).parent == vault / "Contoso"
+    assert json.loads((vault / "orgs.json").read_text())["teams"][TEAM] == "Contoso"
+
+
+async def test_a_new_chat_follows_the_people_already_filed_under_one_company(
+    client: TestClient, vault: Path
+) -> None:
+    """A chat has its own derived team, so only its people can say where it goes.
+
+    The operator is in every company's threads and therefore says nothing; the
+    customer contact appears under exactly one company and decides it.
+    """
+    await _file(client, TEAM_A, "1784110000100", "Contoso", [OPERATOR, "高橋 太郎"])
+    await _file(client, TEAM_B, "1784110000200", "Fabrikam", [OPERATOR, "鈴木 花子"])
+
+    folder = await _push_unlabelled(client, TEAM_NEW, "1784110000300", [OPERATOR, "高橋 太郎"])
+    assert folder.parent == vault / "Contoso"
+    assert json.loads((folder / "thread.json").read_text())["org"] == "Contoso"
+    assert json.loads((vault / "orgs.json").read_text())["teams"][TEAM_NEW] == "Contoso"
+
+
+async def test_people_from_two_companies_leave_the_chat_unfiled(
+    client: TestClient, vault: Path
+) -> None:
+    """Conflicting evidence is not a vote: a wrong company is worse than none."""
+    await _file(client, TEAM_A, "1784110000100", "Contoso", [OPERATOR, "高橋 太郎"])
+    await _file(client, TEAM_B, "1784110000200", "Fabrikam", [OPERATOR, "鈴木 花子"])
+
+    folder = await _push_unlabelled(client, TEAM_NEW, "1784110000300", ["高橋 太郎", "鈴木 花子"])
+    assert folder.parent == vault
+
+
+async def test_only_people_shared_across_companies_leave_the_chat_unfiled(
+    client: TestClient, vault: Path
+) -> None:
+    await _file(client, TEAM_A, "1784110000100", "Contoso", [OPERATOR, "高橋 太郎"])
+    await _file(client, TEAM_B, "1784110000200", "Fabrikam", [OPERATOR, "鈴木 花子"])
+
+    folder = await _push_unlabelled(client, TEAM_NEW, "1784110000300", [OPERATOR, "新顔 一郎"])
+    assert folder.parent == vault
+
+
+async def test_with_a_single_company_nobody_is_distinctive(client: TestClient, vault: Path) -> None:
+    """With one company filed, the operator looks unique to it.
+
+    Inferring then would file every new conversation under the first company the
+    operator ever labelled, so inference waits until two companies exist.
+    """
+    await _file(client, TEAM_A, "1784110000100", "Contoso", [OPERATOR, "高橋 太郎"])
+
+    folder = await _push_unlabelled(client, TEAM_NEW, "1784110000300", [OPERATOR])
+    assert folder.parent == vault
+
+
+async def test_a_typed_label_beats_the_inference(client: TestClient, vault: Path) -> None:
+    await _file(client, TEAM_A, "1784110000100", "Contoso", [OPERATOR, "高橋 太郎"])
+    await _file(client, TEAM_B, "1784110000200", "Fabrikam", [OPERATOR, "鈴木 花子"])
+
+    folder = await _push_unlabelled(
+        client, TEAM_NEW, "1784110000300", [OPERATOR, "高橋 太郎"], org="Northwind"
+    )
+    assert folder.parent == vault / "Northwind"
+
+
 async def test_a_hostile_company_name_cannot_escape_the_vault(
     client: TestClient, vault: Path
 ) -> None:
