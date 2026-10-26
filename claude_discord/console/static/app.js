@@ -41,7 +41,7 @@ const I18N = {
     priority: "Priority", due: "Due", snooze: "Snooze", project: "Project", parent: "Under",
     none: "—", reopen: "Reopen", finish: "Done", finish_confirm: "Click again to finish",
     finish_hint: "Mark this thread done (click twice; shortcut e). Undo right after, or Reopen any time.",
-    reopen_hint: "Bring this thread back from Done", finished: "Done", undo: "Undo", reopened: "Reopened", open_chat: "Open in chat", start: "Hand to AI",
+    reopen_hint: "Bring this thread back from Done", finished: "Done", undo: "Undo", dismiss: "Dismiss notification", reopened: "Reopened", open_chat: "Open in chat", start: "Hand to AI",
     reply_ph: "Reply… (Ctrl+Enter to send; paste, drop or 📎 to attach files)",
     attach_failed: "Could not attach the file", attach_hint: "Attach files",
     attach_big: (n, max) => `${n} is larger than ${max}`, attach_many: (n) => `At most ${n} files per reply`,
@@ -90,7 +90,7 @@ const I18N = {
     priority: "優先度", due: "期限", snooze: "スヌーズ", project: "案件", parent: "親",
     none: "なし", reopen: "戻す", finish: "完了", finish_confirm: "もう一度押すと完了",
     finish_hint: "このスレッドを完了にする（2回押す。ショートカット e）。直後なら「元に戻す」、あとからでも「戻す」で復活できます",
-    reopen_hint: "完了から戻す", finished: "完了にしました", undo: "元に戻す", reopened: "戻しました", open_chat: "チャットで開く", start: "AIに頼む",
+    reopen_hint: "完了から戻す", finished: "完了にしました", undo: "元に戻す", dismiss: "通知を閉じる", reopened: "戻しました", open_chat: "チャットで開く", start: "AIに頼む",
     reply_ph: "返信…（Ctrl+Enter で送信。ファイルは貼り付け・ドロップ・📎で添付）",
     attach_failed: "ファイルを添付できませんでした", attach_hint: "ファイルを添付",
     attach_big: (n, max) => `${n} は ${max} を超えています`, attach_many: (n) => `添付は1回 ${n} 件までです`,
@@ -165,7 +165,11 @@ function toast(msg) {
   showToast(t);
   setTimeout(() => t.remove(), 2600);
 }
+// Every toast carries its own ✕: one can sit over a button the human wants right now,
+// and waiting out its timer is not an option.
 function showToast(t) {
+  t.append(h("button", { class: "toast-x", type: "button", text: "✕", title: T.dismiss, "aria-label": T.dismiss,
+    onclick: (e) => { e.stopPropagation(); t.remove(); } }));
   document.body.append(t);
   placeToasts();
 }
