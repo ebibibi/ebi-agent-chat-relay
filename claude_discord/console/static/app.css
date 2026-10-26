@@ -213,6 +213,8 @@ button.slash-now:hover { border-color: var(--accent); }
 .detail .d-finish { flex: none; margin-left: 6px; color: var(--ai); border-color: color-mix(in srgb, var(--ai) 45%, var(--line)); }
 .detail .d-finish.armed { background: var(--ai); color: #0d1020; border-color: var(--ai); font-weight: 600; }
 .toast.undo { display: flex; align-items: center; gap: 12px; }
+.toast-x { flex: none; margin: -4px -8px -4px auto; padding: 2px 8px; background: none; border: 0; color: var(--dim); font-size: 14px; line-height: 20px; cursor: pointer; border-radius: 6px; }
+.toast-x:hover { color: var(--text); background: var(--line); }
 .detail .d-drawer { padding: 8px 16px 10px; border-bottom: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column;
   gap: 8px; flex-shrink: 0; max-height: 40%; overflow-y: auto; }
 .detail .dim { color: var(--dim); font-size: 12px; }
@@ -297,7 +299,7 @@ a.btn { text-decoration: none; display: inline-block; }
 .help kbd { background: var(--raise); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font-size: 12px; }
 .help table { border-collapse: collapse; } .help td { padding: 3px 10px 3px 0; }
 /* Top right, below the pane headers: at the bottom it covered the reply box being typed in. */
-.toast { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 56px); right: 16px; max-width: min(420px, calc(100vw - 32px)); overflow-wrap: anywhere; box-shadow: 0 4px 16px rgba(0,0,0,.35); background: var(--raise); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; z-index: 20; }
+.toast { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 56px); right: 16px; max-width: min(420px, calc(100vw - 32px)); overflow-wrap: anywhere; box-shadow: 0 4px 16px rgba(0,0,0,.35); background: var(--raise); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; z-index: 20; display: flex; align-items: center; gap: 12px; }
 
 .only-narrow { display: none; }
 @media (max-width: 900px) {

@@ -85,7 +85,7 @@ test('Note viewer', {timeout: 30000}, async t => {
   // A relative Markdown link resolves against the note's folder.
   await page.locator('.note-content > p a', {hasText:'rel'}).click();
   await page.waitForFunction(() => location.hash === '#note/B/Other.md');
-  await page.getByRole('button', {name:'閉じる'}).click();
+  await page.getByRole('button', {name:'閉じる',exact:true}).click();
   await page.waitForFunction(() => location.hash === '#focus' && document.getElementById('note-viewer').hidden);
   // A hidden or missing note says so.
   await page.evaluate(() => window.ConsoleNotes.open('secret/Diary.md'));
@@ -113,7 +113,7 @@ test('note links in a conversation message open the viewer in place', {timeout: 
     // Same tab, query (and its token) kept.
     assert.equal(page.context().pages().length, 1);
     assert.equal(new URL(page.url()).search, '?token=secret');
-    await page.getByRole('button', {name:'閉じる'}).click();
+    await page.getByRole('button', {name:'閉じる',exact:true}).click();
     await page.waitForFunction(() => document.getElementById('note-viewer').hidden);
   }
 });
