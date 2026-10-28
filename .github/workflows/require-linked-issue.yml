@@ -22,6 +22,10 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          # 本文は式展開で run に埋め込まず env 経由で渡す（スクリプト注入対策）。
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
 
@@ -39,21 +43,42 @@ jobs:
           owner="${REPO%%/*}"
           name="${REPO##*/}"
 
-          # closingIssuesReferences は本文の "Closes #12" と
-          # GitHub UI の Development 手動リンクの両方を拾う、GitHub が認める正本。
-          linked="$(gh api graphql \
-            -f owner="$owner" -f name="$name" -F number="$PR_NUMBER" \
-            -f query='
-              query($owner:String!, $name:String!, $number:Int!) {
-                repository(owner:$owner, name:$name) {
-                  pullRequest(number:$number) {
-                    closingIssuesReferences(first:20) {
-                      nodes { number title state }
+          if [ "$BASE_REF" = "$DEFAULT_BRANCH" ]; then
+            # closingIssuesReferences は本文の "Closes #12" と
+            # GitHub UI の Development 手動リンクの両方を拾う、GitHub が認める正本。
+            linked="$(gh api graphql \
+              -f owner="$owner" -f name="$name" -F number="$PR_NUMBER" \
+              -f query='
+                query($owner:String!, $name:String!, $number:Int!) {
+                  repository(owner:$owner, name:$name) {
+                    pullRequest(number:$number) {
+                      closingIssuesReferences(first:20) {
+                        nodes { number title state }
+                      }
                     }
                   }
-                }
-              }' \
-            --jq '.data.repository.pullRequest.closingIssuesReferences.nodes')"
+                }' \
+              --jq '.data.repository.pullRequest.closingIssuesReferences.nodes')"
+          else
+            # GitHub は既定ブランチ向けの PR にしか closingIssuesReferences を
+            # 設定しない。next などへ向けた PR では本文に Closes があっても常に空になる。
+            # そこで本文のキーワード付き参照（同じリポジトリの #番号だけ）を読み、
+            # 実在する Issue（PR ではない）かを API で確かめる。マージしても Issue は
+            # 自動で閉じないため、Refs も紐付けとして認める。
+            numbers="$(printf '%s\n' "${PR_BODY:-}" \
+              | grep -oiE '(^|[^[:alnum:]_/])(close[sd]?|fix(e[sd])?|resolve[sd]?|refs?)[[:space:]]*:?[[:space:]]+#[0-9]+' \
+              | grep -oE '[0-9]+$' | sort -un | head -n 20 || true)"
+            linked='[]'
+            for n in $numbers; do
+              # 存在しない番号や権限エラーは「紐付けなし」として扱う。
+              issue="$(gh api "repos/$REPO/issues/$n" \
+                --jq 'select(.pull_request == null) | {number, title, state}' 2>/dev/null || true)"
+              if [ -n "$issue" ]; then
+                linked="$(jq -c --argjson i "$issue" '. + [$i]' <<<"$linked")"
+              fi
+            done
+            echo "::notice::base が既定ブランチ（$DEFAULT_BRANCH）ではない（$BASE_REF）ため、本文の参照で判定しました。"
+          fi
 
           count="$(printf '%s' "$linked" | jq 'length')"
 
@@ -67,6 +92,9 @@ jobs:
               echo
               echo "1. PR 本文に閉じるキーワードを書く: \`Closes #123\` / \`Fixes #123\` / \`Resolves #123\`"
               echo "2. PR 画面右側の **Development** から Issue を手動リンクする"
+              echo
+              echo "既定ブランチ以外（\`next\` など）へ向けた PR では GitHub が紐付けを作らないため、"
+              echo "**本文の** \`Closes #123\` / \`Refs #123\` だけで判定します（Development の手動リンクは見ません）。"
               echo
               echo "対応する Issue がまだ無いなら、先に Issue を立ててください:"
               echo
