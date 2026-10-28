@@ -206,6 +206,10 @@ class OidcClient:
                 "nonce": nonce,
                 "code_challenge": challenge.rstrip(b"=").decode(),
                 "code_challenge_method": "S256",
+                # Always show the provider's account picker: otherwise it signs
+                # in again with whichever account the browser already holds,
+                # and a refused account could never be swapped for another.
+                "prompt": "select_account",
             }
         )
         return f"{meta['authorization_endpoint']}?{query}", sealed

@@ -120,6 +120,13 @@ async def test_a_verified_allowed_email_signs_in(key) -> None:
     assert provider.last_form["client_secret"] == "secret"
 
 
+async def test_every_sign_in_offers_the_account_picker(key) -> None:
+    # Without it the provider reuses whatever account the browser is already
+    # signed in to, and a refused account can never be swapped for the owner's.
+    url, _ = await make_client(FakeProvider(key)).start()
+    assert parse_qs(urlsplit(url).query)["prompt"] == ["select_account"]
+
+
 @pytest.mark.parametrize(
     "claims",
     [
