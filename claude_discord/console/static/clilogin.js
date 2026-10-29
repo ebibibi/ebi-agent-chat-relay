@@ -94,7 +94,8 @@
       return block;
     });
   }
-  window.consoleCliLogin = { chips, show: (b) => show(b) };
+  // backend.js reads sign-in state for the subscription route in its picker.
+  window.consoleCliLogin = { chips, show: (b) => show(b), state: (b) => row(b) || null };
 
   // ---- the dialog -----------------------------------------------------------
   const dialog = el("dialog", "cl-dialog");

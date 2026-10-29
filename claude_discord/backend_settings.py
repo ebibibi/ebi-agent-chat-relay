@@ -27,6 +27,8 @@ MODEL_GLOBAL_PREFIX = "model.global."  # + backend
 MODEL_THREAD_PREFIX = "model.thread."  # + thread_id + "." + backend
 EFFORT_GLOBAL_PREFIX = "effort.global."  # + backend
 EFFORT_THREAD_PREFIX = "effort.thread."  # + thread_id + "." + backend
+CONNECTION_GLOBAL_PREFIX = "connection.global."  # + backend
+CONNECTION_THREAD_PREFIX = "connection.thread."  # + thread_id + "." + backend
 
 # Codex status footer toggle (2-layer: global default + per-thread override).
 #   "auto" — show the Codex status line only when it can actually be fetched
@@ -176,6 +178,17 @@ class BackendSettings:
         v = await self.repo.get(f"{EFFORT_GLOBAL_PREFIX}{backend}")
         return v if v else None
 
+    async def chosen_connection(self, backend: str, thread_id: int | None = None) -> str | None:
+        """The connection id chosen for ``backend`` (thread > global), or None = as deployed."""
+        if backend not in ALL_BACKENDS:
+            return None
+        if thread_id is not None:
+            v = await self.repo.get(f"{CONNECTION_THREAD_PREFIX}{thread_id}.{backend}")
+            if v:
+                return v
+        v = await self.repo.get(f"{CONNECTION_GLOBAL_PREFIX}{backend}")
+        return v if v else None
+
     async def codex_status_mode(self, thread_id: int | None = None) -> str:
         """Return the Codex status footer mode for this thread (or globally).
 
@@ -236,6 +249,22 @@ class BackendSettings:
             await self.repo.set(f"{EFFORT_GLOBAL_PREFIX}{backend}", effort)
             logger.info("effort set: global backend=%s -> %s", backend, effort)
 
+    async def set_connection(
+        self, backend: str, connection: str, *, thread_id: int | None = None
+    ) -> None:
+        if backend not in ALL_BACKENDS:
+            raise ValueError(f"unknown backend {backend!r}")
+        if not connection:
+            raise ValueError("connection must not be empty")
+        if thread_id is not None:
+            await self.repo.set(f"{CONNECTION_THREAD_PREFIX}{thread_id}.{backend}", connection)
+            logger.info(
+                "connection set: thread=%d backend=%s -> %s", thread_id, backend, connection
+            )
+        else:
+            await self.repo.set(f"{CONNECTION_GLOBAL_PREFIX}{backend}", connection)
+            logger.info("connection set: global backend=%s -> %s", backend, connection)
+
     async def clear_effort(self, backend: str, *, thread_id: int | None = None) -> bool:
         """Remove a stored effort override. Returns True if something was deleted."""
         if backend not in ALL_BACKENDS:
@@ -253,6 +282,8 @@ class BackendSettings:
             if await self.repo.delete(f"{MODEL_THREAD_PREFIX}{thread_id}.{b}"):
                 deleted += 1
             if await self.repo.delete(f"{EFFORT_THREAD_PREFIX}{thread_id}.{b}"):
+                deleted += 1
+            if await self.repo.delete(f"{CONNECTION_THREAD_PREFIX}{thread_id}.{b}"):
                 deleted += 1
         if await self.repo.delete(f"{CODEX_STATUS_THREAD_PREFIX}{thread_id}"):
             deleted += 1

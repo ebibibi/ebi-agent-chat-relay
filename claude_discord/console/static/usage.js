@@ -6,10 +6,10 @@
   const POLL_MS = 60000;
   const TICK_MS = 20000;
   const L = new Proxy({
-    en: { back: "back", reset: "reset", unavailable: "usage unavailable", nodata: "no usage yet",
+    en: { back: "back", reset: "reset", unavailable: "usage unavailable", nodata: "no usage yet", subs: "Subscription usage (Foundry / API routes are not counted here)",
           credits: (n) => `${n} resets`, resetsAt: "resets", d: "d", h: "h", m: "m",
           out: (at, left) => `⛔ back ${at} (${left})` },
-    ja: { back: "復活", reset: "リセット済", unavailable: "取得できません", nodata: "まだ記録なし",
+    ja: { back: "復活", reset: "リセット済", unavailable: "取得できません", nodata: "まだ記録なし", subs: "サブスクの利用枠（Foundry や API の接続先はここに含まれません）",
           credits: (n) => `リセット券 ${n}`, resetsAt: "リセット", d: "日", h: "時間", m: "分",
           out: (at, left) => `⛔ 復活 ${at}（あと${left}）` },
   }, {get: (strings, key) => strings[document.documentElement.lang === "ja" ? "ja" : "en"][key]});
@@ -70,6 +70,8 @@
     const state = !b.available ? "out" : b.error ? "err" : level(worst);
     const block = el("div", `u-be ${state}`);
     const name = el("span", "u-name", NAMES[b.backend] || b.backend);
+    // These windows are the subscription's: a Foundry or API route is not counted here.
+    if (b.backend === "claude" || b.backend === "codex") { name.append(el("span", "u-prof", "💳")); name.title = L.subs; }
     if (b.profile) name.append(el("span", "u-prof", b.profile));
     block.append(name);
     if (!b.available && b.unavailable_until) {

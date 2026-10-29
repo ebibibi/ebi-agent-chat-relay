@@ -31,6 +31,7 @@ from ..account_turns import (
 from ..backend_settings import session_is_resumable
 from ..cogs._run_helper import run_claude_with_config
 from ..cogs.run_config import RunConfig
+from ..connection_choice import apply_connection
 from ..cross_backend_handoff import ConversationHistoryReader, carry_history_across_backends
 from ..execution_settings import apply_thread_execution_mode, thread_execution_mode
 from ..thread_marker import OUTCOME_ERROR
@@ -268,10 +269,13 @@ class ConsoleSessionHost:
         effort = await self._settings.current_effort(backend, thread_key)
         if effort is not None and hasattr(runner, "effort"):
             runner.effort = effort
+        connection = await apply_connection(runner, self._settings, backend, thread_key)
 
-        # The transcript names the model that wrote each answer.
+        # The transcript names the model that wrote each answer, and the route it took.
         model_name = getattr(runner, "model", None)
         surface.agent_model = model_name if isinstance(model_name, str) and model_name else backend
+        if connection is not None:
+            surface.agent_model = f"{surface.agent_model} · {connection.label}"
 
         account_turn, session_id, prompt = await self._plan_account(
             surface, runner, backend, session_id, prompt

@@ -29,11 +29,10 @@ import re
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field, replace
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from claude_code_core.child_env import STRIPPED_ENV_KEYS, strip_transport_credentials
+from claude_code_core.child_env import cli_environment
 
 logger = logging.getLogger(__name__)
 
@@ -155,19 +154,7 @@ def cli_env(source: Mapping[str, str] | None = None) -> dict[str, str]:
     Same policy as :meth:`ClaudeRunner._build_env`: relay credentials stripped,
     the ``CCDB_CLI_ENV_FILE`` overlay applied (it may move ``CLAUDE_CONFIG_DIR``).
     """
-    base = dict(os.environ if source is None else source)
-    env = {k: v for k, v in base.items() if k not in STRIPPED_ENV_KEYS}
-    overlay = base.get("CCDB_CLI_ENV_FILE")
-    if overlay:
-        try:
-            for line in Path(overlay).read_text().splitlines():
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, value = line.split("=", 1)
-                    env[key] = value
-        except OSError:
-            logger.debug("console: CLI env overlay not found: %s", overlay)
-    env = strip_transport_credentials(env)
+    env = cli_environment(source)
     env["NO_COLOR"] = "1"
     env["BROWSER"] = "true"  # there is no browser here; never try to open one
     return env
