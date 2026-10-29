@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sign Claude Code and Codex in from the Console** (#1224) — a relay without a terminal (a
+  container) no longer dead-ends at `Not logged in`. The usage strip shows a 🔑 chip for a CLI that
+  is not signed in; its dialog runs the CLI's own sign-in (`codex login --device-auth`, `claude
+  auth login --claudeai`), shows the vendor link and device code, and forwards Claude's pasted code.
+  The relay never reads or stores the credential. `CCDB_CONSOLE_CLI_LOGIN=0` turns it off.
 - **Teams sync files new threads without a typed company** (#1217) — when neither `orgs.json` nor the
   client names a company, a new thread follows another thread of the same team, or (for chats) the one
   company its people are already filed under. Ambiguous cases stay at the root.

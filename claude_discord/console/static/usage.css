@@ -22,6 +22,27 @@ body > .app { flex: 1 1 0; min-height: 0; height: auto; }
 .u-win.hot .u-pct { color: var(--err); }
 .u-out { color: var(--err); font-weight: 700; }
 
+/* CLI sign-in (clilogin.js): a chip per CLI that is not signed in, and its dialog. */
+.cl-btn { font: inherit; font-size: 12px; padding: 1px 8px; border-radius: 5px; border: 1px solid var(--line);
+  background: var(--raise); color: inherit; cursor: pointer; }
+.cl-btn.primary { background: var(--ai); border-color: var(--ai); color: var(--bg); font-weight: 600; }
+.cl-dialog { max-width: min(560px, 92vw); border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+  color: inherit; padding: 16px 18px; }
+.cl-dialog::backdrop { background: rgb(0 0 0 / 45%); }
+.cl-title { margin: 0 0 10px; font-size: 16px; }
+.cl-step { margin: 10px 0 4px; font-weight: 600; }
+.cl-url { display: flex; gap: 8px; align-items: center; margin: 0; }
+.cl-link { word-break: break-all; font-size: 12px; max-height: 4.5em; overflow: hidden; }
+.cl-code { display: flex; gap: 10px; align-items: center; margin: 0; }
+.cl-code code { font-size: 22px; letter-spacing: 2px; font-weight: 700; }
+.cl-form { display: flex; gap: 8px; }
+.cl-input { flex: 1; font: inherit; padding: 4px 8px; border-radius: 5px; border: 1px solid var(--line);
+  background: var(--bg); color: inherit; }
+.cl-dim { color: var(--dim); margin: 6px 0; }
+.cl-ok { color: var(--ai); font-weight: 700; }
+.cl-err { color: var(--err); font-weight: 700; }
+.cl-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+
 @media (max-width: 900px) {
   .nav, .detail { top: var(--usage-h, 0px); }
   /* Every backend visible without scrolling: one row each if need be. */

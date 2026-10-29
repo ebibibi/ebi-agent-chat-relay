@@ -85,8 +85,10 @@
 
   function render() {
     const backends = (data && data.backends) || [];
-    strip.hidden = backends.length === 0;
-    strip.replaceChildren(...backends.map(backendBlock));
+    // CLIs that are not signed in get a sign-in chip from clilogin.js.
+    const signIn = window.consoleCliLogin ? window.consoleCliLogin.chips() : [];
+    strip.hidden = backends.length === 0 && signIn.length === 0;
+    strip.replaceChildren(...backends.map(backendBlock), ...signIn);
     // Narrow screens overlay the nav and detail panes; they start below the strip.
     document.documentElement.style.setProperty("--usage-h", `${strip.hidden ? 0 : strip.offsetHeight}px`);
   }
@@ -112,5 +114,6 @@
   });
   window.addEventListener("resize", render);
   window.addEventListener("console-language-change", render);
+  window.addEventListener("console-cli-login-change", render);
   load();
 })();
