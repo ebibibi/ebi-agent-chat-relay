@@ -243,6 +243,26 @@ remaining. On a phone the strip wraps, so every backend stays visible.
 - **Account pools** (`CCDB_ACCOUNT_POOLS_FILE`): one entry per profile, using the router's own
   view of whether the profile is blocked.
 
+### Signing the CLIs in
+
+A relay in a container has no terminal, so a new conversation there fails with
+`Not logged in`. When Claude Code or Codex is not signed in, the strip shows a red
+**Claude — not signed in · 🔑 Sign in** chip. The button runs the CLI's own sign-in on the relay
+host and shows what you need in a dialog:
+
+- **Codex**: `codex login --device-auth`. Open the link, enter the one-time code shown in the
+  dialog; the dialog turns to ✅ by itself once the CLI reports success.
+- **Claude Code**: `claude auth login --claudeai` (the subscription, not API billing). Open the
+  link, sign in, and paste the code the page shows into the dialog.
+
+The relay never reads, stores or forwards the credential: the CLI writes its own home exactly as
+it does in a terminal, in the same environment the agent runs with (`CCDB_CLI_ENV_FILE` is
+applied, so a moved `CLAUDE_CONFIG_DIR` is honoured). Only links on the vendors' sign-in hosts are
+shown. One sign-in per CLI runs at a time and is stopped after 15 minutes, when the code expires.
+Sign-in state comes from `claude auth status` / `codex login status`, cached for a minute. In a
+container, keep that home on persistent storage or the sign-in is lost on restart. Account pool
+profiles have their own homes and are not covered. `CCDB_CONSOLE_CLI_LOGIN=0` turns it off.
+
 
 ### Backend, model and effort
 
@@ -466,6 +486,8 @@ Endpoints need authentication unless marked *(no sign-in)*. Every method except 
 | DELETE | `/console/api/passkeys/{id}` | Remove a passkey and its sessions |
 | GET | `/console/api/board` | Every item, sorted for triage, plus slot usage and the Focus `guide` |
 | GET | `/console/api/usage` | Per backend (or pool profile): `available`, `unavailable_until`, and `windows[]` of `{type, utilization, resets_at, status, reset}` |
+| GET | `/console/api/cli-login` | Per CLI: `logged_in` (`null` when unknown), `method`, and the sign-in in progress (`flow`: `state`, `url`, `user_code`, `needs_code`, `message`, `expires_at`) — never a credential |
+| POST | `/console/api/cli-login/{backend}` | `{action: "start" \| "cancel"}` or `{action: "code", code}` (Claude's pasted code) for `claude` / `codex`; 409 when the attempt cannot take it |
 | GET | `/console/api/items/{id}/messages?limit=50` | The conversation's recent messages (max 100), each with `kind`, `embeds` and `attachments` |
 | POST | `/console/api/items` | Write down work: `{title, note?, priority?, due_at?, parent_id?, project?, start?}`. With `start: true` it is handed to an agent in the same request; if that fails the item is kept and the response carries `start_error` |
 | PATCH | `/console/api/items/{id}` | Change `title`, `note`, `priority` (0–3), `due_at`, `snoozed_until`, `project`, `parent_id`, `state`, `readiness` (`now`, `waiting`, `null` = the AI's guess) |

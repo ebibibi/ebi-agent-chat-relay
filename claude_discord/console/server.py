@@ -37,6 +37,8 @@ from ..thread_status import request_thread_outcome, schedule_thread_outcome
 from .auth import ConsoleAuthConfig, ConsoleAuthenticator, ConsoleAuthError
 from .auth_routes import AUTH_PREFIX, AuthRoutes
 from .board import SessionInfo, ThreadSnapshot, build_board
+from .cli_login import CliLogin, login_commands
+from .cli_login_routes import CliLoginRoutes
 from .codex_compact import CompactError, compact_codex_session
 from .commands import (
     CONTROL_COMMANDS,
@@ -240,8 +242,11 @@ class ConsoleServer:
         triage: TriageRepository | None = None,
         places: PlaceRepository | None = None,
         account_router: AccountRouter | None = None,
+        cli_login: CliLogin | None = None,
     ) -> None:
         self.api = api_server
+        #: Signs the agent CLIs in from the browser; None hides the screen.
+        self.cli_login = cli_login
         #: Account pools: where a pooled session's transcript lives. None: ambient only.
         self.account_router = account_router
         #: Lists skills per backend for slash-command autocomplete; None reads the disk.
@@ -333,6 +338,7 @@ class ConsoleServer:
         r.add_patch(f"{API_PREFIX}/workspace/tasks", workspace_routes.change)
         r.add_post(f"{API_PREFIX}/workspace/run", workspace_routes.run)
         r.add_get(f"{API_PREFIX}/usage", self.usage_read)
+        CliLoginRoutes(self.cli_login, lambda request: request[IDENTITY]).register(r, API_PREFIX)
         r.add_get(f"{API_PREFIX}/defaults", self.defaults_read)
         r.add_post(f"{API_PREFIX}/defaults", self.defaults_change)
         for path in ("/defaults/children", "/items/{item_id}/children"):
@@ -438,6 +444,8 @@ class ConsoleServer:
             self._records_task = None
         if self._triager is not None:
             await self._triager.stop()
+        if self.cli_login is not None:
+            await self.cli_login.close()
         if self._runner:
             await self._runner.cleanup()
 
@@ -1786,6 +1794,7 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
         store=store,
         triage=triage,
         places=places,
+        cli_login=CliLogin(login_commands()),
     )
     await console.start()
     await _restore_slot_limit(api_server)
