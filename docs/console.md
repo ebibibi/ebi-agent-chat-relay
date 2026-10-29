@@ -270,9 +270,32 @@ The "🤖 backend · model · effort" line above the reply box opens a picker fo
 backend (Claude, Codex, local, AG-UI, pi), the models of the chosen backend (or a typed one) and
 effort levels. Each choice applies from the next turn; picking a backend redraws its own models and
 levels. The nav's "🤖 Default: …" opens the same picker for the setting new conversations start
-with (`GET /console/api/defaults`, `POST /console/api/defaults` with `{name: backend|model|effort,
-arg}`), validated like `/backend`, `/model` and `/effort`. A conversation's own choice wins over
+with (`GET /console/api/defaults`, `POST /console/api/defaults` with
+`{name: backend|model|effort|connection, arg}`), validated like `/backend`, `/model` and `/effort`. A conversation's own choice wins over
 the default.
+
+#### Connection: where it runs, and who pays
+
+"Claude" or "Codex" alone does not say what a turn costs, so the picker has a **connection** row
+and every summary line names it — `Codex · ☁️ Foundry · gpt-5.4-mini · medium`,
+`Claude · 💳 Subscription · opus`. The transcript names it under each answer too.
+
+Connections are discovered, nothing to configure:
+
+| Backend | 💳 Subscription | Other routes |
+|---|---|---|
+| Claude | always offered (the `claude auth login` sign-in) | the provider the CLI's environment selects — `CLAUDE_CODE_USE_FOUNDRY`, Bedrock, Vertex, `ANTHROPIC_BASE_URL` or an API key (`CCDB_CLI_ENV_FILE` included) |
+| Codex | always offered (ChatGPT sign-in, the built-in `openai` provider) | every `[model_providers.<id>]` in `$CODEX_HOME/config.toml`; an Azure host is shown as ☁️ Foundry |
+
+Until something is chosen, the deployment's own route is used (the environment for Claude,
+`model_provider` for Codex), so nothing changes for a relay that never picks one. Choosing the
+subscription drops the provider variables from Claude's environment; choosing another Codex route
+overrides `model_provider` for that run. No credential is read or moved. A subscription that is not
+signed in shows **🔑 not signed in** on its chip and opens the sign-in dialog when picked. For a
+Codex provider route the model list is the model its `config.toml` names (the discovered catalog is
+the ChatGPT one). The usage strip's 💳 marks subscription windows: Foundry and API usage is not
+counted there. The choice applies in Discord, Teams and scheduled tasks too; `/connection <id>`
+sets it from the reply box.
 
 ### Running work
 

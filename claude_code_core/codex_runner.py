@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 from .account_pool import AccountBinding
 from .child_env import STRIPPED_ENV_KEYS
 from .codex_transcript import codex_message_from_line
+from .connections import Connection, codex_args
 from .execution import ExecutionRefusedError, carry_execution_mode, prepare_launch, refusal_event
 from .types import (
     ImageData,
@@ -345,6 +346,8 @@ class CodexRunner:
         # Account-pool profile this runner spawns as (CODEX_HOME). None means
         # the relay's own environment — the behaviour without a pool.
         self.account: AccountBinding | None = None
+        #: ChatGPT subscription or a config.toml provider (see :mod:`.connections`).
+        self.connection: Connection | None = None
         self._process: asyncio.subprocess.Process | None = None
         self._interrupt_requested = False
         self._app_server: AppServerSession | None = None
@@ -498,6 +501,7 @@ class CodexRunner:
             effort=self.effort if effort is _UNSET else effort,  # type: ignore[arg-type]
         )
         cloned.account = self.account
+        cloned.connection = self.connection
         return carry_execution_mode(self, cloned)
 
     def _use_app_server(self) -> bool:
@@ -608,6 +612,7 @@ class CodexRunner:
         args.append("--skip-git-repo-check")
         if self.model:
             args.extend(["--model", self.model])
+        args.extend(codex_args(self.connection))
         if self.effort:
             if self.effort not in VALID_CODEX_EFFORTS:
                 raise ValueError(

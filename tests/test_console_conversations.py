@@ -604,7 +604,7 @@ async def test_slash_command_catalog_follows_the_backend(env) -> None:
         await env.client.get(f"/console/api/items/{item_id}/commands", headers=AUTH)
     ).json()
     assert got["backend"] == "claude"
-    assert [c["name"] for c in got["commands"]] == ["backend", "model", "effort"]
+    assert [c["name"] for c in got["commands"]] == ["backend", "model", "effort", "connection"]
     assert [c["name"] for c in got["builtins"]] == ["compact", "context", "cost"]
     assert got["efforts"] == ["low", "medium", "high", "max"]
     assert [s["name"] for s in got["skills"]] == ["kb-save"]

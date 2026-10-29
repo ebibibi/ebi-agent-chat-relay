@@ -20,6 +20,7 @@ from claude_code_core.frontend import ConversationSurface, SessionFrontend, Thre
 from .backend_settings import session_is_resumable
 from .cogs._run_helper import run_claude_with_config
 from .cogs.run_config import RunConfig
+from .connection_choice import apply_connection
 from .cross_backend_handoff import ConversationHistoryReader, carry_history_across_backends
 from .execution_settings import apply_thread_execution_mode
 
@@ -192,6 +193,7 @@ class TeamsSessionHost:
         effort = await self._settings.current_effort(backend, thread_key)
         if effort is not None and hasattr(runner, "effort"):
             runner.effort = effort
+        await apply_connection(runner, self._settings, backend, thread_key)
 
         await self._run_session(
             RunConfig(

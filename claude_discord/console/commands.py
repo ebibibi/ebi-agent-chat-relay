@@ -15,11 +15,15 @@ in Discord too.
 
 from __future__ import annotations
 
+import inspect
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from claude_code_core.child_env import cli_environment
+from claude_code_core.connections import SUBSCRIPTION, Connection, connections_for, resolve
 
 from ..backend_settings import ALL_BACKENDS
 from ..cogs.backend_command import EFFORT_ORDER, SUGGESTED_MODELS, VALID_EFFORTS
@@ -31,6 +35,7 @@ CONTROL_COMMANDS: tuple[tuple[str, str], ...] = (
     ("backend", "Switch the AI backend for this conversation"),
     ("model", "Choose the model for the current backend"),
     ("effort", "Set the reasoning effort for the current backend"),
+    ("connection", "Subscription or provider (e.g. Foundry) for the current backend"),
 )
 #: CLI built-ins offered for completion. Claude Code runs them itself, so they go
 #: out as plain text. ``codex exec`` reads them as words for the model, so the
@@ -100,17 +105,45 @@ async def catalog(
 ) -> dict[str, Any]:
     """What the reply box can autocomplete for this conversation, right now."""
     backend = await settings.current_backend(thread_key)
+    options, connection = await _connections(settings, backend, thread_key)
     return {
         "backend": backend,
         "model": await settings.current_model(backend, thread_key),
         "effort": await settings.current_effort(backend, thread_key),
+        "connection": connection.as_dict() if connection is not None else None,
+        "connections": [c.as_dict() for c in options],
         "commands": [{"name": n, "description": d} for n, d in CONTROL_COMMANDS],
         "builtins": builtins_for(backend),
         "backends": list(ALL_BACKENDS),
-        "models": await models(backend),
+        "models": await _models_for(backend, connection, models),
         "efforts": effort_levels(backend),
         "skills": list(skills(backend))[:MAX_SKILLS],
     }
+
+
+async def _connections(
+    settings: Any, backend: str, thread_key: int | None
+) -> tuple[list[Connection], Connection | None]:
+    env = cli_environment()
+    options = connections_for(backend, env)
+    getter = getattr(settings, "chosen_connection", None)
+    pending = getter(backend, thread_key) if callable(getter) else None
+    chosen = await pending if inspect.isawaitable(pending) else None
+    return options, resolve(backend, chosen if isinstance(chosen, str) else None, env)
+
+
+async def _models_for(
+    backend: str,
+    connection: Connection | None,
+    models: Callable[[str], Awaitable[list[dict[str, str]]]],
+) -> list[dict[str, str]]:
+    # The discovered Codex catalog is the ChatGPT one; a provider route only
+    # serves its own deployments, so offer the one its config names.
+    if backend == "codex" and connection is not None and connection.id != SUBSCRIPTION:
+        if connection.model:
+            return [{"value": connection.model, "label": f"{connection.label} (config.toml)"}]
+        return []
+    return await models(backend)
 
 
 async def run_command(settings: Any, thread_key: int | None, name: str, arg: str) -> CommandResult:
@@ -139,6 +172,14 @@ async def run_command(settings: Any, thread_key: int | None, name: str, arg: str
             raise CommandError(f"Unknown effort `{arg}` for `{backend}`. Choose: {choices}.")
         await settings.set_effort(backend, level, thread_id=thread_key)
         return CommandResult(f"Effort for `{backend}` set to `{level}` {scope}.")
+    if name == "connection":
+        options, _ = await _connections(settings, backend, thread_key)
+        match = next((c for c in options if c.id == arg), None)
+        if match is None:
+            choices = ", ".join(c.id for c in options) or "none"
+            raise CommandError(f"Unknown connection `{arg}` for `{backend}`. Choose: {choices}.")
+        await settings.set_connection(backend, match.id, thread_id=thread_key)
+        return CommandResult(f"`{backend}` now runs on {match.label} {scope}.")
     raise CommandError(f"Unknown command `/{name}`.")
 
 

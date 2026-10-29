@@ -42,6 +42,7 @@ from ..backend_settings import BackendSettings, session_is_resumable
 from ..claude.rewind import find_session_jsonl, parse_user_turns
 from ..claude.types import ImageData
 from ..concurrency import SessionRegistry
+from ..connection_choice import apply_connection
 from ..cross_backend_handoff import ConversationHistoryReader, carry_history_across_backends
 from ..database.ask_repo import PendingAskRepository
 from ..database.lounge_repo import LoungeRepository
@@ -464,6 +465,7 @@ class ClaudeChatCog(commands.Cog):
 
         # Per-thread execution environment (/sandbox), bounded by the allowlist.
         await apply_thread_execution_mode(runner, self._backend_settings.repo, thread_id)
+        await apply_connection(runner, self._backend_settings, backend, thread_id)
 
         return runner
 

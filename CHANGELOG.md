@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Choose and see where a backend runs: subscription or provider** — the Console picker has a
+  connection row (💳 subscription, ☁️ Foundry, Bedrock, Vertex, API) and every summary line names it
+  (`Codex · ☁️ Foundry · gpt-5.4-mini`). Routes are discovered from the CLI environment and Codex's
+  `config.toml`; unchosen means the deployment default, so nothing changes until one is picked.
+  Applied in Discord, Console, Teams and scheduled tasks alike.
 - **Sign Claude Code and Codex in from the Console** (#1224) — a relay without a terminal (a
   container) no longer dead-ends at `Not logged in`. The usage strip shows a 🔑 chip for a CLI that
   is not signed in; its dialog runs the CLI's own sign-in (`codex login --device-auth`, `claude

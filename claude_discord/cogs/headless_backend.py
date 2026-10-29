@@ -6,6 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from ..claude.runner import _UNSET
+from ..connection_choice import apply_connection
 from ..execution_settings import apply_thread_execution_mode
 
 if TYPE_CHECKING:
@@ -66,6 +67,7 @@ async def build_headless_runner(
         if effort is not None and hasattr(runner, "effort"):
             runner.effort = effort  # type: ignore[attr-defined]
         await apply_thread_execution_mode(runner, settings.repo, thread_id)
+        await apply_connection(runner, settings, backend, thread_id)
     else:
         if backend_override is not None or model_override is not None:
             # The clone path has no factory to build a different backend with,

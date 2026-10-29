@@ -24,6 +24,7 @@ from pathlib import Path
 from .account_pool import AccountBinding
 from .api_provider import detect_api_provider
 from .child_env import STRIPPED_ENV_KEYS, strip_transport_credentials
+from .connections import Connection, apply_claude_env
 from .execution import ExecutionRefusedError, carry_execution_mode, prepare_launch, refusal_event
 from .parser import parse_line
 from .types import ImageData, InjectedMessage, MessageType, StreamEvent
@@ -138,6 +139,8 @@ class ClaudeRunner:
         # Account-pool profile this runner spawns as (CLAUDE_CONFIG_DIR). None
         # means the relay's own environment — the behaviour without a pool.
         self.account: AccountBinding | None = None
+        #: Subscription or a third-party provider (see :mod:`.connections`); None = as configured.
+        self.connection: Connection | None = None
         self._process: asyncio.subprocess.Process | None = None
         # Messages delivered into the running turn (issue #1129). Admission is
         # open only between the first prompt and the final RESULT; a message
@@ -281,6 +284,7 @@ class ClaudeRunner:
             ),
         )
         cloned.account = self.account
+        cloned.connection = self.connection
         return carry_execution_mode(self, cloned)
 
     async def inject_tool_result(self, request_id: str, data: dict) -> None:
@@ -440,6 +444,8 @@ class ClaudeRunner:
             # After the overlay: the profile chosen for this turn is more
             # specific than a deployment-wide CLAUDE_CONFIG_DIR.
             env.update(self.account.env)
+        # The subscription route drops provider variables the overlay may set.
+        env = apply_claude_env(self.connection, env)
         if self.api_port is not None:
             env["CCDB_API_URL"] = f"http://127.0.0.1:{self.api_port}"
         if self.api_secret is not None:

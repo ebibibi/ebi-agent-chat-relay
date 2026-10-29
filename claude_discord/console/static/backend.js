@@ -20,7 +20,14 @@ window.ConsoleBackend = (() => {
   function onKey(e) { if (e.key === "Escape") { e.stopPropagation(); close(); } }
   function onOutside(e) { if (panel && !panel.contains(e.target)) close(); }
 
-  const summary = (c) => [LABELS[c.backend] || c.backend, c.model, c.effort].filter(Boolean).join(" · ");
+  // Which route a backend takes decides what a turn costs, so it is always named.
+  const ICONS = { subscription: "💳", foundry: "☁️", bedrock: "☁️", vertex: "☁️", api: "🔑" };
+  const route = (conn) => conn ? `${ICONS[conn.kind] || "🔌"} ${(T.bp_kind || {})[conn.kind] || conn.kind}` : null;
+  const summary = (c) => [LABELS[c.backend] || c.backend, route(c.connection), c.model, c.effort].filter(Boolean).join(" · ");
+  const signedOut = (backend) => {
+    const s = window.consoleCliLogin && window.consoleCliLogin.state(backend);
+    return Boolean(s && s.logged_in === false);
+  };
 
   // *scope*: { title, load() -> catalog, apply(name, arg) -> { message, catalog }, onChange(catalog) }
   async function open(scope, anchor) {
@@ -56,13 +63,27 @@ window.ConsoleBackend = (() => {
       const custom = h("input", { type: "text", class: "bp-custom", placeholder: T.bp_model_other, size: 14,
         onkeydown: (e) => { if (e.key === "Enter" && e.target.value.trim()) choose("model", e.target.value.trim()); } });
       const models = c.models || [];
+      const conns = c.connections || [];
+      const current = c.connection ? c.connection.id : null;
+      const connChip = (k) => {
+        const out = k.kind === "subscription" && signedOut(c.backend);
+        const text = `${ICONS[k.kind] || "🔌"} ${k.label}` + (out ? ` · 🔑 ${T.bp_signed_out}` : "");
+        const title = [k.detail, k.default ? T.bp_default_route : null].filter(Boolean).join(" · ") || k.label;
+        return chip(k.id === current, text, async () => {
+          if (k.id !== current) await choose("connection", k.id);
+          if (out && window.consoleCliLogin) window.consoleCliLogin.show(c.backend);
+        }, title);
+      };
       panel.replaceChildren(
         h("div", { class: "bp-head" }, h("strong", { text: scope.title }),
           h("button", { class: "icon-btn", type: "button", "aria-label": "close", onclick: close, text: "×" })),
         h("div", { class: "bp-label", text: T.bp_backend }),
         h("div", { class: "chips" }, (c.backends || []).map((b) =>
           chip(b === c.backend, LABELS[b] || b, () => b !== c.backend && choose("backend", b)))),
-        h("div", { class: "bp-label", text: `${T.bp_model} (${LABELS[c.backend] || c.backend})` }),
+        conns.length ? h("div", { class: "bp-label", text: `${T.bp_connection} (${LABELS[c.backend] || c.backend})` }) : null,
+        conns.length ? h("div", { class: "chips bp-conns" }, conns.map(connChip)) : null,
+        h("div", { class: "bp-label", text: `${T.bp_model} (${[LABELS[c.backend] || c.backend, route(c.connection)].filter(Boolean).join(" · ")})` }),
+        conns.length && !models.length ? h("p", { class: "dim bp-note", text: T.bp_no_models }) : null,
         h("div", { class: "chips" }, models.map((m) =>
           chip(m.value === c.model, m.value, () => m.value !== c.model && choose("model", m.value), m.label || m.value))),
         custom,
