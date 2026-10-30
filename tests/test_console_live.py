@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
+from urllib.parse import unquote
 
 import pytest
 
@@ -103,6 +105,34 @@ async def test_a_delivered_file_is_kept_and_linked(frontend, tmp_path) -> None:
     _, key, token, name = link.removeprefix("/console/api/").split("/")
     path = resolve_file(frontend.files_dir, key, token, name)
     assert path is not None and path.read_text() == "# hi"
+
+
+@pytest.mark.parametrize(
+    "display_name",
+    [
+        "GenAI Assessment v2 次回定例用スライド叩き台（2026-10-30）.pptx",
+        "5. Song_Drums.mp3",
+        "report (final).md",
+        "notes [draft] 100%.md",
+    ],
+)
+async def test_a_delivered_file_with_any_name_gets_a_link_the_console_renders(
+    frontend, tmp_path, display_name
+) -> None:
+    surface = await frontend.open(external_id="c1", title="t")
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"data")
+
+    await surface.deliver_files([OutboundFile(display_name=display_name, path=str(source))])
+
+    [message] = await frontend.repo.history(surface.thread_key, 10)
+    # Same pattern static/markdown.js uses for a download link.
+    match = re.search(r"\[([^\]\n]+)\]\((/console/api/files/[^\s)]+)\)", message.content)
+    assert match is not None, message.content
+    _, key, token, encoded = match.group(2).removeprefix("/console/api/").split("/")
+    path = resolve_file(frontend.files_dir, key, token, unquote(encoded))
+    assert path is not None and path.read_bytes() == b"data"
+    assert path.name == display_name
 
 
 @pytest.mark.parametrize(
