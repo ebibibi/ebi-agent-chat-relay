@@ -1436,3 +1436,92 @@ class TestThreadOutcome:
             with pytest.raises(asyncio.CancelledError):
                 await task
         assert seen == ["action", "done"]
+
+
+class TestRestartNotice:
+    """After a restart, the new process says so in the thread that asked for it."""
+
+    @staticmethod
+    def _settings(stored: dict[str, str]) -> MagicMock:
+        settings = MagicMock()
+        settings.get = AsyncMock(side_effect=lambda key, default=None: stored.get(key, default))
+
+        async def _set(key: str, value: str) -> None:
+            stored[key] = value
+
+        async def _delete(key: str) -> bool:
+            return stored.pop(key, None) is not None
+
+        settings.set = AsyncMock(side_effect=_set)
+        settings.delete = AsyncMock(side_effect=_delete)
+        return settings
+
+    @staticmethod
+    def _restart_cog(bot: MagicMock) -> AutoUpgradeCog:
+        config = UpgradeConfig(
+            package_name="pkg",
+            trigger_prefix="🔄 ebibot-upgrade",
+            restart_command=["true"],
+            working_dir="/tmp",
+        )
+        return AutoUpgradeCog(bot=bot, config=config)
+
+    @pytest.mark.asyncio
+    async def test_restart_remembers_the_thread(self, bot: MagicMock) -> None:
+        stored: dict[str, str] = {}
+        bot.settings_repo = self._settings(stored)
+        cog = self._restart_cog(bot)
+        thread = MagicMock(id=555)
+        thread.send = AsyncMock()
+        with (
+            patch(_PATCH_EXEC, new_callable=AsyncMock, return_value=_make_process()),
+            patch(_PATCH_SLEEP, new_callable=AsyncMock),
+            patch("claude_discord.cogs.auto_upgrade.request_thread_outcome", MagicMock()),
+        ):
+            await cog._restart(None, thread)
+        assert stored == {"auto_upgrade.restart_thread_id": "555"}
+
+    @pytest.mark.asyncio
+    async def test_startup_posts_once_with_the_version(self, bot: MagicMock) -> None:
+        stored = {"auto_upgrade.restart_thread_id": "555"}
+        bot.settings_repo = self._settings(stored)
+        thread = MagicMock(spec=discord.Thread)
+        thread.send = AsyncMock()
+        bot.get_channel = MagicMock(return_value=thread)
+        cog = self._restart_cog(bot)
+        with patch("claude_discord.cogs.auto_upgrade.package_version", return_value="9.9.9"):
+            await cog.announce_restart()
+            await cog.announce_restart()
+        thread.send.assert_awaited_once()
+        text = thread.send.await_args.args[0]
+        assert "9.9.9" in text and "pkg" in text
+        assert stored == {}
+
+    @pytest.mark.asyncio
+    async def test_startup_without_a_pending_restart_posts_nothing(self, bot: MagicMock) -> None:
+        bot.settings_repo = self._settings({})
+        bot.get_channel = MagicMock()
+        await self._restart_cog(bot).announce_restart()
+        bot.get_channel.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_deleted_thread_is_not_an_error(self, bot: MagicMock) -> None:
+        stored = {"auto_upgrade.restart_thread_id": "555"}
+        bot.settings_repo = self._settings(stored)
+        bot.get_channel = MagicMock(return_value=None)
+        bot.fetch_channel = AsyncMock(side_effect=discord.NotFound(MagicMock(status=404), "gone"))
+        await self._restart_cog(bot).announce_restart()
+        assert stored == {}
+
+    @pytest.mark.asyncio
+    async def test_no_settings_store_is_a_no_op(self, bot: MagicMock) -> None:
+        cog = self._restart_cog(bot)
+        thread = MagicMock(id=555)
+        thread.send = AsyncMock()
+        with (
+            patch(_PATCH_EXEC, new_callable=AsyncMock, return_value=_make_process()),
+            patch(_PATCH_SLEEP, new_callable=AsyncMock),
+            patch("claude_discord.cogs.auto_upgrade.request_thread_outcome", MagicMock()),
+        ):
+            await cog._restart(None, thread)
+        await cog.announce_restart()

@@ -17,6 +17,8 @@ import contextlib
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 
 import discord
 from discord import app_commands
@@ -52,6 +54,11 @@ async def _mark_outcome(thread: object, outcome: str, *, wait: bool = False) -> 
     if wait:
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(asyncio.shield(task), _FINAL_OUTCOME_TIMEOUT)
+
+
+#: Settings key holding the thread that asked for the restart now under way. The
+#: next process reads it once at startup to say the restart actually happened.
+_RESTART_THREAD_KEY = "auto_upgrade.restart_thread_id"
 
 
 _ABANDONED_NOTE = (
@@ -227,6 +234,59 @@ class AutoUpgradeCog(commands.Cog):
         # Approval prompts still waiting, by thread id. Lives in memory like the
         # wait itself, so cog_unload can say the prompt is dead before it is.
         self._pending: dict[int, _PendingApproval] = {}
+        self._announce_task: asyncio.Task[None] | None = None
+
+    async def cog_load(self) -> None:
+        """Report a restart this cog started in the previous process, once ready."""
+        self._announce_task = asyncio.create_task(self._announce_when_ready())
+
+    async def _announce_when_ready(self) -> None:
+        await self.bot.wait_until_ready()
+        await self.announce_restart()
+
+    async def announce_restart(self) -> None:
+        """Post "restarted" in the upgrade thread whose restart brought this process up.
+
+        Without it the thread ends at "🔄 Restarting..." and nobody can tell
+        from the thread whether the new process ever came back. The key is
+        removed before posting so a reconnect never repeats the notice.
+        """
+        settings = getattr(self.bot, "settings_repo", None)
+        if settings is None:
+            return
+        try:
+            raw = await settings.get(_RESTART_THREAD_KEY)
+            if raw is None:
+                return
+            await settings.delete(_RESTART_THREAD_KEY)
+            thread_id = int(raw)
+        except Exception:
+            logger.warning("Could not read the pending restart notice", exc_info=True)
+            return
+        try:
+            channel = self.bot.get_channel(thread_id) or await self.bot.fetch_channel(thread_id)
+            await channel.send(self._restarted_text())  # type: ignore[union-attr]
+        except discord.HTTPException:
+            logger.info("Could not post the restart notice to thread %d", thread_id)
+            return
+        logger.info("Restart notice posted to thread %d", thread_id)
+
+    def _restarted_text(self) -> str:
+        name = self.config.package_name
+        try:
+            return f"✅ Restarted — now running {name} v{package_version(name)}."
+        except PackageNotFoundError:
+            return "✅ Restarted."
+
+    async def _remember_restart(self, thread: discord.Thread) -> None:
+        settings = getattr(self.bot, "settings_repo", None)
+        if settings is None:
+            return
+        try:
+            await settings.set(_RESTART_THREAD_KEY, str(thread.id))
+        except Exception:
+            # The notice is a courtesy; it must never stand in the way of the restart.
+            logger.warning("Could not record the restart thread", exc_info=True)
 
     async def cog_unload(self) -> None:
         """Close every approval prompt that the shutdown is about to orphan.
@@ -235,6 +295,8 @@ class AutoUpgradeCog(commands.Cog):
         reaction, the channel button and the console action all lead nowhere,
         while the thread still reads as if it is waiting.
         """
+        if self._announce_task is not None:
+            self._announce_task.cancel()
         pending, self._pending = list(self._pending.values()), {}
         for entry in pending:
             message_actions.clear(*entry.offered)
@@ -673,6 +735,7 @@ class AutoUpgradeCog(commands.Cog):
         if status_target is not None:
             await status_target.add_reaction("✅")
         await _mark_outcome(thread, OUTCOME_DONE, wait=True)
+        await self._remember_restart(thread)
         await asyncio.sleep(1)
         assert self.config.restart_command is not None  # Caller checks this
         await asyncio.create_subprocess_exec(
