@@ -21,6 +21,7 @@ import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
 from claude_code_core.frontend import (
     ActivitySpec,
@@ -62,6 +63,12 @@ CONSOLE_CAPABILITIES = SurfaceCapabilities(
 
 #: Where a delivered file can be fetched. ``files.py`` serves it.
 FILES_ROUTE = "/console/api/files"
+
+
+def _link_label(name: str) -> str:
+    """A filename as Markdown link text; brackets would end the label early."""
+    return name.replace("[", "(").replace("]", ")")
+
 
 #: Notices worth keeping in the transcript. Session start/finish cards and
 #: "thinking" asides are live-progress chatter a reader does not need later.
@@ -264,7 +271,7 @@ class ConsoleSurface:
         for f in files:
             link = await self._keep_file(f)
             if link is not None:
-                lines.append(f"- [{f.display_name}]({link})")
+                lines.append(f"- [{_link_label(f.display_name)}]({link})")
             else:
                 lines.append(f"- `{f.display_name}`" + (f" ({f.path})" if f.path else ""))
         if lines:
@@ -281,7 +288,10 @@ class ConsoleSurface:
         except (OSError, ValueError) as exc:
             logger.warning("console: could not keep %s: %s", file.display_name, exc)
             return None
-        return f"{FILES_ROUTE}/{self._thread_key}/{token}/{file.display_name}"
+        # Percent-encode the name: the console's Markdown ends a link URL at the
+        # first space or ")", so a raw "a b.pptx" became an unclickable link (#1228).
+        # aiohttp decodes the segment again before resolve_file sees it.
+        return f"{FILES_ROUTE}/{self._thread_key}/{token}/{quote(file.display_name, safe='')}"
 
     def open_stream(self) -> _TextStream:
         return _TextStream(self, self.live)
