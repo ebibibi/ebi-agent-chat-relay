@@ -152,13 +152,17 @@ window.ConsoleBackend = (() => {
     get note() { return T.bp_note_default; },
     load: async () => (defaults = await api("/defaults")),
     apply: (name, arg) => api("/defaults", { method: "POST", body: { name, arg } }),
-    onChange: (c) => { defaults = c; renderNav(); },
+    onChange: (c) => { defaults = c; renderNav(); defaultsChanged(); },
   };
 
   async function loadDefaults() {
     try { defaults = await api("/defaults"); } catch { defaults = null; }
     renderNav();
+    defaultsChanged();
   }
+  // usage.js shows only the default backend's usage on a phone until expanded.
+  const defaultsChanged = () => window.dispatchEvent(new Event("console-defaults-change"));
+  const defaultBackend = () => defaults && defaults.backend;
 
   // The nav line: "🤖 Default: Claude · opus" — click to change.
   function nav() {
@@ -169,5 +173,5 @@ window.ConsoleBackend = (() => {
     return btn;
   }
 
-  return { open, forItem, nav, childNav, controls, loadDefaults, summary };
+  return { open, forItem, nav, childNav, controls, loadDefaults, summary, defaultBackend };
 })();
