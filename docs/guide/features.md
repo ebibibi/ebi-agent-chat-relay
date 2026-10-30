@@ -271,6 +271,12 @@ curl "$CCDB_API_URL/api/ingest/ab12…" -H "Authorization: Bearer $CCDB_INGEST_T
 # → {"status": "done", "result": "…", "error": null, "thread_id": "…", "thread_name": "…"}
 ```
 
+**Label what you create (`tags`).** Add `"tags": ["monthly-report"]` and the thread carries those
+tags on the Ebi AI Console board, so a saved view such as `tag:monthly-report` lists exactly the
+threads your integration created. Tags are single words (letters, digits, `. _ : / -`), lower-cased,
+at most 20; a bad tag is a `400` before anything is spawned. A Teams Channel Exporter reply-draft
+request is tagged `teams-exporter` without asking — see [docs/console.md](../console.md#saved-views-and-the-filter-language).
+
 The endpoint is opt-in: with no `ingest_token` configured, `POST` responds `503`. When result retrieval is unavailable, `POST` simply omits `result_id` and `GET /api/ingest/{id}` returns `503` — the spawn behaviour is otherwise unchanged. The request body and attachments are **not** persisted in the result store (only status, the final text, and the thread id); results are capped at 200 rows.
 
 #### Teams reply drafts start at P0

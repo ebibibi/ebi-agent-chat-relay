@@ -517,6 +517,8 @@ Endpoints need authentication unless marked *(no sign-in)*. Every method except 
 | POST | `/console/api/items/{id}/reply` | `{text}` — continues the session, queued behind a running turn |
 | POST | `/console/api/items/{id}/done` | Mark done (also sets the ✅ marker on the thread) |
 | POST | `/console/api/items/{id}/reopen` | Clear the done/someday verdict |
+| GET / POST | `/console/api/views` | The saved views (also in every board as `views`); save one with `{name, query}` — see [Saved views](#saved-views-and-the-filter-language) |
+| PATCH / DELETE | `/console/api/views/{id}` | Change (`name`, `query`, `position`) or delete a saved view |
 | GET / POST / PATCH / DELETE | `/console/api/places` | The managed list of places with open-item counts; add `{name}`, rename `{from, name}` (every item follows), delete `{name}` (items become doable anywhere) |
 | GET | `/console/api/items/{id}/live` | A console conversation's running turn: status, tool activity, the answer so far, whether it can be stopped |
 | POST | `/console/api/items/{id}/messages/{message_id}/actions/{action_id}` | Press a button listed in a message's `actions` (404 once it is answered) |
@@ -595,6 +597,46 @@ a notice. **Clear selection** starts over. Failures remain listed by thread with
 button; successful threads are removed from the selection. Failed targets remain explicit in
 the error list even if a filter hides their rows. Completion runs once per ID, descendants
 before parents, and does not affect unrelated families.
+
+## Saved views and the filter language
+
+The filter box (`/`) reads rules, not only words. Terms are ANDed; a comma inside a value means OR;
+a leading `-` negates a term.
+
+| Term | Selects |
+|---|---|
+| `reply vendor`, `"login bug"` | every word (or the quoted phrase) in the title, project, Workspace entry, thread name or folder — the old search |
+| `tag:teams-exporter` | items carrying the tag (exact) |
+| `status:waiting,review` | the status (`waiting`, `review`, `action`, `error`, `candidate`, `running`, `idle`, `todo`, `someday`, `done`) |
+| `list:me` | the list an item lives in (`me`, `candidate`, `ai`, `todo`, `idle`, `snoozed`, `done`) |
+| `p:0`, `p:<=1`, `priority:>2` | the priority |
+| `project:`, `place:`, `model:`, `dir:`, `title:` | the value contains the text |
+| `backend:codex`, `origin:console` | the backend, and where the thread was started (`discord`, `console`, `cli`) |
+| `is:running` · `pinned` · `overdue` · `paused` · `child` · `thread` · `capture` · `done` · `open` | the state |
+| `has:tag` · `due` · `project` · `place` · `workspace` | the field is set |
+
+A key the language does not know is read as text, so a pasted `https://…` or `10:30` still finds
+what it says. A term that cannot be read (`p:9`, `is:nope`) is listed above the list instead of
+silently matching nothing.
+
+**🔖 Save as view** (beside the filter box, while it holds something) names the rule and puts it in
+the menu under "🔖 Saved views" with its count. A saved view lists what the rule selects from every
+list; finished items only when the rule asks for them (`is:done`, `status:done`), whatever
+"✅ Done hidden" says otherwise. The filter box still narrows it, and the status and Workspace chips
+apply as everywhere. Its bar shows the rule with ✎ Edit and 🗑 Delete; deleting a view never touches a
+thread. Views live on the server and come with every board, so one saved on the desktop is on the
+phone at the next poll. A view's address is `/#<view id>`, like the built-in lists.
+
+**Tags** are what a rule most often selects on. Set them in the drawer (comma-separated) or with
+`PATCH /console/api/items/{id}` `{"tags": [...]}`; an integration sets them when it creates the
+thread (`POST /api/ingest` with `"tags"`). Some come from the thread's origin and need nobody: a
+thread started by the Teams Channel Exporter carries `teams-exporter`, including threads from before
+tags existed (it is derived from the start of the first prompt). Rows show tags as `#tag`.
+
+API: `GET /console/api/views` → `{"views": [{id, name, query, position}]}`; `POST` with
+`{name, query}`, `PATCH /console/api/views/{id}` with any of `name`, `query`, `position`, and
+`DELETE /console/api/views/{id}` each answer with the new list. Names are up to 40 characters,
+rules up to 500, at most 30 views. The server stores the rule and never evaluates it.
 
 ## Finding earlier work
 

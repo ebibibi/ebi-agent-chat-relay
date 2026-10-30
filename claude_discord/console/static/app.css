@@ -444,3 +444,10 @@ button.family-link:hover { color: var(--accent); border-color: var(--accent); }
 .guide-calm { font-weight: 700; }
 .guide-section { margin-top: 6px; }
 .guide-list { margin: 2px 0 0; padding-left: 18px; }
+
+/* Saved views (views.js) and tags (query.js) */
+.nav .nav-heading { font-size: 12px; padding: 2px 10px 4px; }
+.tag.label { color: var(--ai); border-color: color-mix(in srgb, var(--ai) 45%, var(--line)); }
+.view-bar .view-rule { font-size: 12px; padding: 1px 6px; border-radius: 4px; background: var(--raise);
+  overflow-wrap: anywhere; }
+.view-bar .view-unknown { color: var(--p1); font-size: 12px; }

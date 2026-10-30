@@ -10,6 +10,8 @@ holds only what no other part of ccdb knows.
 
 from __future__ import annotations
 
+import json
+import re
 import uuid
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -38,6 +40,10 @@ MAX_PLACE_CHARS = 40
 READINESS_NOW = "now"
 READINESS_WAITING = "waiting"
 READINESS = (READINESS_NOW, READINESS_WAITING)
+#: Labels an item carries ("teams-exporter", "billing"): what a saved view's rule can select.
+MAX_TAGS = 20
+MAX_TAG_CHARS = 40
+_TAG_RE = re.compile(r"^[\w][\w.:/-]*$")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS work_items (
@@ -71,6 +77,7 @@ EDITABLE_FIELDS = (
     "readiness",
     "pinned",
     "paused",
+    "tags",
     "workspace_path",
     "workspace_source",
     "workspace_reason",
@@ -126,6 +133,8 @@ class WorkItem:
     readiness: str | None = None
     #: When readiness was set; a thread's later activity makes it stale (see triage).
     readiness_at: str | None = None
+    #: Labels set by a person or by the integration that created the thread, sorted.
+    tags: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -149,6 +158,7 @@ class WorkItem:
             "workspace_reason": self.workspace_reason,
             "readiness": self.readiness,
             "readiness_at": self.readiness_at,
+            "tags": list(self.tags),
         }
 
 
@@ -178,7 +188,48 @@ def _row_to_item(row: aiosqlite.Row) -> WorkItem:
         workspace_reason=row["workspace_reason"],
         readiness=row["readiness"],
         readiness_at=row["readiness_at"],
+        tags=_load_tags(row["tags"]),
     )
+
+
+def _load_tags(raw: str | None) -> tuple[str, ...]:
+    """The stored JSON list; a damaged value reads as no tags rather than breaking the board."""
+    if not raw:
+        return ()
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return ()
+    if not isinstance(value, list):
+        return ()
+    return tuple(sorted({t for t in value if isinstance(t, str) and t}))
+
+
+def clean_tags(value: Any) -> tuple[str, ...]:
+    """Validate a list of tags and return it trimmed, lower-cased, de-duplicated and sorted.
+
+    A tag is one word a rule can match exactly (``tag:teams-exporter``), so spaces are
+    refused rather than silently turned into something the person did not type.
+    """
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise WorkItemError("tags must be a list of strings")
+    tags: set[str] = set()
+    for raw in value:
+        if not isinstance(raw, str):
+            raise WorkItemError("tags must be a list of strings")
+        tag = raw.strip().casefold()
+        if not tag:
+            continue
+        if len(tag) > MAX_TAG_CHARS:
+            raise WorkItemError(f"a tag must be at most {MAX_TAG_CHARS} characters")
+        if not _TAG_RE.match(tag):
+            raise WorkItemError(f"invalid tag {tag!r}: use letters, digits and . _ : / -")
+        tags.add(tag)
+    if len(tags) > MAX_TAGS:
+        raise WorkItemError(f"at most {MAX_TAGS} tags")
+    return tuple(sorted(tags))
 
 
 def _optional_text(value: Any, field: str, limit: int) -> str | None:
@@ -262,6 +313,8 @@ def validate_changes(changes: dict[str, Any]) -> dict[str, Any]:
             clean["paused_at"] = _now() if value else None
         elif field == "parent_id":
             clean[field] = _optional_text(value, field, 64)
+        elif field == "tags":
+            clean[field] = clean_tags(value)
     return clean
 
 
@@ -296,6 +349,8 @@ class WorkItemRepository:
             if "readiness" not in have:
                 await db.execute("ALTER TABLE work_items ADD COLUMN readiness TEXT")
                 await db.execute("ALTER TABLE work_items ADD COLUMN readiness_at TEXT")
+            if "tags" not in have:
+                await db.execute("ALTER TABLE work_items ADD COLUMN tags TEXT")
             await db.commit()
 
     async def list_all(self) -> list[WorkItem]:
@@ -336,6 +391,7 @@ class WorkItemRepository:
             workspace_path=clean.get("workspace_path"),
             workspace_source=clean.get("workspace_source"),
             workspace_reason=clean.get("workspace_reason"),
+            tags=clean.get("tags", ()),
         )
         await self._check_parent(item.id, item.parent_id)
         await self._write(item)
@@ -388,6 +444,12 @@ class WorkItemRepository:
             item_id,
             {"workspace_path": path, "workspace_source": source, "workspace_reason": reason},
         )
+
+    async def add_tags(self, item_id: str, tags: list[str]) -> WorkItem:
+        """Add *tags* to an item, keeping the ones it has (an integration labelling a thread)."""
+        current = await self.get(item_id)
+        have = list(current.tags) if current is not None else []
+        return await self.update(item_id, {"tags": have + list(tags)})
 
     async def attach_thread(self, item_id: str, thread_id: int) -> WorkItem:
         """A capture was started as a thread: carry its fields over to the thread.
@@ -467,8 +529,8 @@ class WorkItemRepository:
             "INSERT INTO work_items (id, thread_id, title, note, parent_id, priority, due_at,"
             " snoozed_until, project, state, created_at, updated_at, place, pinned_at,"
             " paused_at, workspace_path, workspace_source, workspace_reason, readiness,"
-            " readiness_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " readiness_at, tags)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(id) DO UPDATE SET title = excluded.title, note = excluded.note,"
             " parent_id = excluded.parent_id, priority = excluded.priority,"
             " due_at = excluded.due_at, snoozed_until = excluded.snoozed_until,"
@@ -478,7 +540,8 @@ class WorkItemRepository:
             " workspace_path = excluded.workspace_path,"
             " workspace_source = excluded.workspace_source,"
             " workspace_reason = excluded.workspace_reason,"
-            " readiness = excluded.readiness, readiness_at = excluded.readiness_at",
+            " readiness = excluded.readiness, readiness_at = excluded.readiness_at,"
+            " tags = excluded.tags",
             (
                 item.id,
                 item.thread_id,
@@ -500,5 +563,6 @@ class WorkItemRepository:
                 item.workspace_reason,
                 item.readiness,
                 item.readiness_at,
+                json.dumps(list(item.tags)) if item.tags else None,
             ),
         )

@@ -1097,6 +1097,32 @@ class TestIngest:
         item = await work_repo.get("t111222333")
         assert item is not None
         assert item.priority == 0
+        assert item.tags == ("teams-exporter",)
+
+    @pytest.mark.asyncio
+    async def test_ingest_tags_label_the_thread(self, ingest_client: TestClient, work_repo) -> None:
+        """An integration names its threads so a saved view can select them."""
+        ingest_client._api._console = MagicMock(work_repo=work_repo)  # type: ignore[attr-defined]
+        resp = await ingest_client.post(
+            "/api/ingest",
+            json={"content": "Monthly sweep", "tags": ["Monthly-Report", "monthly-report"]},
+            headers=self.AUTH,
+        )
+        assert resp.status == 201
+        item = await work_repo.get("t111222333")
+        assert item is not None
+        assert item.tags == ("monthly-report",)
+        assert item.priority == 2
+
+    @pytest.mark.asyncio
+    async def test_bad_ingest_tags_are_400_before_spawning(
+        self, ingest_client: TestClient, mock_cog: MagicMock
+    ) -> None:
+        resp = await ingest_client.post(
+            "/api/ingest", json={"content": "x", "tags": ["two words"]}, headers=self.AUTH
+        )
+        assert resp.status == 400
+        mock_cog.spawn_session.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_other_ingest_keeps_the_default_priority(

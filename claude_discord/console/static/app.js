@@ -38,7 +38,7 @@ const I18N = {
     notify_on: "🔔 Notifications on", notify_off: "🔕 Notifications off",
     jump: "↓ Latest", jump_new: (n) => `↓ ${n} new`, no_messages: "No messages yet.",
     slots: (r, m, w) => `Running ${r} / limit ${m ?? "∞"}` + (w ? ` · ${w} queued` : ""),
-    priority: "Priority", due: "Due", snooze: "Snooze", project: "Project", parent: "Under",
+    priority: "Priority", due: "Due", snooze: "Snooze", project: "Project", parent: "Under", tags: "Tags", tags_ph: "tag, tag",
     none: "—", reopen: "Reopen", finish: "Done", finish_confirm: "Click again to finish",
     finish_hint: "Mark this thread done (click twice; shortcut e). Undo right after, or Reopen any time.",
     reopen_hint: "Bring this thread back from Done", finished: "Done", undo: "Undo", dismiss: "Dismiss notification", reopened: "Reopened", open_chat: "Open in chat", start: "Hand to AI",
@@ -87,7 +87,7 @@ const I18N = {
     notify_on: "🔔 通知オン", notify_off: "🔕 通知オフ",
     jump: "↓ 最新へ", jump_new: (n) => `↓ 新着 ${n}件`, no_messages: "まだメッセージはありません",
     slots: (r, m, w) => `実行中 ${r} / 上限 ${m ?? "∞"}` + (w ? `・待ち ${w}` : ""),
-    priority: "優先度", due: "期限", snooze: "スヌーズ", project: "案件", parent: "親",
+    priority: "優先度", due: "期限", snooze: "スヌーズ", project: "案件", parent: "親", tags: "タグ", tags_ph: "タグ, タグ",
     none: "なし", reopen: "戻す", finish: "完了", finish_confirm: "もう一度押すと完了",
     finish_hint: "このスレッドを完了にする（2回押す。ショートカット e）。直後なら「元に戻す」、あとからでも「戻す」で復活できます",
     reopen_hint: "完了から戻す", finished: "完了にしました", undo: "元に戻す", dismiss: "通知を閉じる", reopened: "戻しました", open_chat: "チャットで開く", start: "AIに頼む",
@@ -126,6 +126,8 @@ const VIEWS = [
   { key: "focus", hot: true }, { key: "me", hot: true }, { key: "candidate" }, { key: "ai" }, { key: "todo" }, { key: "idle" },
   { sep: true }, { key: "recent" }, { key: "tree" }, { key: "snoozed" }, { key: "done" },
 ];
+// A built-in list, or a saved view (views.js) — known once the first board arrives.
+const isViewKey = (key) => VIEWS.some((v) => v.key === key) || window.ConsoleViews.isKey(key);
 const VIEW_KEYS = { f: "focus", i: "me", c: "candidate", a: "ai", u: "recent", t: "tree", w: "todo", d: "done" };
 
 const state = {
@@ -215,7 +217,7 @@ async function refresh() {
     const data = await api("/board");
     // An unchanged poll redraws nothing: rebuilding hundreds of rows every few
     // seconds is what makes a phone stutter. Relative times still tick once a minute.
-    const sig = JSON.stringify([data.items, data.slots, data.places]);
+    const sig = JSON.stringify([data.items, data.slots, data.places, data.views]);
     // A search hit pushed into state.items locally still gets reconciled as before.
     const unchanged = sig === state.boardSig && state.items.length === data.items.length
       && Date.now() - state.renderedAt < STALE_RENDER_MS;
@@ -230,6 +232,7 @@ async function refresh() {
     window.ConsoleSlots.onBoard(data.items);
     state.slots = data.slots || {};
     state.places = data.places || [];
+    window.ConsoleViews.onBoard(data.views || []);
     window.ConsoleFocus.setGuide(data.guide || null);
     if (!state.defaultsLoaded) { state.defaultsLoaded = true; window.ConsoleBackend.loadDefaults(); }
     if (state.open && !state.byId.has(state.open)) state.open = null;
@@ -309,9 +312,13 @@ function snoozeTarget(kind) {
 
 // ---------------------------------------------------------------- selection of rows
 function matches(item) {
-  if (!state.filter) return true;
-  const q = state.filter.toLowerCase();
-  return [item.title, item.project, item.workspace_path, item.thread_name, item.working_dir].some((v) => v && v.toLowerCase().includes(q));
+  const saved = window.ConsoleViews.query();
+  if (saved !== null) {
+    // Like its count in the menu: finished items only when the rule asks for them.
+    if (item.bucket === "done" && !window.ConsoleQuery.wantsDone(saved)) return false;
+    if (!window.ConsoleQuery.test(item, saved)) return false;
+  }
+  return !state.filter || window.ConsoleQuery.test(item, state.filter);
 }
 // Pinned items ("working on now") open every view but Done, newest pin first, and leave
 // their usual place so nothing is listed twice — except in the tree, whose shape needs them.
@@ -325,15 +332,15 @@ function ungroupedRows() {
   const shown = state.items.filter((i) => matches(i) && !(hidingDone() && i.bucket === "done"));
   // The Workspace chips count the view before either filter; the status chips, after it.
   const WF = window.ConsoleWsFilter;
-  const inView = state.view === "focus" || state.view === "tree" || state.view === "recent"
-    ? shown : shown.filter((i) => i.bucket === state.view);
+  const inView = isWideView() ? shown : shown.filter((i) => i.bucket === state.view);
   const wsBar = WF.bar(inView);
   const items = WF.apply(shown);
   const SF = window.ConsoleStatusFilter;
   const all = pinnedFirst(items);
   const bar = SF.bar(all);
   const rows = SF.active() ? pinnedFirst(SF.apply(items)) : all;
-  return [wsBar && { node: wsBar }, bar && { node: bar }, ...rows].filter(Boolean);
+  const viewBar = window.ConsoleViews.bar();
+  return [viewBar && { node: viewBar }, wsBar && { node: wsBar }, bar && { node: bar }, ...rows].filter(Boolean);
 }
 function pinnedFirst(items) {
   const pinned = state.view === "done" ? [] : items.filter(isPinned)
@@ -347,7 +354,10 @@ function dropEmptyGroups(rows) {
   return rows.filter((r, i) => r.group === undefined ||
     rows.slice(i + 1).find((n) => n.group !== undefined || n.item)?.item !== undefined);
 }
+// Views that list every bucket at once; the others are one bucket each.
+const isWideView = () => ["focus", "tree", "recent"].includes(state.view) || window.ConsoleViews.active();
 function viewRows(items) {
+  if (window.ConsoleViews.active()) return window.ConsoleViews.rows(items);
   if (state.view === "tree") return treeRows(items.filter((i) => i.bucket !== "done"));
   if (state.view === "recent") return window.ConsoleRecent.rows(items);
   if (state.view === "focus") return window.ConsoleFocus.rows(items);
@@ -386,8 +396,12 @@ function treeRows(items) {
   return rows;
 }
 
-// The Done view always shows its items; everywhere else the switch decides.
-function hidingDone() { return state.hideDone && state.view !== "done"; }
+// The Done view always shows its items, and so does a query that asks for finished ones;
+// everywhere else the switch decides.
+function hidingDone() {
+  if (!state.hideDone || state.view === "done") return false;
+  return !window.ConsoleQuery.wantsDone(`${window.ConsoleViews.query() || ""} ${state.filter}`);
+}
 async function togglePin(id) {
   const item = state.byId.get(id);
   if (!item) return;
@@ -413,6 +427,7 @@ function syncHideDone() {
 function render() {
   syncHash();
   syncHideDone();
+  window.ConsoleViews.syncSaveButton();
   renderNav();
   renderList();
   renderDetail();
@@ -433,6 +448,7 @@ function renderNav() {
     }, h("span", { text: T[v.key] }), h("span", {
       class: "count" + (v.hot && counts[v.key] ? " hot" : ""), text: counts[v.key] || "",
     }))),
+    window.ConsoleViews.nav(),
     window.ConsoleSlots.nav(),
     window.ConsoleWorkspace.nav(),
     window.ConsoleNoteSearch.nav(),
@@ -444,7 +460,7 @@ function renderNav() {
     h("button", { class: "nav-auth", onclick: () => window.ConsoleAuth.showDevices() },
       h("span", { text: `🔑 ${window.ConsoleAuth.label}` })),
   );
-  $("view-title").textContent = T[state.view];
+  $("view-title").textContent = window.ConsoleViews.title() || T[state.view];
   const hot = counts.me || 0;
   document.title = hot ? `(${hot}) Ebi AI Console` : "Ebi AI Console";
 }
@@ -508,6 +524,7 @@ function rowNode({ item, depth, children, rowKey, family }) {
     meta.push(h("span", { class: "tag where", text: T[item.bucket] }));
   }
   if (state.view !== "tree" && item.project) meta.push(h("span", { class: "tag", text: item.project }));
+  for (const tag of item.tags || []) meta.push(h("span", { class: "tag label", title: `tag:${tag}`, text: `#${tag}` }));
   const place = window.ConsoleFocus.placeTag(item);
   if (place) meta.push(place);
   const effort = item.focus !== null && item.focus !== undefined ? window.ConsoleFocus.effortTag(item) : null;
@@ -672,6 +689,9 @@ function drawerParts(item) {
     onchange: (e) => patch(item.id, { due_at: e.target.value ? new Date(e.target.value).toISOString() : null }) });
   const project = h("input", { type: "text", value: item.project || "", placeholder: T.project, size: 14,
     onchange: (e) => patch(item.id, { project: e.target.value || null }) });
+  // Comma-separated; a saved view selects them with tag:<name>.
+  const tags = h("input", { type: "text", value: (item.tags || []).join(", "), placeholder: T.tags_ph, size: 16,
+    onchange: (e) => patch(item.id, { tags: e.target.value.split(",").map((t) => t.trim()).filter(Boolean) }) });
   const parents = state.items.filter((i) => i.id !== item.id && i.bucket !== "done");
   const parent = h("select", { onchange: (e) => patch(item.id, { parent_id: e.target.value || null }) },
     h("option", { value: "", text: T.none }),
@@ -685,7 +705,7 @@ function drawerParts(item) {
   return [
     h("div", { class: "controls" },
       h("label", {}, T.priority, pri), h("label", {}, T.due, due),
-      h("label", {}, T.project, project), h("label", {}, T.parent, parent)),
+      h("label", {}, T.project, project), h("label", {}, T.tags, tags), h("label", {}, T.parent, parent)),
     window.ConsoleFocus.drawerLine(item),
     h("div", { class: "controls" }, h("span", { class: "dim", text: T.snooze }), ...snooze),
     h("div", { class: "controls" }, ...actions),
@@ -850,7 +870,7 @@ function syncHash() {
 }
 function readHash() {
   const [view, item] = location.hash.slice(1).split("/");
-  if (VIEWS.some((v) => v.key === view)) state.view = view;
+  if (isViewKey(view)) state.view = view;
   if (item) { state.open = item; state.selected = item; }
 }
 function setView(view) {
@@ -1085,7 +1105,10 @@ function wire() {
     localStorage.setItem("autostart", e.target.checked ? "1" : "0");
     syncCapture();
   });
-  $("filter").addEventListener("input", (e) => { state.filter = e.target.value; renderList(); });
+  $("filter").addEventListener("input", (e) => {
+    state.filter = e.target.value; window.ConsoleViews.syncSaveButton(); renderList();
+  });
+  $("save-view").addEventListener("click", () => window.ConsoleViews.save());
   $("hide-done").addEventListener("click", () => setHideDone(!state.hideDone));
   const submitCapture = () => {
     const input = $("capture-input");

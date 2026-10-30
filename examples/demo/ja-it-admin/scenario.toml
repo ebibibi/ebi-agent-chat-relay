@@ -5,12 +5,22 @@ name = "一人情シス（みなとテック）"
 timezone = "Asia/Tokyo"
 places = ["事務所", "自宅"]
 
+# Saved views: rules in the Console's filter language, listed in the menu (docs/console.md).
+[[views]]
+name = "M365 の依頼"
+query = "tag:m365 -is:done"
+
+[[views]]
+name = "急ぎ（P0〜P1）"
+query = "p:<=1 -is:done"
+
 [[items]]
 title = "新入社員3名のアカウントを作って（明後日入社）"
 note = "名簿は M365運用/入社者名簿_10月.md。E5ライセンスと部署グループもお願い。終わったら名簿の人に送る初回サインイン案内の文面も。"
 priority = 0
 due = "+0@17:00"
 project = "M365運用"
+tags = ["m365"]
 
 [[items]]
 title = "Azure の請求が予算の80%に。何が増えたか調べて"
@@ -25,6 +35,7 @@ note = "退職日は昨日。メールボックスは消さない。対象のア
 priority = 1
 due = "+1"
 project = "M365運用"
+tags = ["m365"]
 
 [[items]]
 title = "検証ラボの VM の状態を一覧にして、パッチ前のチェックポイントを取って"
