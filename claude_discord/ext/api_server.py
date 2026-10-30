@@ -42,7 +42,7 @@ from ..discord_ui.file_sender import send_file_blobs
 from ..lounge import length_hint
 from ..relay import MODE_INTERRUPT, MODE_QUEUE, VALID_MODES, RelayGuard, build_relay_prompt
 from ..session_view import STATE_HISTORY, STATE_RUNNING, build_session_views
-from ..teams_exporter import REPLY_DRAFT_PRIORITY, is_reply_draft_request
+from ..teams_exporter import REPLY_DRAFT_PRIORITY, TEAMS_EXPORTER_TAG, is_reply_draft_request
 from ..thread_marker import (
     MAX_THREAD_NAME_LENGTH,
     OUTCOME_ACTION,
@@ -2408,6 +2408,15 @@ class ApiServer:
         if manifest_err is not None:
             return web.json_response({"error": manifest_err}, status=400)
 
+        # Optional labels for the console board, so a saved view can select the
+        # threads this integration creates (``tag:<name>``).
+        from ..console.work_repo import WorkItemError, clean_tags
+
+        try:
+            ingest_tags = list(clean_tags(data.get("tags")))
+        except WorkItemError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
         # Optional running-summary linkage. When the client supplies a stable
         # summary_key, this ingest is one turn of a long upstream thread: ccdb
         # injects the stored summary as context and asks the session to save an
@@ -2572,8 +2581,10 @@ class ApiServer:
         if result_id is not None and self.ingest_repo is not None:
             await self.ingest_repo.set_thread(result_id, str(thread.id), thread.name)
 
-        if is_reply_draft_request(content):
-            await self._prioritize_reply_draft(thread.id)
+        reply_draft = is_reply_draft_request(content)
+        if reply_draft:
+            ingest_tags.append(TEAMS_EXPORTER_TAG)
+        await self._label_ingest_thread(thread.id, ingest_tags, reply_draft=reply_draft)
 
         # Pull the owner into the thread and ping them on start, so the
         # unattended session is visible and they're notified again on completion
@@ -2605,25 +2616,29 @@ class ApiServer:
             response["result_id"] = result_id
         return web.json_response(response, status=201)
 
-    async def _prioritize_reply_draft(self, thread_id: int) -> None:
-        """Put a Teams reply-draft thread on the console board at P0.
+    async def _label_ingest_thread(
+        self, thread_id: int, tags: list[str], *, reply_draft: bool
+    ) -> None:
+        """Write an ingested thread's tags, and a Teams reply draft's P0, on the board.
 
-        Someone in Teams is waiting for this answer, so it outranks the rest of
+        Someone in Teams is waiting for a reply draft, so it outranks the rest of
         the board from the start. It is written as the item's own priority, the
         way a person sets one: triage leaves it alone, and the human can still
         lower it. Best effort — no console, no board to rank on.
         """
         console = self._console
-        if console is None:
+        if console is None or not (tags or reply_draft):
             return
         from ..console.work_repo import thread_item_id
 
+        item_id = thread_item_id(thread_id)
         try:
-            await console.work_repo.update(
-                thread_item_id(thread_id), {"priority": REPLY_DRAFT_PRIORITY}
-            )
+            if tags:
+                await console.work_repo.add_tags(item_id, tags)
+            if reply_draft:
+                await console.work_repo.update(item_id, {"priority": REPLY_DRAFT_PRIORITY})
         except Exception:
-            logger.warning("could not set the reply draft %d to P0", thread_id, exc_info=True)
+            logger.warning("could not label the ingested thread %d", thread_id, exc_info=True)
 
     async def _ingest_add_owner(self, thread: discord.Thread) -> None:
         """Add the configured bot owner to an ingest thread (no-op if unset).

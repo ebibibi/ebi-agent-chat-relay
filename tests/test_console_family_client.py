@@ -9,7 +9,9 @@ from pathlib import Path
 import pytest
 
 
-@pytest.mark.parametrize("script", ["console_family.test.cjs", "console_capture.test.cjs"])
+@pytest.mark.parametrize(
+    "script", ["console_family.test.cjs", "console_capture.test.cjs", "console_query.test.cjs"]
+)
 def test_console_client_models(script: str) -> None:
     node = shutil.which("node")
     if node is None:

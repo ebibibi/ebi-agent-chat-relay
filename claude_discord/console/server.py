@@ -32,6 +32,7 @@ from claude_code_core.account_pool import HOME_ENV_VAR
 
 from ..account_turns import session_home
 from ..message_actions import message_actions
+from ..teams_exporter import source_tags
 from ..thread_marker import OUTCOME_DONE, thread_outcome
 from ..thread_status import request_thread_outcome, schedule_thread_outcome
 from .auth import ConsoleAuthConfig, ConsoleAuthenticator, ConsoleAuthError
@@ -80,6 +81,7 @@ from .uploads import (
 )
 from .usage import UsageReader
 from .vault import NoteIndex, Vault
+from .views import SavedViewRepository, ViewRoutes
 from .work_repo import (
     STATE_DONE,
     STATE_OPEN,
@@ -243,8 +245,11 @@ class ConsoleServer:
         places: PlaceRepository | None = None,
         account_router: AccountRouter | None = None,
         cli_login: CliLogin | None = None,
+        views: SavedViewRepository | None = None,
     ) -> None:
         self.api = api_server
+        #: Named rules over the board; None leaves the list empty.
+        self.views = views
         #: Signs the agent CLIs in from the browser; None hides the screen.
         self.cli_login = cli_login
         #: Account pools: where a pooled session's transcript lives. None: ambient only.
@@ -348,6 +353,11 @@ class ConsoleServer:
         r.add_post(f"{API_PREFIX}/places", self.place_add)
         r.add_patch(f"{API_PREFIX}/places", self.place_rename)
         r.add_delete(f"{API_PREFIX}/places", self.place_delete)
+        view_routes = ViewRoutes(self, self.views)
+        r.add_get(f"{API_PREFIX}/views", view_routes.read)
+        r.add_post(f"{API_PREFIX}/views", view_routes.add)
+        r.add_patch(f"{API_PREFIX}/views/{{view_id}}", view_routes.patch)
+        r.add_delete(f"{API_PREFIX}/views/{{view_id}}", view_routes.delete)
         r.add_post(f"{API_PREFIX}/items", self.create_item)
         r.add_patch(f"{API_PREFIX}/items/{{item_id}}", self.patch_item)
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/messages", self.messages)
@@ -594,8 +604,19 @@ class ConsoleServer:
                 "guide": build_guide(items, records=records),
                 "slots": self._slots(),
                 "places": await self._place_list(items),
+                "views": await self._view_list(),
             }
         )
+
+    async def _view_list(self) -> list[dict[str, Any]]:
+        """The saved views, sent with every board so all devices show the same list."""
+        if self.views is None:
+            return []
+        try:
+            return [v.as_dict() for v in await self.views.list()]
+        except Exception:
+            logger.exception("console: could not read saved views")
+            return []
 
     def _bind_workspace(
         self, items: list[dict[str, Any]]
@@ -1687,6 +1708,8 @@ class ConsoleServer:
                 last_used_at=r.last_used_at,
                 context_window=r.context_window,
                 context_used=r.context_used,
+                origin=r.origin,
+                tags=source_tags(r.summary),
             )
             for r in records
         }
@@ -1777,6 +1800,8 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
     triage = TriageRepository(api_server.session_repo.db_path) if triage_ask else None
     places = PlaceRepository(api_server.session_repo.db_path)
     await places.init_db()
+    views = SavedViewRepository(api_server.session_repo.db_path)
+    await views.init_db()
     if triage is not None:
         await triage.init_db()
     console = ConsoleServer(
@@ -1794,6 +1819,7 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
         store=store,
         triage=triage,
         places=places,
+        views=views,
         cli_login=CliLogin(login_commands()),
     )
     await console.start()

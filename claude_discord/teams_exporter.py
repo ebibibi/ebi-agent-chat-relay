@@ -25,3 +25,18 @@ def is_reply_draft_request(text: str) -> bool:
     """Whether *text* is the exporter's request for a reply draft."""
     folded = text.casefold()
     return any(marker in folded for marker in REPLY_DRAFT_MARKERS)
+
+
+#: The tag every exporter thread carries, so a saved view can select them (``tag:teams-exporter``).
+TEAMS_EXPORTER_TAG = "teams-exporter"
+
+
+def source_tags(first_prompt: str | None) -> tuple[str, ...]:
+    """Tags a thread gets from what started it, derived on read.
+
+    Threads created before tags existed are labelled too: the session keeps the
+    start of its first prompt, and the exporter's envelope opens with a marker.
+    """
+    if first_prompt and is_reply_draft_request(first_prompt):
+        return (TEAMS_EXPORTER_TAG,)
+    return ()

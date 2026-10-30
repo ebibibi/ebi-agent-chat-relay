@@ -90,6 +90,10 @@ class SessionInfo:
     #: Size of the model's context window and how much of it the last turn used.
     context_window: int | None = None
     context_used: int | None = None
+    #: Where the session was started ("discord", "console", "cli").
+    origin: str | None = None
+    #: Tags derived from what started the thread (see ``teams_exporter.source_tags``).
+    tags: tuple[str, ...] = ()
 
 
 def _parse(ts: str | None) -> datetime | None:
@@ -318,7 +322,16 @@ def _item(
         "backend": session.backend if session else None,
         "model": session.model if session else None,
         "context": _context(session),
+        "origin": session.origin if session else None,
+        "tags": _tags(overlay, session),
     }
+
+
+def _tags(overlay: WorkItem | None, session: SessionInfo | None) -> list[str]:
+    """The item's own tags plus the ones its origin implies, sorted and without repeats."""
+    own = overlay.tags if overlay else ()
+    derived = session.tags if session else ()
+    return sorted({*own, *derived})
 
 
 def _context(session: SessionInfo | None) -> dict[str, Any] | None:

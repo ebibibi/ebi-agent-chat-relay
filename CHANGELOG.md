@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Saved views: a named rule that lists matching threads from every list** — the Console's filter
+  box reads rules (`tag:teams-exporter status:waiting,review -is:done p:<=1 backend:codex …`), and
+  🔖 Save as view puts the rule in the menu with its count, the same on every device. Items carry
+  tags (drawer, `PATCH /console/api/items/{id}`, or `"tags"` on `POST /api/ingest`); Teams Channel
+  Exporter threads are tagged `teams-exporter` automatically, older ones included. Board items also
+  report `origin`.
 - **Choose and see where a backend runs: subscription or provider** — the Console picker has a
   connection row (💳 subscription, ☁️ Foundry, Bedrock, Vertex, API) and every summary line names it
   (`Codex · ☁️ Foundry · gpt-5.4-mini`). Routes are discovered from the CLI environment and Codex's

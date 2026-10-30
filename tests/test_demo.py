@@ -215,3 +215,25 @@ class TestPost:
         headers = {k.lower(): v for k, v in seen[0].header_items()}
         assert headers["x-console-request"] == "1"
         assert headers["authorization"] == "Bearer tok"
+
+
+class TestSavedViews:
+    def test_views_are_seeded_after_the_items(self, tmp_path: Path) -> None:
+        root = _scenario(tmp_path)
+        toml = root / "scenario.toml"
+        toml.write_text(
+            toml.read_text(encoding="utf-8")
+            + '\n[[views]]\nname = "Ops"\nquery = "project:ops -is:done"\n',
+            encoding="utf-8",
+        )
+        requests = demo.seed_requests(demo.load_scenario(root), TODAY)
+        assert requests[-1] == (
+            "/console/api/views",
+            {"name": "Ops", "query": "project:ops -is:done"},
+        )
+
+    def test_a_view_without_a_query_is_rejected(self, tmp_path: Path) -> None:
+        root = _scenario(tmp_path)
+        (root / "scenario.toml").write_text("name='x'\n[[views]]\nname='n'\n", encoding="utf-8")
+        with pytest.raises(demo.DemoError, match="view 1"):
+            demo.load_scenario(root)

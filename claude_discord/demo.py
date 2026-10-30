@@ -46,7 +46,7 @@ DATA_MARKER = ".ccdb-demo-data"
 # that buys nothing, since these rows hold no scenario content.
 KEEP_TABLES = frozenset({"console_passkeys", "console_sessions"})
 TEXT_SUFFIXES = frozenset({".md", ".txt", ".csv", ".json", ".yaml", ".yml", ".canvas"})
-ITEM_FIELDS = ("title", "note", "priority", "project", "place", "state", "snoozed_until")
+ITEM_FIELDS = ("title", "note", "priority", "project", "place", "state", "snoozed_until", "tags")
 
 _PLACEHOLDER = re.compile(r"\{\{\s*(?:today|date:([+-]?\d+))\s*\}\}")
 _DUE = re.compile(r"^([+-]?\d+)(?:@(\d{1,2}):(\d{2}))?$")
@@ -63,6 +63,8 @@ class Scenario:
     timezone: str = "UTC"
     places: list[str] = field(default_factory=list)
     items: list[dict[str, Any]] = field(default_factory=list)
+    #: Saved views: ``{"name": ..., "query": ...}`` in the Console's filter language.
+    views: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def vault(self) -> Path:
@@ -107,12 +109,17 @@ def load_scenario(root: Path) -> Scenario:
     for index, item in enumerate(items):
         if not isinstance(item, dict) or not str(item.get("title") or "").strip():
             raise DemoError(f"item {index + 1} needs a title")
+    views = raw.get("views", [])
+    for index, view in enumerate(views):
+        if not isinstance(view, dict) or not view.get("name") or not view.get("query"):
+            raise DemoError(f"view {index + 1} needs a name and a query")
     return Scenario(
         root=root,
         name=str(raw.get("name") or root.name),
         timezone=str(raw.get("timezone") or "UTC"),
         places=[str(p) for p in raw.get("places", [])],
         items=items,
+        views=[{"name": str(v["name"]), "query": str(v["query"])} for v in views],
     )
 
 
@@ -130,6 +137,7 @@ def seed_requests(scenario: Scenario, today: date) -> list[tuple[str, dict[str, 
         if "due" in item:
             body["due_at"] = resolve_due(item["due"], today, scenario.timezone)
         requests.append(("/console/api/items", body))
+    requests.extend(("/console/api/views", dict(view)) for view in scenario.views)
     return requests
 
 

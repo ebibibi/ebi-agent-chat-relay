@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from claude_discord.teams_exporter import is_reply_draft_request
+from claude_discord.teams_exporter import (
+    TEAMS_EXPORTER_TAG,
+    is_reply_draft_request,
+    source_tags,
+)
 
 
 @pytest.mark.parametrize(
@@ -29,3 +33,11 @@ def test_reply_draft_requests_are_recognised(text: str) -> None:
 )
 def test_other_text_is_not_a_reply_draft(text: str) -> None:
     assert not is_reply_draft_request(text)
+
+
+def test_a_thread_started_by_the_exporter_is_tagged_from_its_first_prompt() -> None:
+    # The session keeps only the start of the first prompt; the marker opens it.
+    summary = "Microsoft Teams のスレッドが、サーバー上に1発言1ファイルで同期されています。\n\n同期"
+    assert source_tags(summary) == (TEAMS_EXPORTER_TAG,)
+    assert source_tags("Fix the login bug") == ()
+    assert source_tags(None) == ()

@@ -10,8 +10,8 @@ window.ConsoleLinks = (() => {
     try {
       const url = new URL(href, location.href);
       if (url.origin !== location.origin || url.pathname !== '/' || url.username || url.password) return null;
-      const match = url.hash.match(/^#([a-z]+)\/([A-Za-z0-9_-]+)$/);
-      if (!match || !VIEWS.some(v => v.key === match[1])) return null;
+      const match = url.hash.match(/^#([a-z0-9]+)\/([A-Za-z0-9_-]+)$/);
+      if (!match || !isViewKey(match[1])) return null;
       return {view:match[1], id:match[2]};
     } catch { return null; }
   }
@@ -66,7 +66,7 @@ window.ConsoleLinks = (() => {
       else {
         navigation++;
         const view=location.hash.slice(1);
-        if (VIEWS.some(v=>v.key===view)) { state.view=view; closeItem(); }
+        if (isViewKey(view)) { state.view=view; closeItem(); }
       }
     });
   }

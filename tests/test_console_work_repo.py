@@ -221,3 +221,20 @@ async def test_bindings_from_before_sources_existed_stay_decided(tmp_path) -> No
     repo = WorkItemRepository(str(db))
     await repo.init_db()
     assert (await repo.get("t1")).workspace_source == "pinned"
+
+
+async def test_tags_are_normalised_and_kept_by_add_tags(repo) -> None:
+    item = await repo.update(thread_item_id(7), {"tags": [" Billing ", "billing", "ops/site"]})
+    assert item.tags == ("billing", "ops/site")
+    item = await repo.add_tags(item.id, ["teams-exporter"])
+    assert (await repo.get(item.id)).tags == ("billing", "ops/site", "teams-exporter")
+    cleared = await repo.update(item.id, {"tags": []})
+    assert cleared.tags == ()
+
+
+@pytest.mark.parametrize(
+    "bad", ["one", ["two words"], [3], ["x" * 41], [f"t{n}" for n in range(21)]]
+)
+def test_bad_tags_are_refused(bad) -> None:
+    with pytest.raises(WorkItemError):
+        validate_changes({"tags": bad})
