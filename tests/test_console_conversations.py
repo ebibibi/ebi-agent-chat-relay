@@ -1026,3 +1026,52 @@ async def test_an_interrupting_relay_stops_the_console_turn_first(env) -> None:
 async def test_a_relay_to_an_unknown_console_key_raises_lookup_error(env) -> None:
     with pytest.raises(LookupError):
         await env.host.relay(987654, "hi", "thread 42", interrupt=False)
+
+
+async def _start_with_title(env, monkeypatch, suggest) -> tuple[str, int]:
+    """Start an item with THREAD_AUTO_RENAME on and *suggest* standing in for the model."""
+    from claude_discord.console import server
+
+    env.chat_cog._auto_rename_threads = True
+    monkeypatch.setattr(server, "suggest_title", suggest)
+    item_id = await _start(env, "Plan Sunday: the long first line someone typed")
+    while env.console._tasks:
+        await asyncio.gather(*list(env.console._tasks))
+    return item_id, int(item_id[1:])
+
+
+async def test_a_started_item_gets_a_generated_title(env, monkeypatch) -> None:
+    async def suggest(prompt, **_):
+        # The first turn has already ended by the time the title arrives.
+        [conversation] = await env.conversations.list_all()
+        await apply_outcome(env.conversations, conversation.thread_key, OUTCOME_WAITING)
+        return "Sunday plan"
+
+    item_id, key = await _start_with_title(env, monkeypatch, suggest)
+
+    assert (await env.console.work_repo.get(item_id)).title == "Sunday plan"
+    name = (await env.conversations.get(key)).name
+    assert name.endswith("Sunday plan")
+    assert thread_outcome(name) == OUTCOME_WAITING
+
+
+async def test_a_title_edited_meanwhile_is_kept(env, monkeypatch) -> None:
+    async def suggest(prompt, **_):
+        [item] = [i for i in await env.console.work_repo.list_all() if i.thread_id]
+        await env.console.work_repo.update(item.id, {"title": "Mine"})
+        return "Sunday plan"
+
+    item_id, key = await _start_with_title(env, monkeypatch, suggest)
+
+    assert (await env.console.work_repo.get(item_id)).title == "Mine"
+    assert "Sunday plan" not in (await env.conversations.get(key)).name
+
+
+async def test_no_title_is_generated_when_auto_rename_is_off(env, monkeypatch) -> None:
+    from claude_discord.console import server
+
+    suggest = AsyncMock(return_value="Sunday plan")
+    monkeypatch.setattr(server, "suggest_title", suggest)
+    await _start(env)
+
+    suggest.assert_not_called()

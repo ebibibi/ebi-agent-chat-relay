@@ -31,8 +31,14 @@ from aiohttp import web
 from claude_code_core.account_pool import HOME_ENV_VAR
 
 from ..account_turns import session_home
+from ..discord_ui.thread_renamer import suggest_title
 from ..message_actions import message_actions
-from ..thread_marker import OUTCOME_DONE, thread_outcome
+from ..thread_marker import (
+    OUTCOME_DONE,
+    retag_thread_name,
+    set_outcome_thread_name,
+    thread_outcome,
+)
 from ..thread_status import request_thread_outcome, schedule_thread_outcome
 from .auth import ConsoleAuthConfig, ConsoleAuthenticator, ConsoleAuthError
 from .auth_routes import AUTH_PREFIX, AuthRoutes
@@ -1428,7 +1434,37 @@ class ConsoleServer:
                 "console: conversation %s started but %s could not follow", thread_key, _q(item_id)
             )
             return _error("the conversation started, but the item could not be linked to it", 500)
+        cog = self._chat_cog()
+        # Same switch as a chat thread's rename (THREAD_AUTO_RENAME); `is True` so a stub is off.
+        if item.title and getattr(cog, "_auto_rename_threads", False) is True:
+            self._background(self._auto_title(overlay.id, thread_key, item.title, prompt, cog))
         return web.json_response({"item": overlay.as_dict()}, status=201)
+
+    async def _auto_title(
+        self, item_id: str, thread_key: int, captured: str, prompt: str, cog: Any
+    ) -> None:
+        """Replace the capture's first line with a generated title, as a chat thread gets one.
+
+        Nothing changes when generation fails or someone edited the title meanwhile.
+        """
+        title = await suggest_title(
+            prompt, claude_command=cog.runner.command, env=cog.runner._build_env()
+        )
+        if not title:
+            return
+        item = await self.work_repo.get(item_id)
+        if item is None or item.title != captured:
+            return
+        await self.work_repo.update(item_id, {"title": title})
+        if self.conversations is None:
+            return
+        conversation = await self.conversations.get(thread_key)
+        if conversation is not None:
+            # The first turn may already have marked the name (🏁, ❓); keep that marker.
+            renamed = retag_thread_name(conversation.name, title)
+            await self.conversations.set_name(
+                thread_key, set_outcome_thread_name(renamed, thread_outcome(conversation.name))
+            )
 
     async def _reply_in_console(
         self, item_id: str, thread_key: int, text: str, who: str, brief: str | None
