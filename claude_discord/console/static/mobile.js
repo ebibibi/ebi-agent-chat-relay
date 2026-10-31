@@ -76,8 +76,9 @@ window.ConsoleMobile = (() => {
       e.preventDefault();e.stopImmediatePropagation();toggleDrawer();
     }
   }, true);
-  // Swipe right goes back through the layers Escape closes, or opens the menu from the list;
-  // swipe left closes the menu. Text boxes and sideways-scrolling code keep their own drags.
+  // Swipe right goes back through the layers Escape closes; on a list row it finishes the item
+  // and swipe left pins it. Elsewhere in the list swipe right opens the menu, swipe left closes it.
+  // Text boxes and sideways-scrolling code keep their own drags.
   let swipe = null;
   const scrollsX = n => {
     for (; n && n !== document.body; n = n.parentElement)
@@ -87,19 +88,21 @@ window.ConsoleMobile = (() => {
   document.addEventListener('touchstart', e => {
     const t = e.touches[0];
     swipe = narrow.matches && e.touches.length === 1 && !(window.visualViewport?.scale > 1.1)
-      && !e.target.closest('input, textarea, select, [contenteditable], .cm-editor') && !scrollsX(e.target)
-      ? {x: t.clientX, y: t.clientY, at: e.timeStamp} : null;
+      && !e.target.closest('input:not([type=checkbox], [type=radio]), textarea, select, [contenteditable], .cm-editor') && !scrollsX(e.target)
+      ? {x: t.clientX, y: t.clientY, at: e.timeStamp, row: e.target.closest('#list .row')?.dataset.itemId} : null;
   }, {passive: true});
   document.addEventListener('touchcancel', () => {swipe = null;});
   document.addEventListener('touchend', e => {
     if (!swipe) return;
     const t = e.changedTouches[0], dx = t.clientX - swipe.x, dy = t.clientY - swipe.y, slow = e.timeStamp - swipe.at > 600;
+    if (slow || Math.abs(dx) < 70 || Math.abs(dx) < 2 * Math.abs(dy) || getSelection().toString()) {swipe = null; return;}
+    const nav = $('nav'), back = state.open || location.hash.startsWith('#note/'), row = !back && swipe.row;
     swipe = null;
-    if (slow || Math.abs(dx) < 70 || Math.abs(dx) < 2 * Math.abs(dy) || getSelection().toString()) return;
-    const nav = $('nav');
-    if (dx < 0) nav.classList.remove('open');
-    else if (nav.classList.contains('open') || document.querySelector('.note-edit')) return;
-    else if (state.open || location.hash.startsWith('#note/')) document.body.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+    if (nav.classList.contains('open')) { if (dx < 0) nav.classList.remove('open'); }
+    else if (row && dx < 0) togglePin(row);
+    else if (row) { if (state.byId.get(row)?.bucket !== 'done') window.ConsoleFinish.finish(row); }
+    else if (dx < 0 || document.querySelector('.note-edit')) return;
+    else if (back) document.body.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
     else nav.classList.add('open');
   });
   viewport();
