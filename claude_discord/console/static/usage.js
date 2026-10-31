@@ -99,6 +99,8 @@
     const others = backends.filter((b) => b.backend !== def).length;
     const fold = narrow.matches && others > 0;
     strip.classList.toggle("folded", fold && !open);
+    // Every render replaces the toggle; whoever was on it (keyboard, screen reader) stays on it.
+    const focused = document.activeElement?.classList.contains("u-toggle");
     if (fold) {
       const toggle = el("button", "u-toggle", open ? "▴" : `+${others} ▾`);
       toggle.type = "button";
@@ -108,6 +110,7 @@
       toggle.onclick = () => { open = !open; render(); };
       const shown = open ? blocks : blocks.filter((_, i) => backends[i].backend === def);
       strip.replaceChildren(...shown, ...signIn, toggle);
+      if (focused) toggle.focus();
     } else {
       strip.replaceChildren(...blocks, ...signIn);
     }
@@ -135,7 +138,8 @@
     if (!document.hidden) { load(); poll = setInterval(load, POLL_MS); tick = setInterval(render, TICK_MS); }
   });
   window.addEventListener("resize", render);
-  window.addEventListener("console-defaults-change", render);
+  // A new default folds the strip around it, even if it was expanded.
+  window.addEventListener("console-defaults-change", () => { open = false; render(); });
   window.addEventListener("console-language-change", render);
   window.addEventListener("console-cli-login-change", render);
   load();
