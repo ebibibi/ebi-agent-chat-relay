@@ -39,11 +39,36 @@ test('mobile swipes go back, finish or pin a row, and open or close the menu',as
  assert.equal(await navOpen(),false);
  // On a list row: right to left pins, left to right finishes; neither opens the thread.
  const row=await page.locator('#list .row').boundingBox();
- await swipe(300,60,row.y+row.height/2);
- await page.waitForFunction(n=>n.length,writes);
+ const y=row.y+row.height/2, touch=(type,x)=>cdp.send('Input.dispatchTouchEvent',{type,touchPoints:x===undefined?[]:[{x,y}]});
+ const band=()=>page.evaluate(()=>{const l=$('list'),b=getComputedStyle(l,'::before'),r=document.querySelector('#list .row');
+  return {kind:l.dataset.swipe,label:b.content,bg:b.backgroundColor,opacity:b.opacity,top:b.top,x:new DOMMatrix(getComputedStyle(r).transform).m41,rowTop:r.offsetTop+'px'};});
+ // Mid-drag the row follows the finger over a coloured band that says what letting go will do.
+ await touch('touchStart',40);await touch('touchMove',60);await touch('touchMove',120);
+ let b=await band();
+ assert.equal(b.kind,'finish');assert.equal(b.label,'"✓ Finish"');assert.equal(b.bg,'rgb(94, 196, 161)');
+ assert.equal(b.x,80);assert.equal(b.top,b.rowTop);assert.equal(b.opacity,'0.55');
+ // A poll re-renders the list mid-drag; the new row picks the drag up on the next move.
+ await page.evaluate(()=>renderList());
+ await touch('touchMove',220);await page.waitForTimeout(200);
+ b=await band();assert.equal(b.x,180);assert.equal(b.opacity,'1');
+ if(process.env.CONSOLE_SCREENSHOT_DIR)await page.screenshot({path:`${process.env.CONSOLE_SCREENSHOT_DIR}/swipe-finish.png`});
+ await touch('touchMove',100);await page.waitForTimeout(200);
+ b=await band();assert.equal(b.x,60);assert.equal(b.opacity,'0.55');
+ // Let go short of a third of the row: it springs back and nothing is sent.
+ await touch('touchEnd');await page.waitForTimeout(300);
+ b=await band();assert.equal(b.kind,undefined);assert.equal(b.x,0);assert.deepEqual(writes,[]);
+ assert.equal(await page.evaluate(()=>state.open),null);
+ await touch('touchStart',300);await touch('touchMove',280);await touch('touchMove',200);
+ await touch('touchMove',100);await page.waitForTimeout(200);
+ b=await band();assert.equal(b.kind,'pin');assert.equal(b.label,'"📌 Pin"');assert.equal(b.bg,'rgb(255, 180, 84)');
+ if(process.env.CONSOLE_SCREENSHOT_DIR)await page.screenshot({path:`${process.env.CONSOLE_SCREENSHOT_DIR}/swipe-pin.png`});
+ await touch('touchCancel');await page.waitForTimeout(300);
+ assert.deepEqual(writes,[]);
+ await swipe(300,60,y);
+ await page.waitForTimeout(400);
  assert.match(writes.join('\n'),/PATCH \S*\/items\/t100 \{"pinned":true\}/);
  writes.length=0;
- await swipe(40,300,row.y+row.height/2);
+ await swipe(40,300,y);
  await page.waitForTimeout(300);
  assert.match(writes.join('\n'),/POST \S*\/items\/t100\/done/);assert.equal(await page.locator('.bulk-selected').count(),0);
  assert.equal(await page.evaluate(()=>state.open),null);
