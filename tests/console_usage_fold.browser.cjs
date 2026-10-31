@@ -47,8 +47,18 @@ for(const [width,height] of [[1280,800],[390,844]])test(`usage fold ${width}x${h
  assert.equal(await toggle.textContent(),'▴');
  await toggle.click();
  assert.deepEqual(await names(),['Claude']);
- // A new default re-folds the strip around it.
+ // Keyboard and screen-reader users stay on the toggle through its own re-render and the
+ // periodic one, instead of being dropped to the top of the page.
+ const onToggle=()=>page.evaluate(()=>document.activeElement?.classList.contains('u-toggle'));
+ await toggle.focus();await page.keyboard.press('Space');
+ assert.equal(await toggle.textContent(),'▴');
+ assert.equal(await onToggle(),true,'focus stays on the toggle after it re-renders');
+ await page.evaluate(()=>window.dispatchEvent(new Event('resize')));
+ assert.equal(await onToggle(),true,'focus survives a periodic re-render');
+ // A new default re-folds the strip around it, even while it is expanded.
  def='codex';
  await page.evaluate(()=>window.ConsoleBackend.loadDefaults());
  assert.deepEqual(await names(),['Codex']);
+ assert.equal(await toggle.textContent(),'+2 ▾');
+ assert.equal(await toggle.getAttribute('aria-expanded'),'false');
 });
