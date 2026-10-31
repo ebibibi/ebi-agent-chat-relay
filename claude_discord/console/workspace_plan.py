@@ -240,6 +240,8 @@ class WorkspacePlan:
                 more=len(p["next_actions"]) - 1,
                 status=_first_line(p["current_status"]),
                 stale_days=p["staleness_days"] if stale else None,
+                # Why a project ranks high is often a milestone, not its next action.
+                milestone=p.get("nearest_milestone") or None,
                 **due(p["nearest_deadline"]),
             )
 
