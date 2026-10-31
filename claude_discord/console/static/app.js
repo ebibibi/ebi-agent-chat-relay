@@ -1140,6 +1140,8 @@ function wire() {
       return;
     }
     if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
+    // Enter on a button or link presses it; it is not "open the selected row".
+    if (e.key === "Enter" && e.target.closest("button, a[href], summary, [role=button]")) return;
     if (state.pendingG) {
       state.pendingG = false;
       if (VIEW_KEYS[e.key]) { setView(VIEW_KEYS[e.key]); e.preventDefault(); }
