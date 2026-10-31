@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Focus shows the milestone behind a project's rank** — a project ranked by a near milestone
+  now shows `🎯 <milestone>` under its next action, so a high rank no longer looks unrelated to
+  the task shown. Needs Ebi Workspace 2.4.0-dev.11 or later (`nearest_milestone`); older
+  plugins simply show no milestone line.
+
 ## [5.2.0] - 2026-10-30
 
 ### Security
