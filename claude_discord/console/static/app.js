@@ -1061,7 +1061,9 @@ function move(delta) {
   else { renderList(); revealSelection(); }
 }
 function showLogin() {
-  window.ConsoleAuth.showLogin(refresh);
+  // Startup requests that got a 401 are not retried by refresh(), so the Workspace nav is
+  // loaded again here; without it the button stays hidden until the page is reloaded.
+  window.ConsoleAuth.showLogin(() => { window.ConsoleWorkspace.load(); return refresh(); });
 }
 function showHelp(show) {
   $("help").dataset.mode = "help";
