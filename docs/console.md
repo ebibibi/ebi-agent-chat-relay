@@ -728,7 +728,9 @@ Console does not copy the plugin's scoring. It runs the installed plugin's
 a minute and after every Console write. The plugin is found through
 `EBI_WORKSPACE_PLUGIN_DIR` or Claude Code's `~/.claude/plugins/installed_plugins.json`;
 without it this part of Focus is simply absent (`GET /console/api/workspace/plan` answers
-`{"available": false, "reason": "plugin"}`).
+`{"available": false, "reason": "plugin"}`). The stable plugin (2.3.x) has no follow-ups,
+waiting-for or lapsed deadlines, so with it Focus shows the ranking and stalled projects
+only; the plugin's 2.4 scanner adds the rest.
 
 **Where a thread belongs is worked out, not asked for.** Choosing a context is not a step
 the human has to take: a new thread starts unresolved, the Console binds it in the background,
