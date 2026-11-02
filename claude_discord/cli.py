@@ -5,6 +5,8 @@ Usage:
     ccdb start   — start the bot (reads .env)
     ccdb attention-backfill --guild ID --since YYYY-MM-DD
                  — record past human messages for the attention estimate
+    ccdb attention-backfill-console --since YYYY-MM-DD
+                 — the same for Ebi AI Console conversations
     ccdb         — show help
 
 Install via:
@@ -460,6 +462,65 @@ def cmd_attention_backfill(args: argparse.Namespace) -> None:
     sys.exit(asyncio.run(_run_attention_backfill(args)))
 
 
+async def _run_attention_backfill_console(args: argparse.Namespace) -> int:
+    from datetime import UTC, date, datetime
+
+    from claude_code_core.attention import AttentionConfig, local_day_bounds_utc
+    from claude_code_core.attention_repo import HumanActivityRepository
+
+    from .console.attention import backfill_console
+    from .console.server import RESUME_PROMPT
+    from .deployment import DataLayout
+
+    try:
+        since_day = date.fromisoformat(args.since)
+        until_day = date.fromisoformat(args.until) if args.until else None
+    except ValueError:
+        _die("--since/--until must be dates in YYYY-MM-DD form.")
+    try:
+        config = AttentionConfig.from_env(os.environ)
+        since, _ = local_day_bounds_utc(since_day, since_day, config.params)
+        until = (
+            local_day_bounds_utc(until_day, until_day, config.params)[1]
+            if until_day
+            else datetime.now(UTC)
+        )
+    except ValueError as exc:
+        _die(str(exc))
+    if until <= since:
+        _die("--until must not be before --since.")
+
+    db_path = args.db or DataLayout.from_env().sessions_db
+    if not Path(db_path).exists():
+        _die(f"No session DB at {db_path}.")
+    repo = HumanActivityRepository(db_path)
+    await repo.init_db()
+    stats = await backfill_console(
+        db_path,
+        repo,
+        since=since,
+        until=until,
+        author_id=config.console_author,
+        skip_contents=(RESUME_PROMPT,),
+    )
+    print(
+        f"Scanned {stats.scanned} console messages not written by the agent: "
+        f"{stats.human_messages} typed by a person, {stats.already_recorded} already "
+        f"recorded, {stats.inserted} newly recorded in {db_path}."
+    )
+    return 0
+
+
+def cmd_attention_backfill_console(args: argparse.Namespace) -> None:
+    """Entry point for `ccdb attention-backfill-console`."""
+    env_path = Path(args.env)
+    if env_path.exists():
+        from dotenv import load_dotenv
+
+        load_dotenv(env_path)
+    sys.exit(asyncio.run(_run_attention_backfill_console(args)))
+
+
 # ---------------------------------------------------------------------------
 # main() — argument parsing
 # ---------------------------------------------------------------------------
@@ -526,10 +587,29 @@ def main() -> None:
         "--env", default=".env", metavar="PATH", help="Read the bot token from this .env"
     )
 
+    console_backfill = sub.add_parser(
+        "attention-backfill-console",
+        help="Record past human messages from Ebi AI Console for the attention estimate",
+    )
+    console_backfill.add_argument(
+        "--since", required=True, metavar="YYYY-MM-DD", help="First local day to include"
+    )
+    console_backfill.add_argument(
+        "--until", default=None, metavar="YYYY-MM-DD", help="Last local day (default: now)"
+    )
+    console_backfill.add_argument(
+        "--db", default=None, metavar="PATH", help="Session DB (default: the data root's)"
+    )
+    console_backfill.add_argument(
+        "--env", default=".env", metavar="PATH", help="Read CCDB_ATTENTION_* from this .env"
+    )
+
     args = parser.parse_args()
 
     if args.command == "attention-backfill":
         cmd_attention_backfill(args)
+    elif args.command == "attention-backfill-console":
+        cmd_attention_backfill_console(args)
     elif args.command == "setup":
         cmd_setup(Path(args.env))
     elif args.command == "start":

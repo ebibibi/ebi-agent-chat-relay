@@ -10,19 +10,19 @@ It measures the **human**, not the agent.
 
 ## What is recorded
 
-For every human message that reaches a session — on Discord and on Teams — one row is written
-to the `human_activity` table in the deployment's session database:
+For every human message that reaches a session — on Discord, on Teams and from Ebi AI Console —
+one row is written to the `human_activity` table in the deployment's session database:
 
 | column | meaning |
 |---|---|
-| `frontend` | `discord` or `teams` |
+| `frontend` | `discord`, `teams` or `console` (a Console reply into a chat thread is filed under that thread's own frontend) |
 | `conversation_id` | the thread / channel / Teams conversation the message went to |
 | `parent_id` | the parent channel, when there is one |
 | `thread_title` | the thread's title at the time (newest title wins in reports) |
-| `author_id` | Discord user id or Teams `from.id` |
+| `author_id` | Discord user id, Teams `from.id`, or the Console sign-in identity (`oidc:<email>`, `passkey:<name>`, `token`) unless `CCDB_ATTENTION_CONSOLE_AUTHOR` names one id for all of them |
 | `occurred_at` | when the message was sent, UTC |
 | `char_count`, `attachment_count` | how much was written / attached |
-| `message_id` | the platform's message id; `(frontend, conversation_id, message_id)` is unique, so recording is idempotent (Teams activity ids are only unique within a conversation) |
+| `message_id` | the platform's message id (the `console_messages` id for Console conversations); `(frontend, conversation_id, message_id)` is unique, so recording is idempotent (Teams activity ids are only unique within a conversation) |
 | `source` | `live` — recorded as it reached a session; `backfill` — read back from history |
 
 **No message text is stored.** Only the metadata above. One caveat: when a message opens a new
@@ -40,6 +40,24 @@ What does **not** count:
 - Discord system messages (pins, renames, joins);
 - messages that reach no session (an unlisted channel without an @mention, a user outside
   `allowed_user_ids`).
+
+### Ebi AI Console
+
+The rule above — "the author decides" — cannot work for the Console. A reply sent from the
+Console into a Discord thread is posted *by the bot*, and the Console's own conversations store
+the relay's turns under plain names (`wait`, `restart`, `thread <id>`) next to the person's.
+So the Console meters at the entry point instead: only what a signed-in person sends counts.
+
+Counted: starting an item (its title, note and extra prompt), a reply, and a skill picked in the
+reply box. Not counted: wait and restart resumes, relays from other sessions, the Resume
+button's canned prompt, the Stop button, and the Ebi Workspace brief the Console adds to a
+prompt (it is stored as a message of its own). The list of attached files a reply carries counts
+as attachments, not characters. A message too long for one reply is kept as `message.txt` and
+counts as one attachment.
+
+If you use both a chat frontend and the Console, set `CCDB_ATTENTION_CONSOLE_AUTHOR` to your chat
+id (for Discord, the same value as `DISCORD_OWNER_ID`). Bursts are formed per author, so with one
+id a Discord message and a Console reply a minute apart are one burst, not two lead-ins.
 
 ## The estimate
 
@@ -84,6 +102,7 @@ All optional; recording is on by default.
 | `CCDB_ATTENTION_LEAD_IN_MINUTES` | `2` | minutes added before each burst |
 | `CCDB_ATTENTION_ATTACHMENT_WEIGHT` | `50` | characters one attachment counts as in the split |
 | `CCDB_ATTENTION_TIMEZONE` | host local zone | IANA zone for day buckets, e.g. `Asia/Tokyo` |
+| `CCDB_ATTENTION_CONSOLE_AUTHOR` | the sign-in identity | author id Console messages are charged to |
 
 The parameters apply when a report is computed, not when rows are recorded, so changing them
 re-estimates all history. A malformed value stops startup with a message naming the variable.
@@ -160,6 +179,22 @@ It records human messages since `--since`; use `--until` to set the last day.
   backfilled days and the live days are not quite the same measure. Use
   `include_backfill=false` when you want only the live measure.
 - Discord rate limits are honoured (`429 retry_after` and exhausted buckets).
+
+### Ebi AI Console history
+
+The Console keeps every conversation's transcript in `console_messages`, so its history can be
+recovered exactly:
+
+```bash
+ccdb attention-backfill-console --since 2026-10-01
+```
+
+It applies the same rules as live recording (only signed-in people; no waits, restarts, relays,
+Stop or Resume) and keys rows by the transcript's message id, the same key live recording uses.
+Re-running it, or running it over days already recorded live, adds nothing twice. Rows are
+marked `source = 'backfill'`. `CCDB_ATTENTION_CONSOLE_AUTHOR` applies here as well. Console
+replies into Discord threads before this was recorded live are not recovered: they are bot
+posts in Discord, and `attention-backfill` records people only.
 
 Backfill limitations:
 

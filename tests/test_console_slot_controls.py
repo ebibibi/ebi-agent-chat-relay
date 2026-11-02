@@ -62,7 +62,7 @@ async def env(tmp_path):
     console._thread_for = thread_for  # type: ignore[method-assign]
     delivered: list[tuple[str, str]] = []
 
-    async def deliver(item_id, text, who):
+    async def deliver(item_id, text, who, **_kwargs):
         from aiohttp import web
 
         delivered.append((item_id, text))
@@ -153,7 +153,7 @@ async def test_a_failed_resume_keeps_the_pause_mark(env) -> None:
     client, _, work, _, _, console = env
     await work.update("t7", {"paused": True})
 
-    async def refuse(item_id, text, who):
+    async def refuse(item_id, text, who, **_kwargs):
         return web.json_response({"error": "unknown thread"}, status=404)
 
     console._deliver = refuse
