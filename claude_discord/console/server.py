@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -29,12 +30,14 @@ import discord
 from aiohttp import web
 
 from claude_code_core.account_pool import HOME_ENV_VAR
+from claude_code_core.attention_repo import AttentionRecorder
 
 from ..account_turns import session_home
 from ..message_actions import message_actions
 from ..teams_exporter import source_tags
 from ..thread_marker import OUTCOME_DONE, thread_outcome
 from ..thread_status import request_thread_outcome, schedule_thread_outcome
+from .attention import console_activity
 from .auth import ConsoleAuthConfig, ConsoleAuthenticator, ConsoleAuthError
 from .auth_routes import AUTH_PREFIX, AuthRoutes
 from .board import SessionInfo, ThreadSnapshot, build_board
@@ -910,7 +913,8 @@ class ConsoleServer:
     async def resume_item(self, request: web.Request) -> web.Response:
         """Clear the pause mark and ask the agent to carry on where it stopped."""
         item_id = request.match_info["item_id"]
-        delivered = await self._deliver(item_id, RESUME_PROMPT, request[IDENTITY])
+        # A canned prompt the button sends: the person pressed it, but typed nothing.
+        delivered = await self._deliver(item_id, RESUME_PROMPT, request[IDENTITY], metered=False)
         if delivered.status >= 400:
             return delivered
         try:
@@ -1117,10 +1121,16 @@ class ConsoleServer:
         if err:
             return err
         text = with_attachments(text, files)
-        return await self._deliver(request.match_info["item_id"], text, request[IDENTITY])
+        return await self._deliver(
+            request.match_info["item_id"], text, request[IDENTITY], metered=True
+        )
 
-    async def _deliver(self, item_id: str, text: str, who: str) -> web.Response:
-        """Queue *text* as the human's next message in the item's conversation."""
+    async def _deliver(self, item_id: str, text: str, who: str, *, metered: bool) -> web.Response:
+        """Queue *text* as the human's next message in the item's conversation.
+
+        *metered*: a person typed *text*, so it counts toward their attention
+        (docs/attention.md). Canned prompts a button sends pass ``False``.
+        """
         try:
             brief = await self._workspace_brief(item_id)
         except WorkspaceError as exc:
@@ -1131,7 +1141,7 @@ class ConsoleServer:
             return (
                 busy
                 if key in self._compacting
-                else await self._reply_in_console(item_id, key, text, who, brief)
+                else await self._reply_in_console(item_id, key, text, who, brief, metered)
             )
         thread, err = await self._thread_for(item_id)
         if err:
@@ -1147,6 +1157,9 @@ class ConsoleServer:
             return _error(str(exc), 400)
         schedule_thread_outcome(thread, None)
         prompt = f"{text}\n\n-# 🖥️ via Ebi AI Console ({who})"
+        if metered:
+            # Posted by the bot, so the chat frontend's own metering skips it.
+            await self._meter_chat_reply(thread, text, who)
         self._background(
             cog.deliver_relayed_message(
                 thread, prompt, interrupt=False, into_running_turn=True, brief=brief
@@ -1290,7 +1303,8 @@ class ConsoleServer:
         if name not in {s["name"] for s in self._skill_loader()(backend)}:
             return _error(f"Unknown command `/{name}` for `{backend}`.", 400)
         logger.info("console: %s ran skill /%s on %s", _q(who), _q(name), _q(item_id))
-        return await self._deliver(item_id, skill_prompt(backend, name, arg), who)
+        # The person picked the skill and typed its argument.
+        return await self._deliver(item_id, skill_prompt(backend, name, arg), who, metered=True)
 
     async def _compact_codex(self, key: int, item_id: str, who: str) -> web.Response:
         """``/compact`` on a Codex conversation, through ``codex app-server``."""
@@ -1429,6 +1443,8 @@ class ConsoleServer:
                 prompt=prompt,
                 author=who,
                 brief=brief,
+                # The title, note and extra prompt are what the person wrote.
+                metered=True,
             )
         except Exception:
             logger.exception("console: start of %s failed", _q(item_id))
@@ -1451,8 +1467,34 @@ class ConsoleServer:
             return _error("the conversation started, but the item could not be linked to it", 500)
         return web.json_response({"item": overlay.as_dict()}, status=201)
 
+    async def _meter_chat_reply(self, thread: Any, text: str, who: str) -> None:
+        """Record a Console reply into a chat thread under that thread's own key."""
+        recorder = _attention_recorder(self.api)
+        if recorder is None or not recorder.enabled:
+            return
+        try:
+            activity = console_activity(
+                thread_key=int(thread.id),
+                message_id=f"console-{uuid.uuid4().hex}",
+                author_id=recorder.config.console_author or who,
+                content=text,
+                occurred_at=datetime.now(UTC),
+                title=getattr(thread, "name", None),
+                frontend="discord",
+            )
+        except Exception:
+            logger.exception("console: could not describe a reply for metering")
+            return
+        await recorder.record(activity)
+
     async def _reply_in_console(
-        self, item_id: str, thread_key: int, text: str, who: str, brief: str | None
+        self,
+        item_id: str,
+        thread_key: int,
+        text: str,
+        who: str,
+        brief: str | None,
+        metered: bool,
     ) -> web.Response:
         if self.sessions is None:
             return _error("the console cannot run agents in this deployment", 503)
@@ -1462,7 +1504,7 @@ class ConsoleServer:
             return _error(str(exc), 400)
         try:
             injected = await self.sessions.reply(
-                thread_key, text, who, into_running_turn=True, brief=brief
+                thread_key, text, who, into_running_turn=True, brief=brief, metered=metered
             )
         except LookupError:
             return _error("unknown conversation", 404)
@@ -1831,6 +1873,12 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
     return console
 
 
+def _attention_recorder(api_server: Any) -> AttentionRecorder | None:
+    """The deployment's attention recorder, when metering is wired in."""
+    recorder = getattr(getattr(api_server, "components", None), "attention_recorder", None)
+    return recorder if isinstance(recorder, AttentionRecorder) else None
+
+
 async def _build_session_host(
     api_server: ApiServer, conversations: ConversationRepository
 ) -> ConsoleSessionHost | None:
@@ -1879,6 +1927,7 @@ async def _build_session_host(
         registry=getattr(bot, "session_registry", None),
         worktree_manager=getattr(bot, "worktree_manager", None),
         account_router=getattr(bot, "account_router", None),
+        attention_recorder=_attention_recorder(api_server),
     )
     # The wait watcher resumes a conversation after CI; it finds this one here.
     bot.console_sessions = host  # type: ignore[attr-defined]

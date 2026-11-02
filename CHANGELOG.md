@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Ebi AI Console messages count toward attention metering** — starting an item, replying and
+  picking a skill from the Console now write `human_activity` rows (metadata only). They were
+  invisible before: Console replies into chat threads are bot posts, and Console conversations
+  never reached the chat frontends' hook. Relay-injected turns (waits, restarts, relays, the
+  Resume prompt, the Workspace brief) still do not count. `CCDB_ATTENTION_CONSOLE_AUTHOR` charges
+  them to your chat id so both frontends share one timeline, and
+  `ccdb attention-backfill-console` recovers past Console messages from their transcripts.
+
 ### Changed
 
 - **Focus shows the milestone behind a project's rank** — a project ranked by a near milestone

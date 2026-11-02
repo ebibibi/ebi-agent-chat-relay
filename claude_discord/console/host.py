@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from claude_code_core.account_pool import AccountTurn
@@ -35,11 +36,13 @@ from ..connection_choice import apply_connection
 from ..cross_backend_handoff import ConversationHistoryReader, carry_history_across_backends
 from ..execution_settings import apply_thread_execution_mode, thread_execution_mode
 from ..thread_marker import OUTCOME_ERROR
+from .attention import console_activity
 from .conversations import CONSOLE_FRONTEND
 from .surface import AGENT_AUTHOR, ConsoleFrontend, ConsoleSurface, apply_outcome
 
 if TYPE_CHECKING:
     from claude_code_core.account_router import AccountRouter, Failover
+    from claude_code_core.attention_repo import AttentionRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +65,12 @@ class ConsoleSessionHost:
         worktree_manager: Any = None,
         conversation_history: ConversationHistoryReader | None = None,
         account_router: AccountRouter | None = None,
+        attention_recorder: AttentionRecorder | None = None,
     ) -> None:
         self.frontend = frontend
+        # Human-activity metering (docs/attention.md). Only turns a caller marks
+        # ``metered`` — what a person typed — are recorded.
+        self._attention_recorder = attention_recorder
         # Account pools (CCDB_ACCOUNT_POOLS_FILE), the same router Discord turns
         # use. None = one implicit login per backend.
         self._account_router = account_router
@@ -95,15 +102,23 @@ class ConsoleSessionHost:
         return True
 
     async def start(
-        self, *, external_id: str, title: str, prompt: str, author: str, brief: str | None = None
+        self,
+        *,
+        external_id: str,
+        title: str,
+        prompt: str,
+        author: str,
+        brief: str | None = None,
+        metered: bool = False,
     ) -> int:
         """Open a conversation for *external_id* and start its first turn.
 
         Returns as soon as the conversation exists; the turn runs in the
         background. *brief* goes to the agent with the prompt (see ``_submit``).
+        *metered* marks *prompt* as typed by a person (see ``_meter``).
         """
         surface = await self.frontend.open(external_id=external_id, title=title)
-        await self._submit(surface, prompt, author, brief=brief)
+        await self._submit(surface, prompt, author, brief=brief, metered=metered)
         return surface.thread_key
 
     async def reply(
@@ -114,11 +129,13 @@ class ConsoleSessionHost:
         *,
         into_running_turn: bool = False,
         brief: str | None = None,
+        metered: bool = False,
     ) -> bool:
         """Continue a conversation with the human's message.
 
         Returns True when the message went into the turn already running,
-        False when it was queued as a turn of its own.
+        False when it was queued as a turn of its own. *metered* marks *prompt*
+        as typed by a person; waits, restarts and relays leave it off.
         """
         surface = await self.frontend.resolve_surface(thread_key)
         if surface is None:
@@ -126,7 +143,12 @@ class ConsoleSessionHost:
         # A reply answers whatever the marker asked; clear it like a chat reply would.
         await apply_outcome(self.frontend.repo, thread_key, None)
         return await self._submit(
-            surface, prompt, author, into_running_turn=into_running_turn, brief=brief
+            surface,
+            prompt,
+            author,
+            into_running_turn=into_running_turn,
+            brief=brief,
+            metered=metered,
         )
 
     async def relay(self, thread_key: int, prompt: str, author: str, *, interrupt: bool) -> str:
@@ -172,6 +194,7 @@ class ConsoleSessionHost:
         *,
         into_running_turn: bool = False,
         brief: str | None = None,
+        metered: bool = False,
     ) -> bool:
         """Record the human's message and run it.
 
@@ -179,9 +202,11 @@ class ConsoleSessionHost:
         the conversation keeps only what the person wrote and the Console shows the
         brief under activity. The agent receives both.
         """
-        await self.frontend.repo.append(
+        message_id = await self.frontend.repo.append(
             surface.thread_key, author=author, is_bot=False, content=prompt
         )
+        if metered:
+            await self._meter(surface.thread_key, message_id, author, prompt)
         if brief:
             await self.frontend.repo.append(
                 surface.thread_key, author="Ebi Workspace", is_bot=True, content=brief
@@ -191,6 +216,30 @@ class ConsoleSessionHost:
             return True
         self._spawn(surface, prompt)
         return False
+
+    async def _meter(self, thread_key: int, message_id: int, author: str, prompt: str) -> None:
+        """Record the human message as attention metadata; never stops the turn.
+
+        The row is keyed by the transcript's message id, the key
+        ``backfill_console`` derives from history, so the two never double up.
+        """
+        recorder = self._attention_recorder
+        if recorder is None or not recorder.enabled or not message_id:
+            return
+        try:
+            conversation = await self.frontend.repo.get(thread_key)
+            activity = console_activity(
+                thread_key=thread_key,
+                message_id=message_id,
+                author_id=recorder.config.console_author or author,
+                content=prompt,
+                occurred_at=datetime.now(UTC),
+                title=conversation.name if conversation is not None else None,
+            )
+        except Exception:
+            logger.exception("console: could not describe message %s for metering", message_id)
+            return
+        await recorder.record(activity)
 
     async def _inject(self, thread_key: int, prompt: str) -> bool:
         """Deliver into the running turn, if it runs under this conversation's settings."""
