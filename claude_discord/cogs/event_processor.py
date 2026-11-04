@@ -24,6 +24,7 @@ from claude_code_core.approvals import (
     elicitation_form_result,
     elicitation_url_prompt,
     elicitation_url_result,
+    permission_approvers,
     permission_prompt,
     permission_result,
     plan_prompt,
@@ -885,7 +886,7 @@ class EventProcessor:
             )
             return
 
-        prompt = permission_prompt(request, notify=self._notify_mention())
+        prompt = permission_prompt(request, notify=self._approval_mention())
         self._ask_in_background(
             self._ask_choice(prompt, request.request_id, permission_result),
             description=f"permission for {request.tool_name}",
@@ -916,6 +917,15 @@ class EventProcessor:
         """Who to ping, in the protocol's terms rather than Discord's."""
         user_id = self._config.notify_user_id
         return Mention(external_user_id=str(user_id)) if user_id else None
+
+    def _approval_mention(self) -> Mention | None:
+        """Ping someone who can answer. A spawned thread has no requester to ping."""
+        approvers = permission_approvers()
+        if approvers:
+            user_id = self._config.notify_user_id
+            target = str(user_id) if user_id and str(user_id) in approvers else min(approvers)
+            return Mention(external_user_id=target)
+        return self._notify_mention()
 
     async def _ask_choice(
         self,
