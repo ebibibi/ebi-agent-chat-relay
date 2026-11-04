@@ -313,6 +313,8 @@ class EventProcessor:
             await self._on_rate_limit_event(event)
         elif event.message_type == MessageType.STREAM_EVENT:
             await self._on_stream_event(event)
+        elif event.message_type == MessageType.CONTROL_REQUEST and event.permission_request:
+            await self._handle_permission_request(event)
 
         if event.is_complete:
             await self._on_complete(event)

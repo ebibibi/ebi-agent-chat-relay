@@ -10,15 +10,19 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from claude_code_core.approvals import (
+    ALLOW,
     DENY,
     permission_approvers,
     permission_prompt,
     permission_timeout_seconds,
 )
 from claude_code_core.frontend import Choice, ChoicePrompt
+from claude_code_core.memory_surface import MemorySurface
 from claude_code_core.parser import parse_line
 from claude_code_core.runner import ClaudeRunner
 from claude_code_core.types import PermissionRequest
+from claude_discord.cogs.event_processor import EventProcessor
+from claude_discord.cogs.run_config import RunConfig
 from claude_discord.discord_ui.prompt_views import ChoiceView
 
 CAN_USE_TOOL = {
@@ -140,6 +144,25 @@ class TestRunnerProtocol:
         [event async for event in runner._read_stream()]
 
         assert timeouts[:2] == [300, 900]
+
+
+class TestReachesThePerson:
+    """From the CLI's own line to the question on the surface and back."""
+
+    @pytest.mark.asyncio
+    async def test_cli_line_produces_a_prompt_and_the_answer_goes_back(self) -> None:
+        surface = MemorySurface(answers=[[ALLOW]])
+        runner, process = _runner_reading(CAN_USE_TOOL)
+        runner.working_dir = surface.working_dir
+        processor = EventProcessor(RunConfig(surface=surface, runner=runner, prompt="p"))
+
+        async for event in runner._read_stream():
+            await processor.process(event)
+        await processor.wait_for_prompts()
+
+        assert len(surface.prompts) == 1
+        assert surface.prompts[0].question.startswith("needs approval")
+        assert _written(process)[0]["response"]["response"]["behavior"] == "allow"
 
 
 class TestApprovers:
