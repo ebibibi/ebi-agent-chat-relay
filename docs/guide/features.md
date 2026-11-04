@@ -351,6 +351,24 @@ Hashes are only compared within one scheme: when a client changes its hash formu
 
 `next` is deliberately **not** stored: writing it would mean rewriting an existing file on every new reply. Order lives in `chain.jsonl`, and because the identity is the upstream Unix-ms message id, filenames sort chronologically on their own.
 
+#### Getting the reply back to the upstream thread (`/api/teams/reply/status`)
+
+A client that sends `reply_target: {"thread": …}` with `POST /api/ingest` links the run to that thread. ccdb records the newest stored message as the run's base and tells the session to save the plain reply body to `reply-drafts/{result_id}.txt` in the thread folder, on later turns too.
+
+`POST /api/teams/reply/status` takes the same body as `/plan`, with each message's text, and answers from the newest linked run. The client keeps no state, so reopening it on any thread gets that thread's reply.
+
+| State | Meaning |
+|---|---|
+| `none` | No run is linked to this thread |
+| `generating` | A turn is in flight, or the run has only just started |
+| `ready` | The saved body is current |
+| `unverified` | No body file, so `draft` is the session's final message. It may be a work report, so show it before copying |
+| `stale` | A message is newer than the base, or an earlier one was edited. `changes` lists them; `draft` is still returned |
+| `posted` | The thread contains the body, allowing light edits, and nothing after it |
+| `failed` | The run ended without a body. `reason` says why |
+
+A failed link never stops the session: the `/api/ingest` response reports it under `reply_link`.
+
 The directory is the single source of truth — `plan` is answered by reading it. Delete a message file and the next sync fetches it again; an interrupted push completes on the next one; pressing the button twice is a no-op. An attachment that could not be stored is **never** reported as success: it is listed in `thread.json`, in the folder's `README.md`, in the push response, and it keeps appearing in `want_attachments` until its bytes actually arrive.
 
 Threads are filed one folder per company: `{root}/{company}/{title}--{root_mid}/`. A client may send `thread.org`, but the authority is `orgs.json` at the sync root — a hand-editable `team GUID → company` map that wins over the client, so a correction made there sticks. A team it does not know yet is learned from the first label a client sends. With no label at all, a new thread is filed by what the vault already shows: under the company where another thread of the same team sits, or — for chats, whose derived team is new every time — under the one company its people appear in (people found under several companies, such as the operator, do not count; inference needs at least two companies on disk). The inferred company is recorded in `orgs.json` like a typed one. Anything ambiguous stays at the root. The company is a label, never part of the identity (`{team}/{root_mid}`), so re-filing never re-uploads anything — and a thread you move into a company folder by hand keeps syncing, which is how an existing flat vault is migrated.

@@ -187,7 +187,9 @@ def _build_done_marker_section(config: RunConfig) -> str | None:
         "the final reply body or observing delivery; leave completion to the user's "
         "explicit completion action. This also applies on later turns in the same thread. "
         "Use review/action for pending human work. Keep status commentary outside the "
-        "customer-facing reply body." + _waiting_marker_hint()
+        "customer-facing reply body. If the request named a reply body file, overwrite it "
+        "whenever you revise the reply, on later turns too: the exporter copies that file, "
+        "not your message." + _waiting_marker_hint()
     )
 
 

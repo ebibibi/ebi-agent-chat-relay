@@ -27,6 +27,7 @@ import time
 import uuid
 import zipfile
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -54,7 +55,7 @@ from ..thread_marker import (
 )
 from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
 from ..thread_status import request_thread_outcome
-from . import ingest_manifest, teams_sync
+from . import ingest_manifest, teams_reply, teams_sync
 from .attention_api import handle_attention
 from .entra_auth import EntraTokenVerifier, looks_like_jwt
 from .restart_api import handle_cancel_restart, handle_get_restart, handle_reserve_restart
@@ -244,6 +245,16 @@ def _normalize_thread_name(value: object) -> str | None:
     if not name:
         return None
     return name[:_MAX_DISCORD_THREAD_NAME_LENGTH]
+
+
+@dataclass(frozen=True)
+class _ReplyLink:
+    """How one ingest run was tied to the Teams thread it answers."""
+
+    thread_key: str | None = None
+    base_mid: str | None = None
+    draft_path: Path | None = None
+    reason: str = ""
 
 
 class ApiServer:
@@ -440,6 +451,7 @@ class ApiServer:
         # vault as one file per message; the client keeps no state of its own.
         self.app.router.add_post("/api/teams/sync/plan", self.teams_sync_plan)
         self.app.router.add_post("/api/teams/sync/push", self.teams_sync_push)
+        self.app.router.add_post("/api/teams/reply/status", self.teams_reply_status)
         # Startup resume routes
         self.app.router.add_post("/api/mark-resume", self.mark_resume)
 
@@ -467,6 +479,8 @@ class ApiServer:
         # root, never spawning anything.
         app.router.add_post("/api/teams/sync/plan", self.teams_sync_plan)
         app.router.add_post("/api/teams/sync/push", self.teams_sync_push)
+        # Read-only, and the extension's way back to the reply it asked for.
+        app.router.add_post("/api/teams/reply/status", self.teams_reply_status)
         return app
 
     @web.middleware
@@ -2294,6 +2308,7 @@ class ApiServer:
         stored_summary: str,
         result_id: str | None,
         reconciliation: ingest_manifest.Reconciliation | None = None,
+        reply_draft_path: Path | None = None,
     ) -> str:
         """Assemble the session prompt: caller content + attachments + summary.
 
@@ -2349,6 +2364,9 @@ class ApiServer:
                 "要約には、決定事項・未解決の論点・相手の関心事・重要な固有名詞や専門用語・"
                 "次のアクションを簡潔に含めてください（冗長にせず、文脈復元に必要な密度で）。"
             )
+
+        if reply_draft_path is not None:
+            parts.append(teams_reply.render_draft_contract(str(reply_draft_path)))
 
         return "\n\n".join(parts)
 
@@ -2426,6 +2444,19 @@ class ApiServer:
         summary_key = self._valid_summary_key(data.get("summary_key"))
         raw_marker = data.get("latest_marker")
         latest_marker = str(raw_marker) if raw_marker not in (None, "") else None
+
+        # Optional: the Teams thread this run answers, so the extension can ask
+        # for its reply later. Same strict validation as a sync request, because
+        # team and root_mid locate a folder.
+        reply_target: ThreadRef | None = None
+        raw_reply_target = data.get("reply_target")
+        if raw_reply_target is not None:
+            if not isinstance(raw_reply_target, dict):
+                return web.json_response({"error": "reply_target must be an object"}, status=400)
+            try:
+                reply_target = teams_sync.parse_thread_ref(raw_reply_target.get("thread"))
+            except teams_sync.ValidationError as exc:
+                return web.json_response({"error": str(exc)}, status=400)
 
         from ..cogs.claude_chat import ClaudeChatCog  # avoid circular import
 
@@ -2509,6 +2540,8 @@ class ApiServer:
             if existing is not None:
                 stored_summary = existing["summary"] or ""
 
+        reply_link = self._link_reply_target(reply_target, result_id)
+
         prompt = self._build_ingest_prompt(
             content=content,
             saved_paths=saved_paths,
@@ -2516,6 +2549,7 @@ class ApiServer:
             stored_summary=stored_summary,
             result_id=result_id,
             reconciliation=reconciliation,
+            reply_draft_path=reply_link.draft_path,
         )
 
         # When result retrieval is available, register a result row up front and
@@ -2533,6 +2567,8 @@ class ApiServer:
                 result_id=result_id,
                 summary_key=summary_key,
                 pending_marker=latest_marker,
+                teams_thread_key=reply_link.thread_key,
+                teams_base_mid=reply_link.base_mid,
             )
             ingest_repo = self.ingest_repo
             captured_id = result_id
@@ -2614,7 +2650,44 @@ class ApiServer:
         if result_id is not None:
             # Poll GET /api/ingest/{result_id} to retrieve the final reply.
             response["result_id"] = result_id
+        if reply_target is not None:
+            # The client asked for a linked reply, so a link that did not happen
+            # is its to report: the copy button will not find this run.
+            response["reply_link"] = {
+                "linked": reply_link.thread_key is not None,
+                "reason": reply_link.reason,
+            }
         return web.json_response(response, status=201)
+
+    def _link_reply_target(self, ref: ThreadRef | None, result_id: str | None) -> _ReplyLink:
+        """Tie a run to the Teams thread it answers, and fix what it is based on.
+
+        Failing to link costs the copy button, not the reply, so it never stops
+        the session: the reason goes back in the response instead. The base comes
+        from the vault rather than from the client, because the vault is what the
+        session will actually read.
+        """
+        if ref is None:
+            return _ReplyLink()
+        if result_id is None:
+            return _ReplyLink(reason="result retrieval is not available on this server")
+        store = self._teams_store()
+        thread_dir = store.find_thread_dir(ref)
+        if thread_dir is None:
+            return _ReplyLink(reason="the thread has not been synced")
+        try:
+            draft_path = store.prepare_reply_draft(thread_dir, result_id)
+        except OSError as exc:
+            logger.error("Could not prepare a reply draft folder: %s", exc)
+            draft_path = None
+        if draft_path is None:
+            return _ReplyLink(reason="could not prepare the reply body file")
+        stored = store.load_stored(thread_dir)
+        return _ReplyLink(
+            thread_key=teams_reply.thread_key(ref),
+            base_mid=max(stored, key=int) if stored else None,
+            draft_path=draft_path,
+        )
 
     async def _label_ingest_thread(
         self, thread_id: int, tags: list[str], *, reply_draft: bool
@@ -2940,6 +3013,63 @@ class ApiServer:
                 "message_count": meta["message_count"],
             }
         )
+
+    async def teams_reply_status(self, request: web.Request) -> web.Response:
+        """POST /api/teams/reply/status — where this thread's latest reply stands.
+
+        Read-only. The client sends the messages it can see right now (the same
+        shape as /plan, with their text) and gets back whether the reply can be
+        copied or has to be regenerated. It keeps no state of its own, so a popup
+        reopened on any thread gets the right answer.
+        """
+        parsed, err = await self._read_teams_request(request, require_body=False)
+        if err is not None:
+            return err
+        if err := self._require_ingest_repo():
+            return err
+        ref, visible, _coverage = parsed  # type: ignore[misc]
+
+        run = await self.ingest_repo.latest_for_teams_thread(  # type: ignore[union-attr]
+            teams_reply.thread_key(ref)
+        )
+        store = self._teams_store()
+        thread_dir = store.find_thread_dir(ref)
+        file_draft = None
+        if run is not None and thread_dir is not None:
+            file_draft = store.read_reply_draft(thread_dir, run["result_id"])
+        status = teams_reply.evaluate(
+            run=run,
+            running=self._run_is_active(run),
+            file_draft=file_draft,
+            visible=visible,
+            stored=store.load_stored(thread_dir) if thread_dir else {},
+            chain=store.latest_chain(thread_dir) if thread_dir else {},
+            now=datetime.now(),
+        )
+        draft = status.draft
+        return web.json_response(
+            {
+                "state": status.state,
+                "reason": status.reason,
+                "thread_id": run["thread_id"] if run else None,
+                "thread_name": run["thread_name"] if run else None,
+                "base_mid": run["teams_base_mid"] if run else None,
+                "draft": (
+                    {"text": draft.text, "source": draft.source, "updated_at": draft.updated_at}
+                    if draft is not None
+                    else None
+                ),
+                "changes": [
+                    {"mid": c.mid, "kind": c.kind, "author": c.author, "excerpt": c.excerpt}
+                    for c in status.changes
+                ],
+            }
+        )
+
+    def _run_is_active(self, run: dict | None) -> bool:
+        """Whether a turn is in flight in the thread this run started."""
+        thread_id = str((run or {}).get("thread_id") or "")
+        return thread_id.isdigit() and int(thread_id) in self._running_thread_ids()
 
     @staticmethod
     def _valid_summary_key(value: object) -> str | None:
