@@ -125,6 +125,9 @@ async def main() -> None:
     """Start the bot."""
     setup_logging()
     config = load_config()
+    # A fresh checkout has no data root yet, and SQLite cannot create the
+    # parent directory of a database file (#1126).
+    DataLayout.from_env().ensure_db_dirs()
     enabled_frontends = parse_frontends(config["frontends"])
 
     headless = "discord" not in enabled_frontends

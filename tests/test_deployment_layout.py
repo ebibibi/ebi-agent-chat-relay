@@ -23,7 +23,9 @@ from pathlib import Path
 
 import pytest
 
+import claude_discord.main as ccdb_main
 from claude_discord.deployment import DEFAULT_DATA_ROOT, DataLayout
+from claude_discord.ext.api_server import ApiServer
 
 
 class TestEverythingHangsOffTheRoot:
@@ -127,3 +129,41 @@ class TestCreation:
         layout = DataLayout.for_root(str(tmp_path / "acme"))
         layout.ensure_dirs()
         layout.ensure_dirs()
+
+
+class TestFreshInstall:
+    """Issue #1126: ``ccdb start`` on a fresh install must not crash on a missing data root."""
+
+    async def test_startup_creates_only_database_dirs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Drive real startup (console frontend, API enabled) with no data root on disk."""
+        for env in (
+            "WORKTREE_BASE_DIR",
+            "CCDB_TEAMS_VAULT_ROOT",
+            "CCDB_LOG_FILE",
+            "DISCORD_BOT_TOKEN",
+            "DISCORD_CHANNEL_ID",
+        ):
+            monkeypatch.delenv(env, raising=False)
+        monkeypatch.chdir(tmp_path)
+        root = tmp_path / "fresh" / "data"
+        monkeypatch.setenv("CCDB_DATA_ROOT", str(root))
+        monkeypatch.setenv("CCDB_FRONTENDS", "console")
+        monkeypatch.setenv("API_PORT", "1")
+        monkeypatch.setenv("CCDB_CONSOLE_PORT", "2")
+
+        async def no_op(*_args: object, **_kwargs: object) -> None:
+            return None
+
+        monkeypatch.setattr(ApiServer, "start", no_op)
+        monkeypatch.setattr(ccdb_main, "_run_headless", no_op)
+        assert not root.exists()
+
+        await ccdb_main.main()
+
+        layout = DataLayout.from_env()
+        assert Path(layout.notifications_db).is_file()
+        assert Path(layout.sessions_db).is_file()
+        assert not Path(layout.worktrees_dir).exists()
+        assert not Path(layout.teams_vault_dir).exists()

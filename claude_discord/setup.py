@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -357,6 +358,9 @@ async def setup_bridge(
     )
     session_db_path = layout.sessions_db
     task_db_path = layout.tasks_db
+    # SQLite cannot create a database's directory (#1126). The session DB is
+    # always opened; the task DB's parent is made by the scheduler branch.
+    Path(session_db_path).parent.mkdir(parents=True, exist_ok=True)
     escaped = layout.paths_outside_root()
     if escaped:
         logger.warning(
