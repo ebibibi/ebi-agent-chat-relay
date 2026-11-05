@@ -221,6 +221,7 @@ uv sync --extra api
 | DELETE | `/api/ingest/summary` | Clear the stored summary for `key`, forcing a full re-summary on the next ingest |
 | POST | `/api/teams/sync/plan` | Ask what an upstream thread's mirror is missing — send ids + hashes, get back `want_messages`/`want_attachments`/`newest_have_mid` (ingest-token gated) |
 | POST | `/api/teams/sync/push` | Store the wanted messages as one file each under the vault, with attachments and an append-only `chain.jsonl` |
+| POST | `/api/teams/sync/ignore` | Stop (`ignore: true`) or resume (`ignore: false`) tracking attachment gaps of a thread. Ignored files leave `pending`/`unavailable`, are no longer requested, and stay listed under `ignored` and in the README |
 | POST | `/api/teams/reply/status` | Read-only, ingest-token gated. Where a thread's latest reply stands, given the messages on screen: `none`, `generating`, `ready`, `unverified`, `stale`, `posted` or `failed`, with the body and what changed |
 | POST | `/api/mark-resume` | Mark a thread for automatic resume on next bot startup |
 | GET | `/api/lounge` | Read recent AI Lounge messages |
