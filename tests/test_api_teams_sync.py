@@ -1292,3 +1292,203 @@ async def test_a_duplicate_attachment_name_renders_once(client: TestClient) -> N
     note = (folder / "messages" / f"{ROOT}.md").read_text()
     assert note.count("添付未取得: 仕様調査.pdf") == 1
     assert 'attachments: ["仕様調査.pdf"]' in note
+
+
+# ---------------------------------------------------------------------------
+# Ignoring a gap: a file gone at the source must not stop every later reply
+# ---------------------------------------------------------------------------
+
+
+async def _push_failed(client: TestClient, name: str = "gone.txt", status: str = "failed") -> Path:
+    resp = await client.post(
+        "/api/teams/sync/push",
+        headers=AUTH,
+        json=thread_body(
+            messages=[
+                msg(
+                    ROOT,
+                    "ログです",
+                    "h1",
+                    attachments=[{"name": name, "status": status, "reason": "消えている"}],
+                )
+            ]
+        ),
+    )
+    return Path((await resp.json())["folder"])
+
+
+async def _ignore(client: TestClient, name: str = "gone.txt", ignore: bool = True):
+    return await client.post(
+        "/api/teams/sync/ignore",
+        headers=AUTH,
+        json=thread_body(items=[{"mid": ROOT, "name": name}], ignore=ignore),
+    )
+
+
+async def _plan(client: TestClient, name: str = "gone.txt") -> dict:
+    resp = await client.post(
+        "/api/teams/sync/plan",
+        headers=AUTH,
+        json=thread_body(messages=[{"mid": ROOT, "hash": "h1", "attachments": [name]}]),
+    )
+    return await resp.json()
+
+
+async def test_a_new_thread_reports_that_ignoring_is_supported(client: TestClient) -> None:
+    body = await _plan(client)
+    assert body["ignored"] == []
+    assert body["capabilities"]["attachment_ignore"] is True
+
+
+async def test_ignored_gap_leaves_pending_and_is_not_requested(
+    client: TestClient,
+) -> None:
+    folder = await _push_failed(client)
+    resp = await _ignore(client)
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["pending"] == []
+    assert body["not_found"] == []
+    assert body["ignored"][0]["name"] == "gone.txt"
+    assert body["ignored"][0]["reason"] == "消えている"
+    assert body["ignored"][0]["ignored_at"]
+
+    plan = await _plan(client)
+    assert plan["pending"] == []
+    assert plan["want_attachments"] == []
+    assert [i["name"] for i in plan["ignored"]] == ["gone.txt"]
+
+    # Its contents are still unknown, so it stays on the record for the reader.
+    readme = (folder / "README.md").read_text()
+    assert "無視した添付" in readme
+    assert "gone.txt" in readme
+    assert "未取得の添付" not in readme.split("無視した添付")[0]
+
+
+async def test_terminal_gap_can_be_ignored_too(client: TestClient) -> None:
+    await _push_failed(client, status="unavailable")
+    body = await (await _ignore(client)).json()
+    assert body["unavailable"] == []
+    assert [i["name"] for i in body["ignored"]] == ["gone.txt"]
+
+
+async def test_a_later_push_does_not_bring_an_ignored_gap_back(client: TestClient) -> None:
+    await _push_failed(client)
+    await _ignore(client)
+    body = await (
+        await client.post(
+            "/api/teams/sync/push",
+            headers=AUTH,
+            json=thread_body(
+                messages=[
+                    msg(
+                        ROOT,
+                        "ログです（編集）",
+                        "h2",
+                        attachments=[{"name": "gone.txt", "status": "failed", "reason": "再"}],
+                    ),
+                    msg("1784110000500", "別の発言", "h3"),
+                ]
+            ),
+        )
+    ).json()
+    assert body["pending"] == []
+    assert [i["name"] for i in body["ignored"]] == ["gone.txt"]
+
+
+async def test_ignored_terminal_gap_stays_out_after_a_later_push(client: TestClient) -> None:
+    await _push_failed(client, status="unavailable")
+    await _ignore(client)
+    folder = await _push_failed(client, status="unavailable")
+    meta = json.loads((folder / "thread.json").read_text())
+    assert meta["unavailable_attachments"] == []
+    assert [i["name"] for i in meta["ignored_attachments"]] == ["gone.txt"]
+
+
+async def test_undo_makes_it_a_retryable_gap_again(client: TestClient) -> None:
+    await _push_failed(client)
+    await _ignore(client)
+    body = await (await _ignore(client, ignore=False)).json()
+    assert body["ignored"] == []
+    assert [p["name"] for p in body["pending"]] == ["gone.txt"]
+    assert "ignored_at" not in body["pending"][0]
+
+    plan = await _plan(client)
+    assert plan["want_attachments"] == [{"mid": ROOT, "name": "gone.txt"}]
+
+
+async def test_bytes_arriving_ends_the_ignore(client: TestClient) -> None:
+    await _push_failed(client)
+    await _ignore(client)
+    body = await (
+        await client.post(
+            "/api/teams/sync/push",
+            headers=AUTH,
+            json=thread_body(
+                messages=[
+                    msg(
+                        ROOT,
+                        "ログです",
+                        "h1",
+                        attachments=[
+                            {
+                                "name": "gone.txt",
+                                "status": "embedded",
+                                "data": base64.b64encode(b"x").decode(),
+                            }
+                        ],
+                    )
+                ]
+            ),
+        )
+    ).json()
+    assert body["ignored"] == []
+    assert body["pending"] == []
+
+
+async def test_ignoring_an_unknown_file_changes_nothing_and_says_so(client: TestClient) -> None:
+    await _push_failed(client)
+    body = await (await _ignore(client, name="other.txt")).json()
+    assert body["not_found"] == [{"mid": ROOT, "name": "other.txt"}]
+    assert body["ignored"] == []
+    assert [p["name"] for p in body["pending"]] == ["gone.txt"]
+
+
+async def test_ignore_on_a_thread_that_does_not_exist_is_404(client: TestClient) -> None:
+    assert (await _ignore(client)).status == 404
+
+
+async def test_ignore_requires_the_token(client: TestClient) -> None:
+    resp = await client.post(
+        "/api/teams/sync/ignore",
+        json=thread_body(items=[{"mid": ROOT, "name": "a"}]),
+    )
+    assert resp.status == 401
+
+
+@pytest.mark.parametrize(
+    "items",
+    [
+        None,
+        [],
+        "x",
+        [{"mid": "x", "name": "a"}],
+        [{"mid": ROOT}],
+        [{"mid": ROOT, "name": ""}],
+        ["a"],
+    ],
+)
+async def test_ignore_rejects_malformed_items(client: TestClient, items: object) -> None:
+    await _push_failed(client)
+    resp = await client.post("/api/teams/sync/ignore", headers=AUTH, json=thread_body(items=items))
+    assert resp.status == 400
+
+
+async def test_ignore_rejects_too_many_items(client: TestClient) -> None:
+    await _push_failed(client)
+    resp = await client.post(
+        "/api/teams/sync/ignore",
+        headers=AUTH,
+        json=thread_body(items=[{"mid": ROOT, "name": f"{i}.txt"} for i in range(501)]),
+    )
+    assert resp.status == 400

@@ -213,6 +213,7 @@ uv sync --extra api
 | DELETE | `/api/ingest/summary` | `key` の保存済みサマリーをクリアし、次回インジェストで完全な再サマリーを強制 |
 | POST | `/api/teams/sync/plan` | 上流スレッドのミラーに何が足りないかを問い合わせる — ID + ハッシュを送ると `want_messages`/`want_attachments`/`newest_have_mid` が返る（ingest-token 認証） |
 | POST | `/api/teams/sync/push` | plan が要求したメッセージを Vault 配下に 1 件 1 ファイルで保存。添付ファイルと追記専用の `chain.jsonl` を伴う |
+| POST | `/api/teams/sync/ignore` | スレッドの未取得添付の追跡をやめる（`ignore: true`）または再開する（`ignore: false`）。無視した添付は `pending` / `unavailable` から外れて再要求されなくなり、`ignored` と README には残る |
 | POST | `/api/mark-resume` | 次回 Bot 起動時のスレッド自動リジュームを登録 |
 | GET | `/api/lounge` | AI Lounge の最近のメッセージを取得 |
 | POST | `/api/lounge` | AI Lounge にメッセージを投稿（`label` オプション）。200 文字を超えると `hint` フィールドを返す |

@@ -142,6 +142,9 @@ class SyncPlan:
     newest_have_mid: str | None = None
 
 
+MAX_GAP_ITEMS = 500
+
+
 class ValidationError(ValueError):
     """Raised when a client payload is malformed. The message is user-facing."""
 
@@ -149,6 +152,26 @@ class ValidationError(ValueError):
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
+
+
+def parse_gap_items(raw: object) -> list[tuple[str, str]]:
+    """Validate the ``items`` of an ignore request as (mid, name) pairs."""
+    if not isinstance(raw, list) or not raw:
+        raise ValidationError("items must be a non-empty list")
+    if len(raw) > MAX_GAP_ITEMS:
+        raise ValidationError(f"items must not exceed {MAX_GAP_ITEMS}")
+    parsed: list[tuple[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValidationError("each item must be an object")
+        mid = str(item.get("mid") or "").strip()
+        name = str(item.get("name") or "")
+        if not _MID_RE.match(mid):
+            raise ValidationError("item.mid must be a numeric message id")
+        if not name.strip():
+            raise ValidationError("item.name must not be empty")
+        parsed.append((mid, name))
+    return parsed
 
 
 def parse_thread_ref(raw: object) -> ThreadRef:
@@ -320,6 +343,7 @@ def build_plan(
     stored: dict[str, StoredMessage],
     pending: list[dict] | None = None,
     unavailable: list[dict] | None = None,
+    ignored: list[dict] | None = None,
 ) -> SyncPlan:
     """Decide what the client still needs to send.
 
@@ -339,9 +363,10 @@ def build_plan(
         name = str(item.get("name") or "")
         if mid and name:
             pending_by_mid.setdefault(mid, set()).add(name)
-    unavailable_keys = {
+    # A person chose to stop tracking an ignored file, so it is not asked for.
+    not_wanted_keys = {
         (str(item.get("mid") or ""), str(item.get("name") or ""))
-        for item in unavailable or []
+        for item in (unavailable or []) + (ignored or [])
         if item.get("mid") and item.get("name")
     }
     if stored:
@@ -356,10 +381,55 @@ def build_plan(
         for att in msg.attachments:
             name = safe_attachment_name(att.name)
             present = current is not None and name in current.attachments_present
-            if not present and (msg.mid, name) not in unavailable_keys:
+            if not present and (msg.mid, name) not in not_wanted_keys:
                 plan.want_attachments.append({"mid": msg.mid, "name": name})
     plan.want_messages.sort(key=_mid_sort_key)
     return plan
+
+
+def move_gaps(
+    meta: dict, items: list[tuple[str, str]], *, ignore: bool, now: str
+) -> tuple[list[dict], list[dict], list[dict], list[tuple[str, str]]]:
+    """Move gaps to or from the ignored list.
+
+    Returns (pending, unavailable, ignored, unmatched items). Undoing returns a
+    file to ``pending``, the retryable side: why it was ignored may no longer
+    hold, and one failed retry costs little.
+    """
+    lists = {
+        key: list(meta.get(key) or [])
+        for key in ("pending_attachments", "unavailable_attachments", "ignored_attachments")
+    }
+    sources = (
+        ("pending_attachments", "unavailable_attachments") if ignore else ("ignored_attachments",)
+    )
+    unmatched: list[tuple[str, str]] = []
+    for mid, name in items:
+        found = next(
+            (
+                (source, item)
+                for source in sources
+                for item in lists[source]
+                if str(item.get("mid")) == mid and str(item.get("name")) == name
+            ),
+            None,
+        )
+        if found is None:
+            unmatched.append((mid, name))
+            continue
+        source, item = found
+        lists[source] = [other for other in lists[source] if other is not item]
+        if ignore:
+            lists["ignored_attachments"].append({**item, "ignored_at": now})
+        else:
+            restored = {k: v for k, v in item.items() if k != "ignored_at"}
+            lists["pending_attachments"].append(restored)
+    return (
+        lists["pending_attachments"],
+        lists["unavailable_attachments"],
+        lists["ignored_attachments"],
+        unmatched,
+    )
 
 
 def hash_scheme(digest: str) -> str:
@@ -548,6 +618,14 @@ def render_readme(meta: dict, chain: list[dict]) -> str:
     if unavailable:
         lines += ["## 取得元で利用できない添付", ""]
         for item in unavailable:
+            lines.append(
+                f"- `{item.get('name', '')}`（{item.get('mid', '')}）— {item.get('reason', '')}"
+            )
+        lines.append("")
+    ignored = meta.get("ignored_attachments") or []
+    if ignored:
+        lines += ["## 無視した添付（利用者が追跡をやめたもの。内容は不明）", ""]
+        for item in ignored:
             lines.append(
                 f"- `{item.get('name', '')}`（{item.get('mid', '')}）— {item.get('reason', '')}"
             )

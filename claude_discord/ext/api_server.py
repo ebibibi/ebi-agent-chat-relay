@@ -451,6 +451,7 @@ class ApiServer:
         # vault as one file per message; the client keeps no state of its own.
         self.app.router.add_post("/api/teams/sync/plan", self.teams_sync_plan)
         self.app.router.add_post("/api/teams/sync/push", self.teams_sync_push)
+        self.app.router.add_post("/api/teams/sync/ignore", self.teams_sync_ignore)
         self.app.router.add_post("/api/teams/reply/status", self.teams_reply_status)
         # Startup resume routes
         self.app.router.add_post("/api/mark-resume", self.mark_resume)
@@ -479,6 +480,7 @@ class ApiServer:
         # root, never spawning anything.
         app.router.add_post("/api/teams/sync/plan", self.teams_sync_plan)
         app.router.add_post("/api/teams/sync/push", self.teams_sync_push)
+        app.router.add_post("/api/teams/sync/ignore", self.teams_sync_ignore)
         # Read-only, and the extension's way back to the reply it asked for.
         app.router.add_post("/api/teams/reply/status", self.teams_reply_status)
         return app
@@ -2895,6 +2897,7 @@ class ApiServer:
             stored,
             pending=meta.get("pending_attachments") or [],
             unavailable=meta.get("unavailable_attachments") or [],
+            ignored=meta.get("ignored_attachments") or [],
         )
         return web.json_response(
             {
@@ -2910,6 +2913,7 @@ class ApiServer:
                 "newest_have_mid": plan.newest_have_mid,
                 "pending": meta.get("pending_attachments") or [],
                 "unavailable": meta.get("unavailable_attachments") or [],
+                "ignored": meta.get("ignored_attachments") or [],
                 "attachment_summary": meta.get("attachment_summary")
                 or {
                     "detected": 0,
@@ -2924,7 +2928,7 @@ class ApiServer:
                 # needs before it may upload a partially-scrolled chat: against
                 # a server without it, each partial scan reports a different
                 # root mid and lands in its own folder.
-                "capabilities": {"conversation_scope": True},
+                "capabilities": {"conversation_scope": True, "attachment_ignore": True},
             }
         )
 
@@ -3009,8 +3013,52 @@ class ApiServer:
                 # listed here, in thread.json and in the folder's README.
                 "pending": pending,
                 "unavailable": unavailable,
+                "ignored": meta.get("ignored_attachments") or [],
                 "attachment_summary": meta["attachment_summary"],
                 "message_count": meta["message_count"],
+            }
+        )
+
+    async def teams_sync_ignore(self, request: web.Request) -> web.Response:
+        """POST /api/teams/sync/ignore — stop (or resume) tracking attachment gaps.
+
+        A file deleted at the source can never arrive, and treating it as an open
+        gap forever stops every later reply. The decision is stored with the thread
+        so that it holds on every PC, and the file stays listed as ignored because
+        its contents are still unknown to whoever reads the folder.
+        """
+        if err := await self._check_ingest_token(request):
+            return err
+        try:
+            data = await request.json()
+        except json.JSONDecodeError:
+            return web.json_response({"error": "Invalid JSON"}, status=400)
+        if not isinstance(data, dict):
+            return web.json_response({"error": "body must be an object"}, status=400)
+        try:
+            ref = teams_sync.parse_thread_ref(data.get("thread"))
+            items = teams_sync.parse_gap_items(data.get("items"))
+        except teams_sync.ValidationError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
+        store = self._teams_store()
+        thread_dir = store.find_thread_dir(ref)
+        if thread_dir is None:
+            return web.json_response({"error": "Thread has not been synced"}, status=404)
+        try:
+            meta, unmatched = store.set_ignored(
+                thread_dir, ref, items, ignore=data.get("ignore", True) is not False
+            )
+        except OSError as exc:
+            logger.error("Teams sync could not update ignored attachments: %s", exc)
+            return web.json_response({"error": "Could not update the thread"}, status=500)
+        return web.json_response(
+            {
+                "folder": str(thread_dir),
+                "pending": meta["pending_attachments"],
+                "unavailable": meta["unavailable_attachments"],
+                "ignored": meta["ignored_attachments"],
+                "not_found": [{"mid": mid, "name": name} for mid, name in unmatched],
             }
         )
 

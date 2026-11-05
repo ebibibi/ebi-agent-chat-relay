@@ -601,6 +601,7 @@ class TeamsVaultStore:
         *,
         pending: list[dict],
         unavailable: list[dict] | None = None,
+        ignored_items: list[dict] | None = None,
         coverage: dict,
         now: str | None = None,
     ) -> dict:
@@ -610,6 +611,17 @@ class TeamsVaultStore:
         latest = self.latest_chain(thread_dir)
         previous = self.read_meta(thread_dir)
         unavailable = unavailable or []
+        # An ignore outlives later syncs; it ends only when the bytes turn up.
+        kept_ignored = [
+            item
+            for item in (
+                previous.get("ignored_attachments") or []
+                if ignored_items is None
+                else ignored_items
+            )
+            if str(item.get("name") or "")
+            not in self._attachments_present(thread_dir, str(item.get("mid") or ""))
+        ]
         saved_total = sum(len(self._attachments_present(thread_dir, mid)) for mid in latest)
         scan = coverage.get("attachment_scan") or {}
         previous_summary = previous.get("attachment_summary") or {}
@@ -642,6 +654,7 @@ class TeamsVaultStore:
             "coverage": {**(previous.get("coverage") or {}), **coverage},
             "pending_attachments": pending,
             "unavailable_attachments": unavailable,
+            "ignored_attachments": kept_ignored,
             "attachment_summary": attachment_summary,
             "first_synced_at": previous.get("first_synced_at") or now,
             "last_synced_at": now,
@@ -676,15 +689,17 @@ class TeamsVaultStore:
             for msg in pushed or []
         }
         merged: dict[tuple[str, str], dict] = {}
-        unavailable_keys = {
-            (str(item.get("mid") or ""), str(item.get("name") or "")) for item in unavailable or []
+        meta = self.read_meta(thread_dir)
+        excluded_keys = {
+            (str(item.get("mid") or ""), str(item.get("name") or ""))
+            for item in (unavailable or []) + (meta.get("ignored_attachments") or [])
         }
-        for item in (self.read_meta(thread_dir).get("pending_attachments") or []) + fresh:
+        for item in (meta.get("pending_attachments") or []) + fresh:
             mid = str(item.get("mid") or "")
             name = str(item.get("name") or "")
             if not mid or not name:
                 continue
-            if (mid, name) in unavailable_keys:
+            if (mid, name) in excluded_keys:
                 continue
             if mid in declared_by_mid and name not in declared_by_mid[mid]:
                 continue
@@ -719,10 +734,15 @@ class TeamsVaultStore:
         }
         fresh_keys = {(str(item.get("mid") or ""), str(item.get("name") or "")) for item in fresh}
         merged: dict[tuple[str, str], dict] = {}
-        for item in (self.read_meta(thread_dir).get("unavailable_attachments") or []) + fresh:
+        meta = self.read_meta(thread_dir)
+        ignored_keys = {
+            (str(item.get("mid") or ""), str(item.get("name") or ""))
+            for item in meta.get("ignored_attachments") or []
+        }
+        for item in (meta.get("unavailable_attachments") or []) + fresh:
             mid = str(item.get("mid") or "")
             name = str(item.get("name") or "")
-            if not mid or not name:
+            if not mid or not name or (mid, name) in ignored_keys:
                 continue
             if mid in declared_by_mid and name not in declared_by_mid[mid]:
                 continue
@@ -732,3 +752,32 @@ class TeamsVaultStore:
                 continue
             merged[(mid, name)] = {**item, "mid": mid, "name": name}
         return sorted(merged.values(), key=lambda i: (i["mid"], i["name"]))
+
+    def set_ignored(
+        self,
+        thread_dir: Path,
+        ref: ThreadRef,
+        items: list[tuple[str, str]],
+        *,
+        ignore: bool,
+        now: str | None = None,
+    ) -> tuple[dict, list[tuple[str, str]]]:
+        """Move gaps to or from the ignored list. Returns (meta, unmatched items).
+
+        Undoing returns a file to ``pending``, the retryable side: the reason it
+        was ignored may no longer hold, and one failed retry costs little.
+        """
+        now = now or datetime.now().astimezone().isoformat(timespec="seconds")
+        pending, unavailable, kept, unmatched = teams_sync.move_gaps(
+            self.read_meta(thread_dir), items, ignore=ignore, now=now
+        )
+        written = self.write_meta(
+            thread_dir,
+            ref,
+            pending=pending,
+            unavailable=unavailable,
+            ignored_items=kept,
+            coverage={},
+            now=now,
+        )
+        return written, unmatched
