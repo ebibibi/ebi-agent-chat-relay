@@ -59,6 +59,7 @@ class TestExternalAppSurface:
             # the vault root, spawns nothing.
             "/api/teams/sync/plan",
             "/api/teams/sync/push",
+            "/api/teams/sync/ignore",
             # Token-gated and read-only: the reply this extension asked for.
             "/api/teams/reply/status",
         }

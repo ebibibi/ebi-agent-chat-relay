@@ -601,7 +601,7 @@ class TeamsVaultStore:
         *,
         pending: list[dict],
         unavailable: list[dict] | None = None,
-        ignored: list[dict] | None = None,
+        ignored_items: list[dict] | None = None,
         coverage: dict,
         now: str | None = None,
     ) -> dict:
@@ -614,7 +614,11 @@ class TeamsVaultStore:
         # An ignore outlives later syncs; it ends only when the bytes turn up.
         kept_ignored = [
             item
-            for item in (previous.get("ignored_attachments") or [] if ignored is None else ignored)
+            for item in (
+                previous.get("ignored_attachments") or []
+                if ignored_items is None
+                else ignored_items
+            )
             if str(item.get("name") or "")
             not in self._attachments_present(thread_dir, str(item.get("mid") or ""))
         ]
@@ -772,7 +776,7 @@ class TeamsVaultStore:
             ref,
             pending=pending,
             unavailable=unavailable,
-            ignored=kept,
+            ignored_items=kept,
             coverage={},
             now=now,
         )
