@@ -237,3 +237,38 @@ class TestSavedViews:
         (root / "scenario.toml").write_text("name='x'\n[[views]]\nname='n'\n", encoding="utf-8")
         with pytest.raises(demo.DemoError, match="view 1"):
             demo.load_scenario(root)
+
+
+class TestParents:
+    def _scenario(self, tmp_path: Path, parent: str) -> demo.Scenario:
+        root = tmp_path / "scenario"
+        (root / "vault").mkdir(parents=True)
+        (root / "scenario.toml").write_text(
+            'name = "t"\ntimezone = "Asia/Tokyo"\n'
+            '[[items]]\ntitle = "Lead"\n'
+            f'[[items]]\ntitle = "Child"\nparent = "{parent}"\n',
+            encoding="utf-8",
+        )
+        return demo.load_scenario(root)
+
+    def test_a_child_is_seeded_under_the_id_of_its_parent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        posted: list[dict] = []
+
+        def fake_post(url: str, token: str, body: dict) -> dict:
+            posted.append(body)
+            return {"item": {"id": f"c{len(posted)}"}}
+
+        monkeypatch.setattr(demo, "_post", fake_post)
+        monkeypatch.setattr(demo, "wait_for_console", lambda *_: None)
+        demo.seed(self._scenario(tmp_path, "Lead"), "http://x", "tok", TODAY)
+        assert posted == [{"title": "Lead"}, {"title": "Child", "parent_id": "c1"}]
+
+    def test_a_parent_that_does_not_exist_stops_the_seed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(demo, "_post", lambda *_: {"item": {"id": "c1"}})
+        monkeypatch.setattr(demo, "wait_for_console", lambda *_: None)
+        with pytest.raises(demo.DemoError, match="Nobody"):
+            demo.seed(self._scenario(tmp_path, "Nobody"), "http://x", "tok", TODAY)

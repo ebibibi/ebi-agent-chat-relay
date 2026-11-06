@@ -52,6 +52,26 @@ priority = 2
 due = "+2"
 project = "社内勉強会"
 
+# Start the first one and let it spawn children to see the 📍 panel fill in. Its two children
+# are there so the panel and the family list already show on the first open.
+[[items]]
+title = "全社のパスキー移行を統括して"
+note = "部署ごとの移行を子スレッドに分けて進め、私に聞くことは親にまとめて。"
+priority = 1
+project = "社内勉強会"
+
+[[items]]
+title = "営業部のパスキー移行手順を作る"
+priority = 2
+project = "社内勉強会"
+parent = "全社のパスキー移行を統括して"
+
+[[items]]
+title = "管理部のパスキー移行手順を作る"
+priority = 2
+project = "社内勉強会"
+parent = "全社のパスキー移行を統括して"
+
 [[items]]
 title = "パスワードポリシーの見直し案"
 note = "パスキーを入れたあとに考える。"

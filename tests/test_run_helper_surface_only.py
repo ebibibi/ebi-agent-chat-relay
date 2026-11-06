@@ -126,3 +126,12 @@ async def test_delegation_guidance_preserves_preselected_child_ai() -> None:
     assert "parent_thread_id" in context
     assert "child AI preferences" in context
     assert "native subagents" in context
+
+
+async def test_a_parent_is_told_how_to_keep_its_situation_panel_current() -> None:
+    surface = MemorySurface()
+    config = RunConfig(surface=surface, runner=_runner(), prompt="coordinate the children")
+    context = await _build_system_context(config)
+    assert f"/api/threads/{surface.thread_key}/situation" in context
+    assert '"asks"' in context
+    assert '"decided"' in context

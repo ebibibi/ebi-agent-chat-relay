@@ -195,5 +195,5 @@ window.ConsoleFamily = (() => {
     const role = depth ? (ja ? '子' : 'Child') : (ja ? '親' : 'Parent');
     return h('span', {class:'family-role', text:role + (depth > 1 ? (ja ? ` · ${depth}階層` : ` · level ${depth}`) : '')});
   }
-  return {model, groupRows, excerpt, render, rowTag, listGroup, roleTag};
+  return {model, needsAttention, groupRows, excerpt, render, rowTag, listGroup, roleTag};
 })();

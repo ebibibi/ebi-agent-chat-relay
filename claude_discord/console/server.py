@@ -225,6 +225,16 @@ def _iso(value: Any) -> str | None:
     return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _thread_of(item_id: str) -> int | None:
+    """The thread behind ``t<id>``; a written-down item (``c<hex>``) has none."""
+    if not item_id.startswith("t"):
+        return None
+    try:
+        return int(item_id[1:])
+    except ValueError:
+        return None
+
+
 class ConsoleServer:
     """Owns the console listener. Reads ccdb state through ``api_server``."""
 
@@ -365,6 +375,7 @@ class ConsoleServer:
         r.add_patch(f"{API_PREFIX}/items/{{item_id}}", self.patch_item)
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/messages", self.messages)
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/notes", workspace_routes.thread_notes)
+        r.add_get(f"{API_PREFIX}/items/{{item_id}}/situation", self.situation)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/reply", self.reply)
         r.add_post(
             f"{API_PREFIX}/items/{{item_id}}/messages/{{message_id}}/actions/{{action_id}}",
@@ -572,6 +583,24 @@ class ConsoleServer:
     # -- reads -------------------------------------------------------------
     async def me(self, request: web.Request) -> web.Response:
         return web.json_response({"identity": request[IDENTITY]})
+
+    async def situation(self, request: web.Request) -> web.Response:
+        """The panel beside a family: what its parent wrote, and which waits are active.
+
+        Waits are not per item: the client knows the family, the server has one list.
+        """
+        thread_id = _thread_of(request.match_info["item_id"])
+        repo = self.api.situation_repo
+        written = await repo.get(thread_id) if repo is not None and thread_id else None
+        waits = []
+        if self.api.wait_repo is not None:
+            waits = [
+                {"thread_id": str(wait.thread_id), "label": wait.label}
+                for wait in await self.api.wait_repo.list_active()
+            ]
+        return web.json_response(
+            {"situation": written.as_dict() if written else None, "waits": waits}
+        )
 
     async def _lineage(self) -> dict[int, int]:
         if self.api.lineage_repo is None:

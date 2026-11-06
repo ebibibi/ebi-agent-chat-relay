@@ -339,6 +339,26 @@ async def _build_system_context(config: RunConfig) -> str | None:
         "Creating a child thread still requires authorization to delegate."
     )
 
+    parts.append(
+        "## Situation panel for thread families\n"
+        "Once this thread has child threads, the Console shows a panel beside the conversation "
+        "so the user can see where things stand while messages keep arriving. It measures "
+        "by itself which threads are running or waiting; only you can say the rest. Keep it "
+        "current, and always update it before ending a turn that changed it, including a turn "
+        "started by a child's report:\n"
+        f'  `curl -s -X PUT "$CCDB_API_URL/api/threads/{config.surface.thread_key}/situation" '
+        '-H "Content-Type: application/json" '
+        '-d \'{"asks": [...], "doing": [...], "decided": [...]}\'`\n'
+        "Each field is an array of short strings; a field you send replaces that field, one you "
+        "leave out stays, and GET on the same URL returns the record. "
+        "`asks`: what only the user can answer or do now, each understandable on its own, with "
+        "your recommendation; gather your children's questions here so the user can answer you "
+        "alone, and remove an entry once it is answered. "
+        "`doing`: what is moving now, in a few words. "
+        "`decided`: decisions made and outcomes finished; keep them across updates. "
+        "No secrets, and no chat narrative. A thread without children need not use it."
+    )
+
     done_section = _build_done_marker_section(config)
     if done_section:
         parts.append(done_section)

@@ -131,3 +131,22 @@ def test_attachments_carry_their_content_type_for_inline_previews() -> None:
     out = serialize_message(_message("", attachments=[image, legacy]))
     assert out["attachments"][0]["content_type"] == "image/png"
     assert out["attachments"][1]["content_type"] is None
+
+
+@pytest.mark.parametrize(
+    ("author", "content"),
+    [
+        ("thread 1567765910595440741", "[MESSAGE FROM ANOTHER AI SESSION — thread 1]\nreport"),
+        ("wait", "[WAIT FINISHED — automatic continuation]\nWait #1 ended"),
+        ("restart", "🔄 Bot restarted.\nCarry on"),
+    ],
+)
+def test_a_prompt_the_relay_wrote_is_not_the_person_speaking(author: str, content: str) -> None:
+    stored = {"author": author, "is_bot": False, "content": content}
+    assert with_kind(stored)["kind"] == KIND_ACTIVITY
+
+
+@pytest.mark.parametrize("author", ["oidc:me@example.com", "token", "passkey", ""])
+def test_a_person_stays_human_whatever_the_message_looks_like(author: str) -> None:
+    stored = {"author": author, "is_bot": False, "content": "[URGENT] look at this"}
+    assert with_kind(stored)["kind"] == KIND_HUMAN

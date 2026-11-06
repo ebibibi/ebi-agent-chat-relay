@@ -19,7 +19,6 @@ time before this was recorded live.
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -30,6 +29,7 @@ from claude_code_core.attention import SOURCE_BACKFILL, SOURCE_LIVE, HumanActivi
 from claude_code_core.attention_repo import HumanActivityRepository
 
 from .conversations import CONSOLE_FRONTEND
+from .messages import is_machine_author
 
 __all__ = [
     "BackfillStats",
@@ -41,10 +41,6 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-#: Names the relay starts console turns under (wait watcher, restart resume).
-MACHINE_AUTHORS = frozenset({"wait", "restart"})
-#: A relay from another session (``POST /api/threads/<id>/message``).
-_RELAY_AUTHOR = re.compile(r"^thread \d+$")
 #: Prefixes of rows a person caused without typing them (the Stop button).
 _NOT_TYPED_PREFIXES = ("⏹ Stopped by ",)
 #: How ``uploads.with_attachments`` introduces the attached files.
@@ -55,7 +51,7 @@ _ATTACHMENT_ONLY = _ATTACHMENT_NOTE.lstrip("\n")
 def is_human_author(author: str) -> bool:
     """Whether a ``console_messages`` author is a signed-in person, not the relay."""
     author = (author or "").strip()
-    return bool(author) and author not in MACHINE_AUTHORS and not _RELAY_AUTHOR.match(author)
+    return bool(author) and not is_machine_author(author)
 
 
 def measure(content: str) -> tuple[int, int]:

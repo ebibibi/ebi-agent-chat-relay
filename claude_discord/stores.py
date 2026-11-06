@@ -29,6 +29,7 @@ from .database.models import init_db
 from .database.repository import SessionRepository, UsageStatsRepository
 from .database.resume_repo import PendingResumeRepository
 from .database.settings_repo import SettingsRepository
+from .database.situation_repo import ThreadSituationRepository
 from .database.summary_repo import ThreadSummaryRepository
 from .database.wait_repo import WaitRepository
 
@@ -53,6 +54,8 @@ class SessionStores:
     summaries: ThreadSummaryRepository
     frontend_threads: FrontendThreadRepository
     lineage: ThreadLineageRepository
+    #: What a parent thread says about where its work stands (the Console's family panel).
+    situations: ThreadSituationRepository
     #: Human messages that reached a session — the input of the attention estimate.
     attention: HumanActivityRepository
     #: Waits a session registered before ending its turn (``/api/waits``).
@@ -99,6 +102,7 @@ async def build_session_stores(session_db_path: str) -> SessionStores:
         summaries=summaries,
         frontend_threads=frontend_threads,
         lineage=ThreadLineageRepository(session_db_path),
+        situations=ThreadSituationRepository(session_db_path),
         attention=attention,
         waits=WaitRepository(session_db_path),
     )

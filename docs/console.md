@@ -522,6 +522,7 @@ Endpoints need authentication unless marked *(no sign-in)*. Every method except 
 | GET / POST / PATCH / DELETE | `/console/api/places` | The managed list of places with open-item counts; add `{name}`, rename `{from, name}` (every item follows), delete `{name}` (items become doable anywhere) |
 | GET | `/console/api/items/{id}/live` | A console conversation's running turn: status, tool activity, the answer so far, whether it can be stopped |
 | POST | `/console/api/items/{id}/messages/{message_id}/actions/{action_id}` | Press a button listed in a message's `actions` (404 once it is answered) |
+| GET | `/console/api/items/{id}/situation` | What the thread's parent wrote for [the family panel](#where-things-stand) (`situation`, or `null`), and every active wait (`waits`) |
 | POST | `/console/api/items/{id}/stop` | Stop the running turn of a console conversation (409 when nothing runs) |
 | GET | `/console/api/files/{key}/{token}/{name}` | A file an agent delivered in a console conversation |
 | POST | `/console/api/items/{id}/start` | Hand a written-down item to an agent in a console conversation (no chat thread) |
@@ -583,6 +584,49 @@ Finishing a parent from the Console completes its descendants first, including g
 The button shows the full completion count. A failed descendant leaves its ancestors open.
 The immediate Undo reopens only the items completed by that action. This is the web client's
 family action; the individual `/items/{id}/done` API still changes only that item.
+
+### Where things stand
+
+A thread family's conversation has a **📍 Where things stand** panel beside it, so a child's report cannot
+push what you are being asked out of view. It does not scroll with the conversation, and it follows
+the parent while you stay on a child.
+
+| Heading | Measured, no agent needed | Written by the parent |
+|---|---|---|
+| 🙋 Needed from you | Every family member marked ❓ 👀 📋 ⚠️, with triage's next step | `asks`, each with **↩ Answer** |
+| ⚙️ Running | Running and queued turns, active waits | `doing` |
+| ✅ Decided and done | 🏁 completion candidates, finished children (folded) | `decided` |
+
+**↩ Answer** quotes the question into the reply box of the parent, opening it first if you are on a
+child; send your answer there and the parent carries it to its children. The list of child threads and
+a bound Workspace entry (with its `status.md`) move into the panel, which gives the conversation
+back the height. Below 640 px of pane width, a phone included, the panel is a tab next to the
+conversation that counts what is asked of you; the reply box stays visible on both. On a narrow screen a child keeps
+its way back to the parent above the conversation.
+
+The panel names how old the parent's record is, and flags one more than 15 minutes older than the family's
+latest activity. A thread with no children shows no panel unless its agent wrote a record.
+
+The parent keeps its part with the control-plane API. Agents are told how in their run context:
+
+```bash
+curl -s -X PUT "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/situation" \
+  -H "Content-Type: application/json" \
+  -d '{"asks": ["Move on 11/9 or 11/16? I recommend 11/16: testing ends on the 13th."],
+       "doing": ["Payments and E2E tests in two children"],
+       "decided": ["Payments stay on one provider"]}'
+```
+
+Each field is an array of up to 40 strings of up to 600 characters. A field you send replaces that
+field and one you leave out stays. An unknown field is refused. `GET` on the same URL returns the record,
+and the Console reads it from `GET /console/api/items/{id}/situation` along with the active waits. The record is
+stored per thread (`thread_situation`), not in `status.md`:
+one project can have several families at once and a family can exist with no project, see
+[ADR-0017](adr/0017-keep-a-family-situation-beside-the-conversation.md).
+
+In the conversation itself, prompts the relay started a turn with (relays from other sessions, finished waits,
+restart resumes) are activity, shown only with **⚙ Activity**. The agent's answers in such a turn stay visible,
+slightly dimmed, under "↪ Handling a report or a finished wait".
 
 ### Selecting and completing multiple threads
 
