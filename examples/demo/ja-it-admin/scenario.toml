@@ -14,6 +14,24 @@ query = "tag:m365 -is:done"
 name = "急ぎ（P0〜P1）"
 query = "p:<=1 -is:done"
 
+# A declarative page: a screen registered as data, in the menu with its open count (docs/console-pages.md).
+[[pages]]
+slug = "by-hand"
+title = "✋ 手作業の待ち"
+
+[[pages.items]]
+key = "license-order"
+title = "E5 ライセンスを3本追加発注する"
+body = "新入社員3名の分。ベンダーのポータルから発注し、承認は人が行う。"
+url = "https://example.com/portal/orders/new"
+source = "M365運用"
+
+[[pages.items]]
+key = "notice-post"
+title = "勉強会の告知を社内SNSに貼る"
+body = "AI が作った文面をコピーして貼るだけ。"
+source = "社内勉強会"
+
 [[items]]
 title = "新入社員3名のアカウントを作って（明後日入社）"
 note = "名簿は M365運用/入社者名簿_10月.md。E5ライセンスと部署グループもお願い。終わったら名簿の人に送る初回サインイン案内の文面も。"

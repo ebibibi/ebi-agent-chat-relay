@@ -233,6 +233,7 @@ async function refresh() {
     state.slots = data.slots || {};
     state.places = data.places || [];
     window.ConsoleViews.onBoard(data.views || []);
+    window.ConsolePages.onBoard(data.pages || []);
     window.ConsoleFocus.setGuide(data.guide || null);
     if (!state.defaultsLoaded) { state.defaultsLoaded = true; window.ConsoleBackend.loadDefaults(); }
     if (state.open && !state.byId.has(state.open)) state.open = null;
@@ -440,7 +441,7 @@ function renderNav() {
   counts.tree = state.items.filter((i) => i.bucket !== "done").length;
   counts.focus = window.ConsoleFocus.count(state.items);
   const nav = $("nav-views");
-  nav.replaceChildren(
+  nav.replaceChildren(...[
     ...VIEWS.map((v) => v.sep ? h("div", { class: "sep" }) : h("button", {
       class: state.view === v.key ? "active" : "",
       "aria-current": state.view === v.key ? "page" : null,
@@ -449,6 +450,7 @@ function renderNav() {
       class: "count" + (v.hot && counts[v.key] ? " hot" : ""), text: counts[v.key] || "",
     }))),
     window.ConsoleViews.nav(),
+    window.ConsolePages.nav(),
     window.ConsoleSlots.nav(),
     window.ConsoleWorkspace.nav(),
     window.ConsoleNoteSearch.nav(),
@@ -459,7 +461,7 @@ function renderNav() {
       h("span", { text: window.ConsoleNotify.isOn() ? T.notify_on : T.notify_off })) : null,
     h("button", { class: "nav-auth", onclick: () => window.ConsoleAuth.showDevices() },
       h("span", { text: `🔑 ${window.ConsoleAuth.label}` })),
-  );
+  ].filter(Boolean));
   $("view-title").textContent = window.ConsoleViews.title() || T[state.view];
   const hot = counts.me || 0;
   document.title = hot ? `(${hot}) Ebi AI Console` : "Ebi AI Console";

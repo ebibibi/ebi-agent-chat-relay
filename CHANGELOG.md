@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Console pages: a session, script or job adds a screen to the Console's menu by registering data
+  over `/api/pages`, with no code loaded into the browser. Items are worked through by a person and
+  can be resolved by automation that observes the outcome. See `docs/console-pages.md`.
+
+### Added
+
 - **A panel beside a thread family's conversation** — 📍 *Where things stand* stays in place while
   reports arrive and shows what is needed from you, what is running and what is decided and done.
   Status, running turns, waits and finished children are measured; the parent adds its open questions,

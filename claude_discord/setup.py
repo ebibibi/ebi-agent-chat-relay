@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from .database.lineage_repo import ThreadLineageRepository
     from .database.lounge_repo import LoungeRepository
     from .database.notification_repo import NotificationRepository
+    from .database.pages_repo import PageRepository
     from .database.repository import SessionRepository, UsageStatsRepository
     from .database.resume_repo import PendingResumeRepository
     from .database.settings_repo import SettingsRepository
@@ -67,6 +68,7 @@ class BridgeComponents:
     #: can see its own fan-out instead of inferring it from thread titles.
     lineage_repo: ThreadLineageRepository | None = None
     situation_repo: ThreadSituationRepository | None = None
+    page_repo: PageRepository | None = None
     resume_repo: PendingResumeRepository | None = None
     ingest_repo: IngestResultRepository | None = None
     summary_repo: ThreadSummaryRepository | None = None
@@ -111,6 +113,8 @@ class BridgeComponents:
             api_server.lineage_repo = self.lineage_repo
         if self.situation_repo is not None:
             api_server.situation_repo = self.situation_repo
+        if self.page_repo is not None:
+            api_server.page_repo = self.page_repo
         if self.resume_repo is not None:
             api_server.resume_repo = self.resume_repo
         if self.ingest_repo is not None:
@@ -647,6 +651,7 @@ async def setup_bridge(
         wait_repo=stores.waits if enable_waits else None,
         lineage_repo=lineage_repo,
         situation_repo=stores.situations,
+        page_repo=stores.pages,
         resume_repo=resume_repo,
         ingest_repo=ingest_repo,
         summary_repo=summary_repo,
