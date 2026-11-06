@@ -228,7 +228,9 @@ restart there is nothing to press — exactly as nothing is waiting any more.
 A strip across the top of every screen shows how much each backend has left: per rate-limit
 window (5-hour, weekly, …) a bar, the percentage used and the time until it resets. Colours turn
 amber at 70% and red at 90%. A backend that is at its limit shows **⛔ back HH:MM** with the time
-remaining. On a phone the strip wraps, so every backend stays visible.
+remaining. On a phone the strip folds to the default backend (the one new conversations start
+with): a **+N ▾** button on the same row shows the others, **▴** folds them again. Sign-in chips
+stay visible while folded. Every page load starts folded.
 
 - **Claude**: the windows the CLI reports after every turn. A window whose reset time has passed
   reads as reset until the next turn refreshes it.

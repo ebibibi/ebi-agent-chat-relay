@@ -1,5 +1,6 @@
 // Usage strip: how much each backend has left and when an exhausted one is back.
-// Always on screen, above the board. Server data reaches the page through textContent only.
+// Always on screen, above the board; on a phone it folds to the default backend until opened.
+// Server data reaches the page through textContent only.
 "use strict";
 
 (() => {
@@ -7,10 +8,10 @@
   const TICK_MS = 20000;
   const L = new Proxy({
     en: { back: "back", reset: "reset", unavailable: "usage unavailable", nodata: "no usage yet", subs: "Subscription usage (Foundry / API routes are not counted here)",
-          credits: (n) => `${n} resets`, resetsAt: "resets", d: "d", h: "h", m: "m",
+          credits: (n) => `${n} resets`, more: "Show every backend", less: "Show only the default", resetsAt: "resets", d: "d", h: "h", m: "m",
           out: (at, left) => `⛔ back ${at} (${left})` },
     ja: { back: "復活", reset: "リセット済", unavailable: "取得できません", nodata: "まだ記録なし", subs: "サブスクの利用枠（Foundry や API の接続先はここに含まれません）",
-          credits: (n) => `リセット券 ${n}`, resetsAt: "リセット", d: "日", h: "時間", m: "分",
+          credits: (n) => `リセット券 ${n}`, more: "すべてのAIを表示", less: "既定のAIだけ表示", resetsAt: "リセット", d: "日", h: "時間", m: "分",
           out: (at, left) => `⛔ 復活 ${at}（あと${left}）` },
   }, {get: (strings, key) => strings[document.documentElement.lang === "ja" ? "ja" : "en"][key]});
   const NAMES = { claude: "Claude", codex: "Codex", antigravity: "Antigravity", pi: "pi", local: "Local", agui: "AG-UI" };
@@ -23,6 +24,8 @@
   if (!strip) return;
   let data = null;
   let skew = 0; // server clock minus browser clock, seconds
+  let open = false; // phone: the strip starts folded to the default backend
+  const narrow = window.matchMedia("(max-width: 900px)");
 
   const now = () => Date.now() / 1000 + skew;
   const el = (tag, cls, text) => {
@@ -90,7 +93,27 @@
     // CLIs that are not signed in get a sign-in chip from clilogin.js.
     const signIn = window.consoleCliLogin ? window.consoleCliLogin.chips() : [];
     strip.hidden = backends.length === 0 && signIn.length === 0;
-    strip.replaceChildren(...backends.map(backendBlock), ...signIn);
+    const blocks = backends.map(backendBlock);
+    // A phone folds the strip to the default backend; sign-in chips stay, they need action.
+    const def = window.ConsoleBackend && window.ConsoleBackend.defaultBackend();
+    const others = backends.filter((b) => b.backend !== def).length;
+    const fold = narrow.matches && others > 0;
+    strip.classList.toggle("folded", fold && !open);
+    // Every render replaces the toggle; whoever was on it (keyboard, screen reader) stays on it.
+    const focused = document.activeElement?.classList.contains("u-toggle");
+    if (fold) {
+      const toggle = el("button", "u-toggle", open ? "▴" : `+${others} ▾`);
+      toggle.type = "button";
+      toggle.title = open ? L.less : L.more;
+      toggle.setAttribute("aria-label", toggle.title);
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.onclick = () => { open = !open; render(); };
+      const shown = open ? blocks : blocks.filter((_, i) => backends[i].backend === def);
+      strip.replaceChildren(...shown, ...signIn, toggle);
+      if (focused) toggle.focus();
+    } else {
+      strip.replaceChildren(...blocks, ...signIn);
+    }
     // Narrow screens overlay the nav and detail panes; they start below the strip.
     document.documentElement.style.setProperty("--usage-h", `${strip.hidden ? 0 : strip.offsetHeight}px`);
   }
@@ -115,6 +138,8 @@
     if (!document.hidden) { load(); poll = setInterval(load, POLL_MS); tick = setInterval(render, TICK_MS); }
   });
   window.addEventListener("resize", render);
+  // A new default folds the strip around it, even if it was expanded.
+  window.addEventListener("console-defaults-change", () => { open = false; render(); });
   window.addEventListener("console-language-change", render);
   window.addEventListener("console-cli-login-change", render);
   load();
