@@ -1,0 +1,42 @@
+/* The conversation and, for a thread family, the panel that does not scroll with it. */
+.d-body { flex: 1; min-height: 0; min-width: 0; display: flex; }
+.d-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.d-side { flex: none; width: min(360px, 42%); min-height: 0; overflow-y: auto; border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; }
+.d-side[hidden], .d-tabs[hidden] { display: none; }
+.d-side-core { padding: 10px 14px; display: flex; flex-direction: column; gap: 12px; }
+.d-side .family { max-height: none; border-top: 1px solid var(--line); border-bottom: 0; flex: none; overflow: visible; }
+.d-side .family-tasks { max-height: none; }
+.d-side .ws-pane { border-top: 1px solid var(--line); border-bottom: 0; flex: none; }
+.sit-title { margin: 0; font-size: 15px; }
+.sit-updated { margin: -8px 0 0; font-size: 12px; }
+.sit-updated.stale { color: var(--p1); }
+.sit-section { display: flex; flex-direction: column; gap: 4px; }
+.sit-head { margin: 0; font-size: 13px; font-weight: 700; }
+.sit-section.asks .sit-head { color: var(--p1); }
+.sit-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.sit-row { font-size: 13px; overflow-wrap: anywhere; }
+.sit-ask { padding: 6px 8px; border: 1px solid color-mix(in srgb, var(--p1) 45%, var(--line)); border-radius: 6px; display: flex; flex-direction: column; gap: 4px; }
+.sit-text p { margin: 0; }
+.sit-answer { align-self: flex-end; font-size: 12px; }
+.sit-thread { display: block; text-align: left; padding: 0; }
+.sit-detail { font-size: 12px; }
+.sit-empty { font-size: 12px; }
+
+/* Narrow: the panel takes the conversation's place behind a tab; the reply box stays. */
+.d-tabs { display: flex; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--line); flex: none; }
+.sit-tab { flex: 1; min-height: 36px; background: transparent; color: var(--dim); border: 1px solid var(--line); border-radius: 6px; font-size: 13px; cursor: pointer; }
+.sit-tab.on { color: var(--text); border-color: var(--accent); font-weight: 600; }
+.d-body[data-layout="tabs"] { flex-direction: column; }
+.d-body[data-layout="tabs"] .d-main { display: contents; }
+.d-body[data-layout="tabs"] .d-tabs { order: -1; }
+.d-body[data-layout="tabs"] .d-side { order: 2; flex: 1; width: auto; border-left: 0; }
+.d-body[data-layout="tabs"] .msgs-wrap { order: 2; }
+.d-body[data-layout="tabs"] .live-slot, .d-body[data-layout="tabs"] .reply { order: 3; }
+.d-body[data-layout="tabs"][data-tab="chat"] .d-side { display: none; }
+.d-body[data-layout="tabs"][data-tab="situation"] .msgs-wrap,
+.d-body[data-layout="tabs"][data-tab="situation"] .live-slot { display: none; }
+
+/* An answer to a child's report or a finished wait, not to the person. */
+.msg.background { opacity: .72; }
+.msg.background:hover { opacity: 1; }
+.msg-background { font-size: 11px; margin-bottom: 2px; }

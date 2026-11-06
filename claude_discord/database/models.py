@@ -128,6 +128,15 @@ CREATE TABLE IF NOT EXISTS thread_lineage (
 
 CREATE INDEX IF NOT EXISTS idx_thread_lineage_parent ON thread_lineage(parent_thread_id);
 
+-- What a parent thread says about where its work stands (situation_repo.py).
+CREATE TABLE IF NOT EXISTS thread_situation (
+    thread_id INTEGER PRIMARY KEY,
+    asks TEXT NOT NULL DEFAULT '[]',
+    doing TEXT NOT NULL DEFAULT '[]',
+    decided TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT NOT NULL
+);
+
 -- Waits (claude_discord/waits.py): a probe ccdb re-runs until it says done,
 -- then resumes the thread. Lets a session end its turn while CI runs instead
 -- of holding a concurrency slot. Times are Unix seconds.
@@ -232,6 +241,15 @@ _MIGRATIONS = [
         "created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')))"
     ),
     "CREATE INDEX IF NOT EXISTS idx_thread_lineage_parent ON thread_lineage(parent_thread_id)",
+    # thread_situation added for the Console's family panel
+    (
+        "CREATE TABLE IF NOT EXISTS thread_situation ("
+        "thread_id INTEGER PRIMARY KEY, "
+        "asks TEXT NOT NULL DEFAULT '[]', "
+        "doing TEXT NOT NULL DEFAULT '[]', "
+        "decided TEXT NOT NULL DEFAULT '[]', "
+        "updated_at TEXT NOT NULL)"
+    ),
 ]
 
 

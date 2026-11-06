@@ -59,6 +59,7 @@ from . import ingest_manifest, teams_reply, teams_sync
 from .attention_api import handle_attention
 from .entra_auth import EntraTokenVerifier, looks_like_jwt
 from .restart_api import handle_cancel_restart, handle_get_restart, handle_reserve_restart
+from .situation_api import handle_get_situation, handle_put_situation
 from .teams_store import MAX_ATTACHMENT_BYTES as TEAMS_MAX_ATTACHMENT_BYTES
 from .teams_store import TeamsVaultStore
 from .teams_sync import ThreadRef
@@ -78,6 +79,7 @@ if TYPE_CHECKING:
     from ..database.notification_repo import NotificationRepository
     from ..database.repository import SessionRepository
     from ..database.resume_repo import PendingResumeRepository
+    from ..database.situation_repo import ThreadSituationRepository
     from ..database.summary_repo import ThreadSummaryRepository
     from ..database.task_repo import TaskRepository
     from ..database.wait_repo import WaitRepository
@@ -296,6 +298,7 @@ class ApiServer:
         summary_repo: ThreadSummaryRepository | None = None,
         claims_repo: ClaimRepository | None = None,
         lineage_repo: ThreadLineageRepository | None = None,
+        situation_repo: ThreadSituationRepository | None = None,
         transcripts_path: str | None = None,
         ingest_require_complete: bool | None = None,
         teams_vault_root: str | None = None,
@@ -329,6 +332,7 @@ class ApiServer:
         self.summary_repo = summary_repo
         self.claims_repo = claims_repo
         self.lineage_repo = lineage_repo
+        self.situation_repo = situation_repo
         # Human-activity metering (GET /api/attention). Wired by
         # BridgeComponents.apply_to_api_server; 503 until then.
         self.attention_repo: HumanActivityRepository | None = None
@@ -429,6 +433,8 @@ class ApiServer:
         self.app.router.add_get("/api/search", self.search_sessions)
         self.app.router.add_get("/api/threads/{thread_id}/messages", self.get_thread_messages)
         self.app.router.add_post("/api/threads/{thread_id}/message", self.relay_thread_message)
+        self.app.router.add_get("/api/threads/{thread_id}/situation", self.get_situation)
+        self.app.router.add_put("/api/threads/{thread_id}/situation", self.put_situation)
         self.app.router.add_post("/api/threads/{thread_id}/done", self.mark_thread_done)
         self.app.router.add_post("/api/threads/{thread_id}/candidate", self.mark_thread_done)
         self.app.router.add_post("/api/threads/{thread_id}/waiting", self.mark_thread_waiting)
@@ -1829,6 +1835,14 @@ class ApiServer:
         channel, 400 when it is not a thread, 502 when the rename fails.
         """
         return await self._mark_thread_outcome(request, OUTCOME_CANDIDATE)
+
+    async def get_situation(self, request: web.Request) -> web.Response:
+        """GET /api/threads/{thread_id}/situation — what this parent last wrote for its panel."""
+        return await handle_get_situation(request, self.situation_repo)
+
+    async def put_situation(self, request: web.Request) -> web.Response:
+        """PUT /api/threads/{thread_id}/situation — replace the fields the body names."""
+        return await handle_put_situation(request, self.situation_repo)
 
     async def mark_thread_waiting(self, request: web.Request) -> web.Response:
         """POST /api/threads/{thread_id}/waiting — the next move is the human's.

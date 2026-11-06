@@ -605,6 +605,7 @@ function renderDetail() {
   window.ConsoleMobile.layout(item, !editing);
   window.ConsoleFamily.render(item);
   window.ConsoleWsPane.render(item);
+  window.ConsoleSituation.render(item);
   window.ConsoleThreadNotes.render(item);
   window.ConsoleZen.bar(pane);
   placeToasts();
@@ -620,10 +621,7 @@ function buildDetail(pane, item, key) {
   const msgs = h("div", { class: "msgs", id: "msgs", onscroll: updateJump });
   const jump = h("button", { class: "jump", id: "jump", type: "button", hidden: true,
     onclick: () => { msgs.scrollTop = msgs.scrollHeight; updateJump(); } });
-  const nodes = [
-    h("div", { class: "d-head", id: "d-head" }),
-    h("div", { class: "d-drawer", id: "d-drawer", hidden: true }),
-    window.ConsoleBackend.controls(item),
+  const main = [
     h("section", { class: "family", id: "d-family", hidden: true, "aria-label": LANG === "ja" ? "親子スレッド" : "Thread family" }),
     h("section", { class: "ws-pane", id: "d-ws", hidden: true, "aria-label": "Ebi Workspace" }),
     h("section", { class: "tnotes", id: "d-notes", hidden: true }),
@@ -641,14 +639,27 @@ function buildDetail(pane, item, key) {
       h("div", { class: "reply-main" }, meta, tray, box),
       h("div", { class: "reply-side" }, window.ConsolePaste.button(item.id),
         h("button", { class: "btn primary", type: "submit", text: T.send })));
-    nodes.push(form);
+    main.push(form);
     box.value = state.drafts[item.id] || "";
     window.ConsolePaste.attach(box, item.id, tray);
     window.ConsoleSlash.attach(box, item.id, meta);
     window.ConsoleBoxSize.attach(form, box, grow);
     requestAnimationFrame(() => grow(box));
   }
+  // The panel beside a thread family sits in .d-side; see situation.js.
+  const body = h("div", { class: "d-body", id: "d-body" },
+    h("div", { class: "d-tabs", id: "d-tabs", hidden: true }),
+    h("div", { class: "d-main", id: "d-main" }, ...main),
+    h("aside", { class: "d-side", id: "d-side", hidden: true, "aria-label": LANG === "ja" ? "現在地" : "Where things stand" },
+      h("div", { class: "d-side-core", id: "d-side-core" })));
+  const nodes = [
+    h("div", { class: "d-head", id: "d-head" }),
+    h("div", { class: "d-drawer", id: "d-drawer", hidden: true }),
+    window.ConsoleBackend.controls(item),
+    body,
+  ];
   pane.replaceChildren(...nodes.filter(Boolean));
+  window.ConsoleSituation.attach(body);
 }
 
 function headParts(item) {
@@ -851,7 +862,9 @@ function fillMessages(container, { force = false, toBottom = false } = {}) {
   const top = container.scrollTop;
   container.dataset.sig = sig;
   container.dataset.count = String(shown.length);
-  container.replaceChildren(...(shown.length ? shown.map(messageNode) : [h("div", { class: "empty", text: T.no_messages })]));
+  const background = window.ConsoleSituation.backgroundIds(state.messages);
+  const node = (m) => background.has(m.id) ? window.ConsoleSituation.markBackground(messageNode(m)) : messageNode(m);
+  container.replaceChildren(...(shown.length ? shown.map(node) : [h("div", { class: "empty", text: T.no_messages })]));
   if (follow) container.scrollTop = container.scrollHeight;
   else {
     // Replacing every child can reset the scroll position; put the reader back where they were.

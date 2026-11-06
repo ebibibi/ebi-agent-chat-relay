@@ -22,3 +22,4 @@ earlier ADR instead of rewriting its history.
 - [ADR-0014: Publish the Ebi AI Console as version 5](0014-publish-the-ebi-ai-console-as-v5.md)
 - [ADR-0015: Center thread families on the parent conversation](0015-center-thread-families-on-the-parent-conversation.md)
 - [ADR-0016: Map ccdb permissions onto agy's own flags instead of gating the Antigravity backend](0016-map-ccdb-permissions-onto-agy-flags.md)
+- [ADR-0017: Keep a family's situation beside the conversation, per thread](0017-keep-a-family-situation-beside-the-conversation.md)

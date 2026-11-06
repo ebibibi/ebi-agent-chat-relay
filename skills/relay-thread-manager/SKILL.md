@@ -150,7 +150,29 @@ curl -s -X POST "$CCDB_API_URL/api/threads/<worker_thread_id>/message" \
   lounge and in both threads. Treat that alert as your scheduling mistake to fix —
   move one of the items to a later round instead of letting both continue.
 
-## 5. Decide what you can decide, escalate the rest
+## 5. Keep the situation panel current
+
+The Console shows a panel beside your conversation so the human can see where things stand while
+reports keep arriving. It measures who is running and who is waiting; what you need from them and what
+has been settled is yours to write. Update it before ending any turn that changed it, including a turn a
+worker's report started:
+
+```bash
+curl -s -X PUT "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/situation" \
+  -H "Content-Type: application/json" \
+  -d '{"asks": ["Move on 11/9 or 11/16? I recommend 11/16: testing ends on the 13th."],
+       "doing": ["Payments and E2E tests in two workers"],
+       "decided": ["Payments stay on one provider"]}'
+```
+
+- A field you send replaces that field; one you leave out stays. `GET` returns the current record.
+- **`asks` is the human's to-do list from you.** Gather workers' questions here, each understandable on
+  its own and with your recommendation, so they can answer you alone. Remove an entry once it is answered.
+- **`decided` is what must not get lost.** Keep entries across updates; project-level facts still go in
+  the project's own records, issues or PRs.
+- A worker's report that changes nothing for the human needs no message to them: update the panel instead.
+
+## 6. Decide what you can decide, escalate the rest
 
 You may decide: how work is split, ordering, which worker owns what, resolving
 overlaps between workers, re-briefing a stuck worker.
@@ -167,7 +189,7 @@ decide — then mark your own thread as waiting:
 curl -s -X POST "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/waiting"
 ```
 
-## 6. Collect and close
+## 7. Collect and close
 
 When every worker has reported and you have verified the artifacts:
 

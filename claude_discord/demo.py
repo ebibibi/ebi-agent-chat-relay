@@ -136,6 +136,9 @@ def seed_requests(scenario: Scenario, today: date) -> list[tuple[str, dict[str, 
         }
         if "due" in item:
             body["due_at"] = resolve_due(item["due"], today, scenario.timezone)
+        if "parent" in item:
+            # The parent's title; seed() swaps it for the id the Console gives that item.
+            body["parent"] = render_text(item["parent"], today)
         requests.append(("/console/api/items", body))
     requests.extend(("/console/api/views", dict(view)) for view in scenario.views)
     return requests
@@ -203,7 +206,7 @@ def wipe_data(root: Path) -> None:
             shutil.rmtree(child)
 
 
-def _post(url: str, token: str, body: dict[str, Any]) -> None:
+def _post(url: str, token: str, body: dict[str, Any]) -> dict[str, Any]:
     request = urllib.request.Request(
         url,
         data=json.dumps(body).encode(),
@@ -216,7 +219,8 @@ def _post(url: str, token: str, body: dict[str, Any]) -> None:
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=30) as response:
-        response.read()
+        raw = response.read()
+    return json.loads(raw) if raw else {}
 
 
 def wait_for_console(base_url: str, token: str, timeout: float = 120.0) -> None:
@@ -237,9 +241,18 @@ def wait_for_console(base_url: str, token: str, timeout: float = 120.0) -> None:
 def seed(scenario: Scenario, base_url: str, token: str, today: date) -> int:
     wait_for_console(base_url, token)
     requests = seed_requests(scenario, today)
-    for path, body in requests:
+    ids: dict[str, str] = {}
+    for path, seeded in requests:
+        body = dict(seeded)
+        parent = body.pop("parent", None)
+        if parent is not None:
+            if parent not in ids:
+                raise DemoError(f"{body.get('title')}: parent {parent!r} is not an earlier item")
+            body["parent_id"] = ids[parent]
         try:
-            _post(base_url + path, token, body)
+            created = _post(base_url + path, token, body)
+            if path.endswith("/items"):
+                ids[body["title"]] = created["item"]["id"]
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode(errors="replace")[:200]
             # A place that survived from an earlier seed is not an error.
