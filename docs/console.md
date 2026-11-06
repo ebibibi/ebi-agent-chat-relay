@@ -519,6 +519,9 @@ Endpoints need authentication unless marked *(no sign-in)*. Every method except 
 | POST | `/console/api/items/{id}/reopen` | Clear the done/someday verdict |
 | GET / POST | `/console/api/views` | The saved views (also in every board as `views`); save one with `{name, query}` — see [Saved views](#saved-views-and-the-filter-language) |
 | PATCH / DELETE | `/console/api/views/{id}` | Change (`name`, `query`, `position`) or delete a saved view |
+| POST | `/console/api/pages/{slug}` | Define a [page](console-pages.md) (also in every board as `pages`) |
+| GET / POST | `/console/api/pages/{slug}/items` | One page's items in one state (`?state=open`); register an item |
+| PATCH | `/console/api/pages/{slug}/items/{key}` | A person moves an item to `open`, `done` or `skipped` |
 | GET / POST / PATCH / DELETE | `/console/api/places` | The managed list of places with open-item counts; add `{name}`, rename `{from, name}` (every item follows), delete `{name}` (items become doable anywhere) |
 | GET | `/console/api/items/{id}/live` | A console conversation's running turn: status, tool activity, the answer so far, whether it can be stopped |
 | POST | `/console/api/items/{id}/messages/{message_id}/actions/{action_id}` | Press a button listed in a message's `actions` (404 once it is answered) |

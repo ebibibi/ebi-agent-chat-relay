@@ -26,6 +26,7 @@ from .database.ingest_repo import IngestResultRepository
 from .database.lineage_repo import ThreadLineageRepository
 from .database.lounge_repo import LoungeRepository
 from .database.models import init_db
+from .database.pages_repo import PageRepository
 from .database.repository import SessionRepository, UsageStatsRepository
 from .database.resume_repo import PendingResumeRepository
 from .database.settings_repo import SettingsRepository
@@ -60,6 +61,8 @@ class SessionStores:
     attention: HumanActivityRepository
     #: Waits a session registered before ending its turn (``/api/waits``).
     waits: WaitRepository
+    #: Screens automation adds to the Console by registering data (``/api/pages``).
+    pages: PageRepository
 
 
 async def build_session_stores(session_db_path: str) -> SessionStores:
@@ -81,6 +84,8 @@ async def build_session_stores(session_db_path: str) -> SessionStores:
     await summaries.init_db()
     attention = HumanActivityRepository(session_db_path)
     await attention.init_db()
+    pages = PageRepository(session_db_path)
+    await pages.init_db()
 
     # Adopt every thread this deployment already has, so the ledger answers for
     # all of its conversations rather than only the ones opened from now on.
@@ -105,4 +110,5 @@ async def build_session_stores(session_db_path: str) -> SessionStores:
         situations=ThreadSituationRepository(session_db_path),
         attention=attention,
         waits=WaitRepository(session_db_path),
+        pages=pages,
     )

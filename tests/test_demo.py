@@ -218,6 +218,17 @@ class TestPost:
 
 
 class TestSavedViews:
+    def test_a_page_is_defined_before_its_items(self, tmp_path: Path) -> None:
+        root = _scenario(tmp_path)
+        (root / "scenario.toml").write_text(
+            (root / "scenario.toml").read_text(encoding="utf-8")
+            + '\n[[pages]]\nslug = "by-hand"\ntitle = "By hand"\n'
+            + '[[pages.items]]\nkey = "a"\nbody = "text"\n',
+            encoding="utf-8",
+        )
+        paths = [path for path, _ in demo.seed_requests(demo.load_scenario(root), TODAY)]
+        assert paths[-2:] == ["/console/api/pages/by-hand", "/console/api/pages/by-hand/items"]
+
     def test_views_are_seeded_after_the_items(self, tmp_path: Path) -> None:
         root = _scenario(tmp_path)
         toml = root / "scenario.toml"

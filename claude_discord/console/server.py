@@ -33,6 +33,7 @@ from claude_code_core.account_pool import HOME_ENV_VAR
 from claude_code_core.attention_repo import AttentionRecorder
 
 from ..account_turns import session_home
+from ..database.pages_repo import PageRepository
 from ..message_actions import message_actions
 from ..teams_exporter import source_tags
 from ..thread_marker import OUTCOME_DONE, thread_outcome
@@ -60,6 +61,7 @@ from .guide import build_guide
 from .logsafe import q as _q
 from .messages import KIND_ACTIVITY, serialize_message, with_kind
 from .oidc import OidcClient, OidcConfig, provider_name
+from .pages import PageRoutes
 from .passkey_store import PasskeyStore
 from .passkeys import PasskeyService
 from .places import PlaceError, PlaceRepository
@@ -371,6 +373,11 @@ class ConsoleServer:
         r.add_post(f"{API_PREFIX}/views", view_routes.add)
         r.add_patch(f"{API_PREFIX}/views/{{view_id}}", view_routes.patch)
         r.add_delete(f"{API_PREFIX}/views/{{view_id}}", view_routes.delete)
+        page_routes = PageRoutes(self.api)
+        r.add_post(f"{API_PREFIX}/pages/{{slug}}", page_routes.define)
+        r.add_get(f"{API_PREFIX}/pages/{{slug}}/items", page_routes.items)
+        r.add_post(f"{API_PREFIX}/pages/{{slug}}/items", page_routes.add)
+        r.add_patch(f"{API_PREFIX}/pages/{{slug}}/items/{{key}}", page_routes.change)
         r.add_post(f"{API_PREFIX}/items", self.create_item)
         r.add_patch(f"{API_PREFIX}/items/{{item_id}}", self.patch_item)
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/messages", self.messages)
@@ -637,6 +644,7 @@ class ConsoleServer:
                 "slots": self._slots(),
                 "places": await self._place_list(items),
                 "views": await self._view_list(),
+                "pages": await self._page_list(),
             }
         )
 
@@ -648,6 +656,17 @@ class ConsoleServer:
             return [v.as_dict() for v in await self.views.list()]
         except Exception:
             logger.exception("console: could not read saved views")
+            return []
+
+    async def _page_list(self) -> list[dict[str, Any]]:
+        """Pages added over ``/api/pages``, sent with every board so the menu stays current."""
+        repo = getattr(self.api, "page_repo", None)
+        if not isinstance(repo, PageRepository):
+            return []
+        try:
+            return [p.as_dict() for p in await repo.list_pages()]
+        except Exception:
+            logger.exception("console: could not read pages")
             return []
 
     def _bind_workspace(
