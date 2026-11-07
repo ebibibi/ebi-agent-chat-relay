@@ -76,6 +76,101 @@ window.ConsoleMobile = (() => {
       e.preventDefault();e.stopImmediatePropagation();toggleDrawer();
     }
   }, true);
+  // Swipe right goes back through the layers Escape closes. Elsewhere in the list swipe right
+  // opens the menu and swipe left closes it. Text boxes and sideways-scrolling code keep their drags.
+  // A list row follows the finger like Gmail: right finishes, left toggles the pin, each over its
+  // own colour, and acts only when let go past a third of the row.
+  let swipe = null;
+  const SETTLE_MS = 200;
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+  const scrollsX = n => {
+    for (; n && n !== document.body; n = n.parentElement)
+      if (n.scrollWidth > n.clientWidth && /auto|scroll/.test(getComputedStyle(n).overflowX)) return true;
+    return false;
+  };
+  // A poll re-renders the list mid-drag, so the row is looked up again rather than held.
+  const rowNode = k => document.querySelector(`#list .row[data-item-id="${CSS.escape(k.id)}"][data-occurrence="${k.n}"]`);
+  function paint(k, dx, settling) {
+    const list = $('list'), row = rowNode(k);
+    if (!row) return;
+    const item = state.byId.get(k.id), ja = LANG === 'ja';
+    const kind = dx < 0 ? 'pin' : item?.bucket === 'done' ? '' : 'finish';
+    row.classList.add('swiping');
+    row.classList.toggle('settling', Boolean(settling));
+    row.style.transform = dx ? `translateX(${dx}px)` : '';
+    list.dataset.swipe = kind;
+    list.dataset.swipeLabel = kind === 'pin' ? (item?.pinned_at ? (ja ? 'ピンを外す' : 'Unpin') : (ja ? '📌 ピン留め' : '📌 Pin'))
+      : kind ? (ja ? '✓ 完了' : '✓ Finish') : '';
+    list.classList.toggle('swipe-past', Math.abs(dx) >= row.offsetWidth / 3);
+    list.style.setProperty('--swipe-top', `${row.offsetTop}px`);
+    list.style.setProperty('--swipe-height', `${row.offsetHeight}px`);
+  }
+  function unpaint(k) {
+    const list = $('list'), row = rowNode(k);
+    row?.classList.remove('swiping', 'settling');
+    if (row) row.style.transform = '';
+    delete list.dataset.swipe;
+    list.classList.remove('swipe-past');
+  }
+  async function release(k, dx) {
+    const row = rowNode(k), item = state.byId.get(k.id);
+    const past = row && Math.abs(dx) >= row.offsetWidth / 3;
+    const finish = past && dx > 0 && item?.bucket !== 'done', pin = past && dx < 0;
+    // Finishing slides the row out the way it was pushed; anything else springs back.
+    paint(k, finish ? row.offsetWidth : 0, true);
+    await new Promise(r => setTimeout(r, reduced.matches ? 0 : SETTLE_MS));
+    if (!finish) unpaint(k);
+    try {
+      if (finish) await window.ConsoleFinish.finish(k.id);
+      else if (pin) await togglePin(k.id);
+    } finally { unpaint(k); }
+  }
+  document.addEventListener('touchstart', e => {
+    if (swipe) stop();
+    const t = e.touches[0];
+    const row = !state.open && e.target.closest('#list .row');
+    swipe = narrow.matches && e.touches.length === 1 && !(window.visualViewport?.scale > 1.1)
+      && !e.target.closest('input:not([type=checkbox], [type=radio]), textarea, select, [contenteditable], .cm-editor') && !scrollsX(e.target)
+      ? {x: t.clientX, y: t.clientY, at: e.timeStamp, row: row && {id: row.dataset.itemId, n: row.dataset.occurrence}, drag: false} : null;
+    // On the touched node, not the document: once a poll re-renders the list, the touched row is
+    // detached and its events no longer bubble up. Not passive, so a sideways drag stops the scroll.
+    if (swipe) track(e.target, true);
+  }, {passive: true});
+  function track(el, on) {
+    const method = on ? 'addEventListener' : 'removeEventListener';
+    el[method]('touchmove', move, {passive: false});
+    el[method]('touchend', end);
+    el[method]('touchcancel', cancel);
+    if (on) swipe.el = el;
+  }
+  function stop() { if (swipe) track(swipe.el, false); swipe = null; }
+  function move(e) {
+    if (!swipe?.row || $('nav').classList.contains('open')) return;
+    const t = e.touches[0], dx = t.clientX - swipe.x, dy = t.clientY - swipe.y;
+    if (!swipe.drag) {
+      if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) { stop(); return; }
+      if (Math.abs(dx) < 10) return;
+      swipe.drag = true;
+    }
+    e.preventDefault();
+    paint(swipe.row, dx);
+  }
+  function cancel() {
+    if (swipe?.drag) release(swipe.row, 0);
+    stop();
+  }
+  function end(e) {
+    if (!swipe) return;
+    const t = e.changedTouches[0], dx = t.clientX - swipe.x, dy = t.clientY - swipe.y, slow = e.timeStamp - swipe.at > 600;
+    if (swipe.drag) { release(swipe.row, dx); stop(); return; }
+    const nav = $('nav'), back = state.open || location.hash.startsWith('#note/'), row = swipe.row;
+    stop();
+    if (slow || Math.abs(dx) < 70 || Math.abs(dx) < 2 * Math.abs(dy) || getSelection().toString()) return;
+    if (nav.classList.contains('open')) { if (dx < 0) nav.classList.remove('open'); }
+    else if (row || dx < 0 || document.querySelector('.note-edit')) return;
+    else if (back) document.body.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+    else nav.classList.add('open');
+  }
   viewport();
   return {layout};
 })();

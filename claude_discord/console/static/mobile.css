@@ -61,6 +61,23 @@
   .capture .attach { min-width: 44px; min-height: 40px; }
   .capture textarea { font-size: 16px; }
   .jump { min-height: 40px; right: 10px; bottom: 8px; }
+  /* Swiping a row: the row slides over a fixed band that names what letting go will do. */
+  .list { position: relative; overflow-x: hidden; }
+  .list[data-swipe]:not([data-swipe=""])::before { content: attr(data-swipe-label); position: absolute; left: 0; right: 0;
+    top: var(--swipe-top); height: var(--swipe-height); display: flex; align-items: center; padding: 0 20px;
+    font-weight: 600; color: #0d1020; opacity: .55; transition: opacity 150ms ease; }
+  .list[data-swipe=finish]::before { background: var(--ai); justify-content: flex-start; }
+  .list[data-swipe=pin]::before { background: var(--p1); justify-content: flex-end; }
+  .list.swipe-past[data-swipe]::before { opacity: 1; }
+  /* Opaque so the band shows only where the row has moved away; pinned keeps its tint on top. */
+  .list .row.swiping { position: relative; background-color: var(--bg); }
+  .list .row.pinned.swiping { background: linear-gradient(color-mix(in srgb, var(--p1) 12%, transparent), color-mix(in srgb, var(--p1) 12%, transparent)), var(--bg); }
+  .list .row.sel.swiping { background-color: var(--raise); }
+  .list .row.settling { transition: transform 200ms cubic-bezier(0.23, 1, 0.32, 1); }
+}
+@media (max-width: 900px) and (prefers-reduced-motion: reduce) {
+  .list .row.settling { transition: none; }
+  .list[data-swipe]::before { transition: none; }
 }
 /* Landscape phones: the conversation needs the height more than a third line does. */
 @media (max-width: 900px) and (max-height: 500px) {

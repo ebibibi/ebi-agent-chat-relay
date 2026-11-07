@@ -26,6 +26,13 @@ completion, AI settings, links, pinning and task details. Child-task summaries a
 start collapsed on mobile; tap their headings to expand them. Replying directly to a child
 still requires the explicit child-reply action.
 
+Swipes stand in for the header buttons. In a conversation or a note, swipe right to go back
+(the same layers Escape closes, one at a time). On the list, swipe a row right to finish it
+(with the usual Undo toast) or left to pin or unpin it: the row follows the finger over a green
+or orange band naming the action, and acts only when let go past a third of its width; short
+of that it springs back. Swipe right outside the rows to open Menu and left to close it. Text
+fields, the note editor and sideways-scrolling code blocks keep their own drags.
+
 Changing lists from Menu returns to the list. Drafts and pending uploads survive returning to
 a conversation and rotating the screen. Bulk completion controls appear after selecting a row.
 Desktop controls retain their existing layout.
