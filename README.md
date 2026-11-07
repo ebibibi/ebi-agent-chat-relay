@@ -189,7 +189,6 @@ No Discord, no Teams, no bot token: just the web console. You need Python 3.12+,
 ```bash
 git clone https://github.com/ebibibi/ebi-agent-chat-relay.git && cd ebi-agent-chat-relay
 uv sync --extra console
-mkdir -p data
 printf 'CCDB_FRONTENDS=console\nAPI_PORT=8099\nCCDB_CONSOLE_PORT=8100\n' > .env
 uv run ccdb start
 ```
