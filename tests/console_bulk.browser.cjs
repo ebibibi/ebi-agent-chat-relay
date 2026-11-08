@@ -111,14 +111,15 @@ test('child list entry opens the child; direct child replies require a fresh exp
   assert.equal(await app.page.locator('form.reply').isVisible(),false);
   await app.page.locator('.family-parent').click();
   assert.equal(await app.page.evaluate(()=>state.open),'parent');
-  await app.page.locator('.family-open').click();
+  // A parent's children are listed in the situation panel beside the conversation.
+  await app.page.locator('.sit-member .sit-thread',{hasText:'child'}).click();
   assert.equal(await app.page.evaluate(()=>state.open),'child');
   assert.equal(await app.page.locator('form.reply').isVisible(),false);
   await app.page.locator('.family-direct').click();
   assert.equal(await app.page.locator('form.reply').isVisible(),true);
   assert.match(await app.page.locator('#reply').getAttribute('placeholder'),/child/i);
   await app.page.locator('.family-parent').click();
-  await app.page.locator('.family-open').click();
+  await app.page.locator('.sit-member .sit-thread',{hasText:'child'}).click();
   assert.equal(await app.page.locator('form.reply').isVisible(),false);
 });
 test('a failed descendant keeps its parent open and retries the family', async t => {

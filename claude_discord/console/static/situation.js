@@ -1,34 +1,48 @@
-// The panel beside a thread family's conversation: what the person is asked for, what is
-// running, what is settled. It does not scroll with the conversation, so a child's report
-// cannot push the current question out of view.
-// What is measured (status, running, waits) needs no agent; what only the parent can say
-// comes from /items/{id}/situation and shows how old it is.
-// Loaded after family.js and wspane.js and before app.js, which calls these from renderDetail.
+// The panel beside a thread family's conversation: what the person is asked for, what each
+// thread is doing, what is settled, and a reply box. It does not scroll with the conversation,
+// so a child's report cannot push the current question out of view, and it can be read and
+// answered on its own. The person can fold it to a rail; the choice is remembered.
+// What is measured (status, running, waits, latest reports) needs no agent; what only the
+// parent can say comes from /items/{id}/situation and shows how old it is.
+// Loaded after family.js, wspane.js and situation_reply.js and before app.js.
 "use strict";
 window.ConsoleSituation = (() => {
   const REFRESH_MS = 8_000;
   const SPLIT_MIN_PX = 640; // below this the panel becomes a tab beside the conversation
   const STALE_MS = 15 * 60_000;
+  const HIDDEN_KEY = "situationHidden";
   const STRINGS = {
     en: { title: "📍 Where things stand", asks: "🙋 Needed from you", running: "⚙️ Running", decided: "✅ Decided and done",
-      chat: "💬 Conversation", tab: "📍 Where things stand", none: "Nothing right now", answer: "↩ Answer",
-      answerHint: "Quote this in the reply to the parent", updated: (t) => `Parent's record: ${t}`,
-      stale: "older than the latest activity", unwritten: "The parent has not written anything yet; this is what is measured.",
+      members: "👥 Each thread", chat: "💬 Conversation", tab: "📍 Where things stand", none: "Nothing right now",
+      answer: "↩ Answer", answerHint: "Quote this in the reply box below", reply: "↩ Reply", replyHint: "Reply to this thread from the box below",
+      updated: (t) => `Parent's record: ${t}`, stale: "older than the latest activity",
+      unwritten: "The parent has not written anything yet; this is what is measured.",
       queued: "waiting for a slot", wait: "waiting for", done: (n) => `${n} finished`, candidate: "ready to confirm",
+      noReport: "No report yet", hide: "Hide this panel", show: "Show where things stand",
       background: "↪ Handling a report or a finished wait" },
     ja: { title: "📍 現在地", asks: "🙋 求められていること", running: "⚙️ 実行中", decided: "✅ 決定・完了",
-      chat: "💬 会話", tab: "📍 現在地", none: "今はありません", answer: "↩ 回答する",
-      answerHint: "親への返信欄に引用します", updated: (t) => `親の記入: ${t}`,
-      stale: "最新の動きより古い記入です", unwritten: "親はまだ記入していません。下は実測です。",
+      members: "👥 各スレッドの様子", chat: "💬 会話", tab: "📍 現在地", none: "今はありません",
+      answer: "↩ 回答する", answerHint: "下の返信欄に引用します", reply: "↩ 返信", replyHint: "下の返信欄からこのスレッドに返信します",
+      updated: (t) => `親の記入: ${t}`, stale: "最新の動きより古い記入です",
+      unwritten: "親はまだ記入していません。下は実測です。",
       queued: "実行枠の待ち", wait: "待機中", done: (n) => `完了 ${n}件`, candidate: "完了の確認待ち",
+      noReport: "まだ報告はありません", hide: "このパネルを隠す", show: "現在地を表示",
       background: "↪ 子の報告や待機完了への対応" },
   };
   const L = () => STRINGS[document.documentElement.lang === "ja" ? "ja" : "en"];
 
   const cache = new Map(); // item id -> {at, data}
   const pending = new Set();
+  const reports = new Map(); // item id -> {version, text}: the latest agent message, shortened
+  const reportsPending = new Set();
   let tab = "chat";
   let observer = null;
+  let hidden = localStorage.getItem(HIDDEN_KEY) === "1";
+
+  const redrawOpen = () => {
+    const current = state.open && state.byId.get(state.open);
+    if (current) render(current);
+  };
 
   async function load(id) {
     if (pending.has(id)) return;
@@ -39,14 +53,30 @@ window.ConsoleSituation = (() => {
       const data = await api(`/items/${encodeURIComponent(id)}/situation`);
       const before = JSON.stringify(cache.get(id)?.data);
       cache.set(id, { at: Date.now(), data });
-      const current = state.open && state.byId.get(state.open);
-      if (current && JSON.stringify(data) !== before) render(current);
+      if (JSON.stringify(data) !== before) redrawOpen();
     } catch {
       // Measured parts still show; the next poll tries again.
       cache.set(id, { at: Date.now(), data: cache.get(id)?.data || null });
     } finally {
       pending.delete(id);
     }
+  }
+
+  // Latest report of each member, refetched only when the board says the thread moved.
+  const version = (i) => `${i.last_activity_at || ""}|${i.status}|${Boolean(i.running)}`;
+  async function loadReports(members) {
+    const wanted = members.filter((i) => i.thread_id && !reportsPending.has(i.id) &&
+      reports.get(i.id)?.version !== version(i)).slice(0, Math.max(0, 3 - reportsPending.size));
+    if (!wanted.length) return;
+    await Promise.allSettled(wanted.map(async (i) => {
+      reportsPending.add(i.id);
+      try {
+        const data = await api(`/items/${encodeURIComponent(i.id)}/messages?limit=20`);
+        reports.set(i.id, { version: version(i), text: window.ConsoleFamily.excerpt(data.messages || []) });
+      } catch { reports.set(i.id, { version: version(i), text: "" }); }
+      finally { reportsPending.delete(i.id); }
+    }));
+    redrawOpen();
   }
 
   // The thread whose record to show: a parent writes its own, a leaf shows its root's.
@@ -56,48 +86,49 @@ window.ConsoleSituation = (() => {
 
   function model(item, family, holder, data) {
     const written = data && data.situation;
-    const members = [family.root, ...family.rows.map((r) => r.item)];
-    const needs = members.filter(window.ConsoleFamily.needsAttention)
+    const all = [family.root, ...family.rows.map((r) => r.item)];
+    const needs = all.filter(window.ConsoleFamily.needsAttention)
       // The parent's own marker says the same as the questions it wrote down.
       .filter((i) => !(i.id === holder.id && written && written.asks.length));
-    const ids = new Set(members.map((i) => i.thread_id).filter(Boolean));
-    const byThread = new Map(members.map((i) => [i.thread_id, i]));
+    const ids = new Set(all.map((i) => i.thread_id).filter(Boolean));
+    const byThread = new Map(all.map((i) => [i.thread_id, i]));
     const waits = ((data && data.waits) || []).filter((w) => ids.has(w.thread_id));
+    // Who still moves or waits on the person, those needing them first.
+    const open = all.filter((i) => i.status !== "done");
+    const members = [...open.filter((i) => needs.includes(i)), ...open.filter((i) => !needs.includes(i))];
     return {
-      holder, written, needs, waits, byThread,
-      running: members.filter((i) => i.running || i.queued),
-      candidates: members.filter((i) => i.status === "candidate"),
-      finished: members.filter((i) => i.status === "done"),
+      holder, written, needs, waits, byThread, members, root: family.root,
+      candidates: all.filter((i) => i.status === "candidate"),
+      finished: all.filter((i) => i.status === "done"),
     };
   }
 
   const count = (m) => (m.written ? m.written.asks.length : 0) + m.needs.length;
   const inline = (text) => h("div", { class: "md sit-text" }, window.ConsoleNotes.linkify(MD.render(text)));
+  const title = (i) => i.title || i.thread_name || i.id;
 
-  function answer(holder, text) {
-    const quote = `${text.split("\n").map((line) => `> ${line}`).join("\n")}\n\n`;
-    state.drafts[holder.id] = quote + (state.drafts[holder.id] || "");
-    const focus = () => {
-      const box = $("reply");
-      if (!box) return;
-      box.value = state.drafts[holder.id];
-      grow(box);
-      box.focus();
-      box.setSelectionRange(box.value.length, box.value.length);
-    };
-    if (state.open === holder.id) focus();
-    else { openItem(holder.id); requestAnimationFrame(focus); }
+  const openLink = (item, icon) => h("button", { type: "button", class: "linkish sit-thread",
+    onclick: () => openItem(item.id) }, `${icon || STATUS_ICON[item.status] || "·"} ${title(item)}`);
+  const threadRow = (item, detail, icon) => h("li", { class: "sit-row" }, openLink(item, icon),
+    detail ? h("div", { class: "dim sit-detail", text: detail }) : null);
+  const replyButton = (item) => h("button", { type: "button", class: "btn sit-answer", title: L().replyHint,
+    text: L().reply, onclick: () => window.ConsoleSituationReply.choose(item.id, { focus: true }) });
+
+  function memberRow(item, m) {
+    const l = L();
+    const report = reports.get(item.id)?.text;
+    const status = item.queued ? l.queued : item.running ? T.st.running || "" : T.st[item.status] || item.status;
+    return h("li", { class: "sit-row sit-member" + (m.needs.includes(item) ? " attention" : "") },
+      h("div", { class: "sit-member-head" }, openLink(item),
+        h("span", { class: "dim sit-detail", text: [status, rel(item.last_activity_at)].filter(Boolean).join(" · ") })),
+      h("p", { class: "sit-report" + (report ? "" : " dim"), text: report || (item.ai && item.ai.next_step) || l.noReport }),
+      replyButton(item));
   }
 
-  const threadRow = (item, detail, icon) => h("li", { class: "sit-row" },
-    h("button", { type: "button", class: "linkish sit-thread", onclick: () => openItem(item.id) },
-      `${icon || STATUS_ICON[item.status] || "·"} ${item.title || item.thread_name || item.id}`),
-    detail ? h("div", { class: "dim sit-detail", text: detail }) : null);
-
-  function section(title, tone, empty, ...rows) {
+  function section(heading, tone, empty, ...rows) {
     const body = rows.flat().filter(Boolean);
     return h("section", { class: `sit-section ${tone}` },
-      h("h3", { class: "sit-head", text: title }),
+      h("h3", { class: "sit-head", text: heading }),
       body.length ? h("ul", { class: "sit-list" }, ...body)
         : h("div", { class: "dim sit-empty", text: empty }));
   }
@@ -117,67 +148,94 @@ window.ConsoleSituation = (() => {
     const written = m.written || { asks: [], doing: [], decided: [] };
     const asks = written.asks.map((text) => h("li", { class: "sit-row sit-ask" }, inline(text),
       h("button", { type: "button", class: "btn sit-answer", title: l.answerHint, text: l.answer,
-        onclick: () => answer(m.holder, text) })));
-    const needs = m.needs.map((i) => threadRow(i, i.ai && i.ai.next_step));
+        onclick: () => window.ConsoleSituationReply.quote(m.holder.id, text) })));
+    const needs = m.needs.map((i) => h("li", { class: "sit-row sit-ask" }, openLink(i),
+      h("p", { class: "sit-report", text: reports.get(i.id)?.text || (i.ai && i.ai.next_step) || l.noReport }),
+      replyButton(i)));
     const doing = written.doing.map((text) => h("li", { class: "sit-row" }, inline(text)));
-    const running = m.running.map((i) => threadRow(i, i.queued ? l.queued : ""));
     const waits = m.waits.map((w) => {
       const owner = m.byThread.get(w.thread_id);
       return h("li", { class: "sit-row" },
         h("div", { text: `⏳ ${l.wait}: ${w.label}` }),
-        owner ? h("div", { class: "dim sit-detail", text: owner.title || owner.id }) : null);
+        owner ? h("div", { class: "dim sit-detail", text: title(owner) }) : null);
     });
     const decided = written.decided.map((text) => h("li", { class: "sit-row" }, inline(text)));
     const candidates = m.candidates.map((i) => threadRow(i, l.candidate));
     const finished = m.finished.length ? h("li", { class: "sit-row" }, h("details", {},
       h("summary", { class: "dim", text: l.done(m.finished.length) }),
       h("ul", { class: "sit-list" }, ...m.finished.map((i) => threadRow(i))))) : null;
+    const others = m.members.filter((i) => !m.needs.includes(i));
     return [
-      h("h2", { class: "sit-title", text: l.title }),
+      h("div", { class: "sit-top" },
+        h("h2", { class: "sit-title", text: l.title }),
+        h("button", { type: "button", class: "btn sit-hide", title: l.hide, "aria-label": l.hide, text: "›",
+          onclick: () => setHidden(true) })),
       freshness(m, family),
       section(l.asks, "asks", l.none, asks, needs),
-      section(l.running, "running", l.none, doing, running, waits),
+      section(l.running, "running", l.none, doing, waits),
+      section(l.members, "members", l.none, others.map((i) => memberRow(i, m))),
       section(l.decided, "decided", l.none, decided, candidates, finished),
     ];
   }
 
-  // Family list and Workspace entry join the panel, so the conversation keeps the height.
-  // A child keeps the family list in the conversation column at any width: it holds the
-  // way back to the parent and the only way to reply to the child, which the parent's
-  // record would otherwise push below the panel's fold.
-  function place(show, family) {
-    const side = $("d-side"), main = $("d-main"), notes = $("d-notes");
-    if (!side || !main || !notes) return;
+  function setHidden(next) {
+    hidden = next;
+    localStorage.setItem(HIDDEN_KEY, next ? "1" : "0");
+    if (!next && $("d-body")?.dataset.layout === "tabs") tab = "situation";
+    // A full redraw: the family list's own visibility comes back with it.
+    if (state.open) renderDetail();
+  }
+
+  // With the panel open, a parent's family list is the panel's "each thread" section, and the
+  // Workspace entry joins the panel so the conversation keeps the height. A child keeps the
+  // family list in the conversation column: it holds the way back to the parent and the
+  // child's own reply escape hatch. Folded, everything returns to the conversation column.
+  function place(open, family) {
+    const side = $("d-side"), main = $("d-main"), notes = $("d-notes"), reply = $("d-side-reply");
+    if (!side || !main || !notes || !reply) return;
     const familyNode = $("d-family"), workspace = $("d-ws");
-    const beside = (node, there) => {
-      if (!node) return;
-      if (there && node.parentElement !== side) side.append(node);
-      if (!there && node.parentElement !== main) main.insertBefore(node, notes);
-    };
-    beside(familyNode, show && !(family && family.parent));
-    beside(workspace, show);
+    if (workspace && open && workspace.parentElement !== side) side.insertBefore(workspace, reply);
+    if (workspace && !open && workspace.parentElement !== main) main.insertBefore(workspace, notes);
+    if (familyNode && familyNode.parentElement !== main) main.insertBefore(familyNode, notes);
+    if (familyNode && open && !(family && family.parent)) familyNode.hidden = true;
   }
 
   function paintTabs(body, show, tabs, asks) {
     const bar = $("d-tabs");
     if (!bar) return;
     bar.hidden = !(show && tabs);
-    const active = show && tabs ? tab : "chat";
+    const active = show && tabs && !hidden ? tab : "chat";
     body.dataset.tab = active;
     if (bar.hidden) { bar.replaceChildren(); return; }
     const l = L();
-    const button = (key, label) => h("button", { type: "button", class: "sit-tab" + (active === key ? " on" : ""),
-      "aria-pressed": active === key ? "true" : "false", onclick: () => switchTab(key), text: label });
-    bar.replaceChildren(button("chat", l.chat), button("situation", asks ? `${l.tab} (${asks})` : l.tab));
+    const label = asks ? `${l.tab} (${asks})` : l.tab;
+    if (hidden) {
+      bar.replaceChildren(h("button", { type: "button", class: "sit-tab sit-reopen", title: l.show,
+        onclick: () => setHidden(false), text: label }));
+      return;
+    }
+    const button = (key, text) => h("button", { type: "button", class: "sit-tab" + (active === key ? " on" : ""),
+      "aria-pressed": active === key ? "true" : "false", onclick: () => switchTab(key), text });
+    bar.replaceChildren(button("chat", l.chat), button("situation", label));
   }
 
   function switchTab(next) {
     const msgs = $("msgs");
     const top = msgs ? msgs.scrollTop : 0;
     tab = next;
-    const current = state.open && state.byId.get(state.open);
-    if (current) render(current);
+    redrawOpen();
     if (msgs && next === "chat") msgs.scrollTop = top;
+  }
+
+  function paintRail(side, asks) {
+    const rail = $("d-side-rail");
+    if (!rail) return;
+    side.classList.toggle("collapsed", hidden);
+    rail.hidden = !hidden;
+    const l = L();
+    rail.title = l.show;
+    rail.setAttribute("aria-label", l.show);
+    rail.replaceChildren(h("span", { text: "📍" }), asks ? h("span", { class: "sit-rail-count", text: String(asks) }) : null);
   }
 
   // Called from renderDetail on every redraw; rebuilds only when something it shows changed.
@@ -193,14 +251,20 @@ window.ConsoleSituation = (() => {
     const written = Boolean(situation && (situation.asks.length || situation.doing.length || situation.decided.length));
     const show = Boolean(family && (inFamily || written));
     const tabs = body.dataset.layout === "tabs";
-    side.hidden = !show;
-    place(show, family);
+    side.hidden = !show || (hidden && tabs);
+    place(show && !hidden, family);
     if (!show) { paintTabs(body, false, tabs, 0); return; }
     const m = model(item, family, holder, data);
     paintTabs(body, true, tabs, count(m));
+    paintRail(side, count(m));
+    if (hidden) return;
+    loadReports(m.members);
+    window.ConsoleSituationReply.render(
+      m.members.map((i) => ({ item: i, role: i.id === m.root.id ? "parent" : "child" })), holder.id);
     const key = JSON.stringify([LANG, holder.id, m.written, m.waits,
-      [...m.needs, ...m.running, ...m.candidates, ...m.finished].map((i) =>
-        [i.id, i.status, i.queued, i.title, i.ai && i.ai.next_step]),
+      [...m.members, ...m.candidates, ...m.finished].map((i) =>
+        [i.id, i.status, i.queued, i.running, i.title, i.ai && i.ai.next_step, reports.get(i.id)?.text,
+          rel(i.last_activity_at)]),
       m.written ? rel(m.written.updated_at) : ""]);
     // Kept on the node: opening another thread rebuilds the pane and empties it.
     const slot = $("d-side-core");
@@ -214,13 +278,14 @@ window.ConsoleSituation = (() => {
   // Follows the pane's own width: it depends on the window, the list and the resize handle.
   function attach(body) {
     observer?.disconnect();
+    const rail = $("d-side-rail");
+    if (rail) rail.onclick = () => setHidden(false);
     if (!window.ResizeObserver) { body.dataset.layout = "split"; return; }
     observer = new ResizeObserver(([entry]) => {
       const layout = entry.contentRect.width < SPLIT_MIN_PX ? "tabs" : "split";
       if (body.dataset.layout === layout) return;
       body.dataset.layout = layout;
-      const current = state.open && state.byId.get(state.open);
-      if (current) render(current);
+      redrawOpen();
     });
     observer.observe(body);
   }
@@ -243,10 +308,7 @@ window.ConsoleSituation = (() => {
   }
 
   // A parent's record changes nothing on the board, so the board's refresh would not redraw it.
-  setInterval(() => {
-    const current = !document.hidden && state.open && state.byId.get(state.open);
-    if (current) render(current);
-  }, REFRESH_MS);
+  setInterval(() => { if (!document.hidden) redrawOpen(); }, REFRESH_MS);
 
   return { render, attach, backgroundIds, markBackground };
 })();

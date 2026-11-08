@@ -30,7 +30,8 @@ const items = [fixture('p','サイト公開をまとめる'), fixture('c','画�
     return route.fulfill({contentType:'application/json',body:JSON.stringify(data)});
   });
   await page.goto('http://console.test/');
-  await page.evaluate(() => { localStorage.setItem('lang','ja'); });
+  // The family list itself: with the situation panel folded it stays in the conversation column.
+  await page.evaluate(() => { localStorage.setItem('lang','ja'); localStorage.setItem('situationHidden','1'); });
   await page.reload();
   await page.waitForFunction(() => typeof state !== 'undefined' && state.items.length > 0);
   await page.evaluate(() => { setView('tree'); return openItem('p'); });
@@ -54,6 +55,8 @@ const items = [fixture('p','サイト公開をまとめる'), fixture('c','画�
   await page.waitForFunction(() => state.open === 'w');
   await page.evaluate(() => openItem('c'));
   assert.equal(await page.locator('form.reply').isVisible(),false);
+  // Open the panel again: the child's way to reply must not move into it.
+  await page.locator('#d-side-rail').click();
   // The way to reply to a child stays in the conversation column, not under the parent's record.
   await page.waitForFunction(() => document.querySelector('.sit-ask'));
   await page.evaluate(() => renderDetail());
