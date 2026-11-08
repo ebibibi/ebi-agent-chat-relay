@@ -54,6 +54,12 @@ and in `log.md`; the situation is about this family, now.
 An ask can be quoted into the parent's reply box in one click, from a child too, which opens the parent
 first. This keeps ADR-0015's convention that decisions go to the parent.
 
+*Amended 2026-11-08:* quoting into the conversation's box sent the person away from the panel, and a
+child's only reply control ended up under the parent's record. The panel now has its own reply box,
+addressed to the parent by default (so decisions still go to the parent) and to any open child on
+request, shows each open thread's latest report, and folds to a remembered rail. A child's family block
+stays in the conversation column.
+
 Separately, prompts the relay starts a turn with (relays, finished waits, restart resumes) are classified
 by author as `activity`. They were stored without the bot flag so the agent receives them as prompts, and
 were shown as if the person had written them. Agent answers in such a turn stay visible and are labelled.

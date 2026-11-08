@@ -596,16 +596,25 @@ the parent while you stay on a child.
 
 | Heading | Measured, no agent needed | Written by the parent |
 |---|---|---|
-| 🙋 Needed from you | Every family member marked ❓ 👀 📋 ⚠️, with triage's next step | `asks`, each with **↩ Answer** |
-| ⚙️ Running | Running and queued turns, active waits | `doing` |
+| 🙋 Needed from you | Every family member marked ❓ 👀 📋 ⚠️, with its latest report and **↩ Reply** | `asks`, each with **↩ Answer** |
+| ⚙️ Running | Active waits | `doing` |
+| 👥 Each thread | Every other open member: status, how long ago, its latest report, **↩ Reply** | — |
 | ✅ Decided and done | 🏁 completion candidates, finished children (folded) | `decided` |
 
-**↩ Answer** quotes the question into the reply box of the parent, opening it first if you are on a
-child; send your answer there and the parent carries it to its children. The list of child threads and
-a bound Workspace entry (with its `status.md`) move into the panel, which gives the conversation
-back the height. Below 640 px of pane width, a phone included, the panel is a tab next to the
-conversation that counts what is asked of you; the reply box stays visible on both. On a narrow screen a child keeps
-its way back to the parent above the conversation.
+The panel can be read and answered on its own. At its bottom is a reply box with a **To** selector
+listing the parent and every open child. **↩ Answer** quotes the parent's question into that box
+addressed to the parent; **↩ Reply** on a thread addresses the box to that thread. Sending posts the
+same way as the conversation's own reply box, so you never have to open a child to answer it.
+
+The panel replaces the parent's list of child threads, and a bound Workspace entry (with its
+`status.md`) moves into it, which gives the conversation back the height. A child keeps its family
+block (the way back to the parent and **Reply directly to this child**) in the conversation column.
+
+**›** folds the panel to a rail that shows how many things are asked of you; the rail opens it again.
+The choice is remembered in the browser. Folded, the parent's list of child threads returns above the
+conversation. Below 640 px of pane width, a phone included, the panel is a tab next to the conversation
+that counts what is asked of you; on that tab the panel's reply box is the only one shown, and folded,
+a single button brings the tab back.
 
 The panel names how old the parent's record is, and flags one more than 15 minutes older than the family's
 latest activity. A thread with no children shows no panel unless its agent wrote a record.

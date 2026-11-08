@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Console, 📍 *Where things stand*: the panel can be read and answered on its own. Each open thread
+  shows its status and latest report, a reply box at the bottom sends to the parent or any open child
+  (**↩ Answer** and **↩ Reply** address it without leaving the panel), and **›** folds the panel to a
+  rail that remembers the choice. The panel replaces the parent's list of child threads while open.
+
 ### Fixed
 
 - Console: opening a child thread keeps *Reply directly to this child* and the way back to the parent
