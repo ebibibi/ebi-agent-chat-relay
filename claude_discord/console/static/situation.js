@@ -142,8 +142,10 @@ window.ConsoleSituation = (() => {
   }
 
   // Family list and Workspace entry join the panel, so the conversation keeps the height.
-  // A child on a narrow screen keeps them: its way back to the parent must stay in sight.
-  function place(body, show, tabs, family) {
+  // A child keeps the family list in the conversation column at any width: it holds the
+  // way back to the parent and the only way to reply to the child, which the parent's
+  // record would otherwise push below the panel's fold.
+  function place(show, family) {
     const side = $("d-side"), main = $("d-main"), notes = $("d-notes");
     if (!side || !main || !notes) return;
     const familyNode = $("d-family"), workspace = $("d-ws");
@@ -152,7 +154,7 @@ window.ConsoleSituation = (() => {
       if (there && node.parentElement !== side) side.append(node);
       if (!there && node.parentElement !== main) main.insertBefore(node, notes);
     };
-    beside(familyNode, show && !(tabs && family && family.parent));
+    beside(familyNode, show && !(family && family.parent));
     beside(workspace, show);
   }
 
@@ -192,7 +194,7 @@ window.ConsoleSituation = (() => {
     const show = Boolean(family && (inFamily || written));
     const tabs = body.dataset.layout === "tabs";
     side.hidden = !show;
-    place(body, show, tabs, family);
+    place(show, family);
     if (!show) { paintTabs(body, false, tabs, 0); return; }
     const m = model(item, family, holder, data);
     paintTabs(body, true, tabs, count(m));

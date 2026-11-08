@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Console: opening a child thread keeps *Reply directly to this child* and the way back to the parent
+  in the conversation column. On a wide pane they had moved under the parent's record in the side
+  panel, often below its fold, so a child could not be replied to.
+
 ### Added
 
 - Console pages: a session, script or job adds a screen to the Console's menu by registering data

@@ -22,7 +22,10 @@ const items = [fixture('p','サイト公開をまとめる'), fixture('c','画�
       return route.fulfill({contentType:type,body:fs.readFileSync(root+file)});
     }
     let data = {};
-    if (pathname.endsWith('/board')) data = {items,slots:{},places:[]};
+    // A parent's long record fills the panel beside the conversation.
+    if (pathname.endsWith('/situation')) data = {situation:{asks:Array.from({length:4},(_, i) => `確認${i}: `+'長い質問文。'.repeat(20)),
+      doing:['作業A','作業B','作業C','作業D'],decided:['決定1','決定2','決定3','決定4','決定5'],updated_at:'2026-10-13T11:00:00Z'},waits:[]};
+    else if (pathname.endsWith('/board')) data = {items,slots:{},places:[]};
     else if (pathname.endsWith('/messages')) data = {messages:[{id:'m1',kind:'agent',is_bot:true,content:'画面の実装が完了。スマートフォン表示を確認しています。',created_at:'2026-10-13T11:00:00Z'}]};
     return route.fulfill({contentType:'application/json',body:JSON.stringify(data)});
   });
@@ -51,6 +54,11 @@ const items = [fixture('p','サイト公開をまとめる'), fixture('c','画�
   await page.waitForFunction(() => state.open === 'w');
   await page.evaluate(() => openItem('c'));
   assert.equal(await page.locator('form.reply').isVisible(),false);
+  // The way to reply to a child stays in the conversation column, not under the parent's record.
+  await page.waitForFunction(() => document.querySelector('.sit-ask'));
+  await page.evaluate(() => renderDetail());
+  assert.equal(await page.evaluate(() => document.querySelector('.family-direct').closest('#d-main') !== null),true);
+  await page.getByRole('button',{name:'この子に直接返信する',exact:true}).click({trial:true,timeout:2000});
   await page.getByRole('button',{name:'この子に直接返信する',exact:true}).click();
   assert.equal(await page.locator('form.reply').isVisible(),true);
   await page.getByRole('button',{name:'親との会話に戻る',exact:true}).click();
