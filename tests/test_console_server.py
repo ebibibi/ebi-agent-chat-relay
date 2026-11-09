@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
@@ -261,3 +261,33 @@ def test_log_values_cannot_forge_lines() -> None:
 
     assert q("t1\nINFO forged\r\x1b[2J") == "t1 INFO forged  [2J"
     assert len(q("x" * 500)) == 200
+
+
+async def test_human_console_reply_schedules_retitle_with_only_human_text(
+    monkeypatch, tmp_path
+) -> None:
+    from claude_discord.console import server as srv
+
+    repo = WorkItemRepository(str(tmp_path / "sessions.db"))
+    api = MagicMock()
+    api.bot.cogs = {}
+    console = ConsoleServer(api, repo, ConsoleAuthenticator(ConsoleAuthConfig(token=TOKEN)), port=0)
+    thread = MagicMock(id=123, parent_id=456)
+    cog = MagicMock()
+    cog.deliver_relayed_message = AsyncMock()
+    console._workspace_brief = AsyncMock(return_value=None)
+    console._conversation_key = AsyncMock(return_value=None)
+    console._thread_for = AsyncMock(return_value=(thread, None))
+    console._chat_cog = MagicMock(return_value=cog)
+    console.work_repo.update = AsyncMock(return_value=None)
+    console._meter_chat_reply = AsyncMock()
+    monkeypatch.setattr(srv, "schedule_thread_outcome", lambda *args: None)
+    pending = []
+    monkeypatch.setattr(console, "_background", pending.append)
+
+    human_text = "The deployment is ready; please check the migration logs."
+    response = await console._deliver("t123", human_text, "Ming", metered=True)
+    await pending[0]
+
+    assert response.status == 202
+    cog._schedule_retitle.assert_called_once_with(thread, human_text)

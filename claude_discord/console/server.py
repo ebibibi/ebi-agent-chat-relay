@@ -1204,6 +1204,9 @@ class ConsoleServer:
         except WorkItemError as exc:
             return _error(str(exc), 400)
         schedule_thread_outcome(thread, None)
+        if metered:
+            # Count only the human reply; the Console footer is added below.
+            cog._schedule_retitle(thread, text)
         prompt = f"{text}\n\n-# 🖥️ via Ebi AI Console ({who})"
         if metered:
             # Posted by the bot, so the chat frontend's own metering skips it.
