@@ -4,6 +4,7 @@
 window.ConsoleMobile = (() => {
   const narrow = matchMedia('(max-width: 900px)');
   let itemId = null;
+  let lastShape = '';
   function viewport() {
     if (!narrow.matches) return;
     const vv = window.visualViewport;
@@ -11,15 +12,24 @@ window.ConsoleMobile = (() => {
     const messages = document.getElementById('msgs');
     const top = messages?.scrollTop || 0;
     const bottom = messages && nearBottom(messages);
+    const anchor = messages && !bottom ? readingAnchor(messages) : null;
     const height = vv?.height || innerHeight;
     document.documentElement.style.setProperty('--mobile-height', `${height}px`);
     document.documentElement.style.setProperty('--mobile-top', `${vv?.offsetTop || 0}px`);
     // innerHeight shrinks with the visual viewport on some phones; the layout viewport does not.
     const full = Math.max(innerHeight, document.documentElement.clientHeight);
     const typing = matchMedia('(pointer: coarse)').matches && document.activeElement?.matches('textarea, input:not([type=checkbox], [type=radio], [type=button])');
-    document.documentElement.classList.toggle('keyboard-open', full - height > 120 || Boolean(typing));
+    const keyboard = full - height > 120 || Boolean(typing);
+    document.documentElement.classList.toggle('keyboard-open', keyboard);
+    // Only a change of the visible height moves the messages. The viewport also reports
+    // while the reader scrolls; putting the position from before back then undid the scroll.
+    const shape = `${height}|${keyboard}`;
+    if (shape === lastShape) return;
+    lastShape = shape;
     requestAnimationFrame(() => {
-      if (messages?.isConnected) messages.scrollTop = bottom ? messages.scrollHeight : top;
+      if (!messages?.isConnected) return;
+      if (bottom) messages.scrollTop = messages.scrollHeight;
+      else restoreAnchor(messages, anchor, top);
     });
   }
   function layout(item, rebuilt) {

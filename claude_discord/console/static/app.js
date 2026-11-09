@@ -849,6 +849,65 @@ function chatImage(a) {
   return btn;
 }
 
+// Unchanged messages keep their nodes, so a poll leaves a thumbnail, a file row or a text
+// selection inside them alone and nothing above the reader changes height. Rebuilding every
+// node dropped the thumbnails until they loaded again: the text jumped and came back.
+function messageKey(m, background) {
+  return JSON.stringify([m.kind, m.is_bot, m.author, m.model, m.created_at, m.content, m.truncated,
+    m.embeds, m.attachments, m.actions, background]);
+}
+function syncMessages(container, shown, background) {
+  const old = new Map();
+  for (const node of container.children) if (node.dataset.mid) old.set(node.dataset.mid, node);
+  const nodes = shown.map((m, i) => {
+    const mid = m.id != null ? String(m.id) : `#${i}`;
+    const key = messageKey(m, background.has(m.id));
+    const kept = old.get(mid);
+    if (kept && kept.dataset.key === key) return kept;
+    const node = background.has(m.id) ? window.ConsoleSituation.markBackground(messageNode(m)) : messageNode(m);
+    node.dataset.mid = mid;
+    node.dataset.key = key;
+    return node;
+  });
+  const wanted = new Set(nodes);
+  for (const node of [...container.children]) if (!wanted.has(node)) node.remove();
+  nodes.forEach((node, i) => {
+    if (container.children[i] !== node) container.insertBefore(node, container.children[i] || null);
+  });
+}
+
+// What the reader is looking at: the first message still showing at the top, and where.
+// Putting that message back where it was keeps the text still when something above it
+// changes height; a bare scrollTop does not. (Phones turn the browser's own anchoring off.)
+function readingAnchor(box) {
+  const edge = box.getBoundingClientRect().top;
+  for (const node of box.children) {
+    const rect = node.getBoundingClientRect();
+    if (rect.bottom > edge) return { node, mid: node.dataset.mid, offset: rect.top - edge };
+  }
+  return null;
+}
+function restoreAnchor(box, anchor, top) {
+  box.scrollTop = top;
+  if (!anchor) return;
+  const node = anchor.node.parentElement === box ? anchor.node
+    : anchor.mid && box.querySelector(`:scope > [data-mid="${CSS.escape(anchor.mid)}"]`);
+  if (node) box.scrollTop += node.getBoundingClientRect().top - box.getBoundingClientRect().top - anchor.offset;
+}
+// Runs a change to the conversation's content: a reader at the end stays at the end,
+// anyone else keeps reading the same line.
+function holdReading(change) {
+  const box = $("msgs");
+  if (!box) return change();
+  const pinned = nearBottom(box);
+  const anchor = pinned ? null : readingAnchor(box);
+  const top = box.scrollTop;
+  const result = change();
+  if (pinned) box.scrollTop = box.scrollHeight;
+  else restoreAnchor(box, anchor, top);
+  return result;
+}
+
 function fillMessages(container, { force = false, toBottom = false } = {}) {
   if (state.messagesFor !== state.open) {
     if (!container.dataset.sig) container.replaceChildren(h("div", { class: "empty", text: T.loading }));
@@ -863,16 +922,18 @@ function fillMessages(container, { force = false, toBottom = false } = {}) {
   const first = !container.dataset.sig || !container.dataset.sig.startsWith(`${state.open}|`);
   const follow = toBottom || first || nearBottom(container);
   const before = container.dataset.count ? Number(container.dataset.count) : shown.length;
+  const anchor = follow ? null : readingAnchor(container);
   const top = container.scrollTop;
   container.dataset.sig = sig;
   container.dataset.count = String(shown.length);
   const background = window.ConsoleSituation.backgroundIds(state.messages);
-  const node = (m) => background.has(m.id) ? window.ConsoleSituation.markBackground(messageNode(m)) : messageNode(m);
-  container.replaceChildren(...(shown.length ? shown.map(node) : [h("div", { class: "empty", text: T.no_messages })]));
+  if (shown.length) syncMessages(container, shown, background);
+  else container.replaceChildren(h("div", { class: "empty", text: T.no_messages }));
+  // File rows for new answers right away: added on the next live tick they would land above the reader.
+  window.ConsoleLive?.linkFiles();
   if (follow) container.scrollTop = container.scrollHeight;
   else {
-    // Replacing every child can reset the scroll position; put the reader back where they were.
-    container.scrollTop = top;
+    restoreAnchor(container, anchor, top);
     if (shown.length > before) state.unseen = (state.unseen || 0) + shown.length - before;
   }
   updateJump();

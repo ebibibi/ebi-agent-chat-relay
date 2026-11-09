@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Console: reading further up a conversation no longer jumps while a turn runs. Each poll rebuilt
+  every message, so delivered-file thumbnails vanished until they loaded again: the text moved and
+  came back on phones, and drifted on desktops. Unchanged messages now keep their nodes, the first
+  message in view is put back where it was, and a phone's viewport events no longer rewind a scroll.
 - Console: opening a child thread keeps *Reply directly to this child* and the way back to the parent
   in the conversation column. On a wide pane they had moved under the parent's record in the side
   panel, often below its fold, so a child could not be replied to.
