@@ -286,8 +286,54 @@ async def test_human_console_reply_schedules_retitle_with_only_human_text(
     monkeypatch.setattr(console, "_background", pending.append)
 
     human_text = "The deployment is ready; please check the migration logs."
-    response = await console._deliver("t123", human_text, "Ming", metered=True)
+    response = await console._deliver(
+        "t123",
+        "Agent-facing text with injected footer and attachment instructions.",
+        "Ming",
+        metered=True,
+        retitle_text=human_text,
+    )
     await pending[0]
 
     assert response.status == 202
     cog._schedule_retitle.assert_called_once_with(thread, human_text)
+
+
+async def test_reply_preserves_raw_human_text_for_retitle_after_transformations(
+    monkeypatch,
+) -> None:
+    from pathlib import Path
+
+    from aiohttp import web
+
+    from claude_discord.console.server import IDENTITY
+
+    console = ConsoleServer(
+        MagicMock(),
+        MagicMock(),
+        ConsoleAuthenticator(ConsoleAuthConfig(token=TOKEN)),
+        port=0,
+    )
+    raw_text = "Please investigate this long incident report."
+    agent_text = "Read message.txt for the full user message and respond to it."
+    monkeypatch.setattr(console, "_json", AsyncMock(return_value=({"text": raw_text}, None)))
+    monkeypatch.setattr(
+        console,
+        "_reply_files",
+        lambda raw: ([("/uploads/report.txt", Path("/tmp/report.txt"))], None),
+    )
+    monkeypatch.setattr(console, "_attach_long_text", AsyncMock(return_value=(agent_text, None)))
+    monkeypatch.setattr(console, "_deliver", AsyncMock(return_value=web.Response(status=202)))
+    request = MagicMock()
+    request.match_info = {"item_id": "t123"}
+    request.__getitem__.side_effect = lambda key: "Ming" if key == IDENTITY else None
+
+    response = await console.reply(request)
+
+    assert response.status == 202
+    console._deliver.assert_awaited_once()
+    args, kwargs = console._deliver.await_args
+    assert args[0] == "t123"
+    assert args[1].startswith(agent_text)
+    assert "/uploads/report.txt" in args[1]
+    assert kwargs == {"metered": True, "retitle_text": raw_text}
