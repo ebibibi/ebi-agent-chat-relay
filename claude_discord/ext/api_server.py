@@ -1287,6 +1287,9 @@ class ApiServer:
                 console, thread_id, prompt, from_thread=from_thread, mode=mode, hop=hop
             )
 
+        if getattr(self.bot, "headless", False) is True:
+            return web.json_response({"error": "Console conversation not found"}, status=404)
+
         from ..cogs.claude_chat import ClaudeChatCog
 
         cog: ClaudeChatCog | None = self.bot.cogs.get("ClaudeChatCog")  # type: ignore[assignment]
@@ -1821,6 +1824,26 @@ class ApiServer:
         except ValueError:
             return web.json_response({"error": "limit must be an integer"}, status=400)
 
+        if self.console_conversations is not None:
+            conversation = await self.console_conversations.get(thread_id)
+            if conversation is not None:
+                entries = await self.console_conversations.history(thread_id, limit=limit)
+                payload = []
+                for entry in entries:
+                    message = entry.as_dict()
+                    message["content"] = entry.content[:_MAX_THREAD_MESSAGE_CHARS]
+                    message["truncated"] = len(entry.content) > _MAX_THREAD_MESSAGE_CHARS
+                    payload.append(message)
+                return web.json_response(
+                    {
+                        "thread_id": thread_id,
+                        "thread_name": conversation.name,
+                        "messages": payload,
+                    }
+                )
+        if getattr(self.bot, "headless", False) is True:
+            return web.json_response({"error": "Console conversation not found"}, status=404)
+
         channel = self.bot.get_channel(thread_id)
         if channel is None:
             try:
@@ -1974,7 +1997,7 @@ class ApiServer:
         return web.json_response({"status": "marked", "thread_name": marked})
 
     async def spawn(self, request: web.Request) -> web.Response:
-        """POST /api/spawn — create a new Discord thread and optionally start Claude Code.
+        """POST /api/spawn — create native or Discord work and optionally start an agent.
 
         Unlike posting a message to the channel directly, this endpoint
         bypasses the ``on_message`` bot-author guard and works even when
@@ -1982,8 +2005,8 @@ class ApiServer:
 
         Body (JSON):
             prompt: The instruction to send to Claude (required).
-            channel_id: Parent channel ID (optional; defaults to the
-                ``default_channel_id`` configured at startup).
+            channel_id: Parent Discord channel ID (optional; defaults to the
+                ``default_channel_id`` configured at startup; ignored in Console-only mode).
             thread_name: Custom thread title (optional; defaults to the
                 first 100 characters of *prompt*).
             auto_start: Whether to immediately start a Claude Code session
@@ -2010,40 +2033,6 @@ class ApiServer:
         prompt = (data.get("prompt") or "").strip()
         if not prompt:
             return web.json_response({"error": "prompt is required"}, status=400)
-
-        raw_channel_id = data.get("channel_id") or self.default_channel_id
-        if not raw_channel_id:
-            return web.json_response({"error": "No channel specified"}, status=400)
-
-        # Resolve ClaudeChatCog lazily from the bot (zero-config; no constructor change).
-        from ..cogs.claude_chat import ClaudeChatCog  # avoid circular import at module level
-
-        cog: ClaudeChatCog | None = self.bot.cogs.get("ClaudeChatCog")  # type: ignore[assignment]
-        if cog is None:
-            return web.json_response(
-                {"error": "ClaudeChatCog is not loaded"},
-                status=503,
-            )
-
-        try:
-            channel_id = int(raw_channel_id)
-        except (TypeError, ValueError):
-            return web.json_response({"error": "channel_id must be an integer"}, status=400)
-
-        import discord as _discord
-
-        raw = self.bot.get_channel(channel_id)
-        if raw is None:
-            try:
-                raw = await self.bot.fetch_channel(channel_id)
-            except Exception as exc:
-                return web.json_response({"error": str(exc)}, status=500)
-
-        if not isinstance(raw, _discord.TextChannel):
-            return web.json_response(
-                {"error": "Channel must be a text channel that supports threads"},
-                status=400,
-            )
 
         thread_name: str | None = data.get("thread_name") or None
         auto_start: bool = data.get("auto_start", True)
@@ -2079,6 +2068,49 @@ class ApiServer:
         decoded_attachments, att_err = _decode_spawn_attachments(data.get("attachments"))
         if att_err is not None:
             return att_err
+
+        if getattr(self.bot, "headless", False) is True:
+            return await self._spawn_console(
+                prompt=prompt,
+                title=thread_name or prompt[:100],
+                auto_start=auto_start,
+                attachments=decoded_attachments,
+                parent_thread_id=parent_thread_id,
+            )
+
+        raw_channel_id = data.get("channel_id") or self.default_channel_id
+        if not raw_channel_id:
+            return web.json_response({"error": "No channel specified"}, status=400)
+
+        # Resolve ClaudeChatCog lazily from the bot (zero-config; no constructor change).
+        from ..cogs.claude_chat import ClaudeChatCog  # avoid circular import at module level
+
+        cog: ClaudeChatCog | None = self.bot.cogs.get("ClaudeChatCog")  # type: ignore[assignment]
+        if cog is None:
+            return web.json_response(
+                {"error": "ClaudeChatCog is not loaded"},
+                status=503,
+            )
+
+        try:
+            channel_id = int(raw_channel_id)
+        except (TypeError, ValueError):
+            return web.json_response({"error": "channel_id must be an integer"}, status=400)
+
+        import discord as _discord
+
+        raw = self.bot.get_channel(channel_id)
+        if raw is None:
+            try:
+                raw = await self.bot.fetch_channel(channel_id)
+            except Exception as exc:
+                return web.json_response({"error": str(exc)}, status=500)
+
+        if not isinstance(raw, _discord.TextChannel):
+            return web.json_response(
+                {"error": "Channel must be a text channel that supports threads"},
+                status=400,
+            )
 
         try:
             thread = await cog.spawn_session(
@@ -2447,6 +2479,45 @@ class ApiServer:
 
         return "\n\n".join(parts)
 
+    async def _spawn_console(
+        self,
+        *,
+        prompt: str,
+        title: str,
+        auto_start: bool,
+        attachments: list[tuple[str, bytes]],
+        parent_thread_id: int | None,
+    ) -> web.Response:
+        from ..console.host import ConsoleSessionHost
+
+        console = getattr(self.bot, "console_sessions", None)
+        if not isinstance(console, ConsoleSessionHost):
+            return web.json_response({"error": "Console session host is not available"}, status=503)
+        try:
+            key = await console.spawn(
+                prompt=prompt,
+                title=title,
+                auto_start=auto_start,
+                attachments=attachments,
+                parent_thread_id=parent_thread_id,
+                lineage_repo=self.lineage_repo,
+            )
+            conversation = await console.frontend.repo.get(key)
+        except Exception:
+            logger.exception("Console spawn failed")
+            return web.json_response({"error": "Could not create Console conversation"}, status=500)
+        body = {
+            "status": "spawned",
+            "thread_id": str(key),
+            "thread_name": conversation.name if conversation else title,
+            "frontend": "console",
+        }
+        if parent_thread_id is not None:
+            body.update(
+                parent_thread_id=str(parent_thread_id), family=family_code(parent_thread_id)
+            )
+        return web.json_response(body, status=201)
+
     async def ingest(self, request: web.Request) -> web.Response:
         """POST /api/ingest — authenticated spawn for untrusted external clients.
 
@@ -2488,7 +2559,8 @@ class ApiServer:
             return web.json_response({"error": "content is required"}, status=400)
 
         raw_channel_id = data.get("channel_id") or self.default_channel_id
-        if not raw_channel_id:
+        headless = getattr(self.bot, "headless", False) is True
+        if not headless and not raw_channel_id:
             return web.json_response({"error": "No channel specified"}, status=400)
 
         attachments = data.get("attachments") or []
@@ -2535,31 +2607,37 @@ class ApiServer:
             except teams_sync.ValidationError as exc:
                 return web.json_response({"error": str(exc)}, status=400)
 
-        from ..cogs.claude_chat import ClaudeChatCog  # avoid circular import
+        from ..console.host import ConsoleSessionHost
 
-        cog: ClaudeChatCog | None = self.bot.cogs.get("ClaudeChatCog")  # type: ignore[assignment]
-        if cog is None:
-            return web.json_response({"error": "ClaudeChatCog is not loaded"}, status=503)
+        console = getattr(self.bot, "console_sessions", None)
+        if headless and not isinstance(console, ConsoleSessionHost):
+            return web.json_response({"error": "Console session host is not available"}, status=503)
+        if not headless:
+            from ..cogs.claude_chat import ClaudeChatCog  # avoid circular import
 
-        try:
-            channel_id = int(raw_channel_id)
-        except (TypeError, ValueError):
-            return web.json_response({"error": "channel_id must be an integer"}, status=400)
+            cog: ClaudeChatCog | None = self.bot.cogs.get("ClaudeChatCog")  # type: ignore[assignment]
+            if cog is None:
+                return web.json_response({"error": "ClaudeChatCog is not loaded"}, status=503)
 
-        import discord as _discord
-
-        raw = self.bot.get_channel(channel_id)
-        if raw is None:
             try:
-                raw = await self.bot.fetch_channel(channel_id)
-            except Exception as exc:
-                return web.json_response({"error": str(exc)}, status=500)
+                channel_id = int(raw_channel_id or 0)
+            except (TypeError, ValueError):
+                return web.json_response({"error": "channel_id must be an integer"}, status=400)
 
-        if not isinstance(raw, _discord.TextChannel):
-            return web.json_response(
-                {"error": "Channel must be a text channel that supports threads"},
-                status=400,
-            )
+            import discord as _discord
+
+            raw = self.bot.get_channel(channel_id)
+            if raw is None:
+                try:
+                    raw = await self.bot.fetch_channel(channel_id)
+                except Exception as exc:
+                    return web.json_response({"error": str(exc)}, status=500)
+
+            if not isinstance(raw, _discord.TextChannel):
+                return web.json_response(
+                    {"error": "Channel must be a text channel that supports threads"},
+                    status=400,
+                )
 
         # Save attachments under a stable per-request id reused for the dir name.
         request_id = uuid.uuid4().hex
@@ -2672,37 +2750,48 @@ class ApiServer:
             result_sink = _capture_result
 
         try:
-            thread = await cog.spawn_session(
-                raw,
-                prompt,
-                thread_name=thread_name,
-                auto_start=auto_start,
-                result_sink=result_sink,
-            )
+            if headless and isinstance(console, ConsoleSessionHost):
+                thread_id = await console.spawn(
+                    prompt=prompt,
+                    title=thread_name or content[:80],
+                    auto_start=auto_start,
+                    result_sink=result_sink,
+                )
+                conversation = await console.frontend.repo.get(thread_id)
+                created_name = conversation.name if conversation else (thread_name or content[:80])
+            else:
+                thread = await cog.spawn_session(
+                    raw,
+                    prompt,
+                    thread_name=thread_name,
+                    auto_start=auto_start,
+                    result_sink=result_sink,
+                )
+                thread_id, created_name = thread.id, thread.name
         except Exception as exc:
             logger.error("ingest spawn_session failed: %s", exc, exc_info=True)
             if result_id is not None and self.ingest_repo is not None:
                 await self.ingest_repo.set_error(result_id, str(exc))
             return web.json_response({"error": str(exc)}, status=500)
 
-        if result_sink is not None:
+        if result_sink is not None and not headless:
             spawned_thread.append(thread)
 
         # Attach thread info for traceability. The completion sink already has
         # the thread reference above, before this await can yield to the session
         # task.
         if result_id is not None and self.ingest_repo is not None:
-            await self.ingest_repo.set_thread(result_id, str(thread.id), thread.name)
+            await self.ingest_repo.set_thread(result_id, str(thread_id), created_name)
 
         reply_draft = is_reply_draft_request(content)
         if reply_draft:
             ingest_tags.append(TEAMS_EXPORTER_TAG)
-        await self._label_ingest_thread(thread.id, ingest_tags, reply_draft=reply_draft)
+        await self._label_ingest_thread(thread_id, ingest_tags, reply_draft=reply_draft)
 
         # Pull the owner into the thread and ping them on start, so the
         # unattended session is visible and they're notified again on completion
         # (via the result sink). Only when a session actually started.
-        if result_sink is not None:
+        if result_sink is not None and not headless:
             await self._ingest_add_owner(thread)
             await self._ingest_notify_owner(
                 thread,
@@ -2711,14 +2800,14 @@ class ApiServer:
 
         logger.info(
             "Ingested external session in thread %s (%s), %d attachment(s)",
-            thread.id,
-            _sanitize_log(thread.name),
+            thread_id,
+            _sanitize_log(created_name),
             len(saved_paths),
         )
         response: dict[str, object] = {
             "status": "spawned",
-            "thread_id": str(thread.id),
-            "thread_name": thread.name,
+            "thread_id": str(thread_id),
+            "thread_name": created_name,
             "attachments_saved": len(saved_paths),
             # The sender is the only party that can re-send a lost attachment,
             # so it gets the verdict rather than a bare count it cannot check.
@@ -3402,7 +3491,11 @@ class ApiServer:
         """
         import discord
 
-        if self._lounge_mirror_disabled or not self.lounge_channel_id:
+        if (
+            getattr(self.bot, "headless", False) is True
+            or self._lounge_mirror_disabled
+            or not self.lounge_channel_id
+        ):
             return
         try:
             channel = self.bot.get_channel(self.lounge_channel_id)

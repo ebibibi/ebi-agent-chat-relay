@@ -35,7 +35,12 @@ from ..cogs.run_config import RunConfig
 from ..connection_choice import apply_connection
 from ..cross_backend_handoff import ConversationHistoryReader, carry_history_across_backends
 from ..execution_settings import apply_thread_execution_mode, thread_execution_mode
-from ..thread_marker import OUTCOME_ERROR
+from ..thread_marker import (
+    OUTCOME_ERROR,
+    family_code,
+    mark_parent_thread_name,
+    mark_spawned_thread_name,
+)
 from .attention import console_activity
 from .conversations import CONSOLE_FRONTEND
 from .surface import AGENT_AUTHOR, ConsoleFrontend, ConsoleSurface, apply_outcome
@@ -45,6 +50,7 @@ if TYPE_CHECKING:
     from claude_code_core.attention_repo import AttentionRecorder
 
 logger = logging.getLogger(__name__)
+ResultSink = Callable[[str | None, str | None], Awaitable[None]]
 
 
 class ConsoleSessionHost:
@@ -100,6 +106,60 @@ class ConsoleSessionHost:
             thread_key, author=who, is_bot=False, content=f"⏹ Stopped by {who}"
         )
         return True
+
+    async def spawn(
+        self,
+        *,
+        prompt: str,
+        title: str,
+        auto_start: bool = True,
+        attachments: list[tuple[str, bytes]] | None = None,
+        parent_thread_id: int | None = None,
+        lineage_repo: Any = None,
+        result_sink: ResultSink | None = None,
+    ) -> int:
+        """Create native agent work, storing preferences and lineage before its first turn."""
+        import uuid
+
+        from claude_code_core.frontend import OutboundFile
+
+        child_ai = None
+        if parent_thread_id is not None:
+            preferences = self._settings.for_children()
+            backend = await preferences.current_backend(parent_thread_id)
+            child_ai = (
+                backend,
+                await preferences.current_model(backend, parent_thread_id),
+                await preferences.current_effort(backend, parent_thread_id),
+            )
+        surface = await self.frontend.open(
+            external_id="spawn:" + uuid.uuid4().hex,
+            title=mark_spawned_thread_name(title, parent_thread_id=parent_thread_id),
+        )
+        key = surface.thread_key
+        if child_ai is not None:
+            backend, model, effort = child_ai
+            await self._settings.set_backend(backend, thread_id=key)
+            if model:
+                await self._settings.set_model(backend, model, thread_id=key)
+            if effort:
+                await self._settings.set_effort(backend, effort, thread_id=key)
+        if parent_thread_id is not None:
+            if lineage_repo is not None:
+                await lineage_repo.record(key, parent_thread_id, family_code(parent_thread_id))
+            parent = await self.frontend.repo.get(parent_thread_id)
+            if parent is not None:
+                await self.frontend.repo.set_name(
+                    parent_thread_id, mark_parent_thread_name(parent.name, parent_thread_id)
+                )
+        await self.frontend.repo.append(key, author="agent session", is_bot=False, content=prompt)
+        if attachments:
+            await surface.deliver_files(
+                [OutboundFile(display_name=name, blob=data) for name, data in attachments]
+            )
+        if auto_start:
+            self._spawn(surface, prompt, result_sink=result_sink)
+        return key
 
     async def start(
         self,
@@ -252,11 +312,15 @@ class ConsoleSessionHost:
             ),
         )
 
-    def _spawn(self, surface: ConsoleSurface, prompt: str) -> None:
+    def _spawn(
+        self, surface: ConsoleSurface, prompt: str, *, result_sink: ResultSink | None = None
+    ) -> None:
         # Taken now, not when the task first runs: a reply arriving in between
         # must already see that this one is waiting.
         release = live_runs.hold(surface.thread_key)
-        task = asyncio.create_task(self._run_queued(surface, prompt, release))
+        task = asyncio.create_task(
+            self._run_queued(surface, prompt, release, result_sink=result_sink)
+        )
         self._tasks.add(task)
         task.add_done_callback(self._finished)
 
@@ -266,20 +330,29 @@ class ConsoleSessionHost:
             logger.error("console: turn failed", exc_info=task.exception())
 
     async def _run_queued(
-        self, surface: ConsoleSurface, prompt: str, release: Callable[[], None] = lambda: None
+        self,
+        surface: ConsoleSurface,
+        prompt: str,
+        release: Callable[[], None] = lambda: None,
+        *,
+        result_sink: ResultSink | None = None,
     ) -> None:
         lock = self._locks.setdefault(surface.thread_key, asyncio.Lock())
         try:
             async with lock:
                 release()
-                await self._run_locked(surface, prompt)
+                await self._run_locked(surface, prompt, result_sink=result_sink)
         finally:
             release()
 
-    async def _run_locked(self, surface: ConsoleSurface, prompt: str) -> None:
+    async def _run_locked(
+        self, surface: ConsoleSurface, prompt: str, *, result_sink: ResultSink | None = None
+    ) -> None:
         try:
-            await self._run(surface, prompt)
+            await self._run(surface, prompt, result_sink=result_sink)
         except Exception:
+            if result_sink is not None:
+                await result_sink(None, "Console turn failed")
             logger.exception("console: turn for %d failed", surface.thread_key)
             await surface.send_text("⚠️ The turn could not run. See the bot log.")
             await surface.set_outcome(OUTCOME_ERROR)
@@ -288,7 +361,12 @@ class ConsoleSessionHost:
             self.frontend.live.clear(surface.thread_key)
 
     async def _run(
-        self, surface: ConsoleSurface, prompt: str, *, _account_retry: bool = False
+        self,
+        surface: ConsoleSurface,
+        prompt: str,
+        *,
+        _account_retry: bool = False,
+        result_sink: ResultSink | None = None,
     ) -> None:
         user_prompt = prompt
         thread_key = surface.thread_key
@@ -347,13 +425,14 @@ class ConsoleSessionHost:
                 claude_command=runner.command,
                 session_origin=CONSOLE_FRONTEND,
                 account_turn=account_turn,
+                result_sink=result_sink,
             )
         )
         failover = await self._finish_account_turn(surface, account_turn)
         # Opt-in failover (retry_on_exhaustion): rerun the same message once on
         # the next profile, as a Discord thread does. A second rejection just reports.
         if failover is not None and failover.retry and not _account_retry:
-            await self._run(surface, user_prompt, _account_retry=True)
+            await self._run(surface, user_prompt, _account_retry=True, result_sink=result_sink)
 
     async def _plan_account(
         self,

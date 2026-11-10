@@ -480,19 +480,42 @@ also offers **Use a token instead**.
 
 ## Run without Discord
 
-The console can be the only frontend. With `CCDB_FRONTENDS` set and `discord` left out, ccdb
-never logs in to Discord and does not need `DISCORD_BOT_TOKEN` or `DISCORD_CHANNEL_ID`:
+Choose Console-only operation explicitly:
 
-```dotenv
-CCDB_FRONTENDS=console          # or console,teams
-API_PORT=8099                   # the console starts beside the control plane
-CCDB_CONSOLE_PORT=8100
-CCDB_CONSOLE_TOKEN=...          # or the Cloudflare Access settings above
+```sh
+ccdb start --mode console
 ```
 
-The scheduler, waits and the control-plane API keep running. New conversations, scheduled tasks
-included, open in the console. Startup refuses a configuration without Discord that nobody could
-reach (no console ports and no Teams).
+This needs no Discord account, bot token, channel ID or `.env` file. It defaults to
+control-plane port `8099` and Console port `8100`; configured ports take precedence.
+Open `http://localhost:8100` and use the normal passkey setup. The choice overrides
+`CCDB_FRONTENDS` in the environment or `.env` for this invocation. It never logs in
+to Discord, creates Discord threads or mirrors lounge messages to Discord, even
+when old Discord credentials and channel settings remain in the environment.
+
+For a service, persist the choice in its environment (and keep the port settings):
+
+```dotenv
+CCDB_FRONTENDS=console          # or console,teams to also enable Teams
+API_PORT=8099
+CCDB_CONSOLE_PORT=8100
+```
+
+The scheduler, waits and the control-plane API keep running. `/api/spawn` and
+`/api/ingest` create native Console conversations; `channel_id` is unnecessary and
+ignored. Ingest still requires its dedicated bearer token. Spawned children inherit
+the saved child AI preferences, and their parent link is stored before the first
+turn starts. Attachments and seed messages remain in the conversation even with
+`auto_start=false`. Native history is available through
+`GET /api/threads/{thread_id}/messages`, and relays use the native session host.
+Pending Console turns resume after restart without waiting for a Discord ready event.
+
+Existing Discord histories are not migrated. Unknown Discord IDs fail without a
+Discord fetch, and old pending Discord resumes are left untouched until expiry.
+Switch back with `ccdb start --mode discord` and valid Discord credentials; leaving
+both the flag and `CCDB_FRONTENDS` unset preserves the original Discord default.
+Startup refuses a configuration without Discord that nobody could reach (no Console
+ports and no Teams). Authentication and loopback binding remain unchanged.
 
 ## API
 

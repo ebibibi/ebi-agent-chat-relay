@@ -342,28 +342,34 @@ def cmd_setup(env_path: Path = Path(".env")) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def _run_start(env_path: Path) -> None:
-    if not env_path.exists():
+async def _run_start(env_path: Path, *, mode: str | None = None) -> None:
+    if not env_path.exists() and not (mode == "console" and env_path == Path(".env")):
         print(f"❌  No .env file found at {env_path}.", file=sys.stderr)
         print("    Run 'ccdb setup' first to create it.", file=sys.stderr)
         sys.exit(1)
 
     from dotenv import load_dotenv
 
-    load_dotenv(env_path)
+    if env_path.exists():
+        load_dotenv(env_path)
+    if mode is not None:
+        os.environ["CCDB_FRONTENDS"] = mode
+        if mode == "console":
+            os.environ.setdefault("API_PORT", "8099")
+            os.environ.setdefault("CCDB_CONSOLE_PORT", "8100")
 
     from claude_discord.main import main as bot_main
 
     await bot_main()
 
 
-def cmd_start(env_path: Path = Path(".env")) -> None:
+def cmd_start(env_path: Path = Path(".env"), *, mode: str | None = None) -> None:
     """Entry point for `ccdb start`."""
-    if not env_path.exists():
+    if not env_path.exists() and not (mode == "console" and env_path == Path(".env")):
         print(f"❌  No .env file found at {env_path}.", file=sys.stderr)
         print("    Run 'ccdb setup' first.", file=sys.stderr)
         sys.exit(1)
-    asyncio.run(_run_start(env_path))
+    asyncio.run(_run_start(env_path, mode=mode))
 
 
 # ---------------------------------------------------------------------------
@@ -558,6 +564,14 @@ def main() -> None:
         help="Directory containing custom Cog files to load",
     )
 
+    start_parser.add_argument(
+        "--mode",
+        choices=("console", "discord"),
+        default=None,
+        help="Select Console-only (no Discord login or threads) or Discord; "
+        "otherwise use CCDB_FRONTENDS",
+    )
+
     backfill_parser = sub.add_parser(
         "attention-backfill",
         help="Record past human messages from a guild for the attention estimate",
@@ -616,7 +630,10 @@ def main() -> None:
         cogs_dir = getattr(args, "cogs_dir", None)
         if cogs_dir:
             os.environ["CUSTOM_COGS_DIR"] = cogs_dir
-        cmd_start(Path(args.env))
+        if args.mode is None:
+            cmd_start(Path(args.env))
+        else:
+            cmd_start(Path(args.env), mode=args.mode)
     else:
         parser.print_help()
         sys.exit(0)
