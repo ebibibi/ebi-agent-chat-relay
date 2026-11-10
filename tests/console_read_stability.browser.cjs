@@ -21,7 +21,7 @@ for (const width of [1440, 390]) {
     const browser = await chromium.launch({ headless: true,
       executablePath: process.env.CONSOLE_TEST_CHROMIUM, args: ['--no-sandbox'] });
     t.after(() => browser.close());
-    const page = await browser.newPage({ viewport: { width, height: 844 }, locale: 'ja-JP' });
+    const page = await browser.newPage({ viewport: { width, height: width > 900 ? 1100 : 844 }, locale: 'ja-JP' });
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
     let tail = '書きかけ';
@@ -52,7 +52,7 @@ for (const width of [1440, 390]) {
     // Read from the middle of the conversation.
     await page.evaluate(() => { const m = $('msgs'); m.scrollTop = (m.scrollHeight - m.clientHeight) / 2; });
     await page.evaluate(() => {
-      // Watch the first paragraph in view on every frame: any movement is what the reader sees.
+      // Watch the first paragraph in view: any movement is what the reader sees.
       // Each move says which render was last and what the messages looked like then.
       const box = $('msgs');
       const edge = box.getBoundingClientRect().top;
@@ -65,20 +65,29 @@ for (const width of [1440, 390]) {
         window[name] = function (...args) { label = name; return original.apply(this, args); };
       }
       let previous = where();
-      const frame = () => {
+      const check = () => {
         const y = where();
         if (y !== previous) {
           window.__moves.push(`${previous}->${y} after ${label} scrollTop=${box.scrollTop} ` +
             `images=${box.querySelectorAll('.file-thumb img').length}`);
           previous = y;
         }
-        requestAnimationFrame(frame);
       };
-      requestAnimationFrame(frame);
+      // What is painted: layout, then the resize observers (the Console's own first), then paint.
+      // A rAF callback runs before layout and would see the frame before it is settled.
+      const painted = new ResizeObserver(check);
+      const observe = () => [box, ...box.children, $('d-family'), $('d-head'), $('live-slot')]
+        .forEach(node => node && painted.observe(node));
+      observe();
+      new MutationObserver(observe).observe(box, { childList: true });
+      box.addEventListener('scroll', check);
     });
     for (let i = 0; i < 4; i++) {
       tail += ' 続きの文章。'.repeat(20);
-      report += ' 報告が伸びました。'.repeat(8);
+      // A child moves on: its latest report is refetched, and the family list above the
+      // conversation grows or shrinks with it.
+      report = i % 2 ? '短い報告' : '報告が伸びました。'.repeat(20);
+      for (const item of items) item.last_activity_at = `2026-11-09T10:0${i + 1}:00Z`;
       await page.evaluate(async () => { await refresh(); await loadMessages('c'); });
       await page.waitForTimeout(2300); // a live tick and the family reports in between
     }
