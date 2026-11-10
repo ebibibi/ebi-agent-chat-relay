@@ -112,6 +112,12 @@ already in use so it reuses them. Each call is one-shot and tool-less: `claude -
 and settings off, or `codex exec` ephemeral and read-only without the user's config or rules,
 both in a scratch directory and without relay or console credentials in their environment.
 
+The model separately reports whether any human action remains (`ai.needs_human`).
+Information-only threads and work handed to a coordinator stay on the board but leave
+Focus, its guide and the Work through queue. They are not marked done or moved to Waiting.
+New activity triggers another assessment. An explicit **Can do now** overrides this guess.
+Existing guesses are reassessed after the prompt update; until then their behavior is unchanged.
+
 A guess never overrides a person:
 
 - A priority, due date or place you set wins. Setting one from the console pins it, so later

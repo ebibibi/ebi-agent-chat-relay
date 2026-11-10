@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS ai_triage (
 """
 #: Columns added after the first release of the table: (name, SQL type).
 _ADDED_COLUMNS = (
+    ("needs_human", "INTEGER"),
     ("ready", "INTEGER"),
     ("ready_at", "TEXT"),
     ("waiting_for", "TEXT"),
@@ -92,7 +93,7 @@ _ADDED_COLUMNS = (
     ("minutes", "INTEGER"),
 )
 #: Part of every basis: a new prompt re-triages everything once.
-PROMPT_VERSION = "4"
+PROMPT_VERSION = "5"
 #: The longest estimate kept; anything beyond a working day is "deep" either way.
 MAX_MINUTES = 480
 #: Effort buckets by the human's minutes before the turn goes back to the agent:
@@ -101,10 +102,8 @@ QUICK_MINUTES = 3
 SHORT_MINUTES = 20
 
 _PROMPT = """\
-You triage a person's work queue. Read one item and judge four separate things:
-how important it is, whether the person can act on it right now or must wait,
-whether it can only be done in one place or on one device, and how long the person's
-part takes.
+Triage human work: whether any remains here, its importance, readiness, place/device,
+and the person's time needed.
 
 Now: {now} (the person's local time)
 Item title: {title}
@@ -115,14 +114,20 @@ Conversation, oldest first (the person and their AI agent):
 
 Answer with one JSON object and nothing else:
 {{"priority": 0-3, "due": "YYYY-MM-DD" | "YYYY-MM-DDTHH:MM" | null, "reason": "…", "next": "…",
- "ready": true | false, "ready_at": "YYYY-MM-DDTHH:MM" | null, "waiting_for": "…",
+ "needs_human": true | false, "ready": true | false,
+ "ready_at": "YYYY-MM-DDTHH:MM" | null, "waiting_for": "…",
  "place": "…" | null, "minutes": 1-480}}
 
 priority: 0 = must happen today, blocks others, a customer or a hard deadline is waiting;
 1 = this week, or someone is waiting; 2 = normal; 3 = low, someday, or just information.
 due: only a deadline the conversation states or clearly implies, in local time; otherwise null.
 reason: why this priority, at most 60 characters.
-next: the single next thing the person (not the agent) should do, at most 60 characters.
+needs_human: false for information only, no reply needed, or work handed to a coordinator.
+Use the latest decision; ignore resolved or withdrawn requests. Never invent an action to
+acknowledge, unpin or close a thread. Agent work alone is not human work.
+true for a concrete human action, even one waiting for an event.
+next: the single next thing the person (not the agent) should do, at most 60 characters;
+if needs_human is false: next/waiting_for empty, ready false, ready_at/place null.
 ready: true only if the person can do "next" right now, at their desk, without waiting.
 false if "next" has to wait: for a time or date ("tomorrow at 20:00", "after the meeting"),
 for another person's reply or work, for an agent or a job to finish, or for an event.
@@ -178,6 +183,7 @@ class TriageResult:
     #: The Ebi Workspace entry the model thinks this belongs to, and how sure it is.
     workspace_path: str | None = None
     workspace_confidence: float = 0.0
+    needs_human: bool = True
 
 
 @dataclass(frozen=True)
@@ -199,6 +205,7 @@ class Triage:
     place: str | None = None
     pinned_place: bool = False
     minutes: int | None = None
+    needs_human: bool | None = None
 
 
 class TriageRepository:
@@ -226,14 +233,15 @@ class TriageRepository:
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(
                 "INSERT INTO ai_triage (item_id, priority, due_at, reason, next_step, ready,"
-                " ready_at, waiting_for, place, minutes, basis, model, updated_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " ready_at, waiting_for, place, minutes, basis, model, updated_at, needs_human)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 " ON CONFLICT(item_id) DO UPDATE SET priority = excluded.priority,"
                 " due_at = excluded.due_at, reason = excluded.reason,"
                 " next_step = excluded.next_step, ready = excluded.ready,"
                 " ready_at = excluded.ready_at, waiting_for = excluded.waiting_for,"
                 " place = excluded.place, minutes = excluded.minutes,"
-                " basis = excluded.basis, model = excluded.model, updated_at = excluded.updated_at",
+                " basis = excluded.basis, model = excluded.model, updated_at = excluded.updated_at,"
+                " needs_human = excluded.needs_human",
                 (
                     item_id,
                     result.priority,
@@ -248,6 +256,7 @@ class TriageRepository:
                     basis,
                     model,
                     _now(),
+                    int(result.needs_human),
                 ),
             )
             await db.commit()
@@ -287,6 +296,7 @@ def _to_triage(row: aiosqlite.Row) -> Triage:
         place=row["place"],
         pinned_place=bool(row["pinned_place"]),
         minutes=row["minutes"],
+        needs_human=None if row["needs_human"] is None else bool(row["needs_human"]),
     )
 
 
@@ -381,6 +391,7 @@ def parse_reply(raw: str, *, now: datetime) -> TriageResult | None:
         minutes=_minutes(data.get("minutes")),
         workspace_path=_workspace_answer(data.get("workspace")),
         workspace_confidence=_confidence(data.get("workspace_confidence")),
+        needs_human=data.get("needs_human") is not False,
     )
 
 
@@ -507,6 +518,7 @@ def apply_triage(
                 "place": row.place,
                 "minutes": row.minutes,
                 "updated_at": row.updated_at,
+                "needs_human": row.needs_human,
             }
             new["effort"] = effort(row.minutes)
             human_priority = row.pinned_priority or item.get("priority") != DEFAULT_PRIORITY
@@ -525,6 +537,11 @@ def apply_triage(
                 )
         new["focus"] = focus_score(new, now=now)
         human = human_readiness(item)
+        # No human work is different from a task waiting to become possible. Keep
+        # it on the board, but out of Focus/guide/zen, without marking it finished.
+        # An explicit human "can do now" still wins over the model's guess.
+        if row is not None and row.needs_human is False and human is not True:
+            new["focus"] = None
         # A stale override is dropped from the output too, so the client draws the guess.
         new["readiness"] = None if human is None else item["readiness"]
         if human is None:
