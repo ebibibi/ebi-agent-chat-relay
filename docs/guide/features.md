@@ -147,7 +147,16 @@ curl -X POST "$CCDB_API_URL/api/threads/<their_thread_id>/message" \
 - The relayed text is **posted into the thread** before it reaches Claude, so the humans watching see the whole AI-to-AI exchange. A relay is never a back channel.
 - Every message is **wrapped in a marker** naming the sending thread and stating that it is not from the human — an unmarked instruction would be obeyed as if the owner had written it.
 
-Loops are the real risk (two sessions answering each other burn tokens and interrupt each other indefinitely), so a guard bounds every chain: **max 2 hops**, a 60s cooldown per thread pair, 5 relays per sender per 10 minutes, and no self-sends. Refusals come back as 429 with the reason.
+Loops are the real risk (two sessions answering each other burn tokens and interrupt each other indefinitely). The guard measures different risks separately:
+
+- **Declared chains:** max 2 hops and no self-sends.
+- **Duplicates:** the same whitespace-normalized text from the same sender to the same recipient is blocked for 60 seconds. A distinct follow-up or the same instruction to another worker is allowed immediately.
+- **Rapid exchanges:** 20 messages per rolling minute between a pair, counting both directions together. Resetting `hop` or changing the text does not evade this bound; other peers keep their own budget.
+- **Sender flood:** 120 messages per rolling minute across recipients, as an emergency ceiling rather than a five-message coordination quota.
+
+Queue and interrupt requests share these budgets. In-flight dispatches reserve capacity before any asynchronous lookup, and failed dispatches release it. Discord acceptance means the delivery task was scheduled; failures after that point still count. Text is fingerprinted in memory rather than retained by the guard, and expired state is pruned across all senders and pairs. These are process-local limits and reset on restart.
+
+Refusals return 429 with `error` and a stable `reason` (`duplicate`, `pair_burst`, `sender_burst`, `hop_limit`, `invalid_hop`, or `self_send`). Temporary refusals also include `retry_after_seconds` and the `Retry-After` header. Hop and self-send refusals have no timer: do not retry them unchanged. There is no force bypass. These rules detect repetition and bursts, not the semantic importance of a message.
 
 The lounge prompt also gives sessions a tie-break rule so the conversation converges instead of ending in mutual politeness: whoever has commits or a PR beats whoever is still investigating; otherwise the earlier session continues; ties go to the lower thread ID. Whoever stands down pushes its branch first and hands over what it learned.
 
