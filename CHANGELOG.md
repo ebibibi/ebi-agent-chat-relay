@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Console: in a parent thread with the 📍 panel open, the family list no longer flips on and off
+  above the conversation as children's reports arrive. Each flip moved the text by the list's height
+  (230 px, dozens of times a minute, in a family with many children).
+- Console: the line being read now stays put whenever the conversation changes size, not only
+  when messages re-render. The usual cause was a child's report reloading, which made the family list
+  above the conversation shrink and grow; the header, the live panel and late images did the same.
+  The family list also keeps the last report while a newer one loads.
 - Console: reading further up a conversation no longer jumps while a turn runs. Each poll rebuilt
   every message, so delivered-file thumbnails vanished until they loaded again: the text moved and
   came back on phones, and drifted on desktops. Unchanged messages now keep their nodes, the first
