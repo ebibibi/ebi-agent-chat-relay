@@ -26,10 +26,14 @@ abandon an elicitation rather than proceed unsupervised or hang forever.
 from __future__ import annotations
 
 import json
+import logging
+import os
 from typing import Any, Literal
 
 from .frontend import Choice, ChoicePrompt, FormField, FormPrompt, Mention
 from .types import ElicitationRequest, PermissionRequest
+
+logger = logging.getLogger(__name__)
 
 FieldKind = Literal["text", "multiline", "number", "choice", "toggle"]
 
@@ -47,7 +51,9 @@ __all__ = [
     "elicitation_url_prompt",
     "elicitation_url_result",
     "permission_prompt",
+    "permission_approvers",
     "permission_result",
+    "permission_timeout_seconds",
     "plan_prompt",
     "plan_result",
 ]
@@ -94,9 +100,37 @@ def _format_tool_input(tool_input: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def permission_timeout_seconds() -> float:
+    """How long a permission prompt waits. ``CCDB_PERMISSION_TIMEOUT_SECONDS`` overrides."""
+    raw = os.getenv("CCDB_PERMISSION_TIMEOUT_SECONDS", "").strip()
+    try:
+        value = float(raw) if raw else PERMISSION_TIMEOUT_SECONDS
+    except ValueError:
+        return PERMISSION_TIMEOUT_SECONDS
+    return value if value > 0 else PERMISSION_TIMEOUT_SECONDS
+
+
+def permission_approvers() -> frozenset[str] | None:
+    """Who may answer a permission prompt, from ``CCDB_APPROVER_USER_IDS``.
+
+    ``None`` means no restriction. A value that cannot be read gives an empty
+    set, so a typo refuses everyone instead of letting everyone approve.
+    """
+    raw = os.getenv("CCDB_APPROVER_USER_IDS", "").strip()
+    if not raw:
+        return None
+    ids = [part.strip() for part in raw.split(",") if part.strip()]
+    if not all(part.isdigit() for part in ids):
+        logger.warning("CCDB_APPROVER_USER_IDS must be integers; nobody can approve")
+        return frozenset()
+    return frozenset(ids)
+
+
 def permission_prompt(request: PermissionRequest, *, notify: Mention | None = None) -> ChoicePrompt:
     """Ask whether a tool may run. Unanswered means denied."""
     question = f"Tool: {request.tool_name}\n\nInput:\n{_format_tool_input(request.tool_input)}"
+    if request.reason:
+        question = f"{request.reason}\n\n{question}"
     return ChoicePrompt(
         question=question,
         header="\U0001f510 Permission required",
@@ -104,9 +138,10 @@ def permission_prompt(request: PermissionRequest, *, notify: Mention | None = No
             Choice(value=ALLOW, label="✅ Allow", style="positive"),
             Choice(value=DENY, label="❌ Deny", style="destructive"),
         ),
-        timeout_seconds=PERMISSION_TIMEOUT_SECONDS,
+        timeout_seconds=permission_timeout_seconds(),
         default_on_timeout=DENY,
         notify=notify,
+        allowed_user_ids=permission_approvers(),
     )
 
 

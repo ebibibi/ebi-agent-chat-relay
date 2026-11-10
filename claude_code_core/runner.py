@@ -23,6 +23,7 @@ from pathlib import Path
 
 from .account_pool import AccountBinding
 from .api_provider import detect_api_provider
+from .approvals import permission_timeout_seconds
 from .child_env import STRIPPED_ENV_KEYS, strip_transport_credentials
 from .connections import Connection, apply_claude_env
 from .execution import ExecutionRefusedError, carry_execution_mode, prepare_launch, refusal_event
@@ -33,6 +34,20 @@ from .types import ImageData, InjectedMessage, MessageType, StreamEvent
 __all__ = ["ClaudeRunner", "ImageData"]
 
 logger = logging.getLogger(__name__)
+
+
+def _permission_response(request_id: str, tool_input: dict, approved: bool) -> dict:
+    """The answer to a can_use_tool request, in the CLI's control protocol."""
+    decision = (
+        {"behavior": "allow", "updatedInput": tool_input}
+        if approved
+        else {"behavior": "deny", "message": "Denied in Discord, or nobody answered in time."}
+    )
+    return {
+        "type": "control_response",
+        "response": {"subtype": "success", "request_id": request_id, "response": decision},
+    }
+
 
 # Sentinel to distinguish "not provided" from None (which means "no tool restrictions").
 _UNSET = object()
@@ -147,6 +162,8 @@ class ClaudeRunner:
         # stays in _outstanding until the CLI echoes its uuid back.
         self._accepting = False
         self._outstanding: dict[str, InjectedMessage] = {}
+        # Tool input of each can_use_tool request not answered yet.
+        self._pending_permissions: dict[str, dict] = {}
 
     async def run(
         self,
@@ -199,6 +216,7 @@ class ClaudeRunner:
         logger.info("Claude CLI started: pid=%s", self._process.pid)
 
         self._outstanding = {}
+        self._pending_permissions = {}
         if self._process.stdin is not None:
             await self._send_stream_json_message(prompt)
             self._accepting = True
@@ -292,14 +310,22 @@ class ClaudeRunner:
         if self._process is None or self._process.stdin is None:
             logger.warning("inject_tool_result: no active process stdin, ignoring")
             return
-        payload = {"request_id": request_id, **data}
-        line = json.dumps(payload) + "\n"
+        if request_id in self._pending_permissions:
+            tool_input = self._pending_permissions.pop(request_id)
+            payload = _permission_response(request_id, tool_input, bool(data.get("approved")))
+        else:
+            payload = {"request_id": request_id, **data}
+        await self._write_stdin_line(payload)
+        logger.debug("Injected tool result for request %s", request_id)
+
+    async def _write_stdin_line(self, payload: dict) -> None:
+        if self._process is None or self._process.stdin is None:
+            return
         try:
-            self._process.stdin.write(line.encode())
+            self._process.stdin.write((json.dumps(payload) + "\n").encode())
             await self._process.stdin.drain()
-            logger.debug("Injected tool result for request %s", request_id)
         except Exception:
-            logger.warning("inject_tool_result: failed to write to stdin", exc_info=True)
+            logger.warning("Failed to write a control message to stdin", exc_info=True)
 
     async def _send_stream_json_message(self, prompt: str) -> None:
         """Write the initial user message to stdin in stream-json format."""
@@ -391,6 +417,12 @@ class ClaudeRunner:
             "plan",
         ):
             args.append("--dangerously-skip-permissions")
+        elif not self.dangerously_skip_permissions:
+            # Without a prompt tool, -p turns every "ask" (a hook's included)
+            # into a denial nobody sees. The flag also adds these tools, which
+            # ccdb answers through other paths, so they stay off.
+            args.extend(["--permission-prompt-tool", "stdio"])
+            args.extend(["--disallowedTools", "AskUserQuestion,EnterPlanMode,ExitPlanMode"])
 
         if self.allowed_tools:
             args.extend(["--allowedTools", ",".join(self.allowed_tools)])
@@ -474,6 +506,10 @@ class ClaudeRunner:
             # Each line is progress, not a fresh total runtime budget. Long
             # active sessions may run indefinitely; silent streams cannot.
             timeout: float | None = self.timeout_seconds or None
+            if timeout and self._pending_permissions:
+                # The CLI stays silent while a person decides. The prompt has
+                # its own limit, so the wait stays bounded.
+                timeout += permission_timeout_seconds()
             if after_result:
                 # The CLI starts the next turn at once when it has unread
                 # input; silence means it never will.
@@ -497,6 +533,21 @@ class ClaudeRunner:
                 logger.info("Claude CLI stdout line %d: %.100s", line_count, decoded.strip())
             event = parse_line(decoded)
             if event:
+                if event.unsupported_control_request_id is not None:
+                    await self._write_stdin_line(
+                        {
+                            "type": "control_response",
+                            "response": {
+                                "subtype": "error",
+                                "request_id": event.unsupported_control_request_id,
+                                "error": "Not supported by this host",
+                            },
+                        }
+                    )
+                    continue
+                if event.message_type == MessageType.CONTROL_REQUEST and event.permission_request:
+                    request = event.permission_request
+                    self._pending_permissions[request.request_id] = request.tool_input
                 if event.replay_uuid is not None:
                     acked = self._outstanding.pop(event.replay_uuid, None)
                     if acked is not None:
