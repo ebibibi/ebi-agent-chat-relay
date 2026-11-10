@@ -1206,7 +1206,7 @@ class ApiServer:
                 ``hop + 1``; the guard refuses beyond MAX_HOP.
 
         Returns 202 when delivered (Claude runs in the background), 429 when
-        the relay guard refuses (loop/cooldown/rate), 404 for unknown threads.
+        the relay guard refuses (hop/duplicate/pair burst/sender burst), 404 for unknown threads.
         """
         try:
             thread_id = int(request.match_info["thread_id"])
@@ -1244,13 +1244,37 @@ class ApiServer:
             return web.json_response({"error": "hop must be an integer"}, status=400)
 
         now = time.monotonic()
-        refusal = self.relay_guard.check(
-            from_thread=from_thread, to_thread=thread_id, hop=hop, now=now
+        refusal = self.relay_guard.evaluate(
+            from_thread=from_thread, to_thread=thread_id, hop=hop, now=now, text=text
         )
         if refusal is not None:
             logger.info("Relay refused (%s → %s): %s", from_thread, thread_id, refusal)
-            return web.json_response({"error": refusal}, status=429)
+            body: dict[str, Any] = {"error": refusal.message, "reason": refusal.reason}
+            headers = {}
+            if refusal.retry_after_seconds is not None:
+                body["retry_after_seconds"] = refusal.retry_after_seconds
+                headers["Retry-After"] = str(refusal.retry_after_seconds)
+            return web.json_response(body, status=429, headers=headers)
 
+        # No await between checking and reserving: concurrent requests must see
+        # in-flight deliveries, not only completed ones.
+        reservation = self.relay_guard.record(
+            from_thread=from_thread, to_thread=thread_id, now=now, text=text
+        )
+        accepted = False
+        try:
+            response = await self._dispatch_relay(
+                thread_id, text=text, from_thread=from_thread, mode=mode, hop=hop
+            )
+            accepted = response.status == 202
+            return response
+        finally:
+            if not accepted:
+                self.relay_guard.release(reservation)
+
+    async def _dispatch_relay(
+        self, thread_id: int, *, text: str, from_thread: int, mode: str, hop: int
+    ) -> web.Response:
         prompt = build_relay_prompt(text=text, from_thread=from_thread, hop=hop)
 
         # An Ebi AI Console conversation shares the thread-key space but has no
@@ -1260,7 +1284,7 @@ class ApiServer:
         console = getattr(self.bot, "console_sessions", None)
         if isinstance(console, ConsoleSessionHost) and await console.owns(thread_id):
             return await self._relay_to_console(
-                console, thread_id, prompt, from_thread=from_thread, mode=mode, hop=hop, now=now
+                console, thread_id, prompt, from_thread=from_thread, mode=mode, hop=hop
             )
 
         from ..cogs.claude_chat import ClaudeChatCog
@@ -1285,8 +1309,6 @@ class ApiServer:
                 )
         if not isinstance(thread, _discord.Thread):
             return web.json_response({"error": "Target must be a thread"}, status=400)
-
-        self.relay_guard.record(from_thread=from_thread, to_thread=thread_id, now=now)
 
         # Run in the background so the sender is not blocked for the length of
         # the receiver's turn.
@@ -1320,7 +1342,6 @@ class ApiServer:
         from_thread: int,
         mode: str,
         hop: int,
-        now: float,
     ) -> web.Response:
         """Deliver a relay into a Console conversation and report what actually happened.
 
@@ -1345,7 +1366,6 @@ class ApiServer:
                 {"error": f"Message not delivered to console conversation {thread_id}: {exc}"},
                 status=500,
             )
-        self.relay_guard.record(from_thread=from_thread, to_thread=thread_id, now=now)
         logger.info(
             "Relayed message: thread %s → console conversation %s (mode=%s, hop=%s)",
             from_thread,

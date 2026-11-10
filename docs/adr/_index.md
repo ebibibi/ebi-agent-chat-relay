@@ -24,3 +24,4 @@ earlier ADR instead of rewriting its history.
 - [ADR-0016: Map ccdb permissions onto agy's own flags instead of gating the Antigravity backend](0016-map-ccdb-permissions-onto-agy-flags.md)
 - [ADR-0017: Keep a family's situation beside the conversation, per thread](0017-keep-a-family-situation-beside-the-conversation.md)
 - [ADR-0018: Add Console screens as registered data, not loaded code](0018-add-console-screens-as-registered-data.md)
+- [ADR-0019: Measure relay duplicates and peer exchanges separately from fan-out](0019-measure-relay-duplicates-and-peer-exchanges.md)

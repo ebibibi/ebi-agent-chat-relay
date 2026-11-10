@@ -122,9 +122,15 @@ curl -s -X POST "$CCDB_API_URL/api/threads/<worker_thread_id>/message" \
   only for "stop now, you are about to do damage".
 - The message is posted visibly in the worker's thread, marked as coming from you,
   not from the human.
-- **Limits** (refusals return 429 with the reason): max 2 hops per chain, 60 s
-  cooldown per thread pair, 5 relays per sender per 10 minutes, no self-sends, 4000
-  characters. Start each new topic at `hop: 0`.
+- **Limits**: max 2 hops per chain, no self-sends, 4000 characters. A distinct
+  follow-up can be sent immediately. Identical whitespace-normalized text to the
+  same recipient is blocked for 60 seconds; sending it to other workers is allowed.
+  A pair shares 20 messages per rolling minute across both directions; a sender
+  has an emergency ceiling of 120 messages per minute across recipients. Queue
+  and interrupt share the limits. A 429 includes a stable `reason`; temporary
+  refusals include `retry_after_seconds` and `Retry-After`. Respect them instead
+  of retrying in a loop. Start genuinely new topics at `hop: 0`; do not reset hop
+  to continue a chain that reached its limit.
 
 ### Relay pitfalls
 
