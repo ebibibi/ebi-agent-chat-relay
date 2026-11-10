@@ -72,9 +72,11 @@ project = "社内勉強会"
 
 # Start the first one and let it spawn children to see the 📍 panel fill in. Its two children
 # are there so the panel and the family list already show on the first open.
+# In Focus, try Work through / Your next move: only the parent is offered.
+# Inspect the children from its family panel instead; they never join the queue.
 [[items]]
 title = "全社のパスキー移行を統括して"
-note = "部署ごとの移行を子スレッドに分けて進め、私に聞くことは親にまとめて。"
+note = "部署ごとの移行を子スレッドに分けて進め、私に聞くことは親にまとめて。「今やる一手」と「連続で片づける」ではこの親と話し、子の状況は親から開いて確認する。"
 priority = 1
 project = "社内勉強会"
 

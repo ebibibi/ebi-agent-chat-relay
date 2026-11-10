@@ -59,7 +59,10 @@ Two modes hide everything but the conversation — the navigation, the list and 
 - **🎯 Focus** (the button in a thread's header, or `z`) shows the open thread full screen.
   Esc, ✕ Exit or leaving the thread returns to the full console.
 - **🔁 Work through** (the button in the Focus view's time bar) runs a queue: the threads you can
-  act on here and now, in Focus order, narrowed to the time bucket chosen in that bar. Each one
+  act on here and now, in Focus order, narrowed to the time bucket chosen in that bar.
+  Only parent and standalone conversations enter the queue; children and grandchildren stay
+  with their parent, even when that parent is absent from the board. If a queued thread
+  becomes a child, it leaves the queue on the next refresh. Each one
   opens full screen with the reply box focused; the strip at the top shows where you are
   (`2 / 7`), how many are left, the AI's estimate and the next step. Sending a reply, finishing
   the thread or ⏭ Skip (`n`) opens the next one — nothing is picked from a list. A thread that
@@ -96,6 +99,10 @@ model call, so it costs nothing per poll and gives the same answer twice
 
 Everything except the last part works without a Workspace; without one the board sends
 `guide.drift: null` and the card leaves that section out.
+
+The next move also considers only parent and standalone conversations, so delegated children
+cannot fill its candidate slots. Family decisions still link to the parent under **Decide
+together**. Open the parent to inspect a child explicitly.
 
 ## Automatic triage
 

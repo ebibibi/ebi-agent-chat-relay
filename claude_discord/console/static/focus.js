@@ -100,13 +100,16 @@ window.ConsoleFocus = (() => {
     onclick: () => openItem(id), text: label });
 
   function nextMove(g, byId) {
-    const pick = g.next.find((n) => !elsewhere(byId.get(n.id) || n));
+    // Re-check the latest board: a candidate may have acquired a parent.
+    const direct = g.next.filter((n) => !(byId.get(n.id) || n).parent_id);
+    const calm = g.calm || !direct.length;
+    const pick = direct.find((n) => !elsewhere(byId.get(n.id) || n));
     if (!pick) {
       const counts = T.guide_counts(g.counts);
       return [
-        h("div", { class: "guide-calm", text: g.calm ? T.guide_calm : T.guide_elsewhere(g.next.length) }),
+        h("div", { class: "guide-calm", text: calm ? T.guide_calm : T.guide_elsewhere(direct.length) }),
         counts ? h("div", { class: "dim", text: counts }) : null,
-        g.calm && (g.counts.running || g.counts.waiting) ? h("div", { class: "dim", text: T.guide_calm_more }) : null,
+        calm && (g.counts.running || g.counts.waiting) ? h("div", { class: "dim", text: T.guide_calm_more }) : null,
       ];
     }
     const reasons = pick.reasons.map((r) => T.guide_reasons[r]).filter(Boolean);
