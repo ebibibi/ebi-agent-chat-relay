@@ -100,7 +100,10 @@ window.ConsoleFamily = (() => {
   }
   const reports = new Map(), pending = new Set();
   const FOLDED_KEY = 'familyListFolded';
-  let folded = {'1': true, '0': false}[localStorage.getItem(FOLDED_KEY)] ?? null, mobileExpanded = false;
+  // null: not chosen yet (folded beside the panel). Read safely: the model is also loaded
+  // outside a browser by the node tests.
+  let folded = (() => { try { return {'1': true, '0': false}[localStorage.getItem(FOLDED_KEY)] ?? null; } catch { return null; } })();
+  let mobileExpanded = false;
   function label(item) {
     return item.paused_at && !item.running ? T.paused : needsAttention(item) ? L().attention : item.queued ? T.queued : T.st[item.status] || item.status;
   }
