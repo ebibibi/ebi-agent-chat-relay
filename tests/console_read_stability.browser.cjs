@@ -102,3 +102,49 @@ for (const width of [1440, 390]) {
     assert.deepEqual(errors, []);
   });
 }
+
+// With the panel open, a parent's family list belongs to the panel. family.js redraws the list
+// on its own whenever a child's report arrives; it showed the list again each time, and the
+// panel hid it on the next redraw: the conversation under it jumped by the list's height.
+test('a parent\'s family list stays with the panel while reports arrive', async (t) => {
+  const browser = await chromium.launch({ headless: true,
+    executablePath: process.env.CONSOLE_TEST_CHROMIUM, args: ['--no-sandbox'] });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, locale: 'ja-JP' });
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  // Many children: their reports arrive three at a time, each batch a separate redraw.
+  const items = [fixture('p', '親'), ...Array.from({ length: 9 }, (_, n) => fixture(`k${n}`, `子 ${n}`, 'p', 'running'))];
+  await page.route('http://console.test/**', async route => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === '/' || pathname.startsWith('/static/')) {
+      const file = pathname === '/' ? 'index.html' : path.basename(pathname);
+      return route.fulfill({ body: fs.readFileSync(path.join(root, file)),
+        contentType: file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html' });
+    }
+    const id = decodeURIComponent((pathname.match(/\/items\/([^/]+)\//) || [])[1] || '');
+    let data = {};
+    if (pathname.endsWith('/board')) data = { items, slots: {}, places: [] };
+    else if (pathname.endsWith('/messages')) {
+      await new Promise(r => setTimeout(r, 150));
+      data = { messages: id === 'p' ? Array.from({ length: 30 }, (_, n) => message(id, n))
+        : [{ id: `${id}-r`, kind: 'agent', is_bot: true, content: `${id} の報告`, created_at: '2026-11-09T10:00:00Z' }] };
+    } else if (pathname.endsWith('/situation')) data = { situation: { asks: [], doing: [], decided: [] }, waits: [] };
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify(data) });
+  });
+  await page.goto('http://console.test/');
+  await page.evaluate(() => localStorage.removeItem('situationHidden'));
+  await page.reload();
+  await page.waitForFunction(() => typeof state !== 'undefined' && state.items.length === 10);
+  await page.evaluate(() => {
+    openItem('p');
+    window.__shown = 0;
+    // Any frame with the list showing is a jump the reader sees.
+    const frame = () => { const f = $('d-family'); if (f && !f.hidden) window.__shown++; requestAnimationFrame(frame); };
+    requestAnimationFrame(frame);
+  });
+  await page.locator('#d-side').getByText('k8 の報告', { exact: false }).waitFor();
+  await page.waitForTimeout(500);
+  assert.equal(await page.evaluate(() => window.__shown), 0);
+  assert.deepEqual(errors, []);
+});

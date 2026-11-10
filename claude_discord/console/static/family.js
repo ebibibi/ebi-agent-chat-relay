@@ -112,7 +112,8 @@ window.ConsoleFamily = (() => {
   function render(item) {
     const slot = $('d-family');
     const family = model(state.items, item.id);
-    slot.hidden = !family || (!family.parent && !family.rows.length);
+    slot.hidden = !family || (!family.parent && !family.rows.length) ||
+      Boolean(window.ConsoleSituation?.holdsFamily(item.id));
     const reply = $('reply');
     const child = family && family.parent;
     // Default child inspection to read-only, with an explicit escape hatch.
