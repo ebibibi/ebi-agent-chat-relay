@@ -38,6 +38,7 @@ window.ConsoleSituation = (() => {
   let tab = "chat";
   let observer = null;
   let hidden = localStorage.getItem(HIDDEN_KEY) === "1";
+  let holder = null; // the parent whose family list the open panel has taken over
 
   const redrawOpen = () => {
     const current = state.open && state.byId.get(state.open);
@@ -182,6 +183,7 @@ window.ConsoleSituation = (() => {
     hidden = next;
     localStorage.setItem(HIDDEN_KEY, next ? "1" : "0");
     if (!next && $("d-body")?.dataset.layout === "tabs") tab = "situation";
+    if (next) holder = null; // folded: the family list goes back to the conversation column
     // A full redraw: the family list's own visibility comes back with it.
     if (state.open) renderDetail();
   }
@@ -198,6 +200,7 @@ window.ConsoleSituation = (() => {
     if (workspace && !open && workspace.parentElement !== main) main.insertBefore(workspace, notes);
     if (familyNode && familyNode.parentElement !== main) main.insertBefore(familyNode, notes);
     if (familyNode && open && !(family && family.parent)) familyNode.hidden = true;
+    holder = open && !(family && family.parent) ? state.open : null;
   }
 
   function paintTabs(body, show, tabs, asks) {
@@ -310,5 +313,9 @@ window.ConsoleSituation = (() => {
   // A parent's record changes nothing on the board, so the board's refresh would not redraw it.
   setInterval(() => { if (!document.hidden) redrawOpen(); }, REFRESH_MS);
 
-  return { render, attach, backgroundIds, markBackground };
+  // family.js redraws its list on its own when reports arrive; it must not show it again
+  // while the panel holds it. Doing so flipped the list on and off above the conversation.
+  const holdsFamily = (id) => holder !== null && holder === id;
+
+  return { render, attach, backgroundIds, markBackground, holdsFamily };
 })();

@@ -664,6 +664,7 @@ function buildDetail(pane, item, key) {
   ];
   pane.replaceChildren(...nodes.filter(Boolean));
   window.ConsoleSituation.attach(body);
+  window.ConsoleReadHold.attach(msgs);
 }
 
 function headParts(item) {

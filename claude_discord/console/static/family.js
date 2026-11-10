@@ -93,7 +93,9 @@ window.ConsoleFamily = (() => {
   }
   function card({item, depth}, selected) {
     const cached = reports.get(item.id);
-    const recent = cached && cached.version === version(item) && cached.text;
+    // The last report stays while a newer one loads; switching to the next step and back
+    // in between made the list, and the conversation under it, jump.
+    const recent = cached && cached.text;
     const summary = recent || (item.ai && item.ai.next_step ? `${L().next}: ${item.ai.next_step}` : '') || item.note || L().empty;
     return h('li', {class: 'family-task' + (selected === item.id ? ' current' : '') +
       (needsAttention(item) ? ' attention' : '') + (item.status === 'done' ? ' complete' : ''),
@@ -110,7 +112,8 @@ window.ConsoleFamily = (() => {
   function render(item) {
     const slot = $('d-family');
     const family = model(state.items, item.id);
-    slot.hidden = !family || (!family.parent && !family.rows.length);
+    slot.hidden = !family || (!family.parent && !family.rows.length) ||
+      Boolean(window.ConsoleSituation?.holdsFamily(item.id));
     const reply = $('reply');
     const child = family && family.parent;
     // Default child inspection to read-only, with an explicit escape hatch.
