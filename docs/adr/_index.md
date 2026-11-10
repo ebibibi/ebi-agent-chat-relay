@@ -25,3 +25,5 @@ earlier ADR instead of rewriting its history.
 - [ADR-0017: Keep a family's situation beside the conversation, per thread](0017-keep-a-family-situation-beside-the-conversation.md)
 - [ADR-0018: Add Console screens as registered data, not loaded code](0018-add-console-screens-as-registered-data.md)
 - [ADR-0019: Measure relay duplicates and peer exchanges separately from fan-out](0019-measure-relay-duplicates-and-peer-exchanges.md)
+
+- [ADR-0020: Select Console-only operation explicitly](0020-select-console-only-operation-explicitly.md) — Explicit CLI choice and native control-plane routing (accepted, 2026-11-11).

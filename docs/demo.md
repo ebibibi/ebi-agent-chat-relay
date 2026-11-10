@@ -12,7 +12,9 @@ instance is a separate OS user, so the boundary is the operating system's, not t
 
 ## What you get
 
-- The Console on its own port, with no Discord or Teams frontend (`CCDB_FRONTENDS=console`)
+- The Console on its own port, with no Discord or Teams frontend (`CCDB_FRONTENDS=console`);
+  [Console-only startup](console.md#run-without-discord) can also be selected with
+  `ccdb start --mode console`
 - An Ebi Workspace vault and Console items written by a **scenario**, with dates relative to the
   reset day: something "due today" is due today every time you record
 - A reset that empties the data (keeping your passkey, so you do not re-enroll before each take),

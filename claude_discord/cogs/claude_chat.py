@@ -1306,6 +1306,11 @@ class ClaudeChatCog(commands.Cog):
         logger.info("Found %d pending session resume(s) on startup", len(pending))
 
         for entry in pending:
+            if getattr(self.bot, "headless", False) is True:
+                console = getattr(self.bot, "console_sessions", None)
+                if console is None or not await console.owns(entry.thread_id):
+                    # Retain old Discord resumes without contacting Discord.
+                    continue
             # Delete FIRST — prevents double-resume even if spawn fails
             await self._resume_repo.delete(entry.id)
 
@@ -1396,6 +1401,8 @@ class ClaudeChatCog(commands.Cog):
         try:
             if console is not None and await console.owns(thread_id):
                 await console.resume_queued(thread_id, prompt)
+                return
+            if getattr(self.bot, "headless", False) is True:
                 return
             raw = self.bot.get_channel(thread_id) or await self.bot.fetch_channel(thread_id)
         except Exception:
