@@ -103,10 +103,11 @@ for (const width of [1440, 390]) {
   });
 }
 
-// With the panel open, a parent's family list belongs to the panel. family.js redraws the list
-// on its own whenever a child's report arrives; it showed the list again each time, and the
-// panel hid it on the next redraw: the conversation under it jumped by the list's height.
-test('a parent\'s family list stays with the panel while reports arrive', async (t) => {
+// Beside the 📍 panel a parent's family list is one line that unfolds on request. It used to be
+// hidden by the panel and shown again by family.js whenever a child's report arrived: the
+// conversation under it jumped by the list's height, and once hidden for good the children
+// could not be checked from the conversation at all.
+test('a parent\'s family list stays one steady line beside the panel', async (t) => {
   const browser = await chromium.launch({ headless: true,
     executablePath: process.env.CONSOLE_TEST_CHROMIUM, args: ['--no-sandbox'] });
   t.after(() => browser.close());
@@ -138,13 +139,20 @@ test('a parent\'s family list stays with the panel while reports arrive', async 
   await page.waitForFunction(() => typeof state !== 'undefined' && state.items.length === 10);
   await page.evaluate(() => {
     openItem('p');
-    window.__shown = 0;
-    // Any frame with the list showing is a jump the reader sees.
-    const frame = () => { const f = $('d-family'); if (f && !f.hidden) window.__shown++; requestAnimationFrame(frame); };
+    window.__heights = new Set();
+    // Every height the list takes on a frame; more than one is a jump the reader sees.
+    const frame = () => { const f = $('d-family'); if (f && f.isConnected) window.__heights.add(f.hidden ? 0 : f.offsetHeight); requestAnimationFrame(frame); };
     requestAnimationFrame(frame);
   });
   await page.locator('#d-side').getByText('k8 の報告', { exact: false }).waitFor();
   await page.waitForTimeout(500);
-  assert.equal(await page.evaluate(() => window.__shown), 0);
+  assert.equal(await page.locator('#d-family .family-heading').isVisible(), true);
+  assert.equal(await page.locator('#d-family .family-tasks').isVisible(), false);
+  const heights = await page.evaluate(() => [...window.__heights].filter(Boolean));
+  assert.equal(heights.length, 1, JSON.stringify(heights));
+  // Unfolding shows every child, and the choice is remembered.
+  await page.locator('#d-family .family-heading').click();
+  assert.equal(await page.locator('#d-family .family-task').count(), 9);
+  assert.equal(await page.evaluate(() => localStorage.getItem('familyListFolded')), '0');
   assert.deepEqual(errors, []);
 });
