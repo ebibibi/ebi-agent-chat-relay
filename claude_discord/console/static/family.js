@@ -99,7 +99,8 @@ window.ConsoleFamily = (() => {
     return report ? report.content.replace(/\s+/g, ' ').trim().slice(0, 240) : '';
   }
   const reports = new Map(), pending = new Set();
-  let folded = false, mobileExpanded = false;
+  const FOLDED_KEY = 'familyListFolded';
+  let folded = {'1': true, '0': false}[localStorage.getItem(FOLDED_KEY)] ?? null, mobileExpanded = false;
   function label(item) {
     return item.paused_at && !item.running ? T.paused : needsAttention(item) ? L().attention : item.queued ? T.queued : T.st[item.status] || item.status;
   }
@@ -124,8 +125,12 @@ window.ConsoleFamily = (() => {
   function render(item) {
     const slot = $('d-family');
     const family = model(state.items, item.id);
-    slot.hidden = !family || (!family.parent && !family.rows.length) ||
-      Boolean(window.ConsoleSituation?.holdsFamily(item.id));
+    // On a phone, or where the 📍 panel is a tab of its own, the panel lists every thread and
+    // the conversation needs the height: no line for it here. Decided from the item and the
+    // layout alone, so it cannot flip between redraws.
+    const small = matchMedia('(max-width: 900px)').matches || $('d-body')?.dataset.layout === 'tabs';
+    const tabbed = small && Boolean(window.ConsoleSituation?.holdsFamily(item.id));
+    slot.hidden = !family || (!family.parent && !family.rows.length) || tabbed;
     const reply = $('reply');
     const child = family && family.parent;
     // Default child inspection to read-only, with an explicit escape hatch.
@@ -139,7 +144,11 @@ window.ConsoleFamily = (() => {
     }
     if (slot.hidden) { slot.replaceChildren(); delete slot.dataset.signature; return; }
     const mobile = matchMedia("(max-width: 900px)").matches;
-    const collapsed = mobile ? !mobileExpanded : folded;
+    // Beside the 📍 panel a parent's list starts as one line (the panel lists each thread too);
+    // a choice made with the heading is remembered. The list stays put either way: showing and
+    // hiding it on its own moved the conversation under it.
+    const beside = Boolean(window.ConsoleSituation?.holdsFamily(item.id));
+    const collapsed = mobile ? !mobileExpanded : folded === null ? beside : folded;
     const signature = JSON.stringify([item.id, collapsed, state.directReply, family.root.title,
       family.rows.map(({item, depth}) => [item, depth, reports.get(item.id)])]);
     if (slot.dataset.signature === signature) {
@@ -155,14 +164,18 @@ window.ConsoleFamily = (() => {
       h('button', {class: 'btn', type: 'button', onclick: () => openItem(family.parent.id), text: L().back}),
       h('button', {class: 'btn family-direct', type: 'button',
         onclick: () => { state.directReply = item.id; renderDetail(); $('reply')?.focus(); }, text: L().direct}))
-      : h('p', {class: 'dim family-hint', text: L().hint});
+      : collapsed ? null : h('p', {class: 'dim family-hint', text: L().hint});
     const heading = h('button', {class: 'family-heading', type: 'button',
-      'aria-expanded': String(!collapsed), onclick: () => { if (mobile) mobileExpanded = !mobileExpanded; else folded = !folded; render(item); }},
+      'aria-expanded': String(!collapsed), onclick: () => {
+        if (mobile) mobileExpanded = !mobileExpanded;
+        else { folded = !collapsed; localStorage.setItem(FOLDED_KEY, folded ? '1' : '0'); }
+        render(item);
+      }},
       h('strong', {text: `${collapsed ? '▸' : '▾'} ${L().title}`}),
       h('span', {class: 'family-counts', text: L().counts(family.counts)}));
     const list = h('ul', {class: 'family-tasks', hidden: collapsed}, ...family.rows.map(row => card(row, item.id)));
     const scroll = slot.querySelector('.family-tasks')?.scrollTop || 0;
-    slot.replaceChildren(context, heading, list);
+    slot.replaceChildren(...[context, heading, list].filter(Boolean));
     list.scrollTop = scroll;
     if (!collapsed) loadReports(family.rows);
   }

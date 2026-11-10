@@ -42,7 +42,9 @@ const reportOf = {p:'親の報告です。', c:'画面の実装が完了。ス�
   const side = page.locator('#d-side');
   await side.getByText('画面の実装が完了', {exact:false}).waitFor();
   await side.getByText('レビューの指摘3件', {exact:false}).waitFor();
-  assert.equal(await page.locator('#d-family').isVisible(), false, 'the panel replaces the family list');
+  // Beside the panel the family list is one folded line that unfolds on request.
+  assert.equal(await page.locator('#d-family .family-heading').isVisible(), true);
+  assert.equal(await page.locator('#d-family .family-tasks').isVisible(), false);
 
   // Answering the parent's question from the panel, without leaving it.
   await side.getByRole('button',{name:'↩ 回答する'}).click();

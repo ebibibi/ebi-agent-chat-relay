@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Console: a parent's child threads can be checked from the conversation again. Beside the 📍 panel
+  the family list is one steady line (**▸ Child threads**, with counts) that unfolds on click, and the
+  choice is remembered; phones keep it in the panel's tab. #1296 had hidden it for good.
 - Console: in a parent thread with the 📍 panel open, the family list no longer flips on and off
   above the conversation as children's reports arrive. Each flip moved the text by the list's height
   (230 px, dozens of times a minute, in a family with many children).
