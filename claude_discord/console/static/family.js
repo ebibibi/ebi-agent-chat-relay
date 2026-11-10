@@ -55,6 +55,13 @@ window.ConsoleFamily = (() => {
   }
   // Keep each family at its first matching row's position. Include ancestors as
   // context, but do not pull unrelated/filtered siblings into a selection range.
+  const EXPANDED_KEY = 'familyExpanded';
+  const expanded = new Set((() => { try { return JSON.parse(localStorage.getItem(EXPANDED_KEY) || '[]'); } catch { return []; } })());
+  function toggleExpanded(rootId) {
+    if (expanded.has(rootId)) expanded.delete(rootId); else expanded.add(rootId);
+    localStorage.setItem(EXPANDED_KEY, JSON.stringify([...expanded]));
+    renderList();
+  }
   function groupRows(rows) {
     const matching = new Set(rows.filter(r=>r.item).map(r=>r.item.id));
     const emitted = new Set(), out = [];
@@ -72,10 +79,15 @@ window.ConsoleFamily = (() => {
         }
       }
       const entries = [{item:family.root,depth:0}, ...family.rows.map(r=>({...r,depth:r.depth+1}))];
+      // People talk to the parent; outside the tree a family shows its parent and how many
+      // children it has, and lists the children only when unfolded (or one of them is open).
+      const folded = state.view !== 'tree' && family.rows.length > 0 && !expanded.has(family.root.id) &&
+        !family.rows.some(({item}) => item.id === state.open);
       for (const entry of entries) {
         if (!included.has(entry.item.id)) continue;
+        if (folded && entry.depth > 0) continue;
         // Tree already applied the collapse state; other lists always group matches.
-        out.push({...entry, family: family.rows.length ? family : null,
+        out.push({...entry, family: family.rows.length ? family : null, folded,
           children:state.view==='tree' ? state.items.filter(i=>i.parent_id===entry.item.id).length : 0});
       }
     }
@@ -178,17 +190,29 @@ window.ConsoleFamily = (() => {
       title: L().counts(family.counts)});
     return null;
   }
-  function listGroup(family, shown) {
+  function listGroup(family, shown, folded) {
     const ja = document.documentElement.lang === 'ja';
     const total = family.counts.total;
-    const count = ja ? `子スレッド ${total}件` : `${total} child threads`;
-    const visible = shown < total ? (ja ? ` · ${shown}/${total}件を表示` : ` · ${shown} of ${total} shown`) : '';
+    const count = ja ? `子スレッド ${total}件` : `${total} child thread${total === 1 ? "" : "s"}`;
+    const visible = !folded && shown < total ? (ja ? ` · ${shown}/${total}件を表示` : ` · ${shown} of ${total} shown`) : '';
     const name = family.root.title || family.root.id;
-    return h('li', {class:'thread-group', role:'presentation'},
-      h('div', {class:'thread-group-heading'},
-        h('span', {class:'thread-group-label', text:ja ? '親子グループ' : 'Group'}),
-        h('span', {class:'thread-group-count', text:count + visible})),
-      h('ul', {class:'thread-group-rows', role:'group', 'aria-label':`${name} · ${count}`}));
+    if (state.view === 'tree') {
+      // The tree folds with its own triangles; the card only says what it holds.
+      return h('li', {class:'thread-group', role:'presentation'},
+        h('div', {class:'thread-group-heading'},
+          h('span', {class:'thread-group-label', text:ja ? '親子グループ' : 'Group'}),
+          h('span', {class:'thread-group-count', text:count + (shown < total ? (ja ? ` · ${shown}/${total}件を表示` : ` · ${shown} of ${total} shown`) : '')})),
+        h('ul', {class:'thread-group-rows', role:'group', 'aria-label':`${name} · ${count}`}));
+    }
+    const toggle = h('button', {class:'thread-group-toggle', type:'button', 'aria-expanded':String(!folded),
+      title: folded ? (ja ? '子スレッドを表示' : 'Show the child threads') : (ja ? '子スレッドをたたむ' : 'Fold the child threads'),
+      onclick: (e) => { e.stopPropagation(); toggleExpanded(family.root.id); },
+      text: `${folded ? '▸' : '▾'} ${count}${visible}`});
+    return h('li', {class:'thread-group' + (folded ? ' folded' : ''), role:'presentation'},
+      folded ? null : h('div', {class:'thread-group-heading'},
+        h('span', {class:'thread-group-label', text:ja ? '親子グループ' : 'Group'})),
+      h('ul', {class:'thread-group-rows', role:'group', 'aria-label':`${name} · ${count}`}),
+      h('div', {class:'thread-group-foot'}, toggle));
   }
   function roleTag(depth) {
     const ja = document.documentElement.lang === 'ja';

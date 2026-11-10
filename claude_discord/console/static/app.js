@@ -491,7 +491,7 @@ function renderList() {
     if (row.family) {
       if (group?.id !== row.family.root.id) {
         const shown = rows.filter(r => r.family?.root.id === row.family.root.id && r.depth > 0).length;
-        const card = window.ConsoleFamily.listGroup(row.family, shown);
+        const card = window.ConsoleFamily.listGroup(row.family, shown, row.folded);
         nodes.push(card);
         group = {id:row.family.root.id, list:card.querySelector('.thread-group-rows')};
       }
