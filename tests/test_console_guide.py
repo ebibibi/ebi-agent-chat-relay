@@ -154,3 +154,35 @@ def test_records_updated_after_the_conversation_are_not_drift() -> None:
     records = {"Work/Site": {"tasks": [], "updated_at": _ts(timedelta(minutes=5))}}
     item = _item("a", status="done", bucket="done", focus=None, workspace_path="Work/Site")
     assert build_guide([item], records=records, now=NOW)["drift"] == []
+
+
+def test_children_do_not_fill_next_move_slots_but_still_batch_under_parent() -> None:
+    children = [_item(f"c{n}", parent_id="root", focus=500 + n) for n in range(8)]
+    items = (
+        children
+        + [_item("grandchild", parent_id="c0", focus=900)]
+        + [
+            _item("orphan", parent_id="missing", focus=1000),
+            _item("root", focus=150),
+            _item("solo", focus=200),
+        ]
+    )
+    guide = build_guide(items, now=NOW)
+    assert [n["id"] for n in guide["next"]] == ["solo", "root"]
+    assert guide["counts"]["me"] == 2
+    assert guide["calm"] is False
+    assert guide["batches"][0]["root_id"] == "root"
+    assert "grandchild" in guide["batches"][0]["items"]
+
+
+def test_only_children_need_attention_is_calm_even_without_parent_on_board() -> None:
+    guide = build_guide(
+        [
+            _item("child", parent_id="absent", focus=500),
+            _item("grandchild", parent_id="child", focus=600),
+        ],
+        now=NOW,
+    )
+    assert guide["next"] == []
+    assert guide["calm"] is True
+    assert guide["counts"]["me"] == 0
