@@ -104,6 +104,10 @@ test('partial failure stays visible and retry only sends failures; busy clicks d
 
 test('child list entry opens the child; direct child replies require a fresh explicit choice', async t => {
   const app = await setup(t, [fixture('child',{parent_id:'parent'}), fixture('other'),fixture('parent')]);
+  // Outside the tree a family shows its parent and a count; the children unfold on request.
+  assert.deepEqual(await app.page.locator('.row').evaluateAll(nodes=>nodes.map(n=>n.dataset.itemId)), ['parent','other']);
+  assert.equal(await app.page.locator('.thread-group-toggle').innerText(), '▸ 1 child thread');
+  await app.page.locator('.thread-group-toggle').click();
   assert.deepEqual(await app.page.locator('.row').evaluateAll(nodes=>nodes.map(n=>n.dataset.itemId)), ['parent','child','other']);
   await app.row('child').click();
   assert.equal(await app.page.evaluate(()=>state.open),'child');
@@ -162,7 +166,12 @@ test('family cards show boundaries, roles and filtered counts on narrow and wide
     fixture('grandchild',{parent_id:'child'}),fixture('sibling',{parent_id:'parent'}),fixture('other')]);
   const group = app.page.locator('.thread-group');
   assert.equal(await group.count(),1);
-  assert.match(await group.locator('.thread-group-heading').innerText(),/Group.*3 child threads/s);
+  // Folded by default: the parent and how many children it has.
+  assert.deepEqual(await group.locator('.row').evaluateAll(ns=>ns.map(n=>n.dataset.itemId)),['parent']);
+  assert.equal(await group.locator('.thread-group-toggle').innerText(),'▸ 3 child threads');
+  await group.locator('.thread-group-toggle').click();
+  assert.equal(await group.locator('.thread-group-toggle').getAttribute('aria-expanded'),'true');
+  assert.match(await group.locator('.thread-group-heading').innerText(),/Group/);
   assert.equal(await app.row('parent').locator('.family-role').innerText(),'Parent');
   assert.equal(await app.row('child').locator('.family-role').innerText(),'Child');
   assert.equal(await app.row('grandchild').locator('.family-role').innerText(),'Child · level 2');
@@ -170,7 +179,7 @@ test('family cards show boundaries, roles and filtered counts on narrow and wide
   assert.equal(await app.row('other').evaluate(n=>Boolean(n.closest('.thread-group'))),false);
   assert.deepEqual(await group.locator('.row').evaluateAll(ns=>ns.map(n=>n.dataset.itemId)),['parent','child','grandchild','sibling']);
   await app.page.locator('#filter').fill('Thread grandchild');
-  assert.match(await group.locator('.thread-group-heading').innerText(),/2 of 3 shown/);
+  assert.match(await group.locator('.thread-group-toggle').innerText(),/2 of 3 shown/);
   assert.equal(await app.row('sibling').count(),0);
   await app.page.locator('#filter').fill('');
   for (const width of [1440,390,320]) {
@@ -188,7 +197,8 @@ test('family cards show boundaries, roles and filtered counts on narrow and wide
   app.items = app.items.map(i=>({...i,title:i.id==='parent' ? 'お客様への回答をまとめる' :
     i.id==='child' ? '調査結果を確認する' : i.id==='grandchild' ? '<img src=x onerror=alert(1)>' : '関連する作業を整理する'}));
   await app.page.evaluate(async()=>{await refresh();setLanguage('ja');setView('idle');});
-  assert.match(await group.locator('.thread-group-heading').innerText(),/親子グループ.*子スレッド 3件/s);
+  assert.match(await group.locator('.thread-group-heading').innerText(),/親子グループ/);
+  assert.equal(await group.locator('.thread-group-toggle').innerText(),'▾ 子スレッド 3件');
   assert.equal(await app.row('parent').locator('.family-role').innerText(),'親');
   assert.equal(await app.row('child').locator('.family-role').innerText(),'子');
   assert.equal(await group.locator('img').count(),0);
@@ -200,6 +210,10 @@ test('family cards show boundaries, roles and filtered counts on narrow and wide
 test('refresh preserves a nested family row as the scroll anchor', async t => {
   const items = Array.from({length:35},(_,n)=>[fixture(`p${n}`),fixture(`c${n}`,{parent_id:`p${n}`})]).flat();
   const app = await setup(t,items);
+  // Unfolded families, so the children are rows to anchor on.
+  await app.page.evaluate(()=>localStorage.setItem('familyExpanded',JSON.stringify([...Array.from({length:35},(_,n)=>`p${n}`),'new-parent'])));
+  await app.page.reload();
+  await app.page.waitForFunction(()=>typeof state!=='undefined'&&state.items.length===70);
   const pos=()=>app.page.evaluate(()=>{const list=$('list'),edge=list.getBoundingClientRect().top;const row=[...list.querySelectorAll('.row')].find(n=>n.getBoundingClientRect().bottom>edge);return {id:row.dataset.itemId,offset:row.getBoundingClientRect().top-edge};});
   await app.row('c20').evaluate(n=>{const list=document.querySelector('#list');list.scrollTop+=n.getBoundingClientRect().top-list.getBoundingClientRect().top+4;});
   const before=await pos();

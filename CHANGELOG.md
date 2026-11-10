@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Console lists other than the tree show a thread family as its parent and a dim **▸ N child threads**
+  line instead of every child; clicking it unfolds the children (remembered per family). People talk
+  to the parent, so the children no longer crowd 🎯 Focus. A family whose child is open stays unfolded.
+
+### Changed
+
 - Console, 📍 *Where things stand*: the panel can be read and answered on its own. Each open thread
   shows its status and latest report, a reply box at the bottom sends to the parent or any open child
   (**↩ Answer** and **↩ Reply** address it without leaving the panel), and **›** folds the panel to a
