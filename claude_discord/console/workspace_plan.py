@@ -68,11 +68,24 @@ out = {
     "projects": [plain(asdict(p)) for p in result.projects],
     "single_actions": [plain(asdict(s)) for s in result.single_actions],
 }
+# The stable plugin (2.3.x) predates follow-ups, waiting-for, lapsed deadlines and rel_path:
+# fill those in as "none" so its ranking still reaches Focus. 2.4's scanner supplies them.
+contexts = Path(sys.argv[2]) / "02_Contexts"
+follow_up_score = getattr(ws, "follow_up_score", None)
 for p, raw in zip(out["projects"], result.projects):
+    if not p.get("rel_path"):
+        try:
+            p["rel_path"] = Path(p["path"]).relative_to(contexts).as_posix()
+        except ValueError:
+            p["rel_path"] = f'{p["context"]}/{p["name"]}' if p["context"] else p["name"]
+    for key in ("waiting", "due_follow_ups", "lapsed_milestones"):
+        p.setdefault(key, [])
+    due = getattr(raw, "due_follow_ups", [])
     p["follow_up_scores"] = [
-        ws.follow_up_score(raw.priority, (w.follow_up - result.scan_date).days)
-        for w in raw.due_follow_ups
-    ]
+        follow_up_score(raw.priority, (w.follow_up - result.scan_date).days) for w in due
+    ] if follow_up_score else []
+for s in out["single_actions"]:
+    s.setdefault("lapsed", False)
 json.dump(out, sys.stdout, ensure_ascii=False)
 """
 

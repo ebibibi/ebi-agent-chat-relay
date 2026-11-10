@@ -316,3 +316,64 @@ def test_a_project_row_names_the_milestone_that_set_its_deadline(notes, plugin):
     rows = {r["path"]: r for r in plan.shape(scan)["items"]}
     assert rows["Work/Dated"]["milestone"] == "Launch"
     assert rows["Work/Older"]["milestone"] is None
+
+
+# The stable plugin (2.3.x): no rel_path, waiting, follow-ups, lapsed or follow_up_score.
+OLD_SCANNER = """
+from dataclasses import dataclass, field
+from datetime import date
+from pathlib import Path
+
+@dataclass
+class ProjectScore:
+    name: str
+    context: str
+    path: Path
+    score: int = 0
+    priority: str = ""
+    nearest_deadline: date | None = None
+    days_until_deadline: int | None = None
+    has_blocker: bool = False
+    blocker_text: str = ""
+    staleness_days: int = 0
+    current_status: str = ""
+    next_actions: list = field(default_factory=list)
+    category: str = ""
+
+@dataclass
+class SingleAction:
+    context: str
+    text: str
+    priority: str = ""
+    deadline: date | None = None
+    score: int = 0
+
+@dataclass
+class ScanResult:
+    projects: list
+    single_actions: list
+    scan_date: date
+
+def scan_workspace(folder):
+    project = Path(folder) / "02_Contexts" / "Work" / "Client" / "Website"
+    return ScanResult(
+        projects=[ProjectScore("Website", "Work/Client", project, 80, "P1", None, None, False, "",
+                               0, "Ready", ["Ship it"], "active")],
+        single_actions=[SingleAction("Work", "Call back", "P2", date(2026, 10, 17), 40)],
+        scan_date=date(2026, 10, 16),
+    )
+"""
+
+
+def test_the_stable_plugin_without_follow_ups_still_ranks_work(notes, plugin):
+    (plugin / "scripts" / "workspace_scanner.py").write_text(OLD_SCANNER, encoding="utf-8")
+    scan = WorkspacePlan(Workspace(notes), plugin)._scan()
+    project = scan["projects"][0]
+    assert project["rel_path"] == "Work/Client/Website"
+    for key in ("waiting", "due_follow_ups", "follow_up_scores"):
+        assert project[key] == []
+    assert scan["single_actions"][0]["lapsed"] is False
+    shaped = WorkspacePlan(Workspace(notes), plugin).shape(scan)
+    assert shaped["available"] is True
+    assert [row["kind"] for row in shaped["items"]] == ["project", "single"]
+    assert (shaped["waiting"], shaped["lapsed"]) == ([], 0)
