@@ -1,6 +1,6 @@
 const path = require('node:path');
 
-function parseScreenshotOptions(args, scriptDir) {
+function parseScreenshotOptions(args, scriptDir, workingDir = process.cwd()) {
   let language = 'en';
   let outputDir;
 
@@ -29,7 +29,9 @@ function parseScreenshotOptions(args, scriptDir) {
     : '../docs/images/readme';
   return {
     language,
-    out: path.resolve(scriptDir, outputDir || defaultOutput),
+    out: outputDir
+      ? path.resolve(workingDir, outputDir)
+      : path.resolve(scriptDir, defaultOutput),
   };
 }
 

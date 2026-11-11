@@ -11,7 +11,7 @@ const path = require('node:path');
 const { parseScreenshotOptions } = require('./readme_screenshot_options.cjs');
 
 const root = path.resolve(__dirname, '../claude_discord/console/static') + '/';
-const { language, out } = parseScreenshotOptions(process.argv.slice(2), __dirname);
+const { language, out } = parseScreenshotOptions(process.argv.slice(2), __dirname, process.cwd());
 const NOW = Date.parse('2026-10-16T09:30:00Z');
 const ago = (min) => new Date(NOW - min * 60e3).toISOString().replace(/\.\d+Z$/, 'Z');
 
@@ -248,7 +248,10 @@ async function page(browser, viewport, lang = 'en', opts = {}) {
   if (shots.includes('family')) {
     const p = await page(browser, { width: 1440, height: 900 }, language);
     await p.evaluate(() => { setView('tree'); return openItem('t101'); });
-    await p.locator('.family-report').first().waitFor({ state: 'attached' });
+    const familyHeading = p.locator('.family-heading');
+    await familyHeading.waitFor({ state: 'visible' });
+    if (await familyHeading.getAttribute('aria-expanded') === 'false') await familyHeading.click();
+    await p.locator('.family-tasks:not([hidden]) .family-report').first().waitFor({ state: 'visible' });
     await p.waitForTimeout(800);
     await p.screenshot({ path: path.join(out, 'console-family.png') });
     await p.close();
