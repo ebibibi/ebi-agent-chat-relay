@@ -801,7 +801,7 @@ function messageNode(m) {
     const look = remote && P && P.kind(a.filename)
       ? h("button", { class: "btn file-look", type: "button", text: `👁 ${P.label}`,
           onclick: () => P.open(a.filename, () => P.fetchBlob(a.url),
-            () => window.open(a.url, "_blank", "noopener,noreferrer")) })
+            () => window.open(a.url, "_blank", "noopener,noreferrer"), { url: a.url, attachments: m.attachments || [] }) })
       : null;
     body.append(h("div", { class: "file" }, remote
       ? h("a", { href: a.url, target: "_blank", rel: "noopener noreferrer", text: `📎 ${a.filename}` })

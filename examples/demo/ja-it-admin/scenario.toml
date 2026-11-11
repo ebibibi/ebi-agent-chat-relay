@@ -32,6 +32,13 @@ title = "勉強会の告知を社内SNSに貼る"
 body = "AI が作った文面をコピーして貼るだけ。"
 source = "社内勉強会"
 
+# Preview a Markdown document and its companion image in the first minute.
+[[items]]
+title = "図入りの報告書をプレビューで確認する"
+note = "プレビュー確認/report.md と network.png を一緒に添付して。Markdownプレビューで図を確認し、全画面にして本文を読む。ソース表示とダウンロードも確認する。"
+priority = 0
+project = "プレビュー確認"
+
 [[items]]
 title = "新入社員3名のアカウントを作って（明後日入社）"
 note = "名簿は M365運用/入社者名簿_10月.md。E5ライセンスと部署グループもお願い。終わったら名簿の人に送る初回サインイン案内の文面も。"
