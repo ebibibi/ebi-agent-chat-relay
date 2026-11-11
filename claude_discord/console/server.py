@@ -1360,7 +1360,7 @@ class ConsoleServer:
             return _error("wait until the current turn finishes, then compact", 409)
         repo = self.api.session_repo
         record = await repo.get(key) if repo is not None else None
-        if record is None or record.backend != "codex":
+        if repo is None or record is None or record.backend != "codex":
             return _error("this conversation has no Codex session to compact yet", 409)
         factory = vars(getattr(self.api, "components", None) or object()).get("backend_factory")
         command = getattr(factory, "codex_command", None) or "codex"
@@ -1376,9 +1376,12 @@ class ConsoleServer:
             return _error(str(exc), 502)
         finally:
             self._compacting.discard(key)
+        # The previous turn's measurement describes the history before compaction.
+        # Do not invent a new occupancy: the next Codex turn will measure it.
+        await repo.update_context_stats(key, context_window=None, context_used=None)
         logger.info("console: %s compacted Codex session of %s", _q(who), _q(item_id))
         return web.json_response(
-            {"message": "Conversation compacted. The next reply continues from the summary."}
+            {"message": "Conversation compacted. Context usage will be measured on the next reply."}
         )
 
     def _files_dir(self) -> Path | None:

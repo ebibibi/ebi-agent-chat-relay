@@ -735,11 +735,13 @@ class EventProcessor:
 
         # Persist context window stats (requires repo + context_window in event).
         if self._config.repo and event.context_window is not None:
-            context_used = (
-                (event.input_tokens or 0)
-                + (event.cache_read_tokens or 0)
-                + (event.cache_creation_tokens or 0)
-            )
+            context_used = event.context_used
+            if context_used is None:
+                context_used = (
+                    (event.input_tokens or 0)
+                    + (event.cache_read_tokens or 0)
+                    + (event.cache_creation_tokens or 0)
+                )
             await self._config.repo.update_context_stats(
                 thread_id=self._config.surface.thread_key,
                 context_window=event.context_window,
