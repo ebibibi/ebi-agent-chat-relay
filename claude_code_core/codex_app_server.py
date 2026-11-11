@@ -63,6 +63,7 @@ class AppServerSession:
         self._reader: asyncio.Task[None] | None = None
         self._stderr: asyncio.Task[None] | None = None
         self._usage: dict[str, Any] = {}
+        self._context_window: int | None = None
         self._closing = False
         self.outstanding: dict[str, InjectedMessage] = {}
 
@@ -286,7 +287,11 @@ class AppServerSession:
                     continue
                 method = notification["method"]
                 if method == "thread/tokenUsage/updated":
-                    self._usage = params.get("tokenUsage", {}).get("last", {})
+                    usage = params.get("tokenUsage", {})
+                    self._usage = usage.get("last", {})
+                    window = usage.get("modelContextWindow")
+                    if isinstance(window, int) and window > 0:
+                        self._context_window = window
                 if method == "turn/completed":
                     if params.get("turn", {}).get("id") != self.turn_id:
                         continue
@@ -307,6 +312,8 @@ class AppServerSession:
                         input_tokens=self._usage.get("inputTokens"),
                         output_tokens=self._usage.get("outputTokens"),
                         cache_read_tokens=self._usage.get("cachedInputTokens"),
+                        context_window=self._context_window,
+                        context_used=self._usage.get("inputTokens"),
                     )
                     return
                 for event in item_events(notification):

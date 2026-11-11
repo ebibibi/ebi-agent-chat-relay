@@ -458,3 +458,5 @@ button.family-link:hover { color: var(--accent); border-color: var(--accent); }
 .view-bar .view-rule { font-size: 12px; padding: 1px 6px; border-radius: 4px; background: var(--raise);
   overflow-wrap: anywhere; }
 .view-bar .view-unknown { color: var(--p1); font-size: 12px; }
+
+.compact-status { color: var(--ai); font-size: 12px; padding-top: 4px; }

@@ -77,7 +77,8 @@ for line in sys.stdin:
                     "params": {
                         "threadId": thread,
                         "tokenUsage": {
-                            "last": {"inputTokens": 11, "cachedInputTokens": 3, "outputTokens": 5}
+                            "last": {"inputTokens": 11, "cachedInputTokens": 3, "outputTokens": 5},
+                            "modelContextWindow": 475000,
                         },
                     },
                 }
@@ -152,6 +153,8 @@ async def test_acknowledged_steer_and_clean_eof(transport, tmp_path):
     assert any(e.tool_result_id == "cmd1" and e.tool_result_content == "ok" for e in events)
     terminal = [e for e in events if e.is_complete]
     assert len(terminal) == 1
+    assert terminal[0].context_window == 475000
+    assert terminal[0].context_used == 11
     assert terminal[0].input_tokens == 11
     assert terminal[0].cache_read_tokens == 3
     assert terminal[0].output_tokens == 5

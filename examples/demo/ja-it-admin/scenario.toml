@@ -34,6 +34,12 @@ source = "社内勉強会"
 
 # Preview a Markdown document and its companion image in the first minute.
 [[items]]
+title = "Codexの会話を圧縮し、コンテキスト表示を確認する"
+note = "短いCodex会話を作って、/compactを入力してEnterで実行する。圧縮中の表示を確認し、完了後は次の返信で使用量が再計測されることを確認する。Shift+Enterは改行のまま。"
+priority = 1
+project = "Console確認"
+
+[[items]]
 title = "図入りの報告書をプレビューで確認する"
 note = "プレビュー確認/report.md と network.png を一緒に添付して。Markdownプレビューで図を確認し、全画面にして本文を読む。ソース表示とダウンロードも確認する。"
 priority = 0

@@ -48,6 +48,16 @@ The status chips above every list narrow it to the statuses you pick — ❓ you
 review, 📋 your task, 🏁 completion candidates, and so on; several at once match with OR, "All"
 clears them. Each chip counts what the current list holds, and the choice is remembered per browser.
 
+For Codex, type **/compact** and press **Enter** to run native compaction. A partial name
+still completes with Enter or Tab; Shift+Enter still inserts a newline. The progress message
+stays beside the reply box until the operation finishes or reports an error, and a failed
+command remains available for retry. Compaction is refused while a turn is running.
+
+After a successful manual compaction, the old context badge is cleared until the next reply
+measures the new history. An unknown measurement is not shown as zero. App-server turns
+report the model's actual context window and count cached input once in context occupancy;
+these measurements are separate from billing/usage counters.
+
 Each thread also shows how full its context window was after its last turn — 🧠 and a percentage
 on the row (amber from 70%, red from 90%), used / window tokens in the detail header — so a
 thread close to compaction is visible before it happens.

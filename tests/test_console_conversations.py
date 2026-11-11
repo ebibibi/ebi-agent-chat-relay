@@ -46,6 +46,10 @@ class FakeSessions:
     async def get(self, key: int) -> SimpleNamespace | None:
         return self.records.get(key)
 
+    async def update_context_stats(self, thread_id, context_window, context_used):
+        self.records[thread_id].context_window = context_window
+        self.records[thread_id].context_used = context_used
+
 
 @pytest.fixture
 async def env(tmp_path):
@@ -1026,3 +1030,45 @@ async def test_an_interrupting_relay_stops_the_console_turn_first(env) -> None:
 async def test_a_relay_to_an_unknown_console_key_raises_lookup_error(env) -> None:
     with pytest.raises(LookupError):
         await env.host.relay(987654, "hi", "thread 42", interrupt=False)
+
+
+async def test_manual_compact_invalidates_old_context_measurements(env):
+    settings = FakeSettings()
+    env.console.api.components.backend_settings = settings
+    item_id = await _start(env)
+    key = int(item_id[1:])
+    settings.backend[key] = "codex"
+    sessions = FakeSessions()
+    sessions.records[key] = SimpleNamespace(
+        session_id="a1b2-1234", backend="codex", context_window=1000000, context_used=339902
+    )
+    env.console.api.session_repo = sessions
+    env.console._codex_compact = AsyncMock()
+    result = await env.client.post(
+        f"/console/api/items/{item_id}/command", json={"name": "compact"}, headers=WRITE
+    )
+    assert result.status == 200
+    assert sessions.records[key].context_window is None
+    assert sessions.records[key].context_used is None
+
+
+async def test_failed_compact_keeps_context_measurements(env):
+    from claude_discord.console.codex_compact import CompactError
+
+    settings = FakeSettings()
+    env.console.api.components.backend_settings = settings
+    item_id = await _start(env)
+    key = int(item_id[1:])
+    settings.backend[key] = "codex"
+    sessions = FakeSessions()
+    sessions.records[key] = SimpleNamespace(
+        session_id="a1b2-1234", backend="codex", context_window=475000, context_used=100000
+    )
+    env.console.api.session_repo = sessions
+    env.console._codex_compact = AsyncMock(side_effect=CompactError("not compacted"))
+    result = await env.client.post(
+        f"/console/api/items/{item_id}/command", json={"name": "compact"}, headers=WRITE
+    )
+    assert result.status == 502
+    assert sessions.records[key].context_used == 100000
+    assert key not in env.console._compacting
