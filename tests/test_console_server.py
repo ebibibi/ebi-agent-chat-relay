@@ -45,9 +45,11 @@ async def test_the_shell_is_served_with_security_headers(client) -> None:
     assert "Ebi AI Console" in await response.text()
     csp = response.headers["Content-Security-Policy"]
     assert "frame-ancestors 'none'" in csp
-    # Images attached in Discord threads load from Discord's CDN; nothing else does.
+    # Markdown may embed HTTPS images; API connections stay limited to self and the CDN.
     img_src = next(d for d in csp.split(";") if d.strip().startswith("img-src")).split()
-    assert {"https://cdn.discordapp.com", "https://media.discordapp.net"} <= set(img_src)
+    assert "https:" in img_src and "*" not in img_src
+    connect_src = next(d for d in csp.split(";") if d.strip().startswith("connect-src")).split()
+    assert "https:" not in connect_src and "*" not in connect_src
     assert "default-src 'self'" in csp and "connect-src 'self'" in csp
     assert (await client.get("/static/app.js")).status == 200
     assert (await client.get("/static/markdown.js")).status == 200

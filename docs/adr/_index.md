@@ -27,3 +27,5 @@ earlier ADR instead of rewriting its history.
 - [ADR-0019: Measure relay duplicates and peer exchanges separately from fan-out](0019-measure-relay-duplicates-and-peer-exchanges.md)
 
 - [ADR-0020: Select Console-only operation explicitly](0020-select-console-only-operation-explicitly.md) — Explicit CLI choice and native control-plane routing (accepted, 2026-11-11).
+
+- [ADR-0021: Render document images with scoped attachment resources](0021-render-document-images-with-scoped-resources.md) — Authenticated native images, safe web images, viewport reading (accepted, 2026-11-11).

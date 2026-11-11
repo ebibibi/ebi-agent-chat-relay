@@ -156,9 +156,9 @@ _STATIC_TYPES = {
 }
 _SECURITY_HEADERS = {
     "Content-Security-Policy": (
-        # Discord's CDN is allowed for images only: attachments in chat threads preview inline.
-        "default-src 'self'; img-src 'self' data: https://cdn.discordapp.com "
-        "https://media.discordapp.net; style-src 'self'; script-src 'self'; "
+        # Markdown documents may embed HTTPS images; scripts and API connections stay restricted.
+        "default-src 'self'; img-src 'self' data: https:; "
+        "style-src 'self'; script-src 'self'; "
         # Discord's CDN is also readable (CORS "*") so a chat attachment can be previewed.
         "connect-src 'self' https://cdn.discordapp.com https://media.discordapp.net; "
         "frame-ancestors 'none'; base-uri 'none'; form-action 'none'"

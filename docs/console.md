@@ -753,6 +753,23 @@ bold title. Pinning keeps its pin symbol while selection keeps its own outline. 
 refreshes preserve the visible row and its offset, including a thread repeated in a tree and
 its pinned section; only deliberate navigation reveals the selected row.
 
+## Reading file previews
+
+Markdown attachment previews render standard inline and reference images. A relative image
+name resolves to a uniquely named image attached in the same delivery/message, keeping the
+original signed URL for Discord attachments. Otherwise it resolves relative to the document
+URL. Native Console file images are fetched with the same authentication as the document;
+HTTPS web images receive no Console token and send no referrer. Include referenced local
+images with the Markdown file: the preview cannot read arbitrary paths on the agent's disk.
+Ambiguous, blocked or missing images show their alt text and an unavailable message while
+the document remains readable. Raw HTML in Markdown is displayed as text.
+
+Use **Fullscreen** in the preview toolbar to fill the window on desktop or a phone, and
+**Restore size** to return without replacing the document. Escape first restores the size;
+a second Escape closes the preview. Source, copy and download remain available in either size.
+External HTTPS images are permitted by the image policy; scripts, forms, API connections and
+the sandbox for HTML previews retain their existing restrictions.
+
 ## Copying file contents
 
 Text attachments have **Copy contents to clipboard** beside Preview/Download and in the
