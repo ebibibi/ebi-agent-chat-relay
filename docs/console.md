@@ -334,15 +334,18 @@ interrupt with the slot it holds (`POST /console/api/items/{id}/stop`, `/pause`,
 `/queue` with `action: first|later`). The pause mark is stored on the item (`paused_at`).
 
 📌 in the detail header (or `p`) pins a thread as what you are working on now. Pinned threads
-open every list but Done under a highlighted "📌 Working on now" strip, and
+open every list but Done and Recent under a highlighted "📌 Working on now" strip, and
 bring their family with them rather than duplicating it in the tree. The pin is stored with the item
 (`PATCH /console/api/items/{id}` with `pinned: true|false`), so every device sees it.
-Use the ↑ / ↓ buttons on a pinned row to choose its position (touch and keyboard work too).
+Use ↑ / ↓ to move a pin one place, or ⇈ / ⇊ to move straight to the top / bottom of the
+visible pinned list (touch and keyboard work too).
 Order is saved on the server and survives reloads, polling and switching devices. A family
 moves together. Filtered moves use the visible neighbor without removing hidden pins; a new
 or re-pinned item appears first. Moving a pin does not change its activity time or priority.
 `POST /console/api/items/{id}/pin-order` accepts `target_id` and `placement: before|after`;
 both items must still be pinned. The move is atomic and uses the current server order.
+Recent ignores pin positions and family regrouping: matching items appear strictly by
+activity time, with day headings. Pins keep their visual mark but have no reorder controls there.
 Ticking "📌 Pin" next to the capture box pins the request you are writing as it is added
 (`POST /console/api/items` with `pinned: true`); the tick applies to that one request only, and the
 pin stays when the request is handed to an agent.
