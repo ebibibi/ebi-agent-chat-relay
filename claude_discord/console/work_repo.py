@@ -135,6 +135,8 @@ class WorkItem:
     readiness_at: str | None = None
     #: Labels set by a person or by the integration that created the thread, sorted.
     tags: tuple[str, ...] = ()
+    #: Explicit pin order; unranked (new) pins lead the saved order.
+    pin_position: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -152,6 +154,7 @@ class WorkItem:
             "updated_at": self.updated_at,
             "place": self.place,
             "pinned_at": self.pinned_at,
+            "pin_position": self.pin_position,
             "paused_at": self.paused_at,
             "workspace_path": self.workspace_path,
             "workspace_source": self.workspace_source,
@@ -182,6 +185,7 @@ def _row_to_item(row: aiosqlite.Row) -> WorkItem:
         updated_at=row["updated_at"],
         place=row["place"],
         pinned_at=row["pinned_at"],
+        pin_position=row["pin_position"],
         paused_at=row["paused_at"],
         workspace_path=row["workspace_path"],
         workspace_source=row["workspace_source"],
@@ -306,7 +310,12 @@ def validate_changes(changes: dict[str, Any]) -> dict[str, Any]:
         elif field == "pinned":
             if not isinstance(value, bool):
                 raise WorkItemError("pinned must be true or false")
-            clean["pinned_at"] = _now() if value else None
+            clean["pinned_at"] = (
+                datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
+                if value
+                else None
+            )
+            clean["pin_position"] = None
         elif field == "paused":
             if not isinstance(value, bool):
                 raise WorkItemError("paused must be true or false")
@@ -333,6 +342,8 @@ class WorkItemRepository:
                 await db.execute("ALTER TABLE work_items ADD COLUMN place TEXT")
             if "pinned_at" not in have:
                 await db.execute("ALTER TABLE work_items ADD COLUMN pinned_at TEXT")
+            if "pin_position" not in have:
+                await db.execute("ALTER TABLE work_items ADD COLUMN pin_position INTEGER")
             if "paused_at" not in have:
                 await db.execute("ALTER TABLE work_items ADD COLUMN paused_at TEXT")
             if "workspace_path" not in have:
@@ -419,6 +430,30 @@ class WorkItemRepository:
         updated = replace(current, **clean, updated_at=_now())
         await self._write(updated)
         return updated
+
+    async def move_pin(self, item_id: str, target_id: str, placement: str) -> None:
+        """Move one pin relative to another under a write lock.
+
+        Relative moves preserve hidden/new pins. Reordering is not activity.
+        """
+        if placement not in ("before", "after") or item_id == target_id:
+            raise WorkItemError("Choose a different pin and placement before or after")
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            rows = await db.execute_fetchall(
+                "SELECT id FROM work_items WHERE pinned_at IS NOT NULL"
+                " ORDER BY pin_position IS NOT NULL, pin_position, pinned_at DESC, id"
+            )
+            ids = [row[0] for row in rows]
+            if item_id not in ids or target_id not in ids:
+                raise WorkItemError("Pin no longer available; refresh and try again")
+            ids.remove(item_id)
+            index = ids.index(target_id) + (placement == "after")
+            ids.insert(index, item_id)
+            await db.executemany(
+                "UPDATE work_items SET pin_position = ? WHERE id = ?", enumerate(ids)
+            )
+            await db.commit()
 
     async def bind_workspace(
         self, item_id: str, path: str | None, source: str, reason: str | None = None
@@ -529,13 +564,15 @@ class WorkItemRepository:
             "INSERT INTO work_items (id, thread_id, title, note, parent_id, priority, due_at,"
             " snoozed_until, project, state, created_at, updated_at, place, pinned_at,"
             " paused_at, workspace_path, workspace_source, workspace_reason, readiness,"
-            " readiness_at, tags)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " readiness_at, tags, pin_position)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(id) DO UPDATE SET title = excluded.title, note = excluded.note,"
             " parent_id = excluded.parent_id, priority = excluded.priority,"
             " due_at = excluded.due_at, snoozed_until = excluded.snoozed_until,"
             " project = excluded.project, state = excluded.state,"
             " updated_at = excluded.updated_at, place = excluded.place,"
+            " pin_position = CASE WHEN work_items.pinned_at IS NOT excluded.pinned_at"
+            " THEN NULL ELSE work_items.pin_position END,"
             " pinned_at = excluded.pinned_at, paused_at = excluded.paused_at,"
             " workspace_path = excluded.workspace_path,"
             " workspace_source = excluded.workspace_source,"
@@ -564,5 +601,6 @@ class WorkItemRepository:
                 item.readiness,
                 item.readiness_at,
                 json.dumps(list(item.tags)) if item.tags else None,
+                item.pin_position,
             ),
         )

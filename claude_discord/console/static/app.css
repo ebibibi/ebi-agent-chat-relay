@@ -460,3 +460,9 @@ button.family-link:hover { color: var(--accent); border-color: var(--accent); }
 .view-bar .view-unknown { color: var(--p1); font-size: 12px; }
 
 .compact-status { color: var(--ai); font-size: 12px; padding-top: 4px; }
+
+/* Always visible touch/keyboard controls; do not rely on hover or dragging. */
+.pin-order { display: flex; gap: 4px; }
+.pin-order .btn { min-width: 32px; min-height: 32px; padding: 3px 7px; }
+.pin-order .btn:focus-visible { outline: 2px solid var(--p1); outline-offset: 2px; }
+@media (pointer: coarse) { .pin-order .btn { min-width: 44px; min-height: 44px; } }

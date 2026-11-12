@@ -380,6 +380,7 @@ class ConsoleServer:
         r.add_patch(f"{API_PREFIX}/pages/{{slug}}/items/{{key}}", page_routes.change)
         r.add_post(f"{API_PREFIX}/items", self.create_item)
         r.add_patch(f"{API_PREFIX}/items/{{item_id}}", self.patch_item)
+        r.add_post(f"{API_PREFIX}/items/{{item_id}}/pin-order", self.move_pin)
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/messages", self.messages)
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/notes", workspace_routes.thread_notes)
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/situation", self.situation)
@@ -1107,6 +1108,20 @@ class ConsoleServer:
                 item.id, priority="priority" in body, due="due_at" in body, place="place" in body
             )
         return web.json_response({"item": item.as_dict()})
+
+    async def move_pin(self, request: web.Request) -> web.Response:
+        body, err = await self._json(request)
+        if err:
+            return err
+        target_id = body.get("target_id")
+        placement = body.get("placement")
+        if not isinstance(target_id, str) or not isinstance(placement, str):
+            return _error("target_id and placement are required strings", 400)
+        try:
+            await self.work_repo.move_pin(request.match_info["item_id"], target_id, placement)
+        except WorkItemError as exc:
+            return _error(str(exc), 400)
+        return web.json_response({"ok": True})
 
     async def done(self, request: web.Request) -> web.Response:
         item_id = request.match_info["item_id"]

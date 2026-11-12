@@ -21,6 +21,7 @@ const I18N = {
     paused_toast: "Paused", stopping: "Stopping…", resumed_toast: "Resumed",
     slots_hint: "Threads running now / the most that may run at once", slots_up: "Allow one more at once",
     slots_down: "Allow one fewer at once", slots_set: (n) => `Up to ${n} at once`, pinned_group: "📌 Working on now", status_filter: "Status:", status_all: "All", pin: "Pin", unpin: "Pinned",
+    pin_up: "Move pin up", pin_down: "Move pin down",
     pin_hint: "Pin as what you are working on now; pinned threads lead every list (p)", capture_pin: "📌 Pin", capture_pin_hint: "Pin this request as what you are working on now (this one only)", hide_done_off: "✅ Showing done", hide_done_on: "✅ Done hidden",
     hide_done_hint: "Hide or show finished items in every list (h)", hide_done_in_done: "The Done list always shows finished items", context_hint: (d) => `Context window used by the last turn: ${d}`, due_over: "overdue", due_in: (x) => `in ${x}`, u_min: "m", u_hour: "h", u_day: "d", focus_ready: "can do now", ready_now: "Can do now", ready_wait: "Waiting", ready_hint: "Whether you can act on this now (click to switch). Dashed: the AI's guess", ready_yours: "Your call. New activity in the conversation hands it back to the AI", ready_back_ai: "Back to the AI's call", focus_from: (d) => `from ${d}`, ai_guess: "AI guess", ai_set: "set by AI", series: (n) => `×${n}`, series_hint: (n) => `${n} items share this title; Focus shows only the newest`,
     guide_title: "🧭 Your next move", guide_unblocks: "▶ Once you answer, the agent carries on", guide_open: "Open",
@@ -70,6 +71,7 @@ const I18N = {
     paused_toast: "一時停止しました", stopping: "停止中…", resumed_toast: "再開しました",
     slots_hint: "いま実行中の数 / 同時に動かせる上限", slots_up: "同時に動かせる数を1つ増やす",
     slots_down: "同時に動かせる数を1つ減らす", slots_set: (n) => `同時実行の上限を ${n} にしました`, pinned_group: "📌 いまやってる", status_filter: "ステータス：", status_all: "すべて", pin: "ピン留め", unpin: "ピン中",
+    pin_up: "ピンを上へ移動", pin_down: "ピンを下へ移動",
     pin_hint: "いまやってる目印。ピン留めしたスレッドはどの一覧でも一番上に出ます（p）", capture_pin: "📌 ピン留め", capture_pin_hint: "この依頼を「いまやってる」としてピン留めします（この1件だけ）", hide_done_off: "✅ 完了も表示", hide_done_on: "✅ 完了を隠す中",
     hide_done_hint: "完了したタスクを全部の一覧で隠す／表示する（h）", hide_done_in_done: "「完了」の一覧では常に表示します", context_hint: (d) => `直近のターンで使ったコンテキスト：${d}`, due_over: "超過", due_in: (x) => `あと${x}`, u_min: "分", u_hour: "時間", u_day: "日", focus_ready: "今すぐできる", ready_now: "今できる", ready_wait: "待ち", ready_hint: "いま手を付けられるか（クリックで切り替え）。点線はAIの見立て", ready_yours: "あなたの判断。会話に新しい動きがあればAIの見立てに戻ります", ready_back_ai: "AIの見立てに戻す", focus_from: (d) => `${d}〜`, ai_guess: "AIの見立て", ai_set: "AIが推定", series: (n) => `×${n}`, series_hint: (n) => `同じ名前のスレッド${n}件を、いちばん新しいものにまとめています`,
     guide_title: "🧭 今やる一手", guide_unblocks: "▶ 返すとAIが続きを進めます", guide_open: "開く",
@@ -321,11 +323,17 @@ function matches(item) {
   }
   return !state.filter || window.ConsoleQuery.test(item, state.filter);
 }
-// Pinned items ("working on now") open every view but Done, newest pin first, and leave
+// Pinned items ("working on now") open every view but Done, in the saved order, and leave
 // their usual place so nothing is listed twice — except in the tree, whose shape needs them.
 const isPinned = (i) => Boolean(i.pinned_at) && i.bucket !== "done";
 function visibleRows() {
-  return window.ConsoleFamily.groupRows(ungroupedRows());
+  const rows = window.ConsoleFamily.groupRows(ungroupedRows());
+  const pins = rows.filter(r => r.pinId);
+  pins.forEach((row, index) => {
+    row.pinPrevious = pins[index - 1]?.pinId;
+    row.pinNext = pins[index + 1]?.pinId;
+  });
+  return rows;
 }
 // The status chips sit on top of every view and narrow it; they count the view as it is
 // before narrowing, so switching one on never hides the others it offers.
@@ -345,10 +353,12 @@ function ungroupedRows() {
 }
 function pinnedFirst(items) {
   const pinned = state.view === "done" ? [] : items.filter(isPinned)
-    .sort((a, b) => (b.pinned_at || "").localeCompare(a.pinned_at || ""));
+    .sort((a, b) => (a.pin_position != null) - (b.pin_position != null) ||
+      (a.pin_position ?? 0) - (b.pin_position ?? 0) ||
+      (b.pinned_at || "").localeCompare(a.pinned_at || "") || a.id.localeCompare(b.id));
   if (!pinned.length) return viewRows(items);
   const rest = state.view === "tree" ? viewRows(items) : dropEmptyGroups(viewRows(items.filter((i) => !isPinned(i))));
-  return [{ group: T.pinned_group, cls: "group pinned-group" }, ...pinned.map((item) => ({ item, depth: 0 })), ...rest];
+  return [{ group: T.pinned_group, cls: "group pinned-group" }, ...pinned.map((item) => ({ item, depth: 0, pinId: item.id })), ...rest];
 }
 // A heading whose rows all moved to the pinned strip has nothing left under it.
 function dropEmptyGroups(rows) {
@@ -407,6 +417,25 @@ async function togglePin(id) {
   const item = state.byId.get(id);
   if (!item) return;
   await patch(id, { pinned: !item.pinned_at });
+}
+let pinMoving = false;
+async function movePin(id, target, placement, button) {
+  if (pinMoving || !target) return;
+  pinMoving = true;
+  try {
+    await api(`/items/${encodeURIComponent(id)}/pin-order`, {
+      method: "POST", body: { target_id: target, placement },
+    });
+    toast(T.saved);
+    const keepFocus = document.activeElement === button;
+    await refresh();
+    if (keepFocus && document.activeElement === document.body) {
+      const controls = [...document.querySelectorAll(".pin-order button")]
+        .filter(b => b.dataset.pinId === id && !b.disabled);
+      (controls.find(b => b.className === button.className) || controls[0])?.focus();
+    }
+  } catch (err) { toast(err.message); }
+  finally { pinMoving = false; }
 }
 function setHideDone(on) {
   state.hideDone = on;
@@ -515,7 +544,7 @@ function revealSelection() {
   if (sel) sel.scrollIntoView({ block: "nearest" });
 }
 
-function rowNode({ item, depth, children, rowKey, family }) {
+function rowNode({ item, depth, children, rowKey, family, pinId, pinPrevious, pinNext }) {
   const meta = [];
   const wsTag = window.ConsoleWsBind.badge(item);
   if (wsTag) meta.push(wsTag);
@@ -547,6 +576,14 @@ function rowNode({ item, depth, children, rowKey, family }) {
     h("span", { class: `pri p${item.priority}` + (item.priority_by === "ai" ? " ai" : ""),
     title: item.priority_by === "ai" ? T.ai_set : null, text: `P${item.priority}` })];
   side.push(dueLabel(item));
+  if (pinId) side.push(h("span", { class: "pin-order" },
+    ...[["up", pinPrevious, "before", T.pin_up, "↑"], ["down", pinNext, "after", T.pin_down, "↓"]]
+      .map(([direction, target, placement, label, symbol]) => h("button", {
+        class: `btn pin-${direction}`, type: "button", title: label, "aria-label": label,
+        disabled: !target, "data-pin-id": pinId,
+        onkeydown: (event) => { if (["Enter", " "].includes(event.key)) event.stopPropagation(); },
+        onclick: (event) => { event.stopPropagation(); movePin(pinId, target, placement, event.currentTarget); },
+      }, symbol))));
   const twisty = children
     ? h("span", { class: "tw", onclick: (e) => { e.stopPropagation(); toggleCollapse(item.id); },
         text: state.collapsed.has(item.id) ? "▸" : "▾" })
