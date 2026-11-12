@@ -70,6 +70,42 @@ window.ConsoleNotes = (() => {
 
   function build() {
     const m = window.markdownit({ html: false, linkify: true, breaks: true, typographer: false });
+    const cjkLetter = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Bopomofo}]/u;
+    const cjkWord = value => cjkLetter.test(value);
+    const charAt = (value, index) => {
+      const point = value.codePointAt(index);
+      return point === undefined ? "" : String.fromCodePoint(point);
+    };
+    const charBefore = (value, index) => {
+      const last = value.charCodeAt(index - 1);
+      const previous = value.charCodeAt(index - 2);
+      return last >= 0xdc00 && last <= 0xdfff && previous >= 0xd800 && previous <= 0xdbff
+        ? value.slice(index - 2, index)
+        : value.slice(index - 1, index);
+    };
+    m.inline.ruler.before("emphasis", "cjk_strong", (state, silent) => {
+      const start = state.pos;
+      if (state.src.slice(start, start + 2) !== "**") return false;
+      const match = /^\*\*([^*\\\n]+?)\*\*/.exec(state.src.slice(start, state.posMax));
+      if (!match || /^\s|\s$/u.test(match[1]) || !cjkWord(match[1])) return false;
+      const previous = charBefore(state.src, start);
+      const next = charAt(state.src, start + match[0].length);
+      const first = charAt(match[1], 0);
+      const last = charBefore(match[1], match[1].length);
+      if (!((cjkWord(previous) && /\p{L}/u.test(first)) ||
+            (cjkWord(next) && /\p{L}/u.test(last)))) return false;
+      if (silent) return true;
+
+      const oldPosMax = state.posMax;
+      state.push("strong_open", "strong", 1);
+      state.pos = start + 2;
+      state.posMax = start + match[0].length - 2;
+      state.md.inline.tokenize(state);
+      state.pos = start + match[0].length;
+      state.posMax = oldPosMax;
+      state.push("strong_close", "strong", -1);
+      return true;
+    });
     const esc = m.utils.escapeHtml;
 
     // [[target#heading|alias]] and ![[embed]]
