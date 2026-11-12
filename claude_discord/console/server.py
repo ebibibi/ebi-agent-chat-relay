@@ -1174,6 +1174,7 @@ class ConsoleServer:
         if err:
             return err
         text = str(body.get("text") or "").strip()
+        retitle_text = text
         # "images" is the field older clients send; "files" carries any attachment.
         files, err = self._reply_files([*_listed(body.get("images")), *_listed(body.get("files"))])
         if err:
@@ -1185,10 +1186,22 @@ class ConsoleServer:
             return err
         text = with_attachments(text, files)
         return await self._deliver(
-            request.match_info["item_id"], text, request[IDENTITY], metered=True
+            request.match_info["item_id"],
+            text,
+            request[IDENTITY],
+            metered=True,
+            retitle_text=retitle_text,
         )
 
-    async def _deliver(self, item_id: str, text: str, who: str, *, metered: bool) -> web.Response:
+    async def _deliver(
+        self,
+        item_id: str,
+        text: str,
+        who: str,
+        *,
+        metered: bool,
+        retitle_text: str | None = None,
+    ) -> web.Response:
         """Queue *text* as the human's next message in the item's conversation.
 
         *metered*: a person typed *text*, so it counts toward their attention
@@ -1219,6 +1232,9 @@ class ConsoleServer:
         except WorkItemError as exc:
             return _error(str(exc), 400)
         schedule_thread_outcome(thread, None)
+        if metered and retitle_text:
+            # Use only the original human text, not agent-facing wrappers.
+            cog._schedule_retitle(thread, retitle_text)
         prompt = f"{text}\n\n-# 🖥️ via Ebi AI Console ({who})"
         if metered:
             # Posted by the bot, so the chat frontend's own metering skips it.

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
@@ -263,6 +263,82 @@ def test_log_values_cannot_forge_lines() -> None:
 
     assert q("t1\nINFO forged\r\x1b[2J") == "t1 INFO forged  [2J"
     assert len(q("x" * 500)) == 200
+
+
+async def test_human_console_reply_schedules_retitle_with_only_human_text(
+    monkeypatch, tmp_path
+) -> None:
+    from claude_discord.console import server as srv
+
+    repo = WorkItemRepository(str(tmp_path / "sessions.db"))
+    api = MagicMock()
+    api.bot.cogs = {}
+    console = ConsoleServer(api, repo, ConsoleAuthenticator(ConsoleAuthConfig(token=TOKEN)), port=0)
+    thread = MagicMock(id=123, parent_id=456)
+    cog = MagicMock()
+    cog.deliver_relayed_message = AsyncMock()
+    console._workspace_brief = AsyncMock(return_value=None)
+    console._conversation_key = AsyncMock(return_value=None)
+    console._thread_for = AsyncMock(return_value=(thread, None))
+    console._chat_cog = MagicMock(return_value=cog)
+    console.work_repo.update = AsyncMock(return_value=None)
+    console._meter_chat_reply = AsyncMock()
+    monkeypatch.setattr(srv, "schedule_thread_outcome", lambda *args: None)
+    pending = []
+    monkeypatch.setattr(console, "_background", pending.append)
+
+    human_text = "The deployment is ready; please check the migration logs."
+    response = await console._deliver(
+        "t123",
+        "Agent-facing text with injected footer and attachment instructions.",
+        "Ming",
+        metered=True,
+        retitle_text=human_text,
+    )
+    await pending[0]
+
+    assert response.status == 202
+    cog._schedule_retitle.assert_called_once_with(thread, human_text)
+
+
+async def test_reply_preserves_raw_human_text_for_retitle_after_transformations(
+    monkeypatch,
+) -> None:
+    from pathlib import Path
+
+    from aiohttp import web
+
+    from claude_discord.console.server import IDENTITY
+
+    console = ConsoleServer(
+        MagicMock(),
+        MagicMock(),
+        ConsoleAuthenticator(ConsoleAuthConfig(token=TOKEN)),
+        port=0,
+    )
+    raw_text = "Please investigate this long incident report."
+    agent_text = "Read message.txt for the full user message and respond to it."
+    monkeypatch.setattr(console, "_json", AsyncMock(return_value=({"text": raw_text}, None)))
+    monkeypatch.setattr(
+        console,
+        "_reply_files",
+        lambda raw: ([("/uploads/report.txt", Path("/tmp/report.txt"))], None),
+    )
+    monkeypatch.setattr(console, "_attach_long_text", AsyncMock(return_value=(agent_text, None)))
+    monkeypatch.setattr(console, "_deliver", AsyncMock(return_value=web.Response(status=202)))
+    request = MagicMock()
+    request.match_info = {"item_id": "t123"}
+    request.__getitem__.side_effect = lambda key: "Ming" if key == IDENTITY else None
+
+    response = await console.reply(request)
+
+    assert response.status == 202
+    console._deliver.assert_awaited_once()
+    args, kwargs = console._deliver.await_args
+    assert args[0] == "t123"
+    assert args[1].startswith(agent_text)
+    assert "/uploads/report.txt" in args[1]
+    assert kwargs == {"metered": True, "retitle_text": raw_text}
 
 
 async def test_pin_order_endpoint_and_write_guards(client) -> None:
