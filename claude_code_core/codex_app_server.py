@@ -233,6 +233,9 @@ class AppServerSession:
                 params["model"] = runner.model
             if session_id:
                 params["threadId"] = session_id
+                # Only the thread id is consumed below. Full history can exceed
+                # the bounded JSON-line reader; Codex retains it server-side.
+                params["excludeTurns"] = True
             try:
                 response = await self._request(
                     "thread/resume" if session_id else "thread/start", params
@@ -244,6 +247,7 @@ class AppServerSession:
                     raise
                 # Safe only before turn/start: no tools or user input ran yet.
                 params.pop("threadId", None)
+                params.pop("excludeTurns", None)
                 response = await self._request("thread/start", params)
             self.thread_id = response["thread"]["id"]
             yield StreamEvent(
