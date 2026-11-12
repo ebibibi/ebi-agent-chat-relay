@@ -87,7 +87,7 @@ window.ConsoleFamily = (() => {
         if (!included.has(entry.item.id)) continue;
         if (folded && entry.depth > 0) continue;
         // Tree already applied the collapse state; other lists always group matches.
-        out.push({...entry, family: family.rows.length ? family : null, folded,
+        out.push({...entry, ...(entry.depth === 0 && row.pinId ? {pinId:row.pinId} : {}), family: family.rows.length ? family : null, folded,
           children:state.view==='tree' ? state.items.filter(i=>i.parent_id===entry.item.id).length : 0});
       }
     }

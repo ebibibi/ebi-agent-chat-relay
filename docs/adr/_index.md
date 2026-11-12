@@ -31,3 +31,4 @@ earlier ADR instead of rewriting its history.
 - [ADR-0021: Render document images with scoped attachment resources](0021-render-document-images-with-scoped-resources.md) — Authenticated native images, safe web images, viewport reading (accepted, 2026-11-11).
 
 - [ADR-0022: Measure context occupancy separately from token usage](0022-measure-context-separately-from-usage.md) — Codex compact input and truthful context measurements (accepted, 2026-11-11).
+- [ADR-0023: Persist relative pin moves atomically](0023-persist-relative-pin-moves.md)

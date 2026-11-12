@@ -263,3 +263,27 @@ def test_log_values_cannot_forge_lines() -> None:
 
     assert q("t1\nINFO forged\r\x1b[2J") == "t1 INFO forged  [2J"
     assert len(q("x" * 500)) == 200
+
+
+async def test_pin_order_endpoint_and_write_guards(client) -> None:
+    ids = []
+    for title in ["A", "B", "C"]:
+        r = await client.post(
+            "/console/api/items", json={"title": title, "pinned": True}, headers=WRITE
+        )
+        ids.append((await r.json())["item"]["id"])
+    url = f"/console/api/items/{ids[0]}/pin-order"
+    body = {"target_id": ids[2], "placement": "before"}
+    assert (await client.post(url, json=body)).status == 401
+    assert (await client.post(url, json=body, headers=AUTH)).status == 403
+    assert (await client.post(url, json=body, headers=WRITE)).status == 200
+    r = await client.get("/console/api/board", headers=AUTH)
+    items = {i["id"]: i for i in (await r.json())["items"]}
+    assert [items[i]["pin_position"] for i in [ids[0], ids[2], ids[1]]] == [0, 1, 2]
+    for bad in [
+        {},
+        {"target_id": []},
+        {"target_id": "missing", "placement": "before"},
+        {"target_id": ids[1], "placement": "bad"},
+    ]:
+        assert (await client.post(url, json=bad, headers=WRITE)).status == 400

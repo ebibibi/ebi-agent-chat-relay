@@ -238,3 +238,48 @@ async def test_tags_are_normalised_and_kept_by_add_tags(repo) -> None:
 def test_bad_tags_are_refused(bad) -> None:
     with pytest.raises(WorkItemError):
         validate_changes({"tags": bad})
+
+
+async def test_pin_order_is_persisted_without_changing_activity(repo) -> None:
+    a = await repo.create_capture({"title": "A", "pinned": True})
+    b = await repo.create_capture({"title": "B", "pinned": True})
+    c = await repo.create_capture({"title": "C", "pinned": True})
+    await repo.move_pin(a.id, c.id, "before")
+    reopened = WorkItemRepository(repo._db_path)
+    await reopened.init_db()
+    assert [(await reopened.get(i.id)).pin_position for i in [a, c, b]] == [0, 1, 2]
+    assert (await reopened.get(a.id)).updated_at == a.updated_at
+    await repo.update(a.id, {"title": "A edited"})
+    assert (await repo.get(a.id)).pin_position == 0
+    await repo.move_pin(c.id, b.id, "after")
+    assert [(await repo.get(i.id)).pin_position for i in [a, b, c]] == [0, 1, 2]
+    assert (await repo.update(a.id, {"pinned": False})).pin_position is None
+    assert (await repo.get(a.id)).pin_position is None
+    await repo.update(a.id, {"pinned": True})
+    assert (await repo.get(a.id)).pin_position is None
+
+
+@pytest.mark.parametrize("placement", ["before", "after", "invalid"])
+async def test_pin_move_rejects_invalid_or_stale_items_atomically(repo, placement) -> None:
+    a = await repo.create_capture({"title": "A", "pinned": True})
+    b = await repo.create_capture({"title": "B"})
+    with pytest.raises(WorkItemError):
+        await repo.move_pin(a.id, b.id, placement)
+    with pytest.raises(WorkItemError):
+        await repo.move_pin(a.id, a.id, placement)
+    assert (await repo.get(a.id)).pin_position is None
+
+
+async def test_stale_overlay_write_does_not_undo_order_and_capture_start_keeps_it(repo) -> None:
+    a = await repo.create_capture({"title": "A", "pinned": True})
+    b = await repo.create_capture({"title": "B", "pinned": True})
+    await repo.move_pin(a.id, b.id, "before")
+    await repo._write(a)  # An integration read the overlay before the move.
+    assert (await repo.get(a.id)).pin_position == 0
+    started = await repo.attach_thread(a.id, 77)
+    assert started.pin_position == 0
+    assert (await repo.get("t77")).pin_position == 0
+    await repo.update(b.id, {"pinned": False})
+    with pytest.raises(WorkItemError):
+        await repo.move_pin("t77", b.id, "before")
+    assert (await repo.get("t77")).pin_position == 0
