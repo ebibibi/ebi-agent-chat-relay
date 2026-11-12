@@ -156,9 +156,9 @@ _STATIC_TYPES = {
 }
 _SECURITY_HEADERS = {
     "Content-Security-Policy": (
-        # Discord's CDN is allowed for images only: attachments in chat threads preview inline.
-        "default-src 'self'; img-src 'self' data: https://cdn.discordapp.com "
-        "https://media.discordapp.net; style-src 'self'; script-src 'self'; "
+        # Markdown documents may embed HTTPS images; scripts and API connections stay restricted.
+        "default-src 'self'; img-src 'self' data: https:; "
+        "style-src 'self'; script-src 'self'; "
         # Discord's CDN is also readable (CORS "*") so a chat attachment can be previewed.
         "connect-src 'self' https://cdn.discordapp.com https://media.discordapp.net; "
         "frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
@@ -380,6 +380,7 @@ class ConsoleServer:
         r.add_patch(f"{API_PREFIX}/pages/{{slug}}/items/{{key}}", page_routes.change)
         r.add_post(f"{API_PREFIX}/items", self.create_item)
         r.add_patch(f"{API_PREFIX}/items/{{item_id}}", self.patch_item)
+        r.add_post(f"{API_PREFIX}/items/{{item_id}}/pin-order", self.move_pin)
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/messages", self.messages)
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/notes", workspace_routes.thread_notes)
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/situation", self.situation)
@@ -1108,6 +1109,20 @@ class ConsoleServer:
             )
         return web.json_response({"item": item.as_dict()})
 
+    async def move_pin(self, request: web.Request) -> web.Response:
+        body, err = await self._json(request)
+        if err:
+            return err
+        target_id = body.get("target_id")
+        placement = body.get("placement")
+        if not isinstance(target_id, str) or not isinstance(placement, str):
+            return _error("target_id and placement are required strings", 400)
+        try:
+            await self.work_repo.move_pin(request.match_info["item_id"], target_id, placement)
+        except WorkItemError as exc:
+            return _error(str(exc), 400)
+        return web.json_response({"ok": True})
+
     async def done(self, request: web.Request) -> web.Response:
         item_id = request.match_info["item_id"]
         try:
@@ -1376,7 +1391,7 @@ class ConsoleServer:
             return _error("wait until the current turn finishes, then compact", 409)
         repo = self.api.session_repo
         record = await repo.get(key) if repo is not None else None
-        if record is None or record.backend != "codex":
+        if repo is None or record is None or record.backend != "codex":
             return _error("this conversation has no Codex session to compact yet", 409)
         factory = vars(getattr(self.api, "components", None) or object()).get("backend_factory")
         command = getattr(factory, "codex_command", None) or "codex"
@@ -1392,9 +1407,12 @@ class ConsoleServer:
             return _error(str(exc), 502)
         finally:
             self._compacting.discard(key)
+        # The previous turn's measurement describes the history before compaction.
+        # Do not invent a new occupancy: the next Codex turn will measure it.
+        await repo.update_context_stats(key, context_window=None, context_used=None)
         logger.info("console: %s compacted Codex session of %s", _q(who), _q(item_id))
         return web.json_response(
-            {"message": "Conversation compacted. The next reply continues from the summary."}
+            {"message": "Conversation compacted. Context usage will be measured on the next reply."}
         )
 
     def _files_dir(self) -> Path | None:

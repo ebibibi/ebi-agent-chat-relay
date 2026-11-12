@@ -253,7 +253,7 @@ curl -X POST "$CCDB_API_URL/api/threads/<their_thread_id>/message" \
 - O texto retransmitido é **publicado na thread** antes de chegar ao Claude, para que os humanos que assistem vejam toda a troca IA-a-IA. Um relay nunca é um canal secreto.
 - Cada mensagem é **envolvida em um marcador** que nomeia a thread remetente e afirma que não vem do humano — uma instrução sem marcação seria obedecida como se o dono a tivesse escrito.
 
-Loops são o risco real (duas sessões respondendo uma à outra queimam tokens e se interrompem indefinidamente), então uma proteção limita cada cadeia: **máximo de 2 saltos (hops)**, um cooldown de 60s por par de threads, 5 relays por remetente a cada 10 minutos, e nenhum auto-envio. Recusas voltam como 429 com o motivo.
+A proteção mantém **máximo de 2 saltos** e proíbe autoenvios. A mesma mensagem (com espaços normalizados) do mesmo remetente ao mesmo destinatário é bloqueada por 60 segundos; mensagens diferentes e envios a outros destinatários são permitidos imediatamente. Cada par compartilha 20 mensagens por minuto móvel, contando as duas direções; o limite de emergência por remetente é de 120 por minuto móvel. Queue e interrupt compartilham esses limites. Recusas retornam 429 com `reason`; limites temporários incluem `retry_after_seconds` e `Retry-After`. Consulte a [especificação](../guide/features.md#session-to-session-relay).
 
 O prompt do lounge também dá às sessões uma regra de desempate para que a conversa convirja em vez de terminar em cortesia mútua: quem tem commits ou um PR vence quem ainda está investigando; caso contrário, a sessão mais antiga continua; empates vão para o menor ID de thread. Quem recua faz push do seu branch primeiro e entrega o que aprendeu.
 

@@ -48,6 +48,16 @@ The status chips above every list narrow it to the statuses you pick — ❓ you
 review, 📋 your task, 🏁 completion candidates, and so on; several at once match with OR, "All"
 clears them. Each chip counts what the current list holds, and the choice is remembered per browser.
 
+For Codex, type **/compact** and press **Enter** to run native compaction. A partial name
+still completes with Enter or Tab; Shift+Enter still inserts a newline. The progress message
+stays beside the reply box until the operation finishes or reports an error, and a failed
+command remains available for retry. Compaction is refused while a turn is running.
+
+After a successful manual compaction, the old context badge is cleared until the next reply
+measures the new history. An unknown measurement is not shown as zero. App-server turns
+report the model's actual context window and count cached input once in context occupancy;
+these measurements are separate from billing/usage counters.
+
 Each thread also shows how full its context window was after its last turn — 🧠 and a percentage
 on the row (amber from 70%, red from 90%), used / window tokens in the detail header — so a
 thread close to compaction is visible before it happens.
@@ -59,7 +69,10 @@ Two modes hide everything but the conversation — the navigation, the list and 
 - **🎯 Focus** (the button in a thread's header, or `z`) shows the open thread full screen.
   Esc, ✕ Exit or leaving the thread returns to the full console.
 - **🔁 Work through** (the button in the Focus view's time bar) runs a queue: the threads you can
-  act on here and now, in Focus order, narrowed to the time bucket chosen in that bar. Each one
+  act on here and now, in Focus order, narrowed to the time bucket chosen in that bar.
+  Only parent and standalone conversations enter the queue; children and grandchildren stay
+  with their parent, even when that parent is absent from the board. If a queued thread
+  becomes a child, it leaves the queue on the next refresh. Each one
   opens full screen with the reply box focused; the strip at the top shows where you are
   (`2 / 7`), how many are left, the AI's estimate and the next step. Sending a reply, finishing
   the thread or ⏭ Skip (`n`) opens the next one — nothing is picked from a list. A thread that
@@ -96,6 +109,10 @@ model call, so it costs nothing per poll and gives the same answer twice
 
 Everything except the last part works without a Workspace; without one the board sends
 `guide.drift: null` and the card leaves that section out.
+
+The next move also considers only parent and standalone conversations, so delegated children
+cannot fill its candidate slots. Family decisions still link to the parent under **Decide
+together**. Open the parent to inspect a child explicitly.
 
 ## Automatic triage
 
@@ -317,9 +334,18 @@ interrupt with the slot it holds (`POST /console/api/items/{id}/stop`, `/pause`,
 `/queue` with `action: first|later`). The pause mark is stored on the item (`paused_at`).
 
 📌 in the detail header (or `p`) pins a thread as what you are working on now. Pinned threads
-open every list but Done under a highlighted "📌 Working on now" strip, newest pin first, and
+open every list but Done and Recent under a highlighted "📌 Working on now" strip, and
 bring their family with them rather than duplicating it in the tree. The pin is stored with the item
 (`PATCH /console/api/items/{id}` with `pinned: true|false`), so every device sees it.
+Use ↑ / ↓ to move a pin one place, or ⇈ / ⇊ to move straight to the top / bottom of the
+visible pinned list (touch and keyboard work too).
+Order is saved on the server and survives reloads, polling and switching devices. A family
+moves together. Filtered moves use the visible neighbor without removing hidden pins; a new
+or re-pinned item appears first. Moving a pin does not change its activity time or priority.
+`POST /console/api/items/{id}/pin-order` accepts `target_id` and `placement: before|after`;
+both items must still be pinned. The move is atomic and uses the current server order.
+Recent ignores pin positions and family regrouping: matching items appear strictly by
+activity time, with day headings. Pins keep their visual mark but have no reorder controls there.
 Ticking "📌 Pin" next to the capture box pins the request you are writing as it is added
 (`POST /console/api/items` with `pinned: true`); the tick applies to that one request only, and the
 pin stays when the request is handed to an agent.
@@ -473,19 +499,42 @@ also offers **Use a token instead**.
 
 ## Run without Discord
 
-The console can be the only frontend. With `CCDB_FRONTENDS` set and `discord` left out, ccdb
-never logs in to Discord and does not need `DISCORD_BOT_TOKEN` or `DISCORD_CHANNEL_ID`:
+Choose Console-only operation explicitly:
 
-```dotenv
-CCDB_FRONTENDS=console          # or console,teams
-API_PORT=8099                   # the console starts beside the control plane
-CCDB_CONSOLE_PORT=8100
-CCDB_CONSOLE_TOKEN=...          # or the Cloudflare Access settings above
+```sh
+ccdb start --mode console
 ```
 
-The scheduler, waits and the control-plane API keep running. New conversations, scheduled tasks
-included, open in the console. Startup refuses a configuration without Discord that nobody could
-reach (no console ports and no Teams).
+This needs no Discord account, bot token, channel ID or `.env` file. It defaults to
+control-plane port `8099` and Console port `8100`; configured ports take precedence.
+Open `http://localhost:8100` and use the normal passkey setup. The choice overrides
+`CCDB_FRONTENDS` in the environment or `.env` for this invocation. It never logs in
+to Discord, creates Discord threads or mirrors lounge messages to Discord, even
+when old Discord credentials and channel settings remain in the environment.
+
+For a service, persist the choice in its environment (and keep the port settings):
+
+```dotenv
+CCDB_FRONTENDS=console          # or console,teams to also enable Teams
+API_PORT=8099
+CCDB_CONSOLE_PORT=8100
+```
+
+The scheduler, waits and the control-plane API keep running. `/api/spawn` and
+`/api/ingest` create native Console conversations; `channel_id` is unnecessary and
+ignored. Ingest still requires its dedicated bearer token. Spawned children inherit
+the saved child AI preferences, and their parent link is stored before the first
+turn starts. Attachments and seed messages remain in the conversation even with
+`auto_start=false`. Native history is available through
+`GET /api/threads/{thread_id}/messages`, and relays use the native session host.
+Pending Console turns resume after restart without waiting for a Discord ready event.
+
+Existing Discord histories are not migrated. Unknown Discord IDs fail without a
+Discord fetch, and old pending Discord resumes are left untouched until expiry.
+Switch back with `ccdb start --mode discord` and valid Discord credentials; leaving
+both the flag and `CCDB_FRONTENDS` unset preserves the original Discord default.
+Startup refuses a configuration without Discord that nobody could reach (no Console
+ports and no Teams). Authentication and loopback binding remain unchanged.
 
 ## API
 
@@ -722,6 +771,23 @@ Selected rows have a blue outline and a **Selected** marker. Unread rows use a g
 bold title. Pinning keeps its pin symbol while selection keeps its own outline. Background
 refreshes preserve the visible row and its offset, including a thread repeated in a tree and
 its pinned section; only deliberate navigation reveals the selected row.
+
+## Reading file previews
+
+Markdown attachment previews render standard inline and reference images. A relative image
+name resolves to a uniquely named image attached in the same delivery/message, keeping the
+original signed URL for Discord attachments. Otherwise it resolves relative to the document
+URL. Native Console file images are fetched with the same authentication as the document;
+HTTPS web images receive no Console token and send no referrer. Include referenced local
+images with the Markdown file: the preview cannot read arbitrary paths on the agent's disk.
+Ambiguous, blocked or missing images show their alt text and an unavailable message while
+the document remains readable. Raw HTML in Markdown is displayed as text.
+
+Use **Fullscreen** in the preview toolbar to fill the window on desktop or a phone, and
+**Restore size** to return without replacing the document. Escape first restores the size;
+a second Escape closes the preview. Source, copy and download remain available in either size.
+External HTTPS images are permitted by the image policy; scripts, forms, API connections and
+the sandbox for HTML previews retain their existing restrictions.
 
 ## Copying file contents
 

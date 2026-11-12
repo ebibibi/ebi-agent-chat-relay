@@ -186,9 +186,9 @@ window.ConsoleSituation = (() => {
     if (state.open) renderDetail();
   }
 
-  // With the panel open, a parent's family list is the panel's "each thread" section, and the
-  // Workspace entry joins the panel so the conversation keeps the height. A child keeps the
-  // family list in the conversation column: it holds the way back to the parent and the
+  // With the panel open, the Workspace entry joins the panel so the conversation keeps the
+  // height. The family list stays in the conversation column (folded to one line beside the
+  // panel by default, see family.js): a child's list holds the way back to the parent and the
   // child's own reply escape hatch. Folded, everything returns to the conversation column.
   function place(open, family) {
     const side = $("d-side"), main = $("d-main"), notes = $("d-notes"), reply = $("d-side-reply");
@@ -197,7 +197,6 @@ window.ConsoleSituation = (() => {
     if (workspace && open && workspace.parentElement !== side) side.insertBefore(workspace, reply);
     if (workspace && !open && workspace.parentElement !== main) main.insertBefore(workspace, notes);
     if (familyNode && familyNode.parentElement !== main) main.insertBefore(familyNode, notes);
-    if (familyNode && open && !(family && family.parent)) familyNode.hidden = true;
   }
 
   function paintTabs(body, show, tabs, asks) {
@@ -281,11 +280,14 @@ window.ConsoleSituation = (() => {
     const rail = $("d-side-rail");
     if (rail) rail.onclick = () => setHidden(false);
     if (!window.ResizeObserver) { body.dataset.layout = "split"; return; }
+    // Known before the first draw: the family list's line depends on it (family.js).
+    const width = body.getBoundingClientRect().width;
+    if (width) body.dataset.layout = width < SPLIT_MIN_PX ? "tabs" : "split";
     observer = new ResizeObserver(([entry]) => {
       const layout = entry.contentRect.width < SPLIT_MIN_PX ? "tabs" : "split";
       if (body.dataset.layout === layout) return;
       body.dataset.layout = layout;
-      redrawOpen();
+      if (state.open) renderDetail(); // the family list too, not only the panel
     });
     observer.observe(body);
   }
@@ -310,5 +312,14 @@ window.ConsoleSituation = (() => {
   // A parent's record changes nothing on the board, so the board's refresh would not redraw it.
   setInterval(() => { if (!document.hidden) redrawOpen(); }, REFRESH_MS);
 
-  return { render, attach, backgroundIds, markBackground };
+  // Whether the open panel lists this parent's threads: family.js then starts its own list
+  // folded to one line instead of repeating them in full above the conversation.
+  // Decided from the item, not from the last redraw: family.js draws before the panel does.
+  const holdsFamily = (id) => {
+    if (hidden) return false;
+    const family = window.ConsoleFamily.model(state.items, id);
+    return Boolean(family && !family.parent && family.rows.length);
+  };
+
+  return { render, attach, backgroundIds, markBackground, holdsFamily };
 })();

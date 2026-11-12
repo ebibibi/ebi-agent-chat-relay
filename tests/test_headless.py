@@ -106,3 +106,30 @@ async def test_the_console_becomes_primary_on_a_headless_bot(tmp_path) -> None:
 
     assert host is not None
     assert router.primary == "console"
+
+
+async def test_headless_startup_restores_pending_sessions_after_host_is_ready() -> None:
+    from unittest.mock import AsyncMock
+
+    from claude_discord.main import _resume_headless_sessions
+
+    bot = MagicMock()
+    cog = MagicMock()
+    cog.on_ready = AsyncMock()
+    bot.get_cog.return_value = cog
+    await _resume_headless_sessions(bot)
+    cog.on_ready.assert_awaited_once()
+    bot.start.assert_not_called()
+
+
+def test_headless_config_ignores_leftover_discord_identifiers() -> None:
+    env = {
+        "CCDB_FRONTENDS": "console",
+        **CONSOLE_ENV,
+        "DISCORD_CHANNEL_ID": "unused-channel",
+        "DISCORD_OWNER_ID": "unused-owner",
+    }
+    with patch("claude_discord.main.load_dotenv"), patch.dict("os.environ", env, clear=True):
+        config = load_config()
+    assert config["channel_id"] == ""
+    assert config["owner_id"] == ""

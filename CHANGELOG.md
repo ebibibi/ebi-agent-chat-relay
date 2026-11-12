@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Console lists other than the tree show a thread family as its parent and a dim **▸ N child threads**
+  line instead of every child; clicking it unfolds the children (remembered per family). People talk
+  to the parent, so the children no longer crowd 🎯 Focus. A family whose child is open stays unfolded.
+
+### Changed
+
 - Console, 📍 *Where things stand*: the panel can be read and answered on its own. Each open thread
   shows its status and latest report, a reply box at the bottom sends to the parent or any open child
   (**↩ Answer** and **↩ Reply** address it without leaving the panel), and **›** folds the panel to a
@@ -18,6 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Console: a parent's child threads can be checked from the conversation again. Beside the 📍 panel
+  the family list is one steady line (**▸ Child threads**, with counts) that unfolds on click, and the
+  choice is remembered; phones keep it in the panel's tab. #1296 had hidden it for good.
+- Console: in a parent thread with the 📍 panel open, the family list no longer flips on and off
+  above the conversation as children's reports arrive. Each flip moved the text by the list's height
+  (230 px, dozens of times a minute, in a family with many children).
+- Console: the line being read now stays put whenever the conversation changes size, not only
+  when messages re-render. The usual cause was a child's report reloading, which made the family list
+  above the conversation shrink and grow; the header, the live panel and late images did the same.
+  The family list also keeps the last report while a newer one loads.
 - Console: reading further up a conversation no longer jumps while a turn runs. Each poll rebuilt
   every message, so delivered-file thumbnails vanished until they loaded again: the text moved and
   came back on phones, and drifted on desktops. Unchanged messages now keep their nodes, the first

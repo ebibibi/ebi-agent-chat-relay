@@ -32,7 +32,7 @@ claude_discord/
   lounge.py                # AI Lounge prompt builder
   session_view.py          # Cross-session views for GET /api/sessions (pure merge logic)
   session_slots.py         # Steerable session slot queue (prioritize / defer / pause + auto-resume)
-  relay.py                 # RelayGuard + relay prompt wrapper (hop/cooldown/rate limits)
+  relay.py                 # RelayGuard + relay prompt wrapper (hop/duplicate/burst limits)
   session_sync.py          # CLI session discovery and import
   worktree.py              # WorktreeManager — safe git worktree lifecycle
   cogs/

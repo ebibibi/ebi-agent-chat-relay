@@ -146,7 +146,9 @@
         if (P && P.kind(fileName(href))) {
           const look = el("button", "btn", `👁 ${P.label} ${fileName(href)}`);
           look.type = "button";
-          look.addEventListener("click", () => P.open(fileName(href), () => fetchFile(href), () => download(href)));
+          const attachments = [...new Set(found)].map(url => ({ filename: fileName(url), url }));
+          look.addEventListener("click", () => P.open(fileName(href), () => fetchFile(href),
+            () => download(href), { url: href, attachments }));
           row.append(look, P.copyButton(() => fetchFile(href)));
         }
         const btn = el("button", "btn", `📎 ${L.download} ${fileName(href)}`);

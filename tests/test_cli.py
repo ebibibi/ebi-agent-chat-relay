@@ -351,3 +351,68 @@ class TestLoadConfigCwd:
                 load_config()
             args, kwargs = mock_ld.call_args
             assert kwargs.get("usecwd") is True or (args and args[0] is not None)
+
+
+class TestConsoleOnlyMode:
+    async def test_explicit_console_mode_overrides_file_and_has_local_defaults(self, tmp_path):
+        import os
+
+        from claude_discord.cli import _run_start
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("CCDB_FRONTENDS=discord\nDISCORD_BOT_TOKEN=unused\n")
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("claude_discord.main.main", new_callable=AsyncMock) as run,
+        ):
+            await _run_start(env_file, mode="console")
+            assert os.environ["CCDB_FRONTENDS"] == "console"
+            assert os.environ["API_PORT"] == "8099"
+            assert os.environ["CCDB_CONSOLE_PORT"] == "8100"
+            run.assert_awaited_once()
+
+    async def test_console_mode_preserves_configured_ports(self, tmp_path):
+        import os
+
+        from claude_discord.cli import _run_start
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("API_PORT=8181\nCCDB_CONSOLE_PORT=8182\n")
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("claude_discord.main.main", new_callable=AsyncMock),
+        ):
+            await _run_start(env_file, mode="console")
+            assert os.environ["API_PORT"] == "8181"
+            assert os.environ["CCDB_CONSOLE_PORT"] == "8182"
+
+    def test_console_mode_is_explicit_in_cli(self):
+        from claude_discord.cli import main
+
+        with (
+            patch("sys.argv", ["ccdb", "start", "--mode", "console"]),
+            patch("claude_discord.cli.cmd_start") as start,
+        ):
+            main()
+            assert start.call_args.kwargs["mode"] == "console"
+
+
+async def test_console_cli_can_start_without_a_default_env_file(tmp_path, monkeypatch):
+    import os
+
+    from claude_discord.cli import _run_start
+
+    monkeypatch.chdir(tmp_path)
+    with (
+        patch.dict(os.environ, {}, clear=True),
+        patch("claude_discord.main.main", new_callable=AsyncMock) as run,
+    ):
+        await _run_start(Path(".env"), mode="console")
+        run.assert_awaited_once()
+
+
+async def test_console_cli_does_not_ignore_an_explicit_missing_env_file(tmp_path):
+    from claude_discord.cli import _run_start
+
+    with pytest.raises(SystemExit):
+        await _run_start(tmp_path / "missing.env", mode="console")

@@ -32,6 +32,26 @@ title = "勉強会の告知を社内SNSに貼る"
 body = "AI が作った文面をコピーして貼るだけ。"
 source = "社内勉強会"
 
+# Reorder two pins using their row buttons, then reload to verify persistence.
+[[items]]
+title = "ピン留めを好きな順番に並べる"
+note = "この依頼と次の依頼をピン留めし、一覧の↑↓と⇈⇊（一番上・一番下）で順番を変える。再読み込み後も順番が残ること、スマホでも操作できることを確認する。「更新順」ではピンや親子に関係なく更新日時順に並ぶことも確認する。"
+priority = 1
+project = "Console確認"
+
+# Preview a Markdown document and its companion image in the first minute.
+[[items]]
+title = "Codexの会話を圧縮し、コンテキスト表示を確認する"
+note = "短いCodex会話を作って、/compactを入力してEnterで実行する。圧縮中の表示を確認し、完了後は次の返信で使用量が再計測されることを確認する。Shift+Enterは改行のまま。"
+priority = 1
+project = "Console確認"
+
+[[items]]
+title = "図入りの報告書をプレビューで確認する"
+note = "プレビュー確認/report.md と network.png を一緒に添付して。Markdownプレビューで図を確認し、全画面にして本文を読む。ソース表示とダウンロードも確認する。"
+priority = 0
+project = "プレビュー確認"
+
 [[items]]
 title = "新入社員3名のアカウントを作って（明後日入社）"
 note = "名簿は M365運用/入社者名簿_10月.md。E5ライセンスと部署グループもお願い。終わったら名簿の人に送る初回サインイン案内の文面も。"
@@ -72,9 +92,11 @@ project = "社内勉強会"
 
 # Start the first one and let it spawn children to see the 📍 panel fill in. Its two children
 # are there so the panel and the family list already show on the first open.
+# In Focus, try Work through / Your next move: only the parent is offered.
+# Inspect the children from its family panel instead; they never join the queue.
 [[items]]
 title = "全社のパスキー移行を統括して"
-note = "部署ごとの移行を子スレッドに分けて進め、私に聞くことは親にまとめて。"
+note = "部署ごとの移行を子スレッドに分けて進め、私に聞くことは親にまとめて。「今やる一手」と「連続で片づける」ではこの親と話し、子の状況は親から開いて確認する。"
 priority = 1
 project = "社内勉強会"
 

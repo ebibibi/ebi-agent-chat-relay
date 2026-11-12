@@ -233,7 +233,8 @@ button.slash-now:hover { border-color: var(--accent); }
 a.btn { text-decoration: none; display: inline-block; }
 .icon-btn { background: none; border: 0; font-size: 18px; padding: 2px 6px; }
 
-.msgs { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+.msgs { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px;
+  overflow-anchor: none; }
 .msg { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; flex-shrink: 0; }
 .msg.human { border-color: color-mix(in srgb, var(--me) 45%, var(--line)); }
 /* Relay activity is a log, one compact line per entry, not a message card. */
@@ -410,6 +411,12 @@ button.family-link:hover { color: var(--accent); border-color: var(--accent); }
   padding: 7px 10px; background: #292d3b; border-bottom: 1px solid #646c81; font-size: 11px; }
 .thread-group-label { font-weight: 700; color: #e2dbf7; }
 .thread-group-count { color: #c0c3ce; }
+.thread-group-foot { border-top: 1px solid var(--line); }
+.thread-group-toggle { display: block; width: 100%; padding: 4px 12px 5px 38px; border: 0; background: none;
+  color: var(--dim); font-size: 11px; text-align: left; cursor: pointer; }
+.thread-group-toggle:hover { color: var(--fg, #e6e6e6); }
+.thread-group.folded { border-color: var(--line); }
+.thread-group.folded .family-root { border-bottom: 0; }
 .thread-group-rows { list-style: none; padding: 0; margin: 0; }
 .thread-group .row { padding: 9px 9px; }
 .thread-group .row .title { white-space: normal; overflow-wrap: anywhere; display: -webkit-box;
@@ -451,3 +458,11 @@ button.family-link:hover { color: var(--accent); border-color: var(--accent); }
 .view-bar .view-rule { font-size: 12px; padding: 1px 6px; border-radius: 4px; background: var(--raise);
   overflow-wrap: anywhere; }
 .view-bar .view-unknown { color: var(--p1); font-size: 12px; }
+
+.compact-status { color: var(--ai); font-size: 12px; padding-top: 4px; }
+
+/* Always visible touch/keyboard controls; do not rely on hover or dragging. */
+.pin-order { display: grid; grid-template-columns: repeat(2, auto); gap: 4px; }
+.pin-order .btn { min-width: 32px; min-height: 32px; padding: 3px 7px; }
+.pin-order .btn:focus-visible { outline: 2px solid var(--p1); outline-offset: 2px; }
+@media (pointer: coarse) { .pin-order .btn { min-width: 44px; min-height: 44px; } }

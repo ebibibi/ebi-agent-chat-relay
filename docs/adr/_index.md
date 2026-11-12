@@ -24,3 +24,11 @@ earlier ADR instead of rewriting its history.
 - [ADR-0016: Map ccdb permissions onto agy's own flags instead of gating the Antigravity backend](0016-map-ccdb-permissions-onto-agy-flags.md)
 - [ADR-0017: Keep a family's situation beside the conversation, per thread](0017-keep-a-family-situation-beside-the-conversation.md)
 - [ADR-0018: Add Console screens as registered data, not loaded code](0018-add-console-screens-as-registered-data.md)
+- [ADR-0019: Measure relay duplicates and peer exchanges separately from fan-out](0019-measure-relay-duplicates-and-peer-exchanges.md)
+
+- [ADR-0020: Select Console-only operation explicitly](0020-select-console-only-operation-explicitly.md) — Explicit CLI choice and native control-plane routing (accepted, 2026-11-11).
+
+- [ADR-0021: Render document images with scoped attachment resources](0021-render-document-images-with-scoped-resources.md) — Authenticated native images, safe web images, viewport reading (accepted, 2026-11-11).
+
+- [ADR-0022: Measure context occupancy separately from token usage](0022-measure-context-separately-from-usage.md) — Codex compact input and truthful context measurements (accepted, 2026-11-11).
+- [ADR-0023: Persist relative pin moves atomically](0023-persist-relative-pin-moves.md)

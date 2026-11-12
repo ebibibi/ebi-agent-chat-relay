@@ -55,6 +55,13 @@ window.ConsoleFamily = (() => {
   }
   // Keep each family at its first matching row's position. Include ancestors as
   // context, but do not pull unrelated/filtered siblings into a selection range.
+  const EXPANDED_KEY = 'familyExpanded';
+  const expanded = new Set((() => { try { return JSON.parse(localStorage.getItem(EXPANDED_KEY) || '[]'); } catch { return []; } })());
+  function toggleExpanded(rootId) {
+    if (expanded.has(rootId)) expanded.delete(rootId); else expanded.add(rootId);
+    localStorage.setItem(EXPANDED_KEY, JSON.stringify([...expanded]));
+    renderList();
+  }
   function groupRows(rows) {
     const matching = new Set(rows.filter(r=>r.item).map(r=>r.item.id));
     const emitted = new Set(), out = [];
@@ -72,10 +79,15 @@ window.ConsoleFamily = (() => {
         }
       }
       const entries = [{item:family.root,depth:0}, ...family.rows.map(r=>({...r,depth:r.depth+1}))];
+      // People talk to the parent; outside the tree a family shows its parent and how many
+      // children it has, and lists the children only when unfolded (or one of them is open).
+      const folded = state.view !== 'tree' && family.rows.length > 0 && !expanded.has(family.root.id) &&
+        !family.rows.some(({item}) => item.id === state.open);
       for (const entry of entries) {
         if (!included.has(entry.item.id)) continue;
+        if (folded && entry.depth > 0) continue;
         // Tree already applied the collapse state; other lists always group matches.
-        out.push({...entry, family: family.rows.length ? family : null,
+        out.push({...entry, ...(entry.depth === 0 && row.pinId ? {pinId:row.pinId} : {}), family: family.rows.length ? family : null, folded,
           children:state.view==='tree' ? state.items.filter(i=>i.parent_id===entry.item.id).length : 0});
       }
     }
@@ -87,13 +99,19 @@ window.ConsoleFamily = (() => {
     return report ? report.content.replace(/\s+/g, ' ').trim().slice(0, 240) : '';
   }
   const reports = new Map(), pending = new Set();
-  let folded = false, mobileExpanded = false;
+  const FOLDED_KEY = 'familyListFolded';
+  // null: not chosen yet (folded beside the panel). Read safely: the model is also loaded
+  // outside a browser by the node tests.
+  let folded = (() => { try { return {'1': true, '0': false}[localStorage.getItem(FOLDED_KEY)] ?? null; } catch { return null; } })();
+  let mobileExpanded = false;
   function label(item) {
     return item.paused_at && !item.running ? T.paused : needsAttention(item) ? L().attention : item.queued ? T.queued : T.st[item.status] || item.status;
   }
   function card({item, depth}, selected) {
     const cached = reports.get(item.id);
-    const recent = cached && cached.version === version(item) && cached.text;
+    // The last report stays while a newer one loads; switching to the next step and back
+    // in between made the list, and the conversation under it, jump.
+    const recent = cached && cached.text;
     const summary = recent || (item.ai && item.ai.next_step ? `${L().next}: ${item.ai.next_step}` : '') || item.note || L().empty;
     return h('li', {class: 'family-task' + (selected === item.id ? ' current' : '') +
       (needsAttention(item) ? ' attention' : '') + (item.status === 'done' ? ' complete' : ''),
@@ -110,7 +128,12 @@ window.ConsoleFamily = (() => {
   function render(item) {
     const slot = $('d-family');
     const family = model(state.items, item.id);
-    slot.hidden = !family || (!family.parent && !family.rows.length);
+    // On a phone, or where the 📍 panel is a tab of its own, the panel lists every thread and
+    // the conversation needs the height: no line for it here. Decided from the item and the
+    // layout alone, so it cannot flip between redraws.
+    const small = matchMedia('(max-width: 900px)').matches || $('d-body')?.dataset.layout === 'tabs';
+    const tabbed = small && Boolean(window.ConsoleSituation?.holdsFamily(item.id));
+    slot.hidden = !family || (!family.parent && !family.rows.length) || tabbed;
     const reply = $('reply');
     const child = family && family.parent;
     // Default child inspection to read-only, with an explicit escape hatch.
@@ -124,7 +147,11 @@ window.ConsoleFamily = (() => {
     }
     if (slot.hidden) { slot.replaceChildren(); delete slot.dataset.signature; return; }
     const mobile = matchMedia("(max-width: 900px)").matches;
-    const collapsed = mobile ? !mobileExpanded : folded;
+    // Beside the 📍 panel a parent's list starts as one line (the panel lists each thread too);
+    // a choice made with the heading is remembered. The list stays put either way: showing and
+    // hiding it on its own moved the conversation under it.
+    const beside = Boolean(window.ConsoleSituation?.holdsFamily(item.id));
+    const collapsed = mobile ? !mobileExpanded : folded === null ? beside : folded;
     const signature = JSON.stringify([item.id, collapsed, state.directReply, family.root.title,
       family.rows.map(({item, depth}) => [item, depth, reports.get(item.id)])]);
     if (slot.dataset.signature === signature) {
@@ -140,14 +167,18 @@ window.ConsoleFamily = (() => {
       h('button', {class: 'btn', type: 'button', onclick: () => openItem(family.parent.id), text: L().back}),
       h('button', {class: 'btn family-direct', type: 'button',
         onclick: () => { state.directReply = item.id; renderDetail(); $('reply')?.focus(); }, text: L().direct}))
-      : h('p', {class: 'dim family-hint', text: L().hint});
+      : collapsed ? null : h('p', {class: 'dim family-hint', text: L().hint});
     const heading = h('button', {class: 'family-heading', type: 'button',
-      'aria-expanded': String(!collapsed), onclick: () => { if (mobile) mobileExpanded = !mobileExpanded; else folded = !folded; render(item); }},
+      'aria-expanded': String(!collapsed), onclick: () => {
+        if (mobile) mobileExpanded = !mobileExpanded;
+        else { folded = !collapsed; localStorage.setItem(FOLDED_KEY, folded ? '1' : '0'); }
+        render(item);
+      }},
       h('strong', {text: `${collapsed ? '▸' : '▾'} ${L().title}`}),
       h('span', {class: 'family-counts', text: L().counts(family.counts)}));
     const list = h('ul', {class: 'family-tasks', hidden: collapsed}, ...family.rows.map(row => card(row, item.id)));
     const scroll = slot.querySelector('.family-tasks')?.scrollTop || 0;
-    slot.replaceChildren(context, heading, list);
+    slot.replaceChildren(...[context, heading, list].filter(Boolean));
     list.scrollTop = scroll;
     if (!collapsed) loadReports(family.rows);
   }
@@ -178,17 +209,29 @@ window.ConsoleFamily = (() => {
       title: L().counts(family.counts)});
     return null;
   }
-  function listGroup(family, shown) {
+  function listGroup(family, shown, folded) {
     const ja = document.documentElement.lang === 'ja';
     const total = family.counts.total;
-    const count = ja ? `子スレッド ${total}件` : `${total} child threads`;
-    const visible = shown < total ? (ja ? ` · ${shown}/${total}件を表示` : ` · ${shown} of ${total} shown`) : '';
+    const count = ja ? `子スレッド ${total}件` : `${total} child thread${total === 1 ? "" : "s"}`;
+    const visible = !folded && shown < total ? (ja ? ` · ${shown}/${total}件を表示` : ` · ${shown} of ${total} shown`) : '';
     const name = family.root.title || family.root.id;
-    return h('li', {class:'thread-group', role:'presentation'},
-      h('div', {class:'thread-group-heading'},
-        h('span', {class:'thread-group-label', text:ja ? '親子グループ' : 'Group'}),
-        h('span', {class:'thread-group-count', text:count + visible})),
-      h('ul', {class:'thread-group-rows', role:'group', 'aria-label':`${name} · ${count}`}));
+    if (state.view === 'tree') {
+      // The tree folds with its own triangles; the card only says what it holds.
+      return h('li', {class:'thread-group', role:'presentation'},
+        h('div', {class:'thread-group-heading'},
+          h('span', {class:'thread-group-label', text:ja ? '親子グループ' : 'Group'}),
+          h('span', {class:'thread-group-count', text:count + (shown < total ? (ja ? ` · ${shown}/${total}件を表示` : ` · ${shown} of ${total} shown`) : '')})),
+        h('ul', {class:'thread-group-rows', role:'group', 'aria-label':`${name} · ${count}`}));
+    }
+    const toggle = h('button', {class:'thread-group-toggle', type:'button', 'aria-expanded':String(!folded),
+      title: folded ? (ja ? '子スレッドを表示' : 'Show the child threads') : (ja ? '子スレッドをたたむ' : 'Fold the child threads'),
+      onclick: (e) => { e.stopPropagation(); toggleExpanded(family.root.id); },
+      text: `${folded ? '▸' : '▾'} ${count}${visible}`});
+    return h('li', {class:'thread-group' + (folded ? ' folded' : ''), role:'presentation'},
+      folded ? null : h('div', {class:'thread-group-heading'},
+        h('span', {class:'thread-group-label', text:ja ? '親子グループ' : 'Group'})),
+      h('ul', {class:'thread-group-rows', role:'group', 'aria-label':`${name} · ${count}`}),
+      h('div', {class:'thread-group-foot'}, toggle));
   }
   function roleTag(depth) {
     const ja = document.documentElement.lang === 'ja';

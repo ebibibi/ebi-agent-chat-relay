@@ -59,8 +59,8 @@ def load_config() -> dict[str, str]:
     default_model = "sonnet" if backend == "claude" else ""
 
     return {
-        "token": token,
-        "channel_id": channel_id,
+        "token": token if "discord" in frontends else "",
+        "channel_id": channel_id if "discord" in frontends else "",
         "backend": backend,
         "frontends": ",".join(frontends),
         "command": _env("CCDB_COMMAND", "CLAUDE_COMMAND", ""),
@@ -83,7 +83,7 @@ def load_config() -> dict[str, str]:
         "append_system_prompt": os.getenv("APPEND_SYSTEM_PROMPT", ""),
         "max_concurrent": os.getenv("MAX_CONCURRENT_SESSIONS", "3"),
         "timeout": os.getenv("SESSION_TIMEOUT_SECONDS", "300"),
-        "owner_id": os.getenv("DISCORD_OWNER_ID", ""),
+        "owner_id": os.getenv("DISCORD_OWNER_ID", "") if "discord" in frontends else "",
         "channel_ids": _env("CCDB_CHANNEL_IDS", "CLAUDE_CHANNEL_IDS", ""),
         "monitor_all_channels": _env(
             "CCDB_MONITOR_ALL_CHANNELS", "CLAUDE_MONITOR_ALL_CHANNELS", "false"
@@ -113,6 +113,13 @@ def headless_problems(frontends: tuple[str, ...], env: Mapping[str, str]) -> lis
     if "console" not in frontends and "teams" not in frontends:
         problems.append("CCDB_FRONTENDS must include console or teams when it omits discord")
     return problems
+
+
+async def _resume_headless_sessions(bot: ClaudeDiscordBot) -> None:
+    """Restore pending Console turns after its host exists, without a Discord ready event."""
+    cog = bot.get_cog("ClaudeChatCog")
+    if cog is not None:
+        await cog.on_ready()  # type: ignore[attr-defined]
 
 
 async def _run_headless(stop: asyncio.Event) -> None:
@@ -277,6 +284,7 @@ async def main() -> None:
                         loop.add_signal_handler(sig, lambda: asyncio.create_task(bot.close()))
 
             if headless:
+                await _resume_headless_sessions(bot)
                 await _run_headless(stop)
             else:
                 await bot.start(config["token"])
