@@ -42,3 +42,12 @@ The existing database gains one nullable column automatically. All devices use
 the same order. Concurrent relative moves serialize without replacing membership;
 a move targeting an unpinned item fails without changing the order. Reordering
 updates the small set of pinned rows rather than every work item.
+
+
+## Follow-up: chronological Recent and boundary moves (2026-11-12)
+
+The user requested a strictly chronological Recent view. It bypasses both pin
+promotion and family regrouping, since either would move an older item above a
+newer item. Other views keep family grouping and saved pin order. First/last
+controls target the first/last visible pin with the same relative API, preserving
+hidden pins. Four controls use two columns to fit narrow screens.

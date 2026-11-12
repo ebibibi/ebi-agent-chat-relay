@@ -35,7 +35,7 @@ source = "社内勉強会"
 # Reorder two pins using their row buttons, then reload to verify persistence.
 [[items]]
 title = "ピン留めを好きな順番に並べる"
-note = "この依頼と次の依頼をピン留めし、一覧の↑↓で順番を変える。再読み込み後も順番が残ること、スマホでも操作できることを確認する。"
+note = "この依頼と次の依頼をピン留めし、一覧の↑↓と⇈⇊（一番上・一番下）で順番を変える。再読み込み後も順番が残ること、スマホでも操作できることを確認する。「更新順」ではピンや親子に関係なく更新日時順に並ぶことも確認する。"
 priority = 1
 project = "Console確認"
 

@@ -4,7 +4,7 @@ const fs=require('node:fs'),path=require('node:path');
 const root=path.resolve(__dirname,'../claude_discord/console/static');
 async function setup(t,width){
  const browser=await chromium.launch({headless:true,args:['--no-sandbox']});t.after(()=>browser.close());
- const page=await browser.newPage({viewport:{width,height:900}});page.setDefaultTimeout(4000);
+ const page=await browser.newPage({viewport:{width,height:900},hasTouch:width<600});page.setDefaultTimeout(4000);
  const items=['A','B','C'].map((title,i)=>({id:'t'+(100+i),thread_id:String(100+i),title,priority:2,status:'idle',bucket:'idle',pinned_at:`2026-11-12T00:00:0${3-i}Z`,pin_position:null}));
  const requests=[];let fail=false;
  await page.route('http://console.test/**',async route=>{
@@ -64,4 +64,38 @@ test('pinned family moves as a unit and new pins lead saved order',async t=>{
  items.push({id:'t103',thread_id:'103',title:'New pin',priority:2,status:'idle',bucket:'idle',pinned_at:'2026-11-12T01:00:00Z',pin_position:null});
  await page.reload();await page.locator('[data-item-id="t103"]').waitFor();
  assert.deepEqual(await order(page),['t103','t102','t100']);
+});
+
+for(const width of [1280,390])test(`move pins straight to first and last at ${width}px`,async t=>{
+ const {page,requests}=await setup(t,width);
+ if(width<600)assert.ok((await page.locator('[data-item-id="t102"] .pin-first').boundingBox()).height>=44);
+ await page.locator('[data-item-id="t102"] .pin-first').click();
+ await page.waitForFunction(()=>document.querySelector('.row.pinned')?.dataset.itemId==='t102');
+ assert.deepEqual(await order(page),['t102','t100','t101']);
+ assert.deepEqual(requests[0],{target_id:'t100',placement:'before'});
+ assert.equal(await page.locator('[data-item-id="t102"] .pin-first').isDisabled(),true);
+ await page.locator('[data-item-id="t102"] .pin-last').focus();await page.keyboard.press('Enter');
+ await page.waitForFunction(()=>document.querySelectorAll('.row.pinned')[2]?.dataset.itemId==='t102');
+ assert.deepEqual(requests[1],{target_id:'t101',placement:'after'});
+ assert.equal(await page.locator('[data-item-id="t102"] .pin-last').isDisabled(),true);
+ await page.reload();await page.locator('.pin-last').first().waitFor();
+ assert.deepEqual(await order(page),['t100','t101','t102']);
+ assert.equal(await page.locator('#detail').isVisible(),false);
+ assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+});
+
+test('Recent is chronological across pins and family boundaries, with no pin controls',async t=>{
+ const {page,items}=await setup(t,1280);
+ items[0].last_activity_at='2026-11-09T00:00:00Z';
+ items[1].last_activity_at='2026-11-11T00:00:00Z';items[1].parent_id='t100';
+ items[2].last_activity_at='2026-11-10T00:00:00Z';items[2].pinned_at=null;
+ await page.goto('http://console.test/?lang=en#recent');await page.reload();
+ await page.waitForFunction(()=>state.items[1]?.parent_id==='t100');
+ assert.deepEqual(await page.locator('.row').evaluateAll(rs=>rs.map(r=>r.dataset.itemId)),['t101','t102','t100']);
+ assert.equal(await page.locator('.pinned-group').count(),0);
+ assert.equal(await page.locator('.pin-order').count(),0);
+ await page.evaluate(()=>{state.filter='B';render();});
+ assert.deepEqual(await page.locator('.row').evaluateAll(rs=>rs.map(r=>r.dataset.itemId)),['t101']);
+ await page.evaluate(()=>{state.filter='';setView('idle');});
+ assert.equal(await page.locator('.pin-first').count(),1); // family stays folded in other views
 });
