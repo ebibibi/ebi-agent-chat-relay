@@ -172,10 +172,19 @@ def _build_done_marker_section(config: RunConfig) -> str | None:
         "that this thread looks ready to close, and mark it as a completion candidate:\n"
         '  `curl -s -X POST "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/candidate"`\n'
         f"This prefixes the thread title with {marker}. It is only a proposal: the thread "
-        "stays listed until the user confirms it done, which only the user can do. Do NOT "
-        "mark it when you are asking "
+        "stays listed until the user confirms it done (the user decides; see the exception "
+        "below). Do NOT mark it when you are asking "
         "a question, waiting for a pipeline or a decision, or leaving work pending. "
         "If the user replies later, the marker is removed automatically.\n"
+        'Exception — the user explicitly asks you to close a thread ("mark the finished '
+        'child threads done"): then close it for them, this thread or one it spawned:\n'
+        '  `curl -s -X POST "$CCDB_API_URL/api/threads/<thread_id>/complete" '
+        '-H "Content-Type: application/json" -d \'{"from_thread": \'$DISCORD_THREAD_ID\', '
+        '"user_request": "<quote the request>"}\'`\n'
+        "Check each child first (its messages, open PRs, pending waits) and close only the "
+        "ones whose work is actually finished; report which you closed and which you left "
+        "open and why. Never use it on your own judgment — without an explicit request, "
+        "propose with /candidate.\n"
         "Customer replies: Preparing a draft is NOT sending it to the customer. "
         "Producing an answer, an attachment, or posting it in this AI conversation does not "
         "prove external delivery. Keep the thread in review while the user checks the draft, "

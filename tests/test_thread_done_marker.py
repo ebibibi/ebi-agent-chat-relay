@@ -247,7 +247,11 @@ async def test_prompt_explains_the_candidate_endpoint() -> None:
     context = await _build_system_context(config)
     assert "/api/threads/$DISCORD_THREAD_ID/candidate" in context
     assert CANDIDATE in context
-    assert "only the user can do" in context
+    assert "the user decides" in context
+    # The explicit-request exception names its own endpoint and guard rails.
+    assert "/complete" in context
+    assert "user_request" in context
+    assert "Never use it on your own judgment" in context
     assert "/api/threads/$DISCORD_THREAD_ID/done" not in context
 
 
