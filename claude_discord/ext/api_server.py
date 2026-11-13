@@ -48,6 +48,7 @@ from ..thread_marker import (
     MAX_THREAD_NAME_LENGTH,
     OUTCOME_ACTION,
     OUTCOME_CANDIDATE,
+    OUTCOME_DONE,
     OUTCOME_REVIEW,
     OUTCOME_WAITING,
     family_code,
@@ -454,6 +455,7 @@ class ApiServer:
         self.app.router.add_patch("/api/pages/{slug}/items/{key}", self.resolve_page_item)
         self.app.router.add_post("/api/threads/{thread_id}/done", self.mark_thread_done)
         self.app.router.add_post("/api/threads/{thread_id}/candidate", self.mark_thread_done)
+        self.app.router.add_post("/api/threads/{thread_id}/complete", self.complete_thread)
         self.app.router.add_post("/api/threads/{thread_id}/waiting", self.mark_thread_waiting)
         self.app.router.add_post("/api/threads/{thread_id}/review", self.mark_thread_review)
         self.app.router.add_post("/api/threads/{thread_id}/action", self.mark_thread_action)
@@ -1895,6 +1897,24 @@ class ApiServer:
         channel, 400 when it is not a thread, 502 when the rename fails.
         """
         return await self._mark_thread_outcome(request, OUTCOME_CANDIDATE)
+
+    async def complete_thread(self, request: web.Request) -> web.Response:
+        """POST /api/threads/{thread_id}/complete — close it on the user's explicit request.
+
+        See :mod:`claude_discord.ext.thread_complete_api` for the rules.
+        """
+        from .thread_complete_api import handle_complete_thread
+
+        async def mark_done(req: web.Request) -> web.Response:
+            return await self._mark_thread_outcome(req, OUTCOME_DONE)
+
+        return await handle_complete_thread(
+            request,
+            console=self._console,
+            lineage=self.lineage_repo,
+            running_thread_ids=self._running_thread_ids,
+            mark_without_console=mark_done,
+        )
 
     async def list_pages(self, request: web.Request) -> web.Response:
         """GET /api/pages — the screens registered with the Console, with open counts."""

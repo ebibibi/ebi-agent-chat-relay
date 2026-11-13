@@ -54,6 +54,16 @@ class ThreadLineageRepository:
             )
             await db.commit()
 
+    async def parent_of(self, thread_id: int) -> int | None:
+        """Return the thread that spawned *thread_id*, or None for a root thread."""
+        async with aiosqlite.connect(self._db_path) as db:
+            rows = await db.execute_fetchall(
+                "SELECT parent_thread_id FROM thread_lineage WHERE thread_id = ?",
+                (int(thread_id),),
+            )
+        rows = list(rows)
+        return int(rows[0][0]) if rows else None
+
     async def list_all(self, limit: int = 500) -> list[Lineage]:
         """Return the most recent links, newest first."""
         async with aiosqlite.connect(self._db_path) as db:

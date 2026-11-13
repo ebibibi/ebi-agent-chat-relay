@@ -243,6 +243,7 @@ uv sync --extra api
 | POST | `/api/threads/{thread_id}/message` | Relay a message from one session to another (`text`, `from_thread`, `mode`, `hop`) |
 | POST | `/api/threads/{thread_id}/candidate` | Propose closing a thread: a completion candidate (prefixes the title with `🏁`; idempotent). Only a human marks it done |
 | POST | `/api/threads/{thread_id}/done` | Same as `/candidate`, kept for existing prompts |
+| POST | `/api/threads/{thread_id}/complete` | Close a thread **only on the user's explicit request** — same effect as the Console's Done. Body `{"from_thread": <caller>, "user_request": "<the user's words>"}`; the caller may close itself or a thread it spawned (any depth). 400 without `user_request`, 403 outside the caller's family, 409 while the target still runs |
 | POST | `/api/threads/{thread_id}/waiting` | Mark a thread as waiting on the human (prefixes the title with `❓`, replacing `✅`/`⚠️`; removed on the next human reply; idempotent) |
 | POST | `/api/threads/{thread_id}/review` | Mark a thread as having a deliverable for the human to review (prefixes the title with `👀`, replacing any other outcome marker; removed on the next human reply; idempotent) |
 | POST | `/api/threads/{thread_id}/action` | Mark a thread as waiting on a task the human must do outside the chat — a todo (prefixes the title with `📋`, replacing any other outcome marker; removed on the next human reply; idempotent) |

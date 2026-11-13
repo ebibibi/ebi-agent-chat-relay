@@ -1124,13 +1124,20 @@ class ConsoleServer:
         return web.json_response({"ok": True})
 
     async def done(self, request: web.Request) -> web.Response:
-        item_id = request.match_info["item_id"]
         try:
-            item = await self.work_repo.update(
-                item_id, {"state": STATE_DONE, "snoozed_until": None}
-            )
+            item, workspace = await self.complete_item(request.match_info["item_id"])
         except WorkItemError as exc:
             return _error(str(exc), 400)
+        return web.json_response({"item": item.as_dict(), "workspace": workspace})
+
+    async def complete_item(self, item_id: str) -> tuple[WorkItem, dict[str, Any] | None]:
+        """Mark *item_id* done the way the human's Done button does.
+
+        Shared by the Console's own action and the control-plane
+        ``/api/threads/{id}/complete`` an agent calls on the user's explicit
+        request. Raises :class:`WorkItemError` for an item that cannot move.
+        """
+        item = await self.work_repo.update(item_id, {"state": STATE_DONE, "snoozed_until": None})
         key = await self._conversation_key(item_id)
         if key is not None and self.conversations is not None:
             await apply_outcome(self.conversations, key, OUTCOME_DONE)
@@ -1140,7 +1147,7 @@ class ConsoleServer:
                 # Same marker the agent would set, so the chat sidebar agrees.
                 request_thread_outcome(thread, OUTCOME_DONE)
         workspace = await self._workspace_finish(item, done=True)
-        return web.json_response({"item": item.as_dict(), "workspace": workspace})
+        return item, workspace
 
     async def reopen(self, request: web.Request) -> web.Response:
         item_id = request.match_info["item_id"]
