@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Turns cut off by a crash are resumed** (#1368): a turn now records itself in
+  `inflight_turns` when it starts and removes the row when it ends. A row left by an earlier
+  process means it died mid-turn (SIGKILL, the OOM killer) without the clean shutdown that writes
+  `pending_resumes`. On the first `on_ready` such a turn is queued as a `crash_recovery` resume,
+  quoting the message it was handling, through the same startup loop and 5-minute window as a
+  clean restart. A turn silent for longer than that window, or one that already crashed the bot
+  twice in a row, is not run again: the thread is told instead. See `docs/runtime-reliability.md`.
+
 - Console **canvas mode** (#1358, ADR-0025): a third display mode in which one resident
   secretary agent lays out the whole screen. Widgets on the left (`decision`, `diff`, `table`,
   `markdown`, `timeline`, `agents`, `metric`) are placed over `PUT /api/canvas/widgets/{key}` as

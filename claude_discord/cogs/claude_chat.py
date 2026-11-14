@@ -43,8 +43,10 @@ from ..claude.rewind import find_session_jsonl, parse_user_turns
 from ..claude.types import ImageData
 from ..concurrency import SessionRegistry
 from ..connection_choice import apply_connection
+from ..crash_recovery import InflightTracker, crash_notice_text
 from ..cross_backend_handoff import ConversationHistoryReader, carry_history_across_backends
 from ..database.ask_repo import PendingAskRepository
+from ..database.inflight_repo import InflightTurnRepository
 from ..database.lounge_repo import LoungeRepository
 from ..database.repository import SessionRecord, SessionRepository
 from ..database.resume_repo import PendingResumeRepository
@@ -238,6 +240,15 @@ class ClaudeChatCog(commands.Cog):
         self._lounge_repo = lounge_repo or getattr(bot, "lounge_repo", None)
         # Pending resume repo (optional — startup resume disabled when None)
         self._resume_repo = resume_repo or getattr(bot, "resume_repo", None)
+        self._inflight_heartbeat_started = False
+        # Turns running right now, persisted so a SIGKILL/OOM does not lose them.
+        # Lives in the resume repo's database; off whenever resumes are off.
+        resume_db = getattr(self._resume_repo, "db_path", None)
+        self._inflight: InflightTracker | None = (
+            InflightTracker(InflightTurnRepository(resume_db))
+            if isinstance(resume_db, str)
+            else None
+        )
         # Settings repo for dynamic model lookup (optional — falls back to runner.model)
         self._settings_repo = settings_repo or getattr(bot, "settings_repo", None)
         # When True, rename the thread after creation using a claude -p title suggestion
@@ -1299,6 +1310,7 @@ class ClaudeChatCog(commands.Cog):
         if self._resume_repo is None:
             return
 
+        await self._recover_crashed_turns()
         pending = await self._resume_repo.get_pending()
         if not pending:
             return
@@ -1364,6 +1376,38 @@ class ClaudeChatCog(commands.Cog):
                 )
             except Exception:
                 logger.error("Failed to resume session in thread %d", thread_id, exc_info=True)
+
+    async def _recover_crashed_turns(self) -> None:
+        """Queue (or report) turns a killed process left behind; first ``on_ready`` only.
+
+        A crashed turn becomes a ``pending_resumes`` row, so the loop in
+        ``on_ready`` resumes it exactly like one saved at a clean shutdown.
+        See ``crash_recovery.py`` for the TTL and the consecutive-crash limit.
+        """
+        if self._inflight is None or self._resume_repo is None:
+            return
+        first = not self._inflight_heartbeat_started
+        plan = await self._inflight.recover_once(
+            resumes=self._resume_repo,
+            sessions=self.repo,
+            ttl_seconds=self._resume_repo.ttl_minutes * 60.0,
+        )
+        if first:
+            self._inflight_heartbeat_started = True
+            self._spawn_background(self._inflight.heartbeat_forever())
+        if getattr(self.bot, "headless", False) is True:
+            return
+        for notice in plan.notices:
+            try:
+                raw = self.bot.get_channel(notice.thread_id) or await self.bot.fetch_channel(
+                    notice.thread_id
+                )
+                if isinstance(raw, discord.Thread):
+                    await raw.send(crash_notice_text(notice))
+            except Exception:
+                logger.warning(
+                    "Crash notice: thread %d not reachable", notice.thread_id, exc_info=True
+                )
 
     async def _resume_in_console(self, thread_id: int, prompt: str) -> bool:
         """Resume a Ebi AI Console conversation, which has no Discord thread to fetch.
@@ -1857,6 +1901,8 @@ class ClaudeChatCog(commands.Cog):
                 self._active_runners[thread.id] = runner
                 if current_task is not None:
                     self._active_tasks[thread.id] = current_task
+                if self._inflight is not None:
+                    await self._inflight.begin(thread.id, session_id=session_id, prompt=user_prompt)
 
                 # In chat_only mode, skip the "Session running" message and stop button.
                 stop_view: StopView | None = None
@@ -1912,6 +1958,8 @@ class ClaudeChatCog(commands.Cog):
             # still holding the old object.
             if self._active_runners.get(thread.id) is runner:
                 self._active_runners.pop(thread.id, None)
+                if self._inflight is not None:
+                    await self._inflight.end(thread.id)
             if self._active_tasks.get(thread.id) is current_task:
                 self._active_tasks.pop(thread.id, None)
 
