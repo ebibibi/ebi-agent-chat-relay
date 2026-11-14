@@ -120,13 +120,21 @@ def fingerprint(
     return out
 
 
+#: More threads than this appearing (or vanishing) between two looks is a partial board read —
+#: right after a restart the chat threads are not loaded yet — not real news.
+BURST = 10
+
+
 def compare(old: Mapping[str, Print], new: Mapping[str, Print]) -> list[tuple[str, str]]:
     """``(item_id, what)`` for every difference, in a few plain words."""
     changes: list[tuple[str, str]] = []
+    appeared = new.keys() - old.keys()
+    vanished = old.keys() - new.keys()
     for item_id, (status, activity, requests) in new.items():
         before = old.get(item_id)
         if before is None:
-            changes.append((item_id, f"new ({status})"))
+            if len(appeared) <= BURST:
+                changes.append((item_id, f"new ({status})"))
             continue
         old_status, old_activity, old_requests = before
         if status != old_status:
@@ -137,8 +145,8 @@ def compare(old: Mapping[str, Print], new: Mapping[str, Print]) -> list[tuple[st
             changes.append((item_id, "decision request closed"))
         if activity and activity != old_activity and status == old_status:
             changes.append((item_id, "new activity"))
-    for item_id in old.keys() - new.keys():
-        changes.append((item_id, "gone from the board"))
+    if len(vanished) <= BURST:
+        changes.extend((item_id, "gone from the board") for item_id in vanished)
     return changes
 
 

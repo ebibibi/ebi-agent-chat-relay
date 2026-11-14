@@ -495,3 +495,15 @@ async def test_only_the_secretary_prepares_a_session(api) -> None:
     assert bad.status == 400 and "format" in await bad.json()
     assert (await client.delete("/api/canvas/session", headers=console.key)).status == 200
     assert (await (await client.get("/api/canvas")).json())["session"] is None
+
+
+def test_a_partial_board_after_a_restart_is_not_hundreds_of_changes() -> None:
+    """Measured in production: the first board after a restart lacked the chat threads."""
+    partial = fingerprint([_item("t1")], [])
+    full = fingerprint([_item("t1")] + [_item(f"t{i}") for i in range(100, 700)], [])
+    assert compare(partial, full) == []
+    assert compare(full, partial) == []
+    full_with_change = fingerprint(
+        [_item("t1", "done")] + [_item(f"t{i}") for i in range(100, 700)], []
+    )
+    assert compare(partial, full_with_change) == [("t1", "status waiting → done")]
