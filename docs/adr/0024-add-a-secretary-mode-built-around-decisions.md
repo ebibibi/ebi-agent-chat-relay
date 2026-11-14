@@ -80,8 +80,7 @@ short card with the full request folded under it — were approved.
 ### Decision
 
 - **The asking agent writes a decision request**, sent as the JSON body of `/waiting`,
-  `/review` or `/action`, or as an object entry of a parent's `asks` (`for_thread` for a
-  child's question). The card: `title` (what to decide), `context` (what it is about, from
+  `/review` or `/action`. The card: `title` (what to decide), `context` (what it is about, from
   zero), `options` (each a button label and a one-line effect, exactly one recommended for a
   question), `deadline`. The `detail` holds the seven parts in full.
 - **The format is enforced by deterministic checks, never by a model** (`decision_request.py`):
@@ -89,13 +88,18 @@ short card with the full request folded under it — were approved.
   all seven detail parts. A failing request is refused with 400 and every problem listed, so the
   agent rewrites it in the same turn. The bar given to agents: someone who has forgotten the
   whole matter can answer from the card alone.
-- **One open request per thread and key**, stored in `decision_requests`. A new one replaces the
-  old, so a parent carrying a child's question does not duplicate the child's card.
+- **One store, two views.** Requests live only in `decision_requests` (one open request per
+  thread and key; a new one replaces the old). The secretary home is the cross-project inbox
+  of all of them. A family's situation panel ("where things stand") shows the same cards for
+  its own threads under "needed from you", so a parent never copies a child's question and
+  there is nothing to keep in sync. The panel's `asks` text is retired: agents are told not
+  to write questions there; strings are still accepted for compatibility and shown tagged
+  "no request". `doing` and `decided` stay the panel's job and are not shown by the secretary
+  home.
 - **Answered questions go away by themselves.** An answer from a card (or any Console reply)
-  closes the request; a new mark without a request, 🏁/✅, or a parent's `asks` without it closes
-  it too. A request sent with a mark shows only while its thread carries ❓/👀/📋 and is not
-  running, which also covers replies typed in Discord. This addresses decided questions that
-  stayed listed in a parent's `asks`.
+  closes the request; a new mark without a request or 🏁/✅ closes it too. A request shows only
+  while its thread carries ❓/👀/📋 and is not running, which also covers replies typed in
+  Discord. This addresses decided questions that stayed listed in a parent's `asks`.
 - **No summaries.** Threads that wait on the person without a request are listed apart by title.
   The v1 triage fields are no longer requested: they cost output tokens and the cards no longer
   use them. The columns stay in `ai_triage`, unused.

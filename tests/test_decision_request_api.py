@@ -18,7 +18,7 @@ from claude_discord.database.situation_repo import ThreadSituationRepository
 from claude_discord.ext.api_server import ApiServer
 from claude_discord.ext.situation_api import handle_put_situation
 from claude_discord.thread_marker import DEFAULT_WAITING_MARKER
-from tests.test_decision_requests import CHILD, GOOD, THREAD, _good
+from tests.test_decision_requests import THREAD, _good
 
 
 def _thread(name: str) -> MagicMock:
@@ -88,7 +88,7 @@ async def test_a_bare_mark_still_works_and_supersedes_the_old_request(setup) -> 
 
 async def test_finishing_the_thread_closes_every_request_aimed_at_it(setup) -> None:
     client, decisions, _ = setup
-    await decisions.sync_situation(CHILD, [(THREAD, decisions_spec())])
+    await client.post(f"/api/threads/{THREAD}/waiting", json=_good())
     await client.post(f"/api/threads/{THREAD}/waiting", json=_good(key="own"))
     assert len(await decisions.list_open()) == 2
     resp = await client.post(f"/api/threads/{THREAD}/candidate")
@@ -111,73 +111,22 @@ async def test_a_review_needs_only_one_answer(setup) -> None:
     assert stored.kind == "review"
 
 
-def decisions_spec():
-    from claude_discord.decision_request import parse_request
-
-    return parse_request(_good(), kind="waiting")
+# -- situation: asks stays plain text; requests ride on markers ---------------
 
 
-# -- situation ---------------------------------------------------------------
-
-
-@pytest.fixture
-async def situation_client(tmp_path):
+async def test_a_request_written_into_asks_is_pointed_at_the_markers(tmp_path) -> None:
     path = str(tmp_path / "s.db")
     await init_db(path)
     situations = ThreadSituationRepository(path)
-    decisions = DecisionRequestRepository(path)
     app = Application()
     app.router.add_put(
         "/api/threads/{thread_id}/situation",
-        lambda request: handle_put_situation(request, situations, decisions),
+        lambda request: handle_put_situation(request, situations),
     )
     async with TestClient(TestServer(app)) as client:
-        yield client, situations, decisions
-
-
-async def test_a_parent_carries_a_childs_question_as_a_request(situation_client) -> None:
-    client, situations, decisions = situation_client
-    ask = {**_good(), "for_thread": str(CHILD)}
-    resp = await client.put(
-        f"/api/threads/{THREAD}/situation", json={"asks": [ask, "older plain ask"]}
-    )
-    assert resp.status == 200
-    assert (await resp.json())["requests"] == 1
-    stored = await situations.get(THREAD)
-    assert stored is not None
-    assert stored.asks == [GOOD["title"], "older plain ask"]
-    (request,) = await decisions.list_open()
-    assert (request.thread_id, request.source_thread_id) == (CHILD, THREAD)
-
-
-async def test_an_answered_ask_left_out_is_closed(situation_client) -> None:
-    client, _, decisions = situation_client
-    url = f"/api/threads/{THREAD}/situation"
-    await client.put(url, json={"asks": [_good()]})
-    await client.put(url, json={"doing": ["still working"]})
-    assert len(await decisions.list_open()) == 1
-    await client.put(url, json={"asks": []})
-    assert await decisions.list_open() == []
-
-
-async def test_a_bad_ask_is_refused_with_its_position(situation_client) -> None:
-    client, situations, decisions = situation_client
-    url = f"/api/threads/{THREAD}/situation"
-    bad = [_good(), {**_good(), "for_thread": "x"}, {**_good(), "kind": "done"}, _good(title="")]
-    resp = await client.put(url, json={"asks": bad})
-    assert resp.status == 400
-    problems = (await resp.json())["problems"]
-    assert any(p.startswith("asks[1]") for p in problems)
-    assert any(p.startswith("asks[2]") for p in problems)
-    assert any(p.startswith("asks[3]") for p in problems)
-    assert await situations.get(THREAD) is None
-    assert await decisions.list_open() == []
-
-
-async def test_two_questions_for_one_thread_need_keys(situation_client) -> None:
-    client, _, _ = situation_client
-    url = f"/api/threads/{THREAD}/situation"
-    resp = await client.put(url, json={"asks": [_good(), _good()]})
-    assert resp.status == 400
-    resp = await client.put(url, json={"asks": [_good(), _good(key="second")]})
-    assert resp.status == 200
+        url = f"/api/threads/{THREAD}/situation"
+        resp = await client.put(url, json={"asks": [_good()]})
+        assert resp.status == 400
+        assert "/waiting" in (await resp.json())["error"]
+        # Plain strings keep working for the agents that still write them.
+        assert (await client.put(url, json={"asks": ["older plain ask"]})).status == 200

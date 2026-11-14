@@ -13,10 +13,12 @@ module turns the board into the person's unit instead — decisions — built fr
 * ``working`` — what agents are doing, one line each; no progress text;
 * ``done_today`` — finished today, including completion candidates to confirm.
 
-A request shows only while it still stands. One sent with a mark stands while its thread
-carries a ❓/👀/📋 marker; the person's reply clears the marker and the agent starts
-running, so the card goes away even before anything closes it. One a parent carries in its
-``asks`` stands until the parent drops it, and neither shows while its thread is running.
+A request shows only while it still stands: while its thread carries a ❓/👀/📋 marker and is
+not running. The person's reply clears the marker and the agent starts running, so the card
+goes away even before anything closes it.
+
+The cards are sent whole, not only the first few: a family's situation panel shows the same
+cards for its own threads (situation.js), so the Console reads one list for both screens.
 
 Like :mod:`.guide`, it reads only what it is given and asks no model, so every poll costs
 nothing and gives the same answer twice.
@@ -41,12 +43,12 @@ from .guide import reasons
 if TYPE_CHECKING:
     from .server import ConsoleServer
 
-MAX_CARDS = 20
+MAX_CARDS = 100
 MAX_UNEXPLAINED = 20
 MAX_WORKING = 20
 MAX_DONE = 20
 
-#: The markers a request sent with a mark rides on.
+#: The markers a request rides on.
 _MARKED_STATUSES = frozenset({"waiting", "review", "action"})
 #: Statuses where the next move is the person's, request or not.
 _PERSON_STATUSES = _MARKED_STATUSES | {"error"}
@@ -84,9 +86,7 @@ def _stands(request: Mapping[str, Any], item: Mapping[str, Any] | None) -> bool:
     status = item.get("status")
     if status in _FINISHED_STATUSES or status == "running" or item.get("running"):
         return False
-    if request.get("origin") == "mark":
-        return status in _MARKED_STATUSES
-    return True
+    return status in _MARKED_STATUSES
 
 
 def _card(request: Mapping[str, Any], item: Mapping[str, Any], *, now: datetime) -> dict[str, Any]:

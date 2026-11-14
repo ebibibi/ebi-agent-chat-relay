@@ -155,9 +155,11 @@ Deadline: before the deletion on 11/17
 - Each card names its thread (**↗ title**), one click away.
 
 **Where the requests come from.** An agent sends its request as the JSON body of the marker
-call (`POST /api/threads/{id}/waiting`, `/review` or `/action`). A parent carries its own
-questions and its children's in `asks` of its [situation panel](#where-things-stand). Agents
-are given the format and the bar in their run context. The Console checks the format with
+call (`POST /api/threads/{id}/waiting`, `/review` or `/action`). That store is the only place a
+request lives: the secretary home lists the requests of every family, and a family's
+[situation panel](#where-things-stand) shows the same cards for its own threads under
+**🙋 Needed from you**. A parent never copies a child's question. Agents are given the format
+and the bar in their run context. The Console checks the format with
 deterministic rules (`claude_discord/decision_request.py`; no model): the card's four parts,
 one line each, at most three choices (two or more for a question, exactly one recommended), at
 most 300 characters, and all seven parts of the detail. A request that fails is refused with
@@ -165,12 +167,10 @@ most 300 characters, and all seven parts of the detail. A request that fails is 
 it in the same turn. A bare marker call still marks the thread as before; it shows no card.
 
 **When a card goes away.** Requests are stored in `decision_requests`, one open request per
-thread and `key`; a newer one with the same key replaces it, so a parent carrying a child's
-question (`for_thread`) does not add a second card. A request closes when the person answers
-from its card or replies in the Console, when the thread is marked again without a request or
-marked 🏁/✅, or when the parent leaves it out of its next `asks`. A request sent with a mark
-also shows only while its thread still carries ❓/👀/📋 and is not running, so a reply typed
-in Discord takes the card away as soon as the agent picks it up. Nothing here calls a model:
+thread and `key`; a newer one with the same key replaces it. A request closes when the person
+answers from its card or replies in the Console, or when the thread is marked again without a
+request or marked 🏁/✅. It also shows only while its thread still carries ❓/👀/📋 and is not
+running, so a reply typed in Discord takes the card away as soon as the agent picks it up. Nothing here calls a model:
 the screen is computed from the board and the open requests (`claude_discord/console/secretary.py`,
 sent as `secretary` with every board).
 
@@ -742,18 +742,19 @@ The parent keeps its part with the control-plane API. Agents are told how in the
 ```bash
 curl -s -X PUT "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/situation" \
   -H "Content-Type: application/json" \
-  -d '{"asks": ["Move on 11/9 or 11/16? I recommend 11/16: testing ends on the 13th."],
-       "doing": ["Payments and E2E tests in two children"],
+  -d '{"doing": ["Payments and E2E tests in two children"],
        "decided": ["Payments stay on one provider"]}'
 ```
 
-Each field is an array of up to 40 strings of up to 600 characters. An entry of `asks` may instead be a
-[decision request](#secretary-mode) object, with `"for_thread": "<child id>"` when the parent carries a
-child's question and `"kind"` (`waiting` by default, or `review` / `action`). The panel shows its title;
-the secretary home shows the card, and an answer goes to the thread named by `for_thread` (the parent
-itself without it). Writing `asks` again closes the requests the parent left out. Two requests for the
-same thread need distinct `key` values. A field you send replaces that
-field and one you leave out stays. An unknown field is refused. `GET` on the same URL returns the record,
+Each field is an array of up to 40 strings of up to 600 characters. A field you send replaces that
+field and one you leave out stays.
+
+**🙋 Needed from you** is not written by the parent any more. It shows the family's open
+[decision requests](#secretary-mode) as the same cards as the secretary home (same buttons, an answer
+goes to the thread that asked), then the threads that wait on the person without a request, and any
+text an older turn left in `asks`; those two are tagged **no request**. Agents are told not to write
+questions into `asks`; plain strings are still accepted for compatibility, and an object entry is
+refused with a pointer to the markers. `doing` and `decided` keep their role. An unknown field is refused. `GET` on the same URL returns the record,
 and the Console reads it from `GET /console/api/items/{id}/situation` along with the active waits. The record is
 stored per thread (`thread_situation`), not in `status.md`:
 one project can have several families at once and a family can exist with no project, see

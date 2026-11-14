@@ -138,17 +138,6 @@ def test_a_request_is_hidden_once_its_thread_moves_on() -> None:
     assert out["unexplained"] == []
 
 
-def test_a_parents_ask_shows_while_the_parent_is_idle_whatever_its_marker() -> None:
-    items = [_item("t1", status="idle", focus=None), _item("t2", status="running", running=True)]
-    requests = [
-        _request(1, rid=1, origin="situation", source_thread_id="2"),
-        _request(2, rid=2, origin="situation"),
-    ]
-    out = build_secretary(items, requests, now=NOW)
-    assert [c["request_id"] for c in out["decide"]] == [1]
-    assert out["decide"][0]["origin"] == "situation"
-
-
 def test_one_thread_may_carry_two_questions() -> None:
     requests = [_request(1, rid=5, key="b"), _request(1, rid=3, key="a")]
     out = build_secretary([_item("t1")], requests, now=NOW)
@@ -157,11 +146,12 @@ def test_one_thread_may_carry_two_questions() -> None:
 
 
 def test_cards_are_capped() -> None:
-    items = [_item(f"t{n}", focus=100 + n) for n in range(1, 30)]
-    requests = [_request(n, rid=n) for n in range(1, 30)]
+    total = MAX_CARDS + 5
+    items = [_item(f"t{n}", focus=100 + n) for n in range(1, total + 1)]
+    requests = [_request(n, rid=n) for n in range(1, total + 1)]
     out = build_secretary(items, requests, now=NOW)
     assert len(out["decide"]) == MAX_CARDS
-    assert out["decide_more"] == 29 - MAX_CARDS
+    assert out["decide_more"] == 5
 
 
 def test_agents_at_work_and_todays_finished_work_are_listed() -> None:

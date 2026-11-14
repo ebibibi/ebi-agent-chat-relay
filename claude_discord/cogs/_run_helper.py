@@ -364,12 +364,13 @@ async def _build_system_context(config: RunConfig) -> str | None:
         "started by a child's report:\n"
         f'  `curl -s -X PUT "$CCDB_API_URL/api/threads/{config.surface.thread_key}/situation" '
         '-H "Content-Type: application/json" '
-        '-d \'{"asks": [...], "doing": [...], "decided": [...]}\'`\n'
+        '-d \'{"doing": [...], "decided": [...]}\'`\n'
         "A field you send replaces that field, one you leave out stays, and GET on the same "
         "URL returns the record. "
-        "`asks`: what only the user can answer or do now, each entry a decision request (see "
-        '"Asking the user"); gather your children\'s questions here so the user can answer '
-        "them in one place, and leave an entry out once it is answered: its card closes. "
+        'Do not write questions into `asks`: the panel\'s "needed from you" lists the open '
+        "decision requests of the whole family by itself (yours and your children's, see "
+        '"Asking the user"), and a question written here as text would be a second copy that '
+        "outlives its answer. Send `asks` only as `[]` to clear what an older turn wrote. "
         "`doing`: what is moving now, in a few words. "
         "`decided`: decisions made and outcomes finished; keep them across updates. "
         "No secrets, and no chat narrative. A thread without children need not use it."

@@ -219,26 +219,12 @@ async def test_a_new_request_replaces_the_open_one_with_the_same_key(repo) -> No
 
 async def test_closing_by_thread_by_origin_and_by_id(repo) -> None:
     a = await repo.put(THREAD, _spec(), origin="mark", source_thread_id=THREAD)
-    await repo.put(THREAD, _spec(key="b"), origin="situation", source_thread_id=CHILD)
-    assert await repo.close(THREAD, reason="superseded", origin="mark") == 1
-    assert [r.key for r in await repo.list_open()] == ["b"]
-    assert await repo.close(THREAD, reason="answered", request_id=a.id) == 0
-    assert await repo.close(THREAD, reason="replied") == 1
-    assert await repo.list_open() == []
-
-
-async def test_a_parent_rewriting_its_asks_closes_what_it_dropped(repo) -> None:
-    await repo.sync_situation(THREAD, [(CHILD, _spec()), (THREAD, _spec(key="own"))])
-    assert len(await repo.list_open()) == 2
-    await repo.sync_situation(THREAD, [(CHILD, _spec(deadline="今日中"))])
-    (left,) = await repo.list_open()
-    assert (left.thread_id, left.deadline, left.origin) == (CHILD, "今日中", "situation")
-    await repo.sync_situation(THREAD, [])
-    assert await repo.list_open() == []
-
-
-async def test_a_parent_carrying_a_childs_question_keeps_one_card(repo) -> None:
+    await repo.put(THREAD, _spec(key="b"), origin="mark", source_thread_id=THREAD)
     await repo.put(CHILD, _spec(), origin="mark", source_thread_id=CHILD)
-    await repo.sync_situation(THREAD, [(CHILD, _spec())])
-    (only,) = await repo.list_open()
-    assert (only.thread_id, only.origin, only.source_thread_id) == (CHILD, "situation", THREAD)
+    assert await repo.close(THREAD, reason="answered", request_id=a.id) == 1
+    assert sorted((r.thread_id, r.key) for r in await repo.list_open()) == [
+        (THREAD, "b"),
+        (CHILD, ""),
+    ]
+    assert await repo.close(THREAD, reason="superseded", origin="mark") == 1
+    assert [r.thread_id for r in await repo.list_open()] == [CHILD]

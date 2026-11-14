@@ -1951,7 +1951,7 @@ class ApiServer:
 
     async def put_situation(self, request: web.Request) -> web.Response:
         """PUT /api/threads/{thread_id}/situation — replace the fields the body names."""
-        return await handle_put_situation(request, self.situation_repo, self.decision_repo)
+        return await handle_put_situation(request, self.situation_repo)
 
     async def mark_thread_waiting(self, request: web.Request) -> web.Response:
         """POST /api/threads/{thread_id}/waiting — the next move is the human's.

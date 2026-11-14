@@ -113,6 +113,15 @@ window.ConsoleSecretary = (() => {
 
   const title = () => S().title;
 
+  // The same cards are drawn in the list and in an open family's situation panel.
+  function redraw() {
+    render();
+    const item = state.open && state.items.find((i) => i.id === state.open);
+    if (item && window.ConsoleSituation) window.ConsoleSituation.render(item);
+  }
+  // What the panel's redraw key needs to know about the cards' own state.
+  const stateKey = () => JSON.stringify([[...sent], [...writingOwn]]);
+
   // What reaches the thread: the question restated, so the agent knows which one is answered.
   const answerText = (card, text) => S().answer(card.card.title || card.item_title, text);
 
@@ -128,7 +137,7 @@ window.ConsoleSecretary = (() => {
       const waited = card.since ? Math.max(0, Math.round((Date.now() - Date.parse(card.since)) / 1000)) : null;
       record("answer", card.id, Number.isFinite(waited) ? { waited_seconds: waited } : {});
       toast(S().sent);
-      render();
+      redraw();
       refresh();
     } catch (err) {
       toast(err.message);
@@ -189,7 +198,7 @@ window.ConsoleSecretary = (() => {
       onclick: (e) => answer(card, `${o.label} — ${o.effect}`, o.label, e.currentTarget), text: o.label }));
     const writing = writingOwn.has(card.request_id);
     buttons.push(h("button", { type: "button", class: "chip", "aria-expanded": writing ? "true" : "false",
-      onclick: () => { if (writing) writingOwn.delete(card.request_id); else writingOwn.add(card.request_id); render(); },
+      onclick: () => { if (writing) writingOwn.delete(card.request_id); else writingOwn.add(card.request_id); redraw(); },
       text: s.own_answer }));
     return h("li", { class: "sec-card", "data-item-id": card.id }, head, ...body,
       h("div", { class: "sec-buttons" }, ...buttons), writing ? replyForm(card) : null, detailBlock(card));
@@ -239,5 +248,12 @@ window.ConsoleSecretary = (() => {
     return out.map((node) => ({ node }));
   }
 
-  return { on, onBoard, rows, nav, switcher, title, logOpen, VIEW };
+  // The open requests of some threads (a family), drawn as the same cards: situation.js shows
+  // them as "needed from you", so one request has one card wherever it appears.
+  function cardsFor(threadIds) {
+    const all = summary ? [...summary.decide, ...summary.review] : [];
+    return all.filter((c) => threadIds.has(c.thread_id));
+  }
+
+  return { on, onBoard, rows, nav, switcher, title, logOpen, cardsFor, card: decisionCard, stateKey, VIEW };
 })();

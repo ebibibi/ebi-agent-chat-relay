@@ -21,13 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   trial (`GET /console/api/secretary/stats`). Classic mode is unchanged.
 - Console **secretary mode v2** (ADR-0024 revised): the cards are now **decision requests** written
   by the agent that asks, not triage summaries. An agent sends one as the JSON body of
-  `/waiting`, `/review` or `/action`, or as an `asks` entry of its situation panel (with
-  `for_thread` for a child's question). The card has at most six lines (what to decide, what it is
+  `/waiting`, `/review` or `/action`; that store is the only copy. The card has at most six lines (what to decide, what it is
   about, up to three choices with one recommended, the deadline), one button per choice, and the
   seven-part full request folded under **More**. The format is checked deterministically and a
   bad request is refused with 400 and every problem listed. Requests close on an answer, on a new
-  mark, on 🏁/✅, or when a parent drops them from `asks`. Threads waiting without a request are
-  listed apart, by title only. Bare marker calls and string `asks` keep working. The v1 triage
+  mark or on 🏁/✅. Threads waiting without a request are listed apart, by title only. A family's
+  situation panel shows the same cards under **🙋 Needed from you** instead of text the parent
+  wrote; agents no longer write questions into `asks` (strings are still accepted and shown as
+  "no request"). Bare marker calls keep working. The v1 triage
   fields (`ask`, `suggest`, `options`) are no longer requested, which saves their output tokens.
 
 ### Changed

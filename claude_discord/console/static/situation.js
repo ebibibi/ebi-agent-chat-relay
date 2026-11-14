@@ -19,7 +19,7 @@ window.ConsoleSituation = (() => {
       unwritten: "The parent has not written anything yet; this is what is measured.",
       queued: "waiting for a slot", wait: "waiting for", done: (n) => `${n} finished`, candidate: "ready to confirm",
       noReport: "No report yet", hide: "Hide this panel", show: "Show where things stand",
-      background: "↪ Handling a report or a finished wait" },
+      background: "↪ Handling a report or a finished wait", unexplained: "no request" },
     ja: { title: "📍 現在地", asks: "🙋 求められていること", running: "⚙️ 実行中", decided: "✅ 決定・完了",
       members: "👥 各スレッドの様子", chat: "💬 会話", tab: "📍 現在地", none: "今はありません",
       answer: "↩ 回答する", answerHint: "下の返信欄に引用します", reply: "↩ 返信", replyHint: "下の返信欄からこのスレッドに返信します",
@@ -27,7 +27,7 @@ window.ConsoleSituation = (() => {
       unwritten: "親はまだ記入していません。下は実測です。",
       queued: "実行枠の待ち", wait: "待機中", done: (n) => `完了 ${n}件`, candidate: "完了の確認待ち",
       noReport: "まだ報告はありません", hide: "このパネルを隠す", show: "現在地を表示",
-      background: "↪ 子の報告や待機完了への対応" },
+      background: "↪ 子の報告や待機完了への対応", unexplained: "説明なし" },
   };
   const L = () => STRINGS[document.documentElement.lang === "ja" ? "ja" : "en"];
 
@@ -92,18 +92,23 @@ window.ConsoleSituation = (() => {
       .filter((i) => !(i.id === holder.id && written && written.asks.length));
     const ids = new Set(all.map((i) => i.thread_id).filter(Boolean));
     const byThread = new Map(all.map((i) => [i.thread_id, i]));
+    // The family's open decision requests, the same cards as the secretary home (ADR-0024).
+    const cards = window.ConsoleSecretary.cardsFor(ids);
+    const carded = new Set(cards.map((c) => c.thread_id));
     const waits = ((data && data.waits) || []).filter((w) => ids.has(w.thread_id));
     // Who still moves or waits on the person, those needing them first.
     const open = all.filter((i) => i.status !== "done");
     const members = [...open.filter((i) => needs.includes(i)), ...open.filter((i) => !needs.includes(i))];
     return {
-      holder, written, needs, waits, byThread, members, root: family.root,
+      holder, written, needs, waits, byThread, members, root: family.root, cards,
+      // Waiting on the person with no request written: listed apart, as "no explanation".
+      unexplained: needs.filter((i) => !carded.has(i.thread_id)),
       candidates: all.filter((i) => i.status === "candidate"),
       finished: all.filter((i) => i.status === "done"),
     };
   }
 
-  const count = (m) => (m.written ? m.written.asks.length : 0) + m.needs.length;
+  const count = (m) => (m.written ? m.written.asks.length : 0) + m.cards.length + m.unexplained.length;
   const inline = (text) => h("div", { class: "md sit-text" }, window.ConsoleNotes.linkify(MD.render(text)));
   const title = (i) => i.title || i.thread_name || i.id;
 
@@ -146,10 +151,13 @@ window.ConsoleSituation = (() => {
   function core(m, family) {
     const l = L();
     const written = m.written || { asks: [], doing: [], decided: [] };
-    const asks = written.asks.map((text) => h("li", { class: "sit-row sit-ask" }, inline(text),
+    const cards = m.cards.map((c) => window.ConsoleSecretary.card(c));
+    const unexplainedTag = () => h("span", { class: "tag sit-unexplained", text: l.unexplained });
+    // Text an older turn wrote into asks: kept visible, but marked as having no request behind it.
+    const asks = written.asks.map((text) => h("li", { class: "sit-row sit-ask" }, unexplainedTag(), inline(text),
       h("button", { type: "button", class: "btn sit-answer", title: l.answerHint, text: l.answer,
         onclick: () => window.ConsoleSituationReply.quote(m.holder.id, text) })));
-    const needs = m.needs.map((i) => h("li", { class: "sit-row sit-ask" }, openLink(i),
+    const needs = m.unexplained.map((i) => h("li", { class: "sit-row sit-ask" }, unexplainedTag(), openLink(i),
       h("p", { class: "sit-report", text: reports.get(i.id)?.text || (i.ai && i.ai.next_step) || l.noReport }),
       replyButton(i)));
     const doing = written.doing.map((text) => h("li", { class: "sit-row" }, inline(text)));
@@ -171,7 +179,7 @@ window.ConsoleSituation = (() => {
         h("button", { type: "button", class: "btn sit-hide", title: l.hide, "aria-label": l.hide, text: "›",
           onclick: () => setHidden(true) })),
       freshness(m, family),
-      section(l.asks, "asks", l.none, asks, needs),
+      section(l.asks, "asks", l.none, cards, needs, asks),
       section(l.running, "running", l.none, doing, waits),
       section(l.members, "members", l.none, others.map((i) => memberRow(i, m))),
       section(l.decided, "decided", l.none, decided, candidates, finished),
@@ -261,6 +269,7 @@ window.ConsoleSituation = (() => {
     window.ConsoleSituationReply.render(
       m.members.map((i) => ({ item: i, role: i.id === m.root.id ? "parent" : "child" })), holder.id);
     const key = JSON.stringify([LANG, holder.id, m.written, m.waits,
+      m.cards.map((c) => [c.request_id, c.card]), window.ConsoleSecretary.stateKey(),
       [...m.members, ...m.candidates, ...m.finished].map((i) =>
         [i.id, i.status, i.queued, i.running, i.title, i.ai && i.ai.next_step, reports.get(i.id)?.text,
           rel(i.last_activity_at)]),

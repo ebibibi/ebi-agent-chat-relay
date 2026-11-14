@@ -261,14 +261,16 @@ def _detail(value: Any, problems: list[str]) -> dict[str, str]:
 def agent_guide() -> str:
     """The system-prompt section every agent with the control plane gets.
 
-    One place for the format and the bar, which the markers and the situation panel both use.
+    One place for the format and the bar. Requests ride on the markers only: the secretary home
+    and a family's situation panel both show them from the same store.
     """
     return (
         "## Asking the user: decision requests\n"
-        "Whenever you hand the user something to decide, review or do — a ❓/👀/📋 marker, or "
-        "an entry of `asks` in a situation panel — write it as a decision request. The Console "
-        "shows it as a card the user answers with one tap. The bar: someone who has forgotten "
-        "this whole matter can answer from the card alone, without opening the thread or "
+        "Whenever you hand the user something to decide, review or do (a ❓/👀/📋 marker), "
+        "write it as a decision request. The Console shows it as a card the user answers with "
+        "one tap, in its secretary home and in your family's situation panel. "
+        "The bar: someone who has forgotten this whole matter can answer from the card "
+        "alone, without opening the thread or "
         "anything else. Write in the user's language, plainly: no internal shorthand, no IDs "
         "or names without saying what they are.\n"
         f"Card (at most six lines, {MAX_CARD_CHARS} characters in total):\n"
@@ -290,7 +292,6 @@ def agent_guide() -> str:
         "(400) with every problem listed: rewrite it and send it again. "
         'Two open questions in one thread need distinct `"key"` values. '
         "The user's answer arrives as a reply in the thread the card belongs to, and the "
-        "card closes by itself. In a situation panel, add "
-        '`"for_thread": "<child thread id>"` to carry a child\'s question: the answer then '
-        "goes to the child, and the child's own card for it is replaced, not repeated."
+        "card closes by itself. A parent never copies a child's question: the child's card "
+        "already shows in the parent's panel, and the answer goes to the child."
     )

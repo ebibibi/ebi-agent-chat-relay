@@ -45,6 +45,11 @@ def parse_situation(body: Any) -> dict[str, list[str]]:
 
 
 def _entries(name: str, value: Any) -> list[str]:
+    if name == "asks" and isinstance(value, list) and any(isinstance(e, dict) for e in value):
+        raise SituationError(
+            "asks takes plain strings only; ask the user with a decision request sent with the "
+            "/waiting, /review or /action marker instead (the panel shows it as a card)"
+        )
     if not isinstance(value, list) or not all(isinstance(entry, str) for entry in value):
         raise SituationError(f"{name} must be an array of strings")
     entries = [entry.strip() for entry in value if entry.strip()]

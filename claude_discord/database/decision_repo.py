@@ -1,15 +1,15 @@
 """Open decision requests: what agents have asked the person, until it is answered.
 
-One open request per thread and key: a newer request with the same key replaces the old one,
-so an agent asking again — or a parent carrying its child's question to the person — never
-leaves two cards for one question. A request is closed, never deleted, when it is answered,
-replaced, superseded by a bare mark, or dropped from its parent's ``asks``.
+This table is the one place a request lives. The secretary home and a family's situation panel
+both read it, so a parent never copies its child's question: the child's card shows in the
+parent's panel as it is. One open request per thread and key: a newer request with the same
+key replaces the old one. A request is closed, never deleted, when it is answered, replaced,
+superseded by a bare mark, or its thread is finished.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -19,7 +19,6 @@ import aiosqlite
 from ..decision_request import DecisionRequestSpec
 
 ORIGIN_MARK = "mark"
-ORIGIN_SITUATION = "situation"
 
 
 @dataclass(frozen=True)
@@ -123,31 +122,6 @@ class DecisionRequestRepository:
             cursor = await db.execute(sql, args)
             await db.commit()
             return cursor.rowcount
-
-    async def sync_situation(
-        self, source_thread_id: int, entries: Iterable[tuple[int, DecisionRequestSpec]]
-    ) -> None:
-        """Make *entries* the open requests a parent's ``asks`` carries; close what it dropped."""
-        entries = list(entries)
-        keep = {(int(target), spec.key) for target, spec in entries}
-        async with aiosqlite.connect(self._db_path) as db:
-            db.row_factory = aiosqlite.Row
-            rows = await db.execute_fetchall(
-                "SELECT id, thread_id, req_key FROM decision_requests"
-                " WHERE source_thread_id = ? AND origin = ? AND closed_at IS NULL",
-                (int(source_thread_id), ORIGIN_SITUATION),
-            )
-            dropped = [r["id"] for r in rows if (r["thread_id"], r["req_key"]) not in keep]
-            now = _now()
-            for request_id in dropped:
-                await db.execute(
-                    "UPDATE decision_requests SET closed_at = ?, close_reason = 'dropped'"
-                    " WHERE id = ?",
-                    (now, request_id),
-                )
-            for target, spec in entries:
-                await self._put(db, int(target), spec, ORIGIN_SITUATION, int(source_thread_id))
-            await db.commit()
 
     async def list_open(self) -> list[DecisionRequest]:
         async with aiosqlite.connect(self._db_path) as db:
