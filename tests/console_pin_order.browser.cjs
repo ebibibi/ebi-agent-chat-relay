@@ -69,6 +69,12 @@ test('pinned family moves as a unit and new pins lead saved order',async t=>{
 for(const width of [1280,390])test(`move pins straight to first and last at ${width}px`,async t=>{
  const {page,requests}=await setup(t,width);
  if(width<600)assert.ok((await page.locator('[data-item-id="t102"] .pin-first').boundingBox()).height>=44);
+ // One row, in reading order: a 2x2 grid made every pinned row taller (#1348).
+ const boxes=await page.locator('[data-item-id="t102"] .pin-order .btn').evaluateAll(els=>els.map(e=>{const r=e.getBoundingClientRect();return {cls:e.className,top:Math.round(r.top),left:r.left};}));
+ assert.deepEqual(boxes.map(b=>b.cls.split(' ')[1]),['pin-first','pin-up','pin-down','pin-last']);
+ assert.equal(new Set(boxes.map(b=>b.top)).size,1);
+ assert.ok(boxes.every((b,i)=>i===0||b.left>boxes[i-1].left));
+ if(width>=600)assert.ok((await page.locator('[data-item-id="t102"] .pin-first').boundingBox()).height<=28);
  await page.locator('[data-item-id="t102"] .pin-first').click();
  await page.waitForFunction(()=>document.querySelector('.row.pinned')?.dataset.itemId==='t102');
  assert.deepEqual(await order(page),['t102','t100','t101']);
