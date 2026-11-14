@@ -211,6 +211,9 @@ async def test_changes_wake_the_idle_secretary_within_the_limits(repo) -> None:
     assert (await repo.day_usage("2026-11-14"))["turns"] == 1
 
     board.items[0] = _item("t1", "done")
+    # The charter turn just read everything: no wake straight after it.
+    assert await secretary.tick() == "too soon"
+    clock[0] += timedelta(minutes=11)
     assert await secretary.tick() == "woken"
     assert host.replies[-1][0] == key and "1 thread" in host.replies[-1][1]
 

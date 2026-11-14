@@ -262,6 +262,8 @@ class CanvasSecretary:
             )
             await self.repo.set_state(STATE_THREAD, str(key))
             await self.repo.set_state(STATE_CURSOR, str(cursor))
+            # The charter turn reads everything; the first wake waits the usual interval after it.
+            await self.repo.set_state(STATE_LAST_WAKE, _stamp(self._clock()))
             self._secretary_running = True
             logger.info("canvas: secretary conversation %s started by %s", key, who)
             return key
