@@ -94,7 +94,7 @@ body.canvas .app.no-detail { grid-template-columns: minmax(0, 1fr); }
 .cv-s-lane { display: flex; flex-direction: column; min-width: 0; }
 .cv-s-lane-head { height: 26px; font-size: 12px; color: var(--dim); font-weight: 600; }
 .cv-s-track { position: relative; flex: 1; border-left: 1px solid var(--line); }
-.cv-s-block { position: absolute; left: 4px; right: 0; min-height: 22px; overflow: hidden; border-radius: 8px;
+.cv-s-block { position: absolute; left: 4px; right: 0; min-height: 40px; overflow: hidden; border-radius: 8px;
   padding: 4px 8px; font-size: 12.5px; line-height: 1.35; }
 .lane-you .cv-s-block { background: color-mix(in srgb, var(--accent) 30%, var(--panel)); }
 .lane-ai .cv-s-block { background: color-mix(in srgb, var(--ai) 22%, var(--panel)); }
