@@ -229,6 +229,8 @@ async function refresh() {
       && Date.now() - state.renderedAt < STALE_RENDER_MS;
     state.boardSig = sig;
     state.lastSync = new Date();
+    // Canvas mode reads its widgets on every poll; it redraws itself only when they changed.
+    if (window.ConsoleCanvas.on()) window.ConsoleCanvas.onBoard();
     $("sync").className = "sync";
     $("sync").textContent = `${T.updated} ${state.lastSync.toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}`;
     if (unchanged) return;
@@ -474,6 +476,7 @@ function render() {
   renderList();
   renderDetail();
   window.ConsoleZen.paint();
+  window.ConsoleCanvas.paint();
 }
 
 function renderNav() {
@@ -1078,6 +1081,8 @@ async function loadMessages(id) {
 function closeItem() {
   // Working through a queue, leaving a thread means "next one" (zen.js).
   if (window.ConsoleZen.onClose(state.open)) return;
+  // Canvas mode: leaving a thread goes back to the secretary (canvas.js).
+  if (window.ConsoleCanvas.onClose()) return;
   markSeen(state.open); state.open = null; render();
 }
 async function patch(id, changes) {

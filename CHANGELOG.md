@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Console **canvas mode** (#1358, ADR-0025): a third display mode in which one resident
+  secretary agent lays out the whole screen. Widgets on the left (`decision`, `diff`, `table`,
+  `markdown`, `timeline`, `agents`, `metric`) are placed over `PUT /api/canvas/widgets/{key}` as
+  structured data and drawn by fixed renderers; its conversation is on the right. The secretary
+  keeps a note per thread in the relay, reads only what changed (`GET /api/secretary/digest`),
+  and is woken by board changes, never by a timer: at least ten minutes apart, at most 24 times
+  a day by default, pausable, with usage on screen. Decision cards answer the asking thread;
+  other widget buttons and `POST /api/secretary/deliver` reach threads through the secretary.
+  Classic and secretary modes are unchanged.
 - Console **secretary mode** (#1352, ADR-0024): a second display mode next to Classic. It is
   switched in the menu and remembered per browser. Its home shows at most three decisions
   (🔴 *Decide now*). Each one says what is asked, why, and the recommended answer, and an answer
