@@ -128,9 +128,10 @@ window.ConsoleSecretary = (() => {
   // What reaches the thread: the question restated, so the agent knows which one is answered.
   const answerText = (card, text) => S().answer(card.card.title || card.item_title, text);
 
+  // Resolves true once the answer reached the thread (the focus session moves on only then).
   async function answer(card, text, label, button) {
     text = (text || "").trim();
-    if (!text) return;
+    if (!text) return false;
     if (button) button.disabled = true;
     try {
       await api(`/items/${encodeURIComponent(card.id)}/reply`, { method: "POST",
@@ -142,9 +143,11 @@ window.ConsoleSecretary = (() => {
       toast(S().sent);
       redraw();
       refresh();
+      return true;
     } catch (err) {
       toast(err.message);
       if (button) button.disabled = false;
+      return false;
     }
   }
 
@@ -258,5 +261,6 @@ window.ConsoleSecretary = (() => {
     return all.filter((c) => threadIds.has(c.thread_id));
   }
 
-  return { on, onBoard, rows, nav, switcher, title, logOpen, cardsFor, card: decisionCard, stateKey, VIEW };
+  return { on, onBoard, rows, nav, switcher, title, logOpen, cardsFor, card: decisionCard, stateKey, VIEW,
+    answer, all: () => (summary ? [...summary.decide, ...summary.review] : []) };
 })();

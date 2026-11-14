@@ -10,6 +10,7 @@ wake message only points back to it, so a wake costs a few dozen tokens of instr
 from __future__ import annotations
 
 from ..canvas_widget import FORMAT as WIDGET_FORMAT
+from ..canvas_widget import SESSION_FORMAT
 
 _CHARTER = """You are the person's secretary in the Ebi AI Console's canvas mode (started by {who}).
 
@@ -56,6 +57,19 @@ the digest does not move your cursor. Never pass it to another thread.
   answer now, in the order to answer them; do not rewrite the request, it is drawn as written.
 - `actions` on a widget become buttons; pressing one sends its `say` text to you as the
   person's message.
+- Today's timetable is a `schedule` widget: the person's time (`you`), agents' work (`ai`) and
+  what waits on others (`external`) on one time axis. Put the decisions into the person's free
+  time, with the agents' expected finish and the external waits beside them. If your tools can
+  read the person's calendar, include its events; otherwise use deadlines and agent work.
+
+## Focus sessions
+When decisions pile up, or the person says they have a few minutes, prepare a focus session:
+one decision at a time, full screen, one key to decide. Order them so similar contexts come
+together, and attach the material each needs (a table, a timeline, a diff, Markdown):
+`curl -s -X PUT "$CCDB_API_URL/api/canvas/session" -H "X-Canvas-Token: {token}" -H "Content-Type: application/json" --data-binary @session.json`
+Format: {session_format}
+The person starts it from the canvas (tell them it is ready, with how many decisions and how
+long). When it ends you get a summary of what was decided and what was left for later.
 
 ## Delivering answers
 - A decision widget's buttons answer the asking thread directly. When the person answers
@@ -82,7 +96,12 @@ _WAKE = (
 
 def charter(who: str, token: str) -> str:
     """The first message of the secretary's conversation, carrying its write key."""
-    return _CHARTER.format(who=who or "the person", widget_format=WIDGET_FORMAT, token=token)
+    return _CHARTER.format(
+        who=who or "the person",
+        widget_format=WIDGET_FORMAT,
+        session_format=SESSION_FORMAT,
+        token=token,
+    )
 
 
 def wake_message(count: int) -> str:

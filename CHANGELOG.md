@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a day by default, pausable, with usage on screen. Decision cards answer the asking thread;
   other widget buttons and `POST /api/secretary/deliver` reach threads through the secretary.
   Classic and secretary modes are unchanged.
+- Canvas mode **focus session** and **today's timetable** (#1360): the secretary prepares a
+  session (`PUT /api/canvas/session`) that shows the open decisions one at a time, full screen,
+  with their material, answered with one key (1-3, C, S, →) and reported back to the secretary at
+  the end; a `schedule` widget draws you / AI / waiting-on-others on one time axis; any widget
+  opens full screen.
 - Console **secretary mode** (#1352, ADR-0024): a second display mode next to Classic. It is
   switched in the menu and remembered per browser. Its home shows at most three decisions
   (🔴 *Decide now*). Each one says what is asked, why, and the recommended answer, and an answer

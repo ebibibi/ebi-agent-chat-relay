@@ -78,3 +78,81 @@ body.canvas .app.no-detail { grid-template-columns: minmax(0, 1fr); }
   .cv-grid { gap: 10px; }
   .cv-w { padding: 10px 12px; }
 }
+
+/* A focus session the secretary prepared, offered at the top of the canvas. */
+.cv-banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; padding: 10px 14px;
+  border: 1px solid var(--accent); border-radius: 12px; background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
+.cv-head .chip.cv-focus { color: var(--text); border-color: var(--accent); }
+
+/* Today's timetable (schedule widget): a time axis and three lanes. */
+.cv-schedule { position: relative; display: grid; grid-template-columns: 46px repeat(3, minmax(0, 1fr)); gap: 0 8px;
+  min-height: 420px; }
+.cv-full .cv-schedule { min-height: calc(100vh - 120px); }
+.cv-s-axis { position: relative; margin-top: 26px; }
+.cv-s-hour { position: absolute; left: 0; transform: translateY(-50%); font-size: 11px; color: var(--dim);
+  font-variant-numeric: tabular-nums; }
+.cv-s-lane { display: flex; flex-direction: column; min-width: 0; }
+.cv-s-lane-head { height: 26px; font-size: 12px; color: var(--dim); font-weight: 600; }
+.cv-s-track { position: relative; flex: 1; border-left: 1px solid var(--line); }
+.cv-s-block { position: absolute; left: 4px; right: 0; min-height: 22px; overflow: hidden; border-radius: 8px;
+  padding: 4px 8px; font-size: 12.5px; line-height: 1.35; }
+.lane-you .cv-s-block { background: color-mix(in srgb, var(--accent) 30%, var(--panel)); }
+.lane-ai .cv-s-block { background: color-mix(in srgb, var(--ai) 22%, var(--panel)); }
+.lane-external .cv-s-block { background: color-mix(in srgb, var(--me) 22%, var(--panel)); }
+.cv-s-block.link { cursor: pointer; }
+.cv-s-block.link:hover { outline: 1px solid var(--accent); }
+.cv-s-label { font-weight: 600; overflow-wrap: anywhere; }
+.cv-s-sub { font-size: 11px; }
+.cv-s-now { position: absolute; left: 0; right: 0; height: 2px; background: var(--err); pointer-events: none; z-index: 1; }
+
+/* Any widget full screen. */
+.cv-full { position: fixed; inset: 0; z-index: 30; background: var(--bg); display: flex; flex-direction: column;
+  padding: calc(12px + env(safe-area-inset-top)) 20px 20px; overflow: auto; }
+.cv-full-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+.cv-full-head h2 { margin: 0; font-size: 18px; }
+.cv-expand { font-size: 14px; }
+
+/* The focus session: one decision at a time, the whole screen. */
+.cv-session { position: fixed; inset: 0; z-index: 25; background: var(--bg); display: flex; flex-direction: column; }
+.cv-ss-top { display: flex; align-items: center; gap: 16px; padding: calc(10px + env(safe-area-inset-top)) 22px 10px;
+  border-bottom: 1px solid var(--line); }
+.cv-ss-progress { flex: 1; height: 6px; background: var(--raise); border-radius: 999px; overflow: hidden; min-width: 60px; }
+.cv-ss-progress span { display: block; height: 100%; background: var(--accent); }
+.cv-ss-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 320px; }
+.cv-ss-main { overflow-y: auto; padding: 26px 40px 40px; display: flex; flex-direction: column; gap: 14px; }
+.cv-ss-tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; }
+.cv-ss-tags .tag.hot { color: var(--err); border-color: color-mix(in srgb, var(--err) 50%, var(--line)); }
+.cv-ss-title { margin: 0; font-size: 26px; line-height: 1.35; }
+.cv-ss-context { margin: 0; font-size: 15px; line-height: 1.7; }
+.cv-ss-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.cv-ss-option { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; text-align: left; padding: 14px 16px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.cv-ss-option.rec { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.cv-ss-option:hover { background: var(--raise); }
+.cv-ss-key { grid-row: span 2; align-self: start; border: 1px solid var(--line); border-radius: 4px; padding: 0 6px;
+  font-size: 12px; color: var(--dim); }
+.cv-ss-label { font-weight: 700; font-size: 16px; }
+.cv-ss-effect { font-size: 13px; }
+.cv-ss-own { display: flex; gap: 8px; align-items: flex-end; }
+.cv-ss-own textarea { flex: 1; background: var(--raise); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.cv-ss-materials { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+.cv-ss-materials .cv-w { grid-column: auto; }
+.cv-ss-detail summary { cursor: pointer; color: var(--accent); }
+.cv-ss-keys { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; font-size: 12.5px; }
+.cv-ss-side { overflow-y: auto; border-left: 1px solid var(--line); padding: 18px 18px 30px; }
+.cv-ss-side h4 { margin: 16px 0 8px; font-size: 12.5px; color: var(--dim); }
+.cv-ss-side h4:first-child { margin-top: 0; }
+.cv-ss-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
+.cv-ss-list li { display: flex; gap: 6px; padding: 6px 8px; background: var(--panel); border-radius: 8px; overflow-wrap: anywhere; }
+.cv-ss-done { align-items: center; justify-content: center; text-align: center; }
+
+@media (max-width: 900px) {
+  .cv-ss-body { grid-template-columns: minmax(0, 1fr); overflow-y: auto; }
+  .cv-ss-main { padding: 16px 14px; overflow: visible; }
+  .cv-ss-side { border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
+  .cv-ss-title { font-size: 21px; }
+  .cv-ss-top { gap: 10px; padding-left: 12px; padding-right: 12px; flex-wrap: wrap; }
+  .cv-ss-keys { display: none; }
+  .cv-schedule { grid-template-columns: 38px repeat(3, minmax(0, 1fr)); gap: 0 4px; }
+  .cv-s-block { padding: 3px 5px; font-size: 11.5px; }
+}

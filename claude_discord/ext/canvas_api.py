@@ -19,7 +19,15 @@ from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
 
-from ..canvas_widget import MAX_WIDGETS, WidgetError, parse_widget, refusal, valid_key
+from ..canvas_widget import (
+    MAX_WIDGETS,
+    SESSION_FORMAT,
+    WidgetError,
+    parse_session,
+    parse_widget,
+    refusal,
+    valid_key,
+)
 from ..console.canvas_repo import MAX_NOTE
 
 if TYPE_CHECKING:
@@ -60,6 +68,8 @@ class CanvasApi:
         router.add_put("/api/canvas/widgets/{key}", self.put_widget)
         router.add_delete("/api/canvas/widgets/{key}", self.delete_widget)
         router.add_post("/api/canvas/order", self.order)
+        router.add_put("/api/canvas/session", self.put_session)
+        router.add_delete("/api/canvas/session", self.delete_session)
         router.add_get("/api/secretary/digest", self.digest)
         router.add_get("/api/secretary/notes", self.notes)
         router.add_put("/api/secretary/notes/{thread_id}", self.put_note)
@@ -85,7 +95,7 @@ class CanvasApi:
         if canvas is None:
             return self._unavailable()
         widgets = [w.as_dict() for w in await canvas.repo.list_widgets()]
-        return web.json_response({"widgets": widgets})
+        return web.json_response({"widgets": widgets, "session": await canvas.session()})
 
     async def put_widget(self, request: web.Request) -> web.Response:
         canvas = self._canvas()
@@ -137,6 +147,35 @@ class CanvasApi:
             return _error("keys must be a list of widget keys", 400)
         moved = await canvas.repo.reorder(keys)
         return web.json_response({"moved": moved})
+
+    async def put_session(self, request: web.Request) -> web.Response:
+        """The secretary prepares a focus session: which decisions, in which order, with what."""
+        canvas = self._canvas()
+        if canvas is None:
+            return self._unavailable()
+        if (refused := await self._refused(canvas, request)) is not None:
+            return refused
+        body, err = await _body(request)
+        if err:
+            return err
+        try:
+            plan = parse_session(body)
+        except WidgetError as exc:
+            return web.json_response(
+                {"error": "session refused", "problems": exc.problems, "format": SESSION_FORMAT},
+                status=400,
+            )
+        await canvas.set_session(plan)
+        return web.json_response({"status": "prepared", "session": await canvas.session()})
+
+    async def delete_session(self, request: web.Request) -> web.Response:
+        canvas = self._canvas()
+        if canvas is None:
+            return self._unavailable()
+        if (refused := await self._refused(canvas, request)) is not None:
+            return refused
+        await canvas.set_session(None)
+        return web.json_response({"status": "removed"})
 
     async def digest(self, request: web.Request) -> web.Response:
         canvas = self._canvas()

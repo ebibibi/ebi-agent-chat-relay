@@ -112,7 +112,7 @@ const status = (started) => ({item_id: started ? 't900' : null, running: false, 
     assert.deepEqual(action.body, {index: 0});
 
     // Dismissing removes the widget.
-    await page.locator('.cv-w[data-key="t"] .cv-x').click();
+    await page.locator('.cv-w[data-key="t"] .cv-x:not(.cv-expand)').click();
     await page.waitForFunction(() => !document.querySelector('.cv-w[data-key="t"]'));
 
     if (width <= 900) {
