@@ -90,6 +90,10 @@ _ADDED_COLUMNS = (
     ("place", "TEXT"),
     ("pinned_place", "INTEGER NOT NULL DEFAULT 0"),
     ("minutes", "INTEGER"),
+    # Secretary mode (ADR-0024). NULL: never asked; "": asked, nothing to decide.
+    ("ask", "TEXT"),
+    ("suggest", "TEXT"),
+    ("options", "TEXT"),
 )
 #: Part of every basis: a new prompt re-triages everything once.
 PROMPT_VERSION = "4"
@@ -99,6 +103,9 @@ MAX_MINUTES = 480
 #: ⚡ quick (a yes/no, a choice), ⏱ short (read and check something), 🧘 deep (the rest).
 QUICK_MINUTES = 3
 SHORT_MINUTES = 20
+#: Ready-made replies kept per item, and how long each may be.
+MAX_OPTIONS = 3
+MAX_OPTION_CHARS = 40
 
 _PROMPT = """\
 You triage a person's work queue. Read one item and judge four separate things:
@@ -154,6 +161,18 @@ the most specific project over its parent context. Small talk, one-off questions
 that fits no entry get null.
 """
 
+#: Added only when the next move is the person's: the same call then also says what is asked.
+_DECISION_PROMPT = """
+The next move is the person's. Also answer, in the same JSON object:
+"ask": what the agent needs the person to decide or do, as one direct question or request,
+at most 80 characters; "" when nothing is being asked;
+"suggest": the answer you recommend, written as the reply the person would send, at most
+80 characters; "" when the conversation does not let you tell;
+"options": 0-3 short replies the person could send as they are, at most 30 characters each,
+such as the choices the agent offered; [] when the answer needs the person's own words.
+Write ask, suggest and options in the conversation's language.
+"""
+
 _JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
 
 
@@ -178,6 +197,10 @@ class TriageResult:
     #: The Ebi Workspace entry the model thinks this belongs to, and how sure it is.
     workspace_path: str | None = None
     workspace_confidence: float = 0.0
+    #: What the person is asked to decide, the recommended answer, and ready-made replies.
+    ask: str = ""
+    suggest: str = ""
+    options: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -199,6 +222,10 @@ class Triage:
     place: str | None = None
     pinned_place: bool = False
     minutes: int | None = None
+    #: None when the item was never asked (its move was not the person's at the time).
+    ask: str | None = None
+    suggest: str | None = None
+    options: tuple[str, ...] = ()
 
 
 class TriageRepository:
@@ -222,17 +249,28 @@ class TriageRepository:
             rows = await db.execute_fetchall("SELECT * FROM ai_triage")
         return {r["item_id"]: _to_triage(r) for r in rows}
 
-    async def save(self, item_id: str, result: TriageResult, *, basis: str, model: str) -> None:
+    async def save(
+        self,
+        item_id: str,
+        result: TriageResult,
+        *,
+        basis: str,
+        model: str,
+        decision: bool = False,
+    ) -> None:
+        """Store *result*; *decision*: the prompt asked what the person must decide."""
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(
                 "INSERT INTO ai_triage (item_id, priority, due_at, reason, next_step, ready,"
-                " ready_at, waiting_for, place, minutes, basis, model, updated_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " ready_at, waiting_for, place, minutes, ask, suggest, options,"
+                " basis, model, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 " ON CONFLICT(item_id) DO UPDATE SET priority = excluded.priority,"
                 " due_at = excluded.due_at, reason = excluded.reason,"
                 " next_step = excluded.next_step, ready = excluded.ready,"
                 " ready_at = excluded.ready_at, waiting_for = excluded.waiting_for,"
                 " place = excluded.place, minutes = excluded.minutes,"
+                " ask = excluded.ask, suggest = excluded.suggest, options = excluded.options,"
                 " basis = excluded.basis, model = excluded.model, updated_at = excluded.updated_at",
                 (
                     item_id,
@@ -245,6 +283,9 @@ class TriageRepository:
                     result.waiting_for,
                     result.place,
                     result.minutes,
+                    result.ask if decision else None,
+                    result.suggest if decision else None,
+                    json.dumps(list(result.options), ensure_ascii=False) if decision else None,
                     basis,
                     model,
                     _now(),
@@ -287,7 +328,18 @@ def _to_triage(row: aiosqlite.Row) -> Triage:
         place=row["place"],
         pinned_place=bool(row["pinned_place"]),
         minutes=row["minutes"],
+        ask=row["ask"],
+        suggest=row["suggest"],
+        options=_stored_options(row["options"]),
     )
+
+
+def _stored_options(raw: str | None) -> tuple[str, ...]:
+    try:
+        value = json.loads(raw) if raw else []
+    except json.JSONDecodeError:
+        return ()
+    return _options(value)
 
 
 # -- the model -------------------------------------------------------------
@@ -304,6 +356,9 @@ def build_prompt(
 ) -> str:
     """The prompt for one item. *messages* are (who, text), oldest first.
 
+    When the next move is the person's (*status* waiting, review, action or error) the model
+    also says what is being asked; for other items the prompt and the answer stay as short.
+
     *workspace* lists Ebi Workspace entries as (path, one-line description); when given,
     the model also says which entry the work belongs to.
     """
@@ -315,13 +370,22 @@ def build_prompt(
     body = "\n".join(lines)
     if len(body) > MAX_PROMPT_CHARS:
         body = "…" + body[-MAX_PROMPT_CHARS:]
-    return _PROMPT.format(
-        now=now.astimezone().strftime("%Y-%m-%d %H:%M (%a)"),
-        title=" ".join(title.split())[:200] or "(untitled)",
-        status=status,
-        places=", ".join(sorted({p for p in places if p})[:MAX_KNOWN_PLACES]) or "(none yet)",
-        messages=body or "(no messages)",
-    ) + (_WORKSPACE_PROMPT.format(entries=_workspace_lines(workspace)) if workspace else "")
+    return (
+        _PROMPT.format(
+            now=now.astimezone().strftime("%Y-%m-%d %H:%M (%a)"),
+            title=" ".join(title.split())[:200] or "(untitled)",
+            status=status,
+            places=", ".join(sorted({p for p in places if p})[:MAX_KNOWN_PLACES]) or "(none yet)",
+            messages=body or "(no messages)",
+        )
+        + (_DECISION_PROMPT if wants_decision(status) else "")
+        + (_WORKSPACE_PROMPT.format(entries=_workspace_lines(workspace)) if workspace else "")
+    )
+
+
+def wants_decision(status: str | None) -> bool:
+    """Whether triage asks the model what the person must decide for an item in *status*."""
+    return status in _HUMAN_STATUSES
 
 
 def _workspace_lines(workspace: Sequence[tuple[str, str]]) -> str:
@@ -381,7 +445,26 @@ def parse_reply(raw: str, *, now: datetime) -> TriageResult | None:
         minutes=_minutes(data.get("minutes")),
         workspace_path=_workspace_answer(data.get("workspace")),
         workspace_confidence=_confidence(data.get("workspace_confidence")),
+        ask=_short(data.get("ask")),
+        suggest=_short(data.get("suggest")),
+        options=_options(data.get("options")),
     )
+
+
+def _options(value: Any) -> tuple[str, ...]:
+    """Up to ``MAX_OPTIONS`` distinct, non-empty short strings; anything else is dropped."""
+    if not isinstance(value, list):
+        return ()
+    out: list[str] = []
+    for entry in value:
+        if not isinstance(entry, str):
+            continue
+        text = " ".join(entry.split())[:MAX_OPTION_CHARS]
+        if text and text not in out:
+            out.append(text)
+        if len(out) == MAX_OPTIONS:
+            break
+    return tuple(out)
 
 
 def _minutes(value: Any) -> int | None:
@@ -506,6 +589,9 @@ def apply_triage(
                 "waiting_for": row.waiting_for,
                 "place": row.place,
                 "minutes": row.minutes,
+                "ask": row.ask,
+                "suggest": row.suggest,
+                "options": list(row.options),
                 "updated_at": row.updated_at,
             }
             new["effort"] = effort(row.minutes)
@@ -659,6 +745,15 @@ def _basis(item: dict[str, Any]) -> str:
     return f"{PROMPT_VERSION}|{stamp}|{item.get('status')}"
 
 
+def _lacks_decision(item: dict[str, Any], row: Triage) -> bool:
+    """A row from before the decision fields, for an item whose move is the person's.
+
+    Such rows are asked once more instead of bumping ``PROMPT_VERSION``, which would
+    re-triage every open item: only the items secretary mode shows pay for the change.
+    """
+    return wants_decision(item.get("status")) and row.ask is None
+
+
 class Triager:
     """Triages items with new activity, a few per pass, in the background."""
 
@@ -696,7 +791,7 @@ class Triager:
                 continue
             basis = _basis(item)
             row = rows.get(item["id"])
-            if row is not None and row.basis == basis:
+            if row is not None and row.basis == basis and not _lacks_decision(item, row):
                 continue
             failed = self._failed.get(item["id"])
             if failed and failed[0] == basis and now - failed[1] < RETRY_SECONDS:
@@ -750,7 +845,13 @@ class Triager:
                 raise ValueError("no usable answer")
             # A backend-following ask names the model it used for this item.
             model = str(getattr(self._ask, "model", self._model))
-            await self.repo.save(item["id"], result, basis=basis, model=model)
+            await self.repo.save(
+                item["id"],
+                result,
+                basis=basis,
+                model=model,
+                decision=wants_decision(str(item.get("status"))),
+            )
             known = {path for path, _ in workspace}
             if (
                 guess

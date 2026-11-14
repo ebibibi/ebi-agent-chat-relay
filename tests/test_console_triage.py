@@ -88,7 +88,8 @@ def test_the_prompt_keeps_the_latest_messages_and_states_the_time() -> None:
     assert "Item title: Ship it" in prompt
     assert "message 39" in prompt and "message 0 " not in prompt
     assert "2026-10-12" in prompt
-    assert len(prompt) < 12000
+    # A person's turn also asks what they must decide (secretary mode, ADR-0024).
+    assert len(prompt) < 13000
 
 
 # -- the board -------------------------------------------------------------

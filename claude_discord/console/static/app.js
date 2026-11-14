@@ -129,7 +129,8 @@ const VIEWS = [
   { sep: true }, { key: "recent" }, { key: "tree" }, { key: "snoozed" }, { key: "done" },
 ];
 // A built-in list, or a saved view (views.js) — known once the first board arrives.
-const isViewKey = (key) => VIEWS.some((v) => v.key === key) || window.ConsoleViews.isKey(key);
+const isViewKey = (key) => VIEWS.some((v) => v.key === key) || window.ConsoleViews.isKey(key) ||
+  (key === window.ConsoleSecretary.VIEW && window.ConsoleSecretary.on());
 const VIEW_KEYS = { f: "focus", i: "me", c: "candidate", a: "ai", u: "recent", t: "tree", w: "todo", d: "done" };
 
 const state = {
@@ -144,6 +145,9 @@ const state = {
   drawerOpen: localStorage.getItem("drawerOpen") === "1",
   unseen: 0,
 };
+// Secretary mode (secretary.js) is its own home; with the mode off its view falls back to Focus.
+if (window.ConsoleSecretary.on() && !location.hash.slice(1)) state.view = window.ConsoleSecretary.VIEW;
+if (state.view === window.ConsoleSecretary.VIEW && !window.ConsoleSecretary.on()) state.view = "focus";
 
 // ---------------------------------------------------------------- dom helpers
 function h(tag, attrs = {}, ...children) {
@@ -237,6 +241,7 @@ async function refresh() {
     window.ConsoleViews.onBoard(data.views || []);
     window.ConsolePages.onBoard(data.pages || []);
     window.ConsoleFocus.setGuide(data.guide || null);
+    window.ConsoleSecretary.onBoard(data.secretary || null);
     if (!state.defaultsLoaded) { state.defaultsLoaded = true; window.ConsoleBackend.loadDefaults(); }
     if (state.open && !state.byId.has(state.open)) state.open = null;
     // Whatever is on screen is being read.
@@ -327,6 +332,7 @@ function matches(item) {
 // their usual place so nothing is listed twice — except in the tree, whose shape needs them.
 const isPinned = (i) => Boolean(i.pinned_at) && i.bucket !== "done";
 function visibleRows() {
+  if (state.view === window.ConsoleSecretary.VIEW) return window.ConsoleSecretary.rows();
   const ungrouped = ungroupedRows();
   // Recent is a timeline: family regrouping would pull an older parent above its child.
   const rows = chronologicalView() ? ungrouped : window.ConsoleFamily.groupRows(ungrouped);
@@ -477,6 +483,8 @@ function renderNav() {
   counts.focus = window.ConsoleFocus.count(state.items);
   const nav = $("nav-views");
   nav.replaceChildren(...[
+    window.ConsoleSecretary.switcher(),
+    window.ConsoleSecretary.nav(),
     ...VIEWS.map((v) => v.sep ? h("div", { class: "sep" }) : h("button", {
       class: state.view === v.key ? "active" : "",
       "aria-current": state.view === v.key ? "page" : null,
@@ -497,7 +505,8 @@ function renderNav() {
     h("button", { class: "nav-auth", onclick: () => window.ConsoleAuth.showDevices() },
       h("span", { text: `🔑 ${window.ConsoleAuth.label}` })),
   ].filter(Boolean));
-  $("view-title").textContent = window.ConsoleViews.title() || T[state.view];
+  $("view-title").textContent = window.ConsoleViews.title() ||
+    (state.view === window.ConsoleSecretary.VIEW ? window.ConsoleSecretary.title() : T[state.view]);
   const hot = counts.me || 0;
   document.title = hot ? `(${hot}) Ebi AI Console` : "Ebi AI Console";
 }
@@ -536,7 +545,7 @@ function renderList() {
   list.replaceChildren(...nodes);
   window.ConsoleBulk?.toolbar();
   const empty = $("empty");
-  empty.hidden = rows.some((r) => r.item);
+  empty.hidden = rows.some((r) => r.item) || state.view === window.ConsoleSecretary.VIEW;
   empty.textContent = T.empty;
   const restored = anchor && [...list.querySelectorAll('.row')].find((row) => row.dataset.itemId === anchor.dataset.itemId && row.dataset.occurrence === anchor.dataset.occurrence);
   list.scrollTop = restored
@@ -1039,6 +1048,8 @@ function toggleCollapse(id) {
   renderList();
 }
 async function openItem(id) {
+  // Trial metric (secretary.js): a thread opened, counted once per opening.
+  if (state.open !== id) window.ConsoleSecretary.logOpen(id);
   if (state.open !== id) state.directReply = null;
   if (state.open !== id) state.unseen = 0;
   state.open = id;

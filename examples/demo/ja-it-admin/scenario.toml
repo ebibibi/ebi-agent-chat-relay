@@ -90,6 +90,15 @@ priority = 2
 due = "+2"
 project = "社内勉強会"
 
+# Secretary mode: start this one, then switch the menu's 表示モード to 秘書. Its question shows up
+# under 🔴 今決めること with a recommended answer you can send with one click (docs/console.md).
+[[items]]
+title = "Teams の外部共有をどちらの方式にするか決めたい"
+note = "A案（ゲストは招待した人だけ）とB案（取引先ドメインの許可リスト）の違いを3行で整理し、おすすめを添えて「どちらにしますか？」と私に聞いて。決まるまで設定は変えない。"
+priority = 1
+project = "M365運用"
+tags = ["m365"]
+
 # Start the first one and let it spawn children to see the 📍 panel fill in. Its two children
 # are there so the panel and the family list already show on the first open.
 # In Focus, try Work through / Your next move: only the parent is offered.

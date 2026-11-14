@@ -114,6 +114,44 @@ The next move also considers only parent and standalone conversations, so delega
 cannot fill its candidate slots. Family decisions still link to the parent under **Decide
 together**. Open the parent to inspect a child explicitly.
 
+## Secretary mode
+
+The classic lists are built around agent threads. Someone running dozens of them ends up
+opening every thread that waits on them and re-reading it to learn what is being asked.
+Secretary mode is a second display mode built around **decisions** instead
+([ADR-0024](adr/0024-add-a-secretary-mode-built-around-decisions.md)). The switch sits at the
+top of the menu: **Display mode: Classic / Secretary**. It is remembered per browser, and
+the classic mode keeps its look and behavior. With secretary mode on, the menu gains
+**🗂 Secretary**. That screen becomes the home whenever the Console opens without a view
+in the address.
+
+- **🔴 Decide now** — at most three questions where an agent stopped for you (❓ asked,
+  📋 a step only you can do, ⚠️ failed), ranked like Focus with your own threads before
+  delegated ones. Each card shows what is being asked in one sentence, why, how long it has
+  waited, the recommended answer and up to three ready-made replies. One click, or a few words
+  of your own, sends the answer through the same reply endpoint as the detail pane, so the
+  agent carries on exactly as if you had typed it in the thread. A card that has no question
+  recorded yet shows the triage's next step or the title. "N more → Focus" leads to the rest.
+- **👀 To review**, **🤖 Agents at work** (one line each, no progress text) and
+  **✅ Finished today**, where a 🏁 candidate can be confirmed with the usual ✅ writeback.
+- Every card keeps **↗ Open the thread**.
+
+The screen is computed from the board without a model call
+(`claude_discord/console/secretary.py`, sent as `secretary` with every board). The words on
+a card come from [automatic triage](#automatic-triage). For an item whose move is yours, the
+same per-item call also returns `ask`, `suggest` and `options`. Other items get the same
+prompt and answer as before. Adding the fields did not change the prompt version, so there
+was no full re-triage. A row written before the fields existed is asked once more, and only
+when its item waits on you. The board reports the fields as `ai.ask`, `ai.suggest` and
+`ai.options`: `null` means never asked, and `""` means asked with nothing to decide.
+
+**Trial metrics.** To compare the modes over a week, the Console records which threads you
+open (in either mode) and which answers came from a card, with how long the question had
+waited. It records metadata only, never text. The table is `console_secretary_events`,
+and rows older than 180 days are dropped. `GET /console/api/secretary/stats?days=7` returns
+per-day threads opened, opened per mode, card answers and the median wait before a card
+answer.
+
 ## Automatic triage
 
 Nobody fills in priority and due date for every thread, so the console asks a fast model
@@ -556,7 +594,7 @@ Endpoints need authentication unless marked *(no sign-in)*. Every method except 
 | GET | `/console/api/passkeys` | Registered passkeys (names and dates, never key material) |
 | POST | `/console/api/passkeys/invite` | A single-use code for adding another device |
 | DELETE | `/console/api/passkeys/{id}` | Remove a passkey and its sessions |
-| GET | `/console/api/board` | Every item, sorted for triage, plus slot usage and the Focus `guide` |
+| GET | `/console/api/board` | Every item, sorted for triage, plus slot usage, the Focus `guide` and the [secretary](#secretary-mode) summary |
 | GET | `/console/api/usage` | Per backend (or pool profile): `available`, `unavailable_until`, and `windows[]` of `{type, utilization, resets_at, status, reset}` |
 | GET | `/console/api/cli-login` | Per CLI: `logged_in` (`null` when unknown), `method`, and the sign-in in progress (`flow`: `state`, `url`, `user_code`, `needs_code`, `message`, `expires_at`) — never a credential |
 | POST | `/console/api/cli-login/{backend}` | `{action: "start" \| "cancel"}` or `{action: "code", code}` (Claude's pasted code) for `claude` / `codex`; 409 when the attempt cannot take it |
@@ -566,6 +604,8 @@ Endpoints need authentication unless marked *(no sign-in)*. Every method except 
 | POST | `/console/api/items/{id}/reply` | `{text}` — continues the session, queued behind a running turn |
 | POST | `/console/api/items/{id}/done` | Mark done (also sets the ✅ marker on the thread) |
 | POST | `/console/api/items/{id}/reopen` | Clear the done/someday verdict |
+| POST | `/console/api/secretary/events` | `{kind: "open" \| "answer", item_id, mode?: "classic" \| "secretary", waited_seconds?}` — a [secretary-mode](#secretary-mode) trial record (204) |
+| GET | `/console/api/secretary/stats?days=7` | Per local day: `opened_threads`, `by_mode`, `card_answers`, `answer_wait_seconds_median` |
 | GET / POST | `/console/api/views` | The saved views (also in every board as `views`); save one with `{name, query}` — see [Saved views](#saved-views-and-the-filter-language) |
 | PATCH / DELETE | `/console/api/views/{id}` | Change (`name`, `query`, `position`) or delete a saved view |
 | POST | `/console/api/pages/{slug}` | Define a [page](console-pages.md) (also in every board as `pages`) |
