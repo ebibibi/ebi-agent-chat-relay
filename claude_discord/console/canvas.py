@@ -17,8 +17,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hmac
 import logging
 import os
+import secrets
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -35,6 +37,8 @@ logger = logging.getLogger(__name__)
 STATE_THREAD = "secretary_thread"
 STATE_CURSOR = "cursor"
 STATE_PAUSED = "paused"
+#: The secretary's write key: only its conversation may change the canvas, notes or cursor.
+STATE_TOKEN = "token"
 STATE_LAST_WAKE = "last_wake_at"
 
 TICK_SECONDS = 30
@@ -246,8 +250,10 @@ class CanvasSecretary:
             if key is not None and not restart and await self._host.owns(key):
                 return key
             cursor = await self.repo.last_change()
+            token = secrets.token_urlsafe(24)
+            await self.repo.set_state(STATE_TOKEN, token)
             key = await self._host.spawn(
-                prompt=charter(who),
+                prompt=charter(who, token),
                 title=SECRETARY_TITLE,
                 ai=(self.config.backend, self.config.model, self.config.effort),
             )
@@ -256,6 +262,11 @@ class CanvasSecretary:
             self._secretary_running = True
             logger.info("canvas: secretary conversation %s started by %s", key, who)
             return key
+
+    async def authorized(self, presented: str | None) -> bool:
+        """Whether *presented* is the current secretary's write key (a restart rotates it)."""
+        token = await self.repo.get_state(STATE_TOKEN)
+        return bool(token and presented and hmac.compare_digest(token, presented))
 
     async def paused(self) -> bool:
         return (await self.repo.get_state(STATE_PAUSED)) == "1"

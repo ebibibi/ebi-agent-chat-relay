@@ -211,6 +211,10 @@ places widgets there; the right is your conversation with it. **↩ Classic scre
 - **Model.** `claude` with `sonnet` unless `CCDB_CANVAS_SECRETARY_BACKEND`,
   `CCDB_CANVAS_SECRETARY_MODEL` or `CCDB_CANVAS_SECRETARY_EFFORT` say otherwise.
 
+**Only the secretary writes.** Starting or restarting it issues a random key, given only in its
+charter. Widget, order, note and deliver calls must carry it as `X-Canvas-Token` and are refused
+with 403 otherwise; a digest read without it never moves the cursor. Reads are open.
+
 **Widgets are data, drawn by the Console.** The secretary sends
 `PUT /api/canvas/widgets/{key}` with a `kind`, a one-line `title`, `data`, and optionally
 `size` (`s`, `m`, `l`), `position`, a one-line `note` and up to four `actions`

@@ -29,6 +29,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 MAX_DELIVER_CHARS = 4000
+#: The secretary's write key, given only in its own charter (ADR-0025).
+TOKEN_HEADER = "X-Canvas-Token"
 
 
 def _error(message: str, status: int) -> web.Response:
@@ -70,6 +72,14 @@ class CanvasApi:
     def _unavailable(self) -> web.Response:
         return _error("canvas mode needs the Ebi AI Console, which is not running", 503)
 
+    async def _refused(self, canvas: CanvasSecretary, request: web.Request) -> web.Response | None:
+        """403 unless the caller is the secretary's own conversation (it holds the key)."""
+        if await canvas.authorized(request.headers.get(TOKEN_HEADER)):
+            return None
+        return _error(
+            f"only the canvas secretary may change this; send its {TOKEN_HEADER} header", 403
+        )
+
     async def read(self, request: web.Request) -> web.Response:
         canvas = self._canvas()
         if canvas is None:
@@ -81,6 +91,8 @@ class CanvasApi:
         canvas = self._canvas()
         if canvas is None:
             return self._unavailable()
+        if (refused := await self._refused(canvas, request)) is not None:
+            return refused
         key = request.match_info["key"]
         if not valid_key(key):
             return _error(
@@ -106,6 +118,8 @@ class CanvasApi:
         canvas = self._canvas()
         if canvas is None:
             return self._unavailable()
+        if (refused := await self._refused(canvas, request)) is not None:
+            return refused
         removed = await canvas.repo.delete_widget(request.match_info["key"])
         return web.json_response({"status": "removed" if removed else "absent"})
 
@@ -113,6 +127,8 @@ class CanvasApi:
         canvas = self._canvas()
         if canvas is None:
             return self._unavailable()
+        if (refused := await self._refused(canvas, request)) is not None:
+            return refused
         body, err = await _body(request)
         if err:
             return err
@@ -127,10 +143,12 @@ class CanvasApi:
         if canvas is None:
             return self._unavailable()
         query = request.rel_url.query
+        # Anyone may look; only the secretary moves its own cursor.
+        owner = await canvas.authorized(request.headers.get(TOKEN_HEADER))
         return web.json_response(
             await canvas.digest(
                 everything=query.get("all") in ("1", "true"),
-                peek=query.get("peek") in ("1", "true"),
+                peek=not owner or query.get("peek") in ("1", "true"),
             )
         )
 
@@ -145,6 +163,8 @@ class CanvasApi:
         canvas = self._canvas()
         if canvas is None:
             return self._unavailable()
+        if (refused := await self._refused(canvas, request)) is not None:
+            return refused
         thread_id = _thread(request.match_info["thread_id"])
         if thread_id is None:
             return _error("thread_id must be digits", 400)
@@ -162,8 +182,11 @@ class CanvasApi:
 
     async def deliver(self, request: web.Request) -> web.Response:
         console = getattr(self._api, "_console", None)
-        if console is None or getattr(console, "canvas", None) is None:
+        canvas = getattr(console, "canvas", None)
+        if console is None or canvas is None:
             return self._unavailable()
+        if (refused := await self._refused(canvas, request)) is not None:
+            return refused
         body, err = await _body(request)
         if err:
             return err

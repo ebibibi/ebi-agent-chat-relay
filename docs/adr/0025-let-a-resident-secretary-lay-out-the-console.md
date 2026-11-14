@@ -85,9 +85,14 @@ Add **canvas mode**, a third display mode chosen per browser beside classic and 
   last placed. Decision cards read the live store, so an answered question disappears at once.
 - A widget the secretary forgets to remove stays. Widgets record when they were last updated,
   and the Console shows it on each, so a stale widget looks stale.
-- Notes and widgets are text in the relay database, with the same trust as the rest of
-  `/api/*`. They are never executed. `/api/secretary/deliver` is reachable by any local agent,
-  like `/api/threads/{id}/message`; what it sends is labelled as relayed by the secretary, so the
-  receiving agent and the transcript can tell it from words the person typed.
+- Notes and widgets are text in the relay database and are never executed. **Only the
+  secretary's conversation may write them.** Starting (or restarting) the secretary issues a
+  random write key, given only in its charter; widget, order, note and deliver calls without it
+  are refused with 403, and a digest read without it never moves the cursor. Reads stay open
+  like the rest of `/api/*`. This keeps other agents (or a prompt injected into one) from
+  planting notes the secretary would trust, placing buttons with hidden words, or answering on
+  the person's behalf. It is not a boundary against code running as the same OS user, which can
+  read the database directly. What `/api/secretary/deliver` sends is labelled as relayed by the
+  secretary, and a widget button shows the words it will send before it is pressed.
 - If the trial fails, the mode is removed with its tables; classic and secretary modes do not
   depend on it.

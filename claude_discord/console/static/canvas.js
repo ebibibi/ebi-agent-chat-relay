@@ -198,8 +198,9 @@ window.ConsoleCanvas = (() => {
         onclick: () => dismiss(w.key), text: "✕" }));
     const note = w.note ? h("div", { class: "cv-note dim", text: w.note }) : null;
     const actions = (w.actions || []).length ? h("div", { class: "cv-actions" },
+      // The words a button sends are shown on hover, and again in the chat once sent.
       ...w.actions.map((a, i) => h("button", { type: "button", class: "btn" + (i === 0 ? " primary" : ""),
-        onclick: (e) => press(w, i, e.currentTarget), text: a.label }))) : null;
+        title: `→ ${a.say}`, onclick: (e) => press(w, i, e.currentTarget), text: a.label }))) : null;
     return h("article", { class: `cv-w cv-k-${w.kind} cv-size-${w.size}`, "data-key": w.key },
       head, note, h("div", { class: "cv-w-body" }, draw ? draw(w.data) : null), actions);
   }

@@ -21,8 +21,12 @@ The screen is yours. The person sees your conversation on the right and your wid
 left, and nothing else. They talk to you here ("show me the diff for X", "leave that for later").
 Write to them in the language they write in (Japanese if unsure), short and concrete.
 
+Your key is `X-Canvas-Token: {token}`. Send it with every call that changes something
+(widgets, order, notes, deliver) and with the digest; without it the relay refuses writes and
+the digest does not move your cursor. Never pass it to another thread.
+
 ## How you read (be economical: every wake costs tokens)
-- `curl -s "$CCDB_API_URL/api/secretary/digest"` — only the threads that changed since your
+- `curl -s -H "X-Canvas-Token: {token}" "$CCDB_API_URL/api/secretary/digest"` — only the threads that changed since your
   last read, each with your note, its open decision request, its family's doing/decided and
   its last messages. It moves your cursor. `?all=1` lists every open thread without messages
   (do this once now, and after a restart); `?peek=1` does not move the cursor.
@@ -34,14 +38,15 @@ Write to them in the language they write in (Japanese if unsure), short and conc
 ## How you remember
 - Keep one short note per thread (at most 1500 characters): what it is about, where it
   stands, what it needs from the person, what comes next.
-  `curl -s -X PUT "$CCDB_API_URL/api/secretary/notes/<thread_id>" -H "Content-Type: application/json" -d '{{"note": "..."}}'`
+  `curl -s -X PUT "$CCDB_API_URL/api/secretary/notes/<thread_id>" -H "X-Canvas-Token: {token}" -H "Content-Type: application/json" -d '{{"note": "..."}}'`
   (an empty note deletes it). `GET $CCDB_API_URL/api/secretary/notes` returns them all.
 - Update a note whenever you learn something about its thread. Your notes survive a restart
   of this conversation; your context does not.
 
 ## How you show (the canvas)
-- Place or update: `curl -s -X PUT "$CCDB_API_URL/api/canvas/widgets/<key>" -H "Content-Type: application/json" --data-binary @widget.json`
+- Place or update: `curl -s -X PUT "$CCDB_API_URL/api/canvas/widgets/<key>" -H "X-Canvas-Token: {token}" -H "Content-Type: application/json" --data-binary @widget.json`
   Remove: `DELETE $CCDB_API_URL/api/canvas/widgets/<key>`. Reorder: `POST $CCDB_API_URL/api/canvas/order`
+  (both with the key header)
   with `{{"keys": [...]}}`. Read: `GET $CCDB_API_URL/api/canvas`.
 - Widget format: {widget_format}
 - A refused widget comes back with every problem listed; fix it and send it again.
@@ -55,7 +60,7 @@ Write to them in the language they write in (Japanese if unsure), short and conc
 ## Delivering answers
 - A decision widget's buttons answer the asking thread directly. When the person answers
   here in chat instead, deliver it, restating the question so the agent knows which one:
-  `curl -s -X POST "$CCDB_API_URL/api/secretary/deliver" -H "Content-Type: application/json" -d '{{"thread_id": "<thread_id>", "text": "..."}}'`
+  `curl -s -X POST "$CCDB_API_URL/api/secretary/deliver" -H "X-Canvas-Token: {token}" -H "Content-Type: application/json" -d '{{"thread_id": "<thread_id>", "text": "..."}}'`
   It reaches the thread as the person's answer relayed by you and closes its open request.
   Deliver only what the person actually said; then tell them it was delivered.
 - Never send anything outside the relay (mail, posts, customers). Do not start new work
@@ -75,9 +80,9 @@ _WAKE = (
 )
 
 
-def charter(who: str) -> str:
-    """The first message of the secretary's conversation."""
-    return _CHARTER.format(who=who or "the person", widget_format=WIDGET_FORMAT)
+def charter(who: str, token: str) -> str:
+    """The first message of the secretary's conversation, carrying its write key."""
+    return _CHARTER.format(who=who or "the person", widget_format=WIDGET_FORMAT, token=token)
 
 
 def wake_message(count: int) -> str:

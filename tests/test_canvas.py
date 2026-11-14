@@ -261,7 +261,8 @@ async def test_digest_reads_only_what_changed_and_moves_the_cursor(repo) -> None
 
 
 def test_charter_and_wake_point_to_the_api() -> None:
-    text = charter("ebi")
+    text = charter("ebi", "k3y")
+    assert "X-Canvas-Token: k3y" in text
     for path in ("/api/secretary/digest", "/api/secretary/notes", "/api/canvas/widgets"):
         assert path in text
     assert "{" not in wake_message(3).replace("{}", "")
@@ -291,6 +292,8 @@ async def api():
     await store.init_db()
     console = MagicMock()
     console.canvas = _secretary(store, Board(), FakeHost(), [datetime(2026, 11, 14, tzinfo=UTC)])
+    await console.canvas.start_secretary("ebi")
+    console.key = {"X-Canvas-Token": await store.get_state("token")}
     console.deliver_from_secretary = AsyncMock(
         return_value=web.json_response({"status": "delivered"}, status=202)
     )
@@ -309,24 +312,35 @@ async def test_without_the_console_the_canvas_answers_503(api) -> None:
 async def test_widgets_are_placed_updated_ordered_and_removed(api) -> None:
     client, server, console, store = api
     server._console = console
-    resp = await client.put("/api/canvas/widgets/now", json=_widget("markdown"))
+    resp = await client.put(
+        "/api/canvas/widgets/now", json=_widget("markdown"), headers=console.key
+    )
     assert resp.status == 201
-    resp = await client.put("/api/canvas/widgets/now", json=_widget("metric"))
+    resp = await client.put("/api/canvas/widgets/now", json=_widget("metric"), headers=console.key)
     assert resp.status == 200 and (await resp.json())["widget"]["kind"] == "metric"
-    await client.put("/api/canvas/widgets/b", json=_widget("table"))
-    assert (await client.post("/api/canvas/order", json={"keys": ["b", "now"]})).status == 200
+    await client.put("/api/canvas/widgets/b", json=_widget("table"), headers=console.key)
+    assert (
+        await client.post("/api/canvas/order", json={"keys": ["b", "now"]}, headers=console.key)
+    ).status == 200
     keys = [w["key"] for w in (await (await client.get("/api/canvas")).json())["widgets"]]
     assert keys == ["b", "now"]
-    assert (await (await client.delete("/api/canvas/widgets/b")).json())["status"] == "removed"
+    assert (await (await client.delete("/api/canvas/widgets/b", headers=console.key)).json())[
+        "status"
+    ] == "removed"
 
 
 async def test_a_refused_widget_says_why(api) -> None:
     client, server, console, _ = api
     server._console = console
-    resp = await client.put("/api/canvas/widgets/x", json={"kind": "html", "title": "t"})
+    resp = await client.put(
+        "/api/canvas/widgets/x", json={"kind": "html", "title": "t"}, headers=console.key
+    )
     body = await resp.json()
     assert resp.status == 400 and body["problems"] and "format" in body
-    assert (await client.put("/api/canvas/widgets/Bad Key", json=_widget("markdown"))).status in (
+    bad_key = await client.put(
+        "/api/canvas/widgets/Bad Key", json=_widget("markdown"), headers=console.key
+    )
+    assert bad_key.status in (
         400,
         404,
     )
@@ -335,13 +349,45 @@ async def test_a_refused_widget_says_why(api) -> None:
 async def test_notes_digest_and_deliver(api) -> None:
     client, server, console, _ = api
     server._console = console
-    assert (await client.put("/api/secretary/notes/12", json={"note": "hi"})).status == 200
+    k = console.key
+    assert (
+        await client.put("/api/secretary/notes/12", json={"note": "hi"}, headers=k)
+    ).status == 200
     notes = (await (await client.get("/api/secretary/notes")).json())["notes"]
     assert notes["12"]["note"] == "hi"
-    assert (await client.put("/api/secretary/notes/12", json={"note": "x" * 2000})).status == 400
+    long = await client.put("/api/secretary/notes/12", json={"note": "x" * 2000}, headers=k)
+    assert long.status == 400
     assert (await client.get("/api/secretary/digest?peek=1")).status == 200
-    resp = await client.post("/api/secretary/deliver", json={"thread_id": "12", "text": "A"})
+    resp = await client.post(
+        "/api/secretary/deliver", json={"thread_id": "12", "text": "A"}, headers=k
+    )
     assert resp.status == 202
     console.deliver_from_secretary.assert_awaited_once_with(12, "A")
-    bad = await client.post("/api/secretary/deliver", json={"thread_id": "x", "text": "A"})
+    bad = await client.post(
+        "/api/secretary/deliver", json={"thread_id": "x", "text": "A"}, headers=k
+    )
     assert bad.status == 400
+
+
+async def test_only_the_secretary_may_write_or_move_its_cursor(api) -> None:
+    client, server, console, store = api
+    server._console = console
+    wrong = {"X-Canvas-Token": "guess"}
+    for call in (
+        client.put("/api/canvas/widgets/now", json=_widget("markdown")),
+        client.put("/api/canvas/widgets/now", json=_widget("markdown"), headers=wrong),
+        client.delete("/api/canvas/widgets/now"),
+        client.post("/api/canvas/order", json={"keys": []}),
+        client.put("/api/secretary/notes/12", json={"note": "planted"}),
+        client.post("/api/secretary/deliver", json={"thread_id": "12", "text": "yes"}),
+    ):
+        assert (await call).status == 403
+    console.deliver_from_secretary.assert_not_awaited()
+    await store.add_changes([("t1", "new (waiting)")])
+    assert (await (await client.get("/api/secretary/digest")).json())["threads"]
+    assert (await store.get_state("cursor")) == "0", "a stranger's read does not move the cursor"
+    await client.get("/api/secretary/digest", headers=console.key)
+    assert (await store.get_state("cursor")) != "0"
+    old = console.key["X-Canvas-Token"]
+    await console.canvas.start_secretary("ebi", restart=True)
+    assert not await console.canvas.authorized(old), "a restart rotates the key"
