@@ -12,6 +12,38 @@ after a Claude environment overlay. Provider API credentials remain available;
 the local control-plane secret is injected explicitly. This limits accidental
 credential exposure through environment dumps; it is not a filesystem sandbox.
 
+Two more relay-owned secrets are stripped: the console's sign-in secret
+(`CCDB_CONSOLE_OIDC_CLIENT_SECRET`) and the write URL some deployments keep
+beside the Teams queue (`CCDB_TEAMS_QUEUE_URL_ADD`). Credentials an agent uses
+for its own work (cloud CLIs, provider keys) are still inherited; moving them
+behind a proxy is tracked in #1370.
+
+## Turns cut off by a crash
+
+A clean shutdown writes `pending_resumes` for every running turn
+(`ClaudeChatCog.cog_unload`). A process killed by SIGKILL or the OOM killer
+runs no Python, so each turn also records itself while it runs:
+
+- A turn writes a row to `inflight_turns` when it starts and deletes it when it
+  ends, however it ends. Each process has its own `boot_id` and refreshes its
+  rows' `heartbeat_at` every minute.
+- On the first `on_ready` of a process, rows with another `boot_id` were left
+  by a process that died mid-turn. They are read and deleted in one step
+  (single-fire) and turned into `crash_recovery` rows in `pending_resumes`, so
+  the existing startup loop resumes them: delete before spawn, console and
+  headless handling, the reconnect-safe path. The resume prompt quotes the
+  message the turn was handling and asks the agent to check what was done.
+- A thread that already has a pending resume (clean shutdown, reserved restart)
+  keeps that one.
+- A turn whose heartbeat is older than the resume TTL (5 minutes) is not run
+  again: after a long outage the user may have moved on. A turn that already
+  crashed the bot twice in a row is not run again either, or a turn that kills
+  the process every time would restart it forever. In both cases the thread is
+  told it stopped and that a reply continues it. A turn that ends normally
+  resets the count.
+
+The record is bookkeeping: a database error is logged and never fails a turn.
+
 ## Attachment delivery
 
 The existing `.ccdb-attachments-<thread_id>` marker remains the request format.

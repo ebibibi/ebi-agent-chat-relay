@@ -62,6 +62,20 @@ CREATE TABLE IF NOT EXISTS pending_resumes (
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
+-- Turns that are running right now, one row per thread. Written when a turn
+-- starts and deleted when it ends, so a row left by an earlier process means
+-- that process died mid-turn (SIGKILL, OOM, power loss) without the clean
+-- shutdown that writes pending_resumes. See InflightTurnRepository.
+CREATE TABLE IF NOT EXISTS inflight_turns (
+    thread_id INTEGER PRIMARY KEY,
+    boot_id TEXT NOT NULL,
+    session_id TEXT,
+    prompt TEXT,
+    crash_count INTEGER NOT NULL DEFAULT 0,
+    started_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    heartbeat_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
 -- Thread inbox: persistent status tracking across bot restarts.
 -- Populated when a Claude session ends; cleared when the user replies.
 -- status: 'waiting' (user's reply needed) | 'ambiguous' (unclear)
