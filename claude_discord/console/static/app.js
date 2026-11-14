@@ -514,6 +514,7 @@ function renderNav() {
 function renderList() {
   const rows = visibleRows();
   window.ConsoleBulk?.sync(rows);
+  document.querySelector(".list-pane").classList.toggle("secretary-view", state.view === window.ConsoleSecretary.VIEW);
   const list = $("list");
   const top = list.scrollTop;
   const edge = list.getBoundingClientRect().top;
