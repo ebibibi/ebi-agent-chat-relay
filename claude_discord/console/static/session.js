@@ -164,7 +164,8 @@ window.ConsoleSession = (() => {
     const c = card.card;
     const tags = [];
     if (plan && plan.group) tags.push(h("span", { class: "tag", text: plan.group }));
-    if (/戻せ|undone|irrevers/i.test(c.context)) tags.push(h("span", { class: "tag hot", text: s.irreversible }));
+    // Only the negative forms: "元に戻せます" (can be undone) must not be flagged.
+    if (/戻せない|戻せません|取り消せない|取り消せません|cannot be undone|can't be undone|irreversible/i.test(c.context)) tags.push(h("span", { class: "tag hot", text: s.irreversible }));
     tags.push(h("span", { class: "tag", text: `${s.deadline}${c.deadline}` }));
     tags.push(h("button", { type: "button", class: "guide-link", onclick: () => { end(); openItem(card.id); },
       text: `↗ ${card.item_title}` }));

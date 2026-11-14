@@ -16,7 +16,7 @@ const items = [item(900, '🗂 Secretary (canvas)', 'idle', {bucket: 'idle', can
 const card = (rid, id, title, kind, options) => ({request_id: rid, id: `t${id}`, thread_id: String(id), item_title: title,
   kind, origin: 'mark', reasons: [], since: '2026-11-14T10:00:00Z', place: null, parent_id: null,
   card: {title: kind === 'review' ? '販売ページの差分を見て反映するか' : 'hccjp を消す前に、中のデータを書き出して残しますか？',
-    context: '11/17 に削除します。消すとほぼ戻せません。', options, deadline: '11/17 削除前'},
+    context: kind === 'review' ? '公開後も元に戻せます。' : '11/17 に削除します。消すとほぼ戻せません。', options, deadline: '11/17 削除前'},
   detail: {about: 'a', now: 'b', ask: 'c', choices: 'd', recommendation: 'おすすめは A', materials: 'm', deadline: 'g'}});
 const cards = [
   card(41, 12, 'Ebi Workspace 販売ページ', 'review', [{label: 'A 反映する', effect: '今夜公開', recommended: true}, {label: 'B 直す', effect: '明日', recommended: false}]),
@@ -92,6 +92,7 @@ const status = {item_id: 't900', running: false, paused: false, pending: 0,
     await page.locator('#cv-session').waitFor();
     assert.match(await page.locator('.cv-ss-title').innerText(), /hccjp/);
     assert.equal(await page.locator('.cv-ss-materials .cv-table td', {hasText: '356個'}).count(), 1);
+    assert.equal(await page.locator('.cv-ss-tags .tag.hot').count(), 1, 'cannot be undone is flagged');
     assert.match(await page.locator('.cv-ss-side').innerText(), /販売ページの差分を見て反映するか/);
     assert.match(await page.locator('.cv-ss-side').innerText(), /YouTube 字幕/);
     if (process.env.SHOTS) await page.screenshot({path: `${process.env.SHOTS}/session-${width}.png`});
@@ -102,6 +103,7 @@ const status = {item_id: 't900', running: false, paused: false, pending: 0,
     assert.equal(reply.body.request_id, 40);
     assert.match(reply.body.text, /A 残さない — 追加作業なし/);
     assert.match(await page.locator('.cv-ss-side').innerText(), /A 残さない/);
+    assert.equal(await page.locator('.cv-ss-tags .tag.hot').count(), 0, '"can be undone" is not flagged');
 
     await page.keyboard.press('s');
     await page.locator('.cv-ss-done').waitFor();
