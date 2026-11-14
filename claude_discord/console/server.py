@@ -68,6 +68,7 @@ from .places import PlaceError, PlaceRepository
 from .places import clean_name as clean_place
 from .ratelimit import RateLimiter
 from .search import SearchRoutes
+from .secretary import SecretaryEventRepository, SecretaryRoutes, build_secretary
 from .surface import apply_outcome
 from .triage import INTERVAL_SECONDS as TRIAGE_INTERVAL_SECONDS
 from .triage import (
@@ -261,8 +262,11 @@ class ConsoleServer:
         account_router: AccountRouter | None = None,
         cli_login: CliLogin | None = None,
         views: SavedViewRepository | None = None,
+        secretary_events: SecretaryEventRepository | None = None,
     ) -> None:
         self.api = api_server
+        #: Secretary mode's trial metrics; None turns recording off.
+        self.secretary_events = secretary_events
         #: Named rules over the board; None leaves the list empty.
         self.views = views
         #: Signs the agent CLIs in from the browser; None hides the screen.
@@ -374,6 +378,9 @@ class ConsoleServer:
         r.add_patch(f"{API_PREFIX}/views/{{view_id}}", view_routes.patch)
         r.add_delete(f"{API_PREFIX}/views/{{view_id}}", view_routes.delete)
         page_routes = PageRoutes(self.api)
+        secretary_routes = SecretaryRoutes(self, self.secretary_events)
+        r.add_post(f"{API_PREFIX}/secretary/events", secretary_routes.record)
+        r.add_get(f"{API_PREFIX}/secretary/stats", secretary_routes.stats)
         r.add_post(f"{API_PREFIX}/pages/{{slug}}", page_routes.define)
         r.add_get(f"{API_PREFIX}/pages/{{slug}}/items", page_routes.items)
         r.add_post(f"{API_PREFIX}/pages/{{slug}}/items", page_routes.add)
@@ -642,6 +649,7 @@ class ConsoleServer:
                 "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "items": items,
                 "guide": build_guide(items, records=records),
+                "secretary": build_secretary(items),
                 "slots": self._slots(),
                 "places": await self._place_list(items),
                 "views": await self._view_list(),
@@ -1917,6 +1925,8 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
     await places.init_db()
     views = SavedViewRepository(api_server.session_repo.db_path)
     await views.init_db()
+    secretary_events = SecretaryEventRepository(api_server.session_repo.db_path)
+    await secretary_events.init_db()
     if triage is not None:
         await triage.init_db()
     console = ConsoleServer(
@@ -1935,6 +1945,7 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
         triage=triage,
         places=places,
         views=views,
+        secretary_events=secretary_events,
         cli_login=CliLogin(login_commands()),
     )
     await console.start()
