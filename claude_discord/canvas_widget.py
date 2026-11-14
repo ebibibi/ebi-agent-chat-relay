@@ -16,7 +16,10 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-KINDS = ("decision", "diff", "table", "markdown", "timeline", "agents", "metric")
+KINDS = ("decision", "diff", "table", "markdown", "timeline", "agents", "metric", "schedule")
+#: The kinds a focus session may show as a decision's material.
+MATERIAL_KINDS = ("table", "timeline", "diff", "markdown")
+LANES = ("you", "ai", "external")
 SIZES = ("s", "m", "l")
 
 MAX_WIDGETS = 30
@@ -47,7 +50,9 @@ FORMAT = (
     'table {"columns": [..], "rows": [[..]]}; markdown {"text"}; '
     'timeline {"entries": [{"time", "label", "state": todo|now|done|wait, "minutes"?}]}; '
     'agents {"thread_ids": [..]} (empty: every running thread); '
-    'metric {"value", "label", "sub"?, "percent"? 0-100}.'
+    'metric {"value", "label", "sub"?, "percent"? 0-100}; '
+    'schedule {"lanes": {"you"|"ai"|"external": [{"start": "HH:MM", "end"?: "HH:MM", '
+    '"label", "sub"?, "thread_id"?}]}} (today\'s timetable).'
 )
 
 
@@ -205,6 +210,58 @@ def _metric(data: Mapping[str, Any], problems: list[str]) -> dict[str, Any]:
     }
 
 
+_HHMM = re.compile(r"^([01][0-9]|2[0-4]):[0-5][0-9]$")
+MAX_LANE = 20
+
+
+def _minutes(value: str) -> int:
+    hours, minutes = value.split(":")
+    return int(hours) * 60 + int(minutes)
+
+
+def _block(entry: Any, problems: list[str]) -> dict[str, Any] | None:
+    if not isinstance(entry, Mapping):
+        problems.append("each block must be an object")
+        return None
+    start = str(entry.get("start") or "")
+    end = str(entry.get("end") or "")
+    if not _HHMM.match(start):
+        problems.append(f"block start must be HH:MM, got {start!r}")
+        return None
+    if end and (not _HHMM.match(end) or _minutes(end) <= _minutes(start)):
+        problems.append(f"block end must be HH:MM after its start, got {end!r}")
+        end = ""
+    thread = str(entry.get("thread_id") or "").strip()
+    if thread and not _THREAD.match(thread):
+        problems.append("block thread_id must be numeric")
+        thread = ""
+    return {
+        "start": start,
+        "end": end or None,
+        "label": _line(entry.get("label"), "block label", MAX_CELL, problems, required=True),
+        "sub": _line(entry.get("sub"), "block sub", MAX_NOTE, problems, required=False),
+        "thread_id": thread or None,
+    }
+
+
+def _schedule(data: Mapping[str, Any], problems: list[str]) -> dict[str, Any]:
+    lanes = data.get("lanes")
+    if not isinstance(lanes, Mapping) or not lanes:
+        problems.append("data.lanes must be an object with you, ai and/or external")
+        return {"lanes": {}}
+    unknown = sorted(set(map(str, lanes)) - set(LANES))
+    if unknown:
+        problems.append(f"unknown lanes: {', '.join(unknown)}")
+    out: dict[str, list[dict[str, Any]]] = {}
+    for lane in LANES:
+        entries = lanes.get(lane) or []
+        if not isinstance(entries, list) or len(entries) > MAX_LANE:
+            problems.append(f"lane {lane} must be a list of at most {MAX_LANE} blocks")
+            continue
+        out[lane] = [b for b in (_block(e, problems) for e in entries) if b is not None]
+    return {"lanes": out}
+
+
 _CHECKS: dict[str, Callable[[Mapping[str, Any], list[str]], dict[str, Any]]] = {
     "decision": _decision,
     "diff": _diff,
@@ -213,6 +270,7 @@ _CHECKS: dict[str, Callable[[Mapping[str, Any], list[str]], dict[str, Any]]] = {
     "timeline": _timeline,
     "agents": _agents,
     "metric": _metric,
+    "schedule": _schedule,
 }
 assert set(_CHECKS) == set(KINDS)
 
@@ -278,3 +336,80 @@ def parse_widget(body: Any) -> WidgetSpec:
 
 def valid_key(key: str) -> bool:
     return bool(KEY.match(key))
+
+
+# -- focus session ---------------------------------------------------------------
+MAX_SESSION_ITEMS = 20
+MAX_MATERIALS = 3
+_SESSION_FIELDS = frozenset({"title", "minutes", "items"})
+_SESSION_ITEM_FIELDS = frozenset({"thread_id", "group", "why", "materials"})
+
+SESSION_FORMAT = (
+    'Send {"title"?: one line, "minutes"?: 1-240 (default 15), "items": [{"thread_id": the '
+    'asking thread, "group"?: a short context label, "why"?: one line, "materials"?: up to 3 '
+    "of {kind: table|timeline|diff|markdown, title, data} drawn beside the decision}]} in the "
+    "order to decide, similar contexts together."
+)
+
+
+def _materials(raw: Any, problems: list[str]) -> list[dict[str, Any]]:
+    if not isinstance(raw, list) or len(raw) > MAX_MATERIALS:
+        problems.append(f"item materials must be a list of at most {MAX_MATERIALS}")
+        return []
+    drawn = []
+    for material in raw:
+        if isinstance(material, Mapping) and material.get("kind") not in MATERIAL_KINDS:
+            problems.append(f"material kind must be one of {', '.join(MATERIAL_KINDS)}")
+            continue
+        try:
+            spec = parse_widget(material)
+        except WidgetError as exc:
+            problems.extend(f"material: {p}" for p in exc.problems)
+            continue
+        drawn.append({"kind": spec.kind, "title": spec.title, "data": spec.data})
+    return drawn
+
+
+def _session_item(raw: Any, problems: list[str]) -> dict[str, Any] | None:
+    if not isinstance(raw, Mapping):
+        problems.append("each item must be an object")
+        return None
+    extra = sorted(set(raw) - _SESSION_ITEM_FIELDS)
+    if extra:
+        problems.append(f"unknown item fields: {', '.join(extra)}")
+    thread = str(raw.get("thread_id") or "").strip()
+    if not _THREAD.match(thread):
+        problems.append("item thread_id must be the asking thread's id (numeric)")
+    return {
+        "thread_id": thread,
+        "group": _line(raw.get("group"), "item group", 40, problems, required=False),
+        "why": _line(raw.get("why"), "item why", MAX_NOTE, problems, required=False),
+        "materials": _materials(raw.get("materials") or [], problems),
+    }
+
+
+def parse_session(body: Any) -> dict[str, Any]:
+    """Validate the secretary's plan for a focus session, or raise :class:`WidgetError`.
+
+    The plan orders open decision requests by thread and attaches up to three pieces of
+    material to each, drawn with the same renderers as widgets.
+    """
+    if not isinstance(body, Mapping):
+        raise WidgetError(["the session must be a JSON object"])
+    problems: list[str] = []
+    unknown = sorted(set(body) - _SESSION_FIELDS)
+    if unknown:
+        problems.append(f"unknown fields: {', '.join(unknown)}")
+    title = _line(body.get("title"), "title", MAX_TITLE, problems, required=False)
+    minutes = body.get("minutes", 15)
+    if not isinstance(minutes, int) or isinstance(minutes, bool) or not 1 <= minutes <= 240:
+        problems.append("minutes must be a whole number 1-240")
+        minutes = 15
+    raw_items = body.get("items")
+    if not isinstance(raw_items, list) or not raw_items or len(raw_items) > MAX_SESSION_ITEMS:
+        problems.append(f"items must be a list of 1-{MAX_SESSION_ITEMS} decisions")
+        raw_items = []
+    items = [i for i in (_session_item(r, problems) for r in raw_items) if i is not None]
+    if problems:
+        raise WidgetError(problems)
+    return {"title": title, "minutes": minutes, "items": items}

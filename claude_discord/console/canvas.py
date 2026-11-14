@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hmac
+import json
 import logging
 import os
 import secrets
@@ -39,6 +40,8 @@ STATE_CURSOR = "cursor"
 STATE_PAUSED = "paused"
 #: The secretary's write key: only its conversation may change the canvas, notes or cursor.
 STATE_TOKEN = "token"
+#: The focus session the secretary prepared (JSON), until the person finishes it.
+STATE_SESSION = "session"
 STATE_LAST_WAKE = "last_wake_at"
 
 TICK_SECONDS = 30
@@ -259,6 +262,8 @@ class CanvasSecretary:
             )
             await self.repo.set_state(STATE_THREAD, str(key))
             await self.repo.set_state(STATE_CURSOR, str(cursor))
+            # The charter turn reads everything; the first wake waits the usual interval after it.
+            await self.repo.set_state(STATE_LAST_WAKE, _stamp(self._clock()))
             self._secretary_running = True
             logger.info("canvas: secretary conversation %s started by %s", key, who)
             return key
@@ -267,6 +272,25 @@ class CanvasSecretary:
         """Whether *presented* is the current secretary's write key (a restart rotates it)."""
         token = await self.repo.get_state(STATE_TOKEN)
         return bool(token and presented and hmac.compare_digest(token, presented))
+
+    async def session(self) -> dict[str, Any] | None:
+        raw = await self.repo.get_state(STATE_SESSION)
+        if not raw:
+            return None
+        try:
+            plan = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.warning("canvas: the stored focus session is not JSON; dropping it")
+            await self.repo.set_state(STATE_SESSION, None)
+            return None
+        return plan if isinstance(plan, dict) else None
+
+    async def set_session(self, plan: dict[str, Any] | None) -> None:
+        if plan is None:
+            await self.repo.set_state(STATE_SESSION, None)
+            return
+        stored = {**plan, "prepared_at": _stamp(self._clock())}
+        await self.repo.set_state(STATE_SESSION, json.dumps(stored, ensure_ascii=False))
 
     async def paused(self) -> bool:
         return (await self.repo.get_state(STATE_PAUSED)) == "1"

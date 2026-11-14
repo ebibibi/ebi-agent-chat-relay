@@ -29,6 +29,9 @@ window.ConsoleCanvas = (() => {
       open: "Open the thread", chat: "💬 Secretary", no_running: "No agent is working right now.",
       states: { now: "▶", done: "✓", wait: "⏳", todo: "○" }, minutes: (m) => `${m} min`,
       before: "Before", after: "After", sent: "Sent to the secretary",
+      expand: "Show full screen", close: "✕ Close", lanes: { you: "You", ai: "AI", external: "Waiting on others" },
+      focus: (n) => `🎯 Focus session (${n})`, focus_ready: (t, n, m) => `🎯 The secretary prepared a focus session: ${t || "decisions"} — ${n} to decide, about ${m} min`,
+      focus_start: "Start",
     },
     ja: {
       mode: "画面秘書", title: "🗂 秘書", back: "← 秘書に戻る", classic: "↩ 通常の画面",
@@ -45,6 +48,9 @@ window.ConsoleCanvas = (() => {
       open: "スレッドを開く", chat: "💬 秘書と話す", no_running: "いまAIが進めている作業はありません。",
       states: { now: "▶", done: "✓", wait: "⏳", todo: "○" }, minutes: (m) => `${m}分`,
       before: "変更前", after: "変更後", sent: "秘書に伝えました",
+      expand: "全画面で見る", close: "✕ 閉じる", lanes: { you: "あなた", ai: "AI", external: "外部・待ち" },
+      focus: (n) => `🎯 集中セッション（${n}件）`, focus_ready: (t, n, m) => `🎯 秘書が集中セッションを用意しました：${t || "決めごと"} — ${n}件・約${m}分`,
+      focus_start: "始める",
     },
   };
   const S = () => STRINGS[document.documentElement.lang === "ja" ? "ja" : "en"];
@@ -157,6 +163,9 @@ window.ConsoleCanvas = (() => {
       buttons.push(h("button", { type: "button", class: "chip", onclick: () => setPaused(!sec.paused), text: sec.paused ? s.resume : s.pause }));
       buttons.push(h("button", { type: "button", class: "chip", onclick: () => start(true), text: s.restart }));
     }
+    const decisions = window.ConsoleSecretary.all().length;
+    if (sec.item_id && decisions && window.ConsoleSession) buttons.unshift(h("button", { type: "button", class: "chip cv-focus",
+      onclick: () => window.ConsoleSession.open(), text: s.focus(decisions) }));
     buttons.push(h("button", { type: "button", class: "chip", onclick: leave, text: s.classic }));
     const back = state.open && sec.item_id && state.open !== sec.item_id && !narrow.matches
       ? h("button", { type: "button", class: "btn cv-back", onclick: () => openItem(sec.item_id), text: s.back }) : null;
@@ -178,6 +187,11 @@ window.ConsoleCanvas = (() => {
     }
     const widgets = (data && data.widgets) || [];
     const out = [];
+    const plan = data && data.session;
+    if (plan && plan.items && plan.items.length && window.ConsoleSession) {
+      out.push(h("div", { class: "cv-banner" }, h("span", { text: s.focus_ready(plan.title, plan.items.length, plan.minutes) }),
+        h("button", { type: "button", class: "btn primary", onclick: () => window.ConsoleSession.open(), text: s.focus_start })));
+    }
     if (!widgets.length) out.push(h("p", { class: "cv-empty dim", text: s.empty }));
     else out.push(h("div", { class: "cv-grid" }, ...widgets.map(widget)));
     if (narrow.matches) out.push(h("button", { type: "button", class: "btn primary cv-chat", onclick: chat, text: s.chat }));
@@ -185,15 +199,18 @@ window.ConsoleCanvas = (() => {
   }
 
   // -- widgets ---------------------------------------------------------------
-  const DRAW = { decision, diff, table, markdown, timeline, agents, metric };
+  const DRAW = { decision, diff, table, markdown, timeline, agents, metric, schedule };
+  // One renderer per kind, shared with the focus session (session.js) for its material.
+  const draw = (kind, d) => (DRAW[kind] ? DRAW[kind](d) : null);
 
   function widget(w) {
     const s = S();
-    const draw = DRAW[w.kind];
     const head = h("div", { class: "cv-w-head" },
       h("h3", { text: w.title }),
       h("span", { class: "cv-spacer" }),
       h("span", { class: "dim cv-when", title: w.updated_at, text: s.updated(rel(w.updated_at)) }),
+      h("button", { type: "button", class: "icon-btn cv-x cv-expand", title: s.expand, "aria-label": s.expand,
+        onclick: () => full(w), text: "⛶" }),
       h("button", { type: "button", class: "icon-btn cv-x", title: s.dismiss, "aria-label": s.dismiss,
         onclick: () => dismiss(w.key), text: "✕" }));
     const note = w.note ? h("div", { class: "cv-note dim", text: w.note }) : null;
@@ -202,7 +219,7 @@ window.ConsoleCanvas = (() => {
       ...w.actions.map((a, i) => h("button", { type: "button", class: "btn" + (i === 0 ? " primary" : ""),
         title: `→ ${a.say}`, onclick: (e) => press(w, i, e.currentTarget), text: a.label }))) : null;
     return h("article", { class: `cv-w cv-k-${w.kind} cv-size-${w.size}`, "data-key": w.key },
-      head, note, h("div", { class: "cv-w-body" }, draw ? draw(w.data) : null), actions);
+      head, note, h("div", { class: "cv-w-body" }, draw(w.kind, w.data)), actions);
   }
 
   async function press(w, index, button) {
@@ -275,6 +292,59 @@ window.ConsoleCanvas = (() => {
       i.last_activity_at ? h("span", { class: "dim", text: rel(i.last_activity_at) }) : null)));
   }
 
+  // Today's timetable: three lanes on one time axis, the hour lines and a line at "now".
+  const toMin = (t) => { const [hh, mm] = t.split(":").map(Number); return hh * 60 + mm; };
+  function schedule(d) {
+    const s = S();
+    const lanes = d.lanes || {};
+    const blocks = ["you", "ai", "external"].flatMap((k) => (lanes[k] || []).map((b) => ({ ...b, lane: k })));
+    if (!blocks.length) return h("div", { class: "dim", text: "—" });
+    const now = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const ends = blocks.map((b) => (b.end ? toMin(b.end) : toMin(b.start) + 30));
+    const first = Math.floor(Math.min(...blocks.map((b) => toMin(b.start)), nowMin) / 60) * 60;
+    const last = Math.ceil(Math.max(...ends, Math.min(nowMin + 30, 24 * 60)) / 60) * 60;
+    const span = Math.max(60, last - first);
+    const pct = (m) => `${((m - first) / span) * 100}%`;
+    const hours = [];
+    for (let m = first; m <= last; m += 60) hours.push(h("div", { class: "cv-s-hour", style: { top: pct(m) },
+      text: `${String(Math.floor(m / 60)).padStart(2, "0")}:00` }));
+    const lane = (k) => h("div", { class: `cv-s-lane lane-${k}` },
+      h("div", { class: "cv-s-lane-head", text: s.lanes[k] }),
+      h("div", { class: "cv-s-track" }, ...(lanes[k] || []).map((b) => {
+        const start = toMin(b.start), end = b.end ? toMin(b.end) : start + 30;
+        const node = h("div", { class: "cv-s-block", style: { top: pct(start), height: `calc(${((end - start) / span) * 100}% - 3px)` },
+          title: `${b.start}${b.end ? `–${b.end}` : ""} ${b.label}` },
+          h("div", { class: "cv-s-label", text: b.label }),
+          h("div", { class: "cv-s-sub dim", text: [`${b.start}${b.end ? `–${b.end}` : ""}`, b.sub].filter(Boolean).join(" · ") }));
+        if (b.thread_id) { node.classList.add("link"); node.addEventListener("click", () => { chatOpen = true; openItem(`t${b.thread_id}`); }); }
+        return node;
+      }), nowLine()));
+    // "Now" is drawn in every lane's own track, so it lines up with the blocks.
+    function nowLine() {
+      return nowMin >= first && nowMin <= last ? h("div", { class: "cv-s-now", style: { top: pct(nowMin) } }) : null;
+    }
+    return h("div", { class: "cv-schedule" },
+      h("div", { class: "cv-s-axis" }, ...hours), lane("you"), lane("ai"), lane("external"));
+  }
+
+  // Any widget, full screen: a timetable or a long table reads better without the rest.
+  function full(w) {
+    const s = S();
+    closeFull();
+    const close = h("button", { type: "button", class: "btn", onclick: closeFull, text: s.close });
+    const box = h("div", { class: "cv-full", id: "cv-full", role: "dialog", "aria-label": w.title },
+      h("header", { class: "cv-full-head" }, h("h2", { text: w.title }), w.note ? h("span", { class: "dim", text: w.note }) : null,
+        h("span", { class: "cv-spacer" }), close),
+      h("div", { class: `cv-full-body cv-k-${w.kind}` }, draw(w.kind, w.data)));
+    document.body.append(box);
+    close.focus();
+  }
+  function closeFull() { const box = $("cv-full"); if (box) { box.remove(); return true; } return false; }
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && closeFull()) { e.preventDefault(); e.stopImmediatePropagation(); }
+  }, true);
+
   function metric(d) {
     return h("div", { class: "cv-metric" },
       h("div", { class: "cv-m-value", text: d.value }),
@@ -284,5 +354,6 @@ window.ConsoleCanvas = (() => {
         h("span", { style: { width: `${Math.max(0, Math.min(100, d.percent))}%` } })) : null);
   }
 
-  return { on, enter, leave, paint, onBoard, onClose, load, MODE, label: () => S().mode };
+  const session = () => (data && data.session) || null;
+  return { on, enter, leave, paint, onBoard, onClose, load, draw, session, MODE, label: () => S().mode };
 })();

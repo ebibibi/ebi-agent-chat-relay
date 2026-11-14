@@ -28,6 +28,7 @@ GOOD: dict[str, dict[str, Any]] = {
     "timeline": {"entries": [{"time": "21:00", "label": "Answer A", "state": "now", "minutes": 5}]},
     "agents": {"thread_ids": []},
     "metric": {"value": "3", "label": "to decide", "percent": 40},
+    "schedule": {"lanes": {"you": [{"start": "21:00", "end": "21:30", "label": "Decide"}]}},
 }
 
 
@@ -210,6 +211,9 @@ async def test_changes_wake_the_idle_secretary_within_the_limits(repo) -> None:
     assert (await repo.day_usage("2026-11-14"))["turns"] == 1
 
     board.items[0] = _item("t1", "done")
+    # The charter turn just read everything: no wake straight after it.
+    assert await secretary.tick() == "too soon"
+    clock[0] += timedelta(minutes=11)
     assert await secretary.tick() == "woken"
     assert host.replies[-1][0] == key and "1 thread" in host.replies[-1][1]
 
@@ -391,3 +395,103 @@ async def test_only_the_secretary_may_write_or_move_its_cursor(api) -> None:
     old = console.key["X-Canvas-Token"]
     await console.canvas.start_secretary("ebi", restart=True)
     assert not await console.canvas.authorized(old), "a restart rotates the key"
+
+
+# -- today's timetable and focus sessions -------------------------------------------
+def test_schedule_lanes_and_times_are_checked() -> None:
+    spec = parse_widget(
+        {
+            "kind": "schedule",
+            "title": "今日",
+            "data": {
+                "lanes": {
+                    "you": [
+                        {"start": "21:00", "end": "21:10", "label": "決めごと3件", "thread_id": "5"}
+                    ],
+                    "ai": [{"start": "20:30", "label": "字幕", "sub": "62%"}],
+                }
+            },
+        }
+    )
+    assert spec.data["lanes"]["you"][0]["end"] == "21:10"
+    assert spec.data["lanes"]["ai"][0]["end"] is None
+    assert spec.data["lanes"]["external"] == []
+    with pytest.raises(WidgetError) as caught:
+        parse_widget(
+            {
+                "kind": "schedule",
+                "title": "t",
+                "data": {
+                    "lanes": {
+                        "me": [],
+                        "you": [
+                            {"start": "9:00", "label": "x"},
+                            {"start": "10:00", "end": "09:00", "label": "y"},
+                        ],
+                    }
+                },
+            }
+        )
+    text = " | ".join(caught.value.problems)
+    assert "unknown lanes: me" in text and "HH:MM" in text and "after its start" in text
+
+
+def test_a_session_plan_orders_decisions_with_material() -> None:
+    from claude_discord.canvas_widget import parse_session
+
+    plan = parse_session(
+        {
+            "title": "GA v2",
+            "minutes": 15,
+            "items": [
+                {
+                    "thread_id": "11",
+                    "group": "GA v2",
+                    "why": "deadline 11/17",
+                    "materials": [
+                        {"kind": "table", "title": "中身", "data": GOOD["table"]},
+                        {"kind": "timeline", "title": "記録", "data": GOOD["timeline"]},
+                    ],
+                },
+                {"thread_id": "12"},
+            ],
+        }
+    )
+    assert [i["thread_id"] for i in plan["items"]] == ["11", "12"]
+    assert plan["items"][0]["materials"][1]["kind"] == "timeline"
+    with pytest.raises(WidgetError) as caught:
+        parse_session(
+            {
+                "minutes": 0,
+                "items": [{"thread_id": "x", "materials": [{"kind": "decision", "title": "d"}]}],
+            }
+        )
+    text = " | ".join(caught.value.problems)
+    assert "minutes" in text and "thread_id" in text and "material kind" in text
+
+
+def test_the_session_summary_tells_the_secretary_what_was_settled() -> None:
+    from claude_discord.console.canvas_routes import _titles, session_summary
+
+    decided, problem = _titles([{"title": "hccjp", "answer": "A 残さない"}], with_answer=True)
+    later, _ = _titles([{"title": "販売ページ"}], with_answer=False)
+    assert problem is None
+    text = session_summary(decided, later)
+    assert "hccjp → A 残さない" in text and "販売ページ" in text
+    assert _titles([{"title": ""}], with_answer=False)[1]
+    assert _titles("x", with_answer=False)[1]
+
+
+async def test_only_the_secretary_prepares_a_session(api) -> None:
+    client, server, console, _ = api
+    server._console = console
+    plan = {"items": [{"thread_id": "11"}], "minutes": 10}
+    assert (await client.put("/api/canvas/session", json=plan)).status == 403
+    resp = await client.put("/api/canvas/session", json=plan, headers=console.key)
+    assert resp.status == 200
+    read = await (await client.get("/api/canvas")).json()
+    assert read["session"]["minutes"] == 10 and read["session"]["prepared_at"]
+    bad = await client.put("/api/canvas/session", json={"items": []}, headers=console.key)
+    assert bad.status == 400 and "format" in await bad.json()
+    assert (await client.delete("/api/canvas/session", headers=console.key)).status == 200
+    assert (await (await client.get("/api/canvas")).json())["session"] is None

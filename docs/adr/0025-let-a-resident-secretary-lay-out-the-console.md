@@ -76,6 +76,17 @@ Add **canvas mode**, a third display mode chosen per browser beside classic and 
   secretary). Any other widget may carry buttons whose text is sent to the secretary as the
   person's message.
 
+### Addendum (#1360): focus sessions and today's timetable
+
+The person asked for two more views on the same foundation. Both reuse the canvas rather than
+add a mechanism: a **focus session** is a full-screen queue of the open decision requests,
+optionally ordered and given material by the secretary (`PUT /api/canvas/session`, validated
+like widgets, material drawn by the widget renderers), answered through the v2 answer path and
+reported back to the secretary in one message when it ends. **Today's timetable** is one more
+widget kind, `schedule`, with three lanes (the person, agents, waiting on others) on one time
+axis; any widget can be shown full screen. ccdb reads no calendar for it: calendar access stays
+with the agent's own tools, so the relay gains no new credential.
+
 ## Consequences
 
 - One resident conversation costs tokens on every wake. The defaults bound it to 24

@@ -244,6 +244,28 @@ answer relayed by the secretary, and its open request closes.
 
 On a phone the canvas comes first; **💬 Secretary** opens the conversation over it.
 
+**Today's timetable** is a `schedule` widget: `{"lanes": {"you": [...], "ai": [...],
+"external": [...]}}`, each block `{"start": "HH:MM", "end"?: "HH:MM", "label", "sub"?,
+"thread_id"?}`. The Console draws the three lanes on one time axis with a red line at now; a
+block with a thread opens it. The secretary puts the decisions into your free time, beside the
+agents' expected finish and what waits on others. ccdb has no calendar of its own: the secretary
+adds events when its own tools can read your calendar. Any widget opens full screen with **⛶**
+(Esc closes it).
+
+**Focus session.** When decisions pile up, or you tell the secretary you have a few minutes, it
+prepares a session with `PUT /api/canvas/session` (key required):
+`{"title"?, "minutes"?: 1-240, "items": [{"thread_id", "group"?, "why"?, "materials"?: up to
+three of table / timeline / diff / markdown}]}`, ordered so similar contexts come together.
+The canvas then offers it at the top; **🎯 Focus session (n)** in the header opens one at any
+time, with the open decision requests in order when nothing was prepared. The session fills the
+screen with one decision at a time: the card large, its material drawn beside it, the full
+request folded below, and on the right what comes next, what agents are doing and what this
+session settled. Keys: **1 2 3** answer (sent to the asking thread like a card button, closing
+its request), **C** answer in your own words, **S** later, **→** next, **Esc** end. At the end
+the secretary receives one message listing what was decided and what was left for later
+(`POST /console/api/canvas/session/finish`), and the prepared plan is cleared.
+`DELETE /api/canvas/session` withdraws a plan.
+
 ## Automatic triage
 
 Nobody fills in priority and due date for every thread, so the console asks a fast model
