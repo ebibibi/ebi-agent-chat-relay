@@ -98,8 +98,11 @@ window.ConsoleSecretary = (() => {
     const s = S();
     const chip = (key, label) => h("button", { type: "button", class: "chip" + ((on() ? VIEW : "classic") === key ? " on" : ""),
       "aria-pressed": (on() ? VIEW : "classic") === key ? "true" : "false", onclick: () => setMode(key), text: label });
+    // Canvas mode (canvas.js) takes the whole screen, so its chip only enters it.
+    const canvas = window.ConsoleCanvas ? h("button", { type: "button", class: "chip",
+      onclick: () => window.ConsoleCanvas.enter(), text: window.ConsoleCanvas.label() }) : null;
     return h("div", { class: "mode-switch", role: "group", "aria-label": s.mode },
-      h("span", { class: "dim", text: s.mode }), chip("classic", s.classic), chip(VIEW, s.secretary));
+      h("span", { class: "dim", text: s.mode }), chip("classic", s.classic), chip(VIEW, s.secretary), canvas);
   }
 
   // The secretary home as a menu entry, only in secretary mode.

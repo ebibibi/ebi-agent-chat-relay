@@ -181,6 +181,69 @@ and rows older than 180 days are dropped. `GET /console/api/secretary/stats?days
 per-day threads opened, opened per mode, card answers and the median wait before a card
 answer.
 
+## Canvas mode: the secretary lays out the screen
+
+Canvas mode is a third display mode (**Display mode: … / Canvas**, labelled 画面秘書 in
+Japanese; [ADR-0025](adr/0025-let-a-resident-secretary-lay-out-the-console.md)). The thread
+list goes away. The left of the screen belongs to one resident **secretary agent**, which
+places widgets there; the right is your conversation with it. **↩ Classic screen** goes back.
+
+- **Start it once.** The first time, the canvas offers **Start the secretary**. That opens an
+  ordinary Console conversation (same runner, transcript, `/model`, Stop) whose first message
+  is the secretary's charter (`claude_discord/console/canvas_charter.py`). Until someone starts
+  it, nothing is read and nothing is spent. **🔄 Restart** opens a fresh conversation (for a
+  full context); the notes and widgets stay.
+- **It keeps every thread in mind through notes.** The secretary writes one short note per
+  thread (`PUT /api/secretary/notes/{thread_id}`); the relay keeps them. On a wake it reads
+  `GET /api/secretary/digest`: only the threads whose status, activity or decision request
+  changed since its cursor, each with its note, its open request, its family's doing/decided
+  and its last four messages. `?all=1` lists every open thread without messages; `?peek=1`
+  leaves the cursor where it is.
+- **It is woken by changes, not by a timer.** Every 30 seconds a watcher compares the board
+  (status, the activity of idle threads, open requests; no model). A wake is one short
+  message into the secretary's conversation, sent only when something changed, the secretary
+  is idle, `CCDB_CANVAS_MIN_INTERVAL` seconds (600) have passed since the last wake and the
+  day's wakes are under `CCDB_CANVAS_MAX_WAKES_PER_DAY` (24). **⏸ Pause** stops the wakes;
+  what you type always goes through.
+- **Usage is on screen**: wakes today against the cap, turns, the secretary's context, and an
+  estimate of the input it read today (the context size after each turn, summed; cached input
+  is billed below it).
+- **Model.** `claude` with `sonnet` unless `CCDB_CANVAS_SECRETARY_BACKEND`,
+  `CCDB_CANVAS_SECRETARY_MODEL` or `CCDB_CANVAS_SECRETARY_EFFORT` say otherwise.
+
+**Only the secretary writes.** Starting or restarting it issues a random key, given only in its
+charter. Widget, order, note and deliver calls must carry it as `X-Canvas-Token` and are refused
+with 403 otherwise; a digest read without it never moves the cursor. Reads are open.
+
+**Widgets are data, drawn by the Console.** The secretary sends
+`PUT /api/canvas/widgets/{key}` with a `kind`, a one-line `title`, `data`, and optionally
+`size` (`s`, `m`, `l`), `position`, a one-line `note` and up to four `actions`
+(`{"label", "say"}` — a button that sends `say` to the secretary as your message). Each kind
+has a fixed renderer; text is set as text and Markdown goes through the sanitising renderer, so
+no HTML or script from a model reaches the page. A malformed widget is refused with 400 and
+every problem listed (`claude_discord/canvas_widget.py`).
+
+| Kind | `data` | Drawn as |
+|---|---|---|
+| `decision` | `{"thread_id"}` | The thread's open decision request, as the secretary-mode card; its buttons answer the asking thread |
+| `diff` | `{"diff"}` (unified) or `{"before", "after"}` | Coloured lines, or the two texts side by side |
+| `table` | `{"columns": [...], "rows": [[...]]}` | A table (8 columns, 40 rows at most) |
+| `markdown` | `{"text"}` | Sanitised Markdown |
+| `timeline` | `{"entries": [{"time", "label", "state", "minutes"?, "thread_id"?}]}` | An ordered plan; `state` is `todo`, `now`, `done` or `wait` |
+| `agents` | `{"thread_ids": [...]}` | Those threads' status, or every running thread when empty |
+| `metric` | `{"value", "label", "sub"?, "percent"?}` | A number with an optional bar |
+
+`DELETE /api/canvas/widgets/{key}` removes one, `POST /api/canvas/order` with `{"keys": [...]}`
+reorders, `GET /api/canvas` lists them. A canvas holds at most 30. Each widget shows when it was
+last updated, and **✕** removes it from the screen.
+
+**Answers.** A decision card's buttons answer the asking thread directly, as in secretary mode.
+When you answer in the chat instead, the secretary delivers it with
+`POST /api/secretary/deliver` (`{"thread_id", "text"}`): the thread receives it marked as your
+answer relayed by the secretary, and its open request closes.
+
+On a phone the canvas comes first; **💬 Secretary** opens the conversation over it.
+
 ## Automatic triage
 
 Nobody fills in priority and due date for every thread, so the console asks a fast model

@@ -42,6 +42,9 @@ from .attention import console_activity
 from .auth import ConsoleAuthConfig, ConsoleAuthenticator, ConsoleAuthError
 from .auth_routes import AUTH_PREFIX, AuthRoutes
 from .board import SessionInfo, ThreadSnapshot, build_board
+from .canvas import CanvasSecretary
+from .canvas_repo import CanvasRepository
+from .canvas_routes import CanvasRoutes
 from .cli_login import CliLogin, login_commands
 from .cli_login_routes import CliLoginRoutes
 from .codex_compact import CompactError, compact_codex_session
@@ -263,6 +266,7 @@ class ConsoleServer:
         cli_login: CliLogin | None = None,
         views: SavedViewRepository | None = None,
         secretary_events: SecretaryEventRepository | None = None,
+        canvas_repo: CanvasRepository | None = None,
     ) -> None:
         self.api = api_server
         #: Secretary mode's trial metrics; None turns recording off.
@@ -321,6 +325,8 @@ class ConsoleServer:
         self._start_locks: dict[str, asyncio.Lock] = {}
         # Strong references: the loop keeps only weak ones to running tasks.
         self._tasks: set[asyncio.Task[Any]] = set()
+        #: Canvas mode's resident secretary (ADR-0025); None turns the mode off.
+        self.canvas = self._build_canvas(canvas_repo)
         self.app = self._build_app()
 
     def _background(self, coro: Any) -> None:
@@ -380,6 +386,7 @@ class ConsoleServer:
         page_routes = PageRoutes(self.api)
         secretary_routes = SecretaryRoutes(self, self.secretary_events)
         r.add_post(f"{API_PREFIX}/secretary/events", secretary_routes.record)
+        CanvasRoutes(self, self.canvas, IDENTITY).register(r, API_PREFIX)
         r.add_get(f"{API_PREFIX}/secretary/stats", secretary_routes.stats)
         r.add_post(f"{API_PREFIX}/pages/{{slug}}", page_routes.define)
         r.add_get(f"{API_PREFIX}/pages/{{slug}}/items", page_routes.items)
@@ -457,6 +464,8 @@ class ConsoleServer:
         logger.info("Ebi AI Console started: http://%s:%d", self.host, self.port)
         if self.workspace.root is not None and self._records_task is None:
             self._records_task = asyncio.ensure_future(self._records_loop())
+        if self.canvas is not None:
+            self.canvas.start()
 
     def start_triage(self, ask: Callable[[str], Awaitable[str | None]], *, model: str) -> None:
         """Triage open items in the background with *ask* (one model call per item)."""
@@ -475,7 +484,41 @@ class ConsoleServer:
         self._triager.start(self._board_items, TRIAGE_INTERVAL_SECONDS)
         logger.info("Ebi AI Console: automatic triage on (%s)", model)
 
+    def _build_canvas(self, repo: CanvasRepository | None) -> CanvasSecretary | None:
+        if repo is None:
+            return None
+        return CanvasSecretary(
+            repo,
+            board=self._board_items,
+            requests=self._open_requests,
+            messages=self.triage_messages,
+            situation=self._situation_dict,
+            host=self.sessions,
+        )
+
+    async def _situation_dict(self, thread_id: int) -> dict[str, Any] | None:
+        repo = self.api.situation_repo
+        if repo is None:
+            return None
+        written = await repo.get(thread_id)
+        return written.as_dict() if written else None
+
+    async def deliver_from_secretary(self, thread_id: int, text: str) -> web.Response:
+        """The person's answer, given in the canvas secretary's chat, to the thread that asked.
+
+        It is marked as relayed, so the receiving agent knows the words passed through the
+        secretary, and it closes the thread's open requests as a Console reply does.
+        """
+        item_id = f"t{int(thread_id)}"
+        relayed = f"🗂 The person's answer, relayed by their secretary (canvas mode):\n\n{text}"
+        response = await self._deliver(item_id, relayed, "secretary", metered=False)
+        if response.status < 300:
+            await self._close_requests(item_id, None)
+        return response
+
     async def stop(self) -> None:
+        if self.canvas is not None:
+            await self.canvas.stop()
         if self._records_task is not None:
             self._records_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -811,8 +854,11 @@ class ConsoleServer:
             sessions=sessions,
         )
         queued = self._queued_thread_ids()
+        secretary = await self.canvas.item_id() if self.canvas is not None else None
         for item in items:
             item["queued"] = item["thread_id"] in queued
+            # The canvas secretary is a standing service, not work: no chime per turn.
+            item["canvas_secretary"] = item["id"] == secretary
         return items
 
     async def triage_messages(self, item: dict[str, Any]) -> list[tuple[str, str]]:
@@ -1956,6 +2002,8 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
     await views.init_db()
     secretary_events = SecretaryEventRepository(api_server.session_repo.db_path)
     await secretary_events.init_db()
+    canvas_repo = CanvasRepository(api_server.session_repo.db_path)
+    await canvas_repo.init_db()
     if triage is not None:
         await triage.init_db()
     console = ConsoleServer(
@@ -1975,6 +2023,7 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
         places=places,
         views=views,
         secretary_events=secretary_events,
+        canvas_repo=canvas_repo,
         cli_login=CliLogin(login_commands()),
     )
     await console.start()

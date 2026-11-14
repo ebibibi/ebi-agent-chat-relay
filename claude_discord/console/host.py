@@ -117,14 +117,19 @@ class ConsoleSessionHost:
         parent_thread_id: int | None = None,
         lineage_repo: Any = None,
         result_sink: ResultSink | None = None,
+        ai: tuple[str, str | None, str | None] | None = None,
     ) -> int:
-        """Create native agent work, storing preferences and lineage before its first turn."""
+        """Create native agent work, storing preferences and lineage before its first turn.
+
+        *ai* — ``(backend, model, effort)`` — pins the conversation's AI before its first turn
+        (the canvas secretary, ADR-0025); otherwise a child inherits its parent's preferences.
+        """
         import uuid
 
         from claude_code_core.frontend import OutboundFile
 
-        child_ai = None
-        if parent_thread_id is not None:
+        child_ai = ai
+        if child_ai is None and parent_thread_id is not None:
             preferences = self._settings.for_children()
             backend = await preferences.current_backend(parent_thread_id)
             child_ai = (
