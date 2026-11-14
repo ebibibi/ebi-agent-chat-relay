@@ -137,6 +137,24 @@ CREATE TABLE IF NOT EXISTS thread_situation (
     updated_at TEXT NOT NULL
 );
 
+-- Decision requests an agent sent the person (decision_repo.py, ADR-0024).
+-- closed_at NULL: still open. One open request per (thread_id, req_key).
+CREATE TABLE IF NOT EXISTS decision_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id INTEGER NOT NULL,
+    req_key TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL,
+    origin TEXT NOT NULL,
+    source_thread_id INTEGER NOT NULL,
+    card TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    closed_at TEXT,
+    close_reason TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_decision_requests_open ON decision_requests(closed_at, thread_id);
+
 -- Waits (claude_discord/waits.py): a probe ccdb re-runs until it says done,
 -- then resumes the thread. Lets a session end its turn while CI runs instead
 -- of holding a concurrency slot. Times are Unix seconds.
@@ -250,6 +268,23 @@ _MIGRATIONS = [
         "decided TEXT NOT NULL DEFAULT '[]', "
         "updated_at TEXT NOT NULL)"
     ),
+    # decision_requests added for secretary mode v2 (ADR-0024)
+    (
+        "CREATE TABLE IF NOT EXISTS decision_requests ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "thread_id INTEGER NOT NULL, "
+        "req_key TEXT NOT NULL DEFAULT '', "
+        "kind TEXT NOT NULL, "
+        "origin TEXT NOT NULL, "
+        "source_thread_id INTEGER NOT NULL, "
+        "card TEXT NOT NULL, "
+        "detail TEXT NOT NULL, "
+        "created_at TEXT NOT NULL, "
+        "closed_at TEXT, "
+        "close_reason TEXT)"
+    ),
+    "CREATE INDEX IF NOT EXISTS idx_decision_requests_open"
+    " ON decision_requests(closed_at, thread_id)",
 ]
 
 

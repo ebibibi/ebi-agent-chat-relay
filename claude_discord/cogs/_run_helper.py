@@ -246,7 +246,9 @@ def _waiting_marker_hint() -> str:
         return ""
     return (
         "\nWhen instead your turn ends because only the user can move the work forward, "
-        "say plainly what you need from them and mark the thread with the ONE that fits:\n"
+        "say plainly what you need from them and mark the thread with the ONE that fits, "
+        'sending your decision request as the call\'s JSON body (see "Asking the user"; a '
+        "bare call still marks, but the user then gets no card):\n"
         + "\n".join(lines)
         + "\nThe marker is removed when the user replies. Do not use any of these while "
         "you are the one who still has work to do."
@@ -348,6 +350,11 @@ async def _build_system_context(config: RunConfig) -> str | None:
         "Creating a child thread still requires authorization to delegate."
     )
 
+    if getattr(config.runner, "api_port", None) is not None:
+        from ..decision_request import agent_guide
+
+        parts.append(agent_guide())
+
     parts.append(
         "## Situation panel for thread families\n"
         "Once this thread has child threads, the Console shows a panel beside the conversation "
@@ -358,11 +365,11 @@ async def _build_system_context(config: RunConfig) -> str | None:
         f'  `curl -s -X PUT "$CCDB_API_URL/api/threads/{config.surface.thread_key}/situation" '
         '-H "Content-Type: application/json" '
         '-d \'{"asks": [...], "doing": [...], "decided": [...]}\'`\n'
-        "Each field is an array of short strings; a field you send replaces that field, one you "
-        "leave out stays, and GET on the same URL returns the record. "
-        "`asks`: what only the user can answer or do now, each understandable on its own, with "
-        "your recommendation; gather your children's questions here so the user can answer you "
-        "alone, and remove an entry once it is answered. "
+        "A field you send replaces that field, one you leave out stays, and GET on the same "
+        "URL returns the record. "
+        "`asks`: what only the user can answer or do now, each entry a decision request (see "
+        '"Asking the user"); gather your children\'s questions here so the user can answer '
+        "them in one place, and leave an entry out once it is answered: its card closes. "
         "`doing`: what is moving now, in a few words. "
         "`decided`: decisions made and outcomes finished; keep them across updates. "
         "No secrets, and no chat narrative. A thread without children need not use it."

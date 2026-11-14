@@ -21,6 +21,7 @@ from claude_code_core.attention_repo import HumanActivityRepository
 
 from .database.ask_repo import PendingAskRepository
 from .database.claims_repo import ClaimRepository
+from .database.decision_repo import DecisionRequestRepository
 from .database.frontend_thread_repo import FrontendThreadRepository
 from .database.ingest_repo import IngestResultRepository
 from .database.lineage_repo import ThreadLineageRepository
@@ -57,6 +58,7 @@ class SessionStores:
     lineage: ThreadLineageRepository
     #: What a parent thread says about where its work stands (the Console's family panel).
     situations: ThreadSituationRepository
+    decisions: DecisionRequestRepository
     #: Human messages that reached a session — the input of the attention estimate.
     attention: HumanActivityRepository
     #: Waits a session registered before ending its turn (``/api/waits``).
@@ -108,6 +110,7 @@ async def build_session_stores(session_db_path: str) -> SessionStores:
         frontend_threads=frontend_threads,
         lineage=ThreadLineageRepository(session_db_path),
         situations=ThreadSituationRepository(session_db_path),
+        decisions=DecisionRequestRepository(session_db_path),
         attention=attention,
         waits=WaitRepository(session_db_path),
         pages=pages,

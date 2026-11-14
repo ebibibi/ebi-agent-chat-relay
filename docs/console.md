@@ -125,25 +125,54 @@ the classic mode keeps its look and behavior. With secretary mode on, the menu g
 **🗂 Secretary**. That screen becomes the home whenever the Console opens without a view
 in the address.
 
-- **🔴 Decide now** — at most three questions where an agent stopped for you (❓ asked,
-  📋 a step only you can do, ⚠️ failed), ranked like Focus with your own threads before
-  delegated ones. Each card shows what is being asked in one sentence, why, how long it has
-  waited, the recommended answer and up to three ready-made replies. One click, or a few words
-  of your own, sends the answer through the same reply endpoint as the detail pane, so the
-  agent carries on exactly as if you had typed it in the thread. A card that has no question
-  recorded yet shows the triage's next step or the title. "N more → Focus" leads to the rest.
-- **👀 To review**, **🤖 Agents at work** (one line each, no progress text) and
-  **✅ Finished today**, where a 🏁 candidate can be confirmed with the usual ✅ writeback.
-- Every card keeps **↗ Open the thread**.
+The cards are **decision requests** written by the agent that asks, not summaries
+(v1 summarised each thread's last message with the triage model, and its cards could not be
+answered; see the ADR). A card has at most six lines and is meant to be answerable by someone
+who has forgotten the whole matter:
 
-The screen is computed from the board without a model call
-(`claude_discord/console/secretary.py`, sent as `secretary` with every board). The words on
-a card come from [automatic triage](#automatic-triage). For an item whose move is yours, the
-same per-item call also returns `ask`, `suggest` and `options`. Other items get the same
-prompt and answer as before. Adding the fields did not change the prompt version, so there
-was no full re-triage. A row written before the fields existed is asked once more, and only
-when its item waits on you. The board reports the fields as `ai.ask`, `ai.suggest` and
-`ai.options`: `null` means never asked, and `""` means asked with nothing to decide.
+```
+🔴 Delete hccjp now, or export its data first?
+About: the HCCJP environment of GA v2 is deleted on 11/17; that cannot be undone.
+A Delete as is [recommended]: no extra work; it holds mostly automated tests.
+B Export first: 30-60 minutes of work; storage costs cents a month.
+Deadline: before the deletion on 11/17
+[A Delete as is] [B Export first] [✏️ Another answer]   More ▾
+```
+
+- **🔴 Decide now** — cards for questions (❓) and steps only you can do (📋), ranked like
+  Focus with your own threads before delegated ones; the first three show, the rest are one
+  click away. A button sends the choice to the thread that asked, restating the question
+  (`「<title>」への回答: <label> — <effect>`), through the same reply endpoint as the detail pane.
+  **✏️ Another answer** sends words of your own the same way. **More ▾** unfolds the full
+  request: what it is about, what is happening and why now, what to decide, the choices and
+  their results, the recommendation and why, the material to decide with (the draft, the
+  diff, the numbers, rendered as Markdown), and the deadline.
+- **👀 To review** — the same cards for deliverables (👀).
+- **📭 Waiting without a request** — threads that wait on you (❓/👀/📋/⚠️) but whose agent
+  wrote no request, by title only. Nothing is summarised for them; open the thread.
+- **🤖 Agents at work** (one line each, no progress text) and **✅ Finished today**, where a
+  🏁 candidate can be confirmed with the usual ✅ writeback.
+- Each card names its thread (**↗ title**), one click away.
+
+**Where the requests come from.** An agent sends its request as the JSON body of the marker
+call (`POST /api/threads/{id}/waiting`, `/review` or `/action`). A parent carries its own
+questions and its children's in `asks` of its [situation panel](#where-things-stand). Agents
+are given the format and the bar in their run context. The Console checks the format with
+deterministic rules (`claude_discord/decision_request.py`; no model): the card's four parts,
+one line each, at most three choices (two or more for a question, exactly one recommended), at
+most 300 characters, and all seven parts of the detail. A request that fails is refused with
+400 and every problem listed (`problems`), plus the format (`format`), so the agent rewrites
+it in the same turn. A bare marker call still marks the thread as before; it shows no card.
+
+**When a card goes away.** Requests are stored in `decision_requests`, one open request per
+thread and `key`; a newer one with the same key replaces it, so a parent carrying a child's
+question (`for_thread`) does not add a second card. A request closes when the person answers
+from its card or replies in the Console, when the thread is marked again without a request or
+marked 🏁/✅, or when the parent leaves it out of its next `asks`. A request sent with a mark
+also shows only while its thread still carries ❓/👀/📋 and is not running, so a reply typed
+in Discord takes the card away as soon as the agent picks it up. Nothing here calls a model:
+the screen is computed from the board and the open requests (`claude_discord/console/secretary.py`,
+sent as `secretary` with every board).
 
 **Trial metrics.** To compare the modes over a week, the Console records which threads you
 open (in either mode) and which answers came from a card, with how long the question had
@@ -718,7 +747,12 @@ curl -s -X PUT "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/situation" \
        "decided": ["Payments stay on one provider"]}'
 ```
 
-Each field is an array of up to 40 strings of up to 600 characters. A field you send replaces that
+Each field is an array of up to 40 strings of up to 600 characters. An entry of `asks` may instead be a
+[decision request](#secretary-mode) object, with `"for_thread": "<child id>"` when the parent carries a
+child's question and `"kind"` (`waiting` by default, or `review` / `action`). The panel shows its title;
+the secretary home shows the card, and an answer goes to the thread named by `for_thread` (the parent
+itself without it). Writing `asks` again closes the requests the parent left out. Two requests for the
+same thread need distinct `key` values. A field you send replaces that
 field and one you leave out stays. An unknown field is refused. `GET` on the same URL returns the record,
 and the Console reads it from `GET /console/api/items/{id}/situation` along with the active waits. The record is
 stored per thread (`thread_situation`), not in `status.md`:

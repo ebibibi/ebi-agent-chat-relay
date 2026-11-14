@@ -1,8 +1,8 @@
 ---
 type: adr
 id: ADR-0024
-title: Add a secretary mode built around decisions, without new model calls
-decision: Add a second Console display mode whose home lists at most three decisions, worded by fields the existing per-item triage call adds, and assembled without a model. The classic mode is unchanged.
+title: Add a secretary mode built around decisions, written by the agent that asks
+decision: Add a second Console display mode whose home shows decision cards. In v2 each card is a structured decision request written by the asking agent and checked by deterministic rules (v1 worded cards with the triage model, and its cards could not be answered). The home is assembled without a model. The classic mode is unchanged.
 status: accepted
 date: 2026-11-14
 decided_by: human+ai
@@ -10,7 +10,7 @@ deciders: [Masahiko Ebisuda, Claude]
 scope: repository
 ---
 
-# ADR-0024: Add a secretary mode built around decisions, without new model calls
+# ADR-0024: Add a secretary mode built around decisions, written by the agent that asks
 
 ## Context
 
@@ -56,3 +56,57 @@ look and behavior; the only things it gains are the switch and a silent record o
 - A later stage can move the agents themselves to talk to the person through this screen, or send
   web-push notifications for "decide now" only. Neither is in scope until the trial shows the mode
   helps.
+
+## Revision (v2, 2026-11-14): the agent that asks writes the card
+
+### What went wrong with v1
+
+The person rated v1 "not usable at all", worse than the classic mode: the cards had no
+explanation, so nothing on them could be answered on the spot. The cause was the source of
+the words. v1 had the cheapest model shorten each thread's **last message** into one line, and
+a thread's last message is usually a usage footer or a CI notice. Shortening text that holds
+no explanation cannot produce one. The real question often lived in another thread (a parent
+gathering its children's questions), written in shorthand there too: the situation panel's
+instructions asked for `asks` that are "understandable on their own" but also described them as
+"short strings", and the agents wrote the short strings.
+
+An experiment settled the alternative. The agents that had asked three real questions were each
+given the same seven-part format (what this is about; what is happening and why now; what to
+decide; the choices and their results; the recommendation and why; the material to decide with;
+the deadline and what happens without a decision). The person could answer all three without
+opening anything else, but found the full text too much to read at a glance. Two layers — a
+short card with the full request folded under it — were approved.
+
+### Decision
+
+- **The asking agent writes a decision request**, sent as the JSON body of `/waiting`,
+  `/review` or `/action`, or as an object entry of a parent's `asks` (`for_thread` for a
+  child's question). The card: `title` (what to decide), `context` (what it is about, from
+  zero), `options` (each a button label and a one-line effect, exactly one recommended for a
+  question), `deadline`. The `detail` holds the seven parts in full.
+- **The format is enforced by deterministic checks, never by a model** (`decision_request.py`):
+  every part present, one line each, at most three choices, at most 300 characters on the card,
+  all seven detail parts. A failing request is refused with 400 and every problem listed, so the
+  agent rewrites it in the same turn. The bar given to agents: someone who has forgotten the
+  whole matter can answer from the card alone.
+- **One open request per thread and key**, stored in `decision_requests`. A new one replaces the
+  old, so a parent carrying a child's question does not duplicate the child's card.
+- **Answered questions go away by themselves.** An answer from a card (or any Console reply)
+  closes the request; a new mark without a request, 🏁/✅, or a parent's `asks` without it closes
+  it too. A request sent with a mark shows only while its thread carries ❓/👀/📋 and is not
+  running, which also covers replies typed in Discord. This addresses decided questions that
+  stayed listed in a parent's `asks`.
+- **No summaries.** Threads that wait on the person without a request are listed apart by title.
+  The v1 triage fields are no longer requested: they cost output tokens and the cards no longer
+  use them. The columns stay in `ai_triage`, unused.
+- **Compatibility.** Bare marker calls and string `asks` work as before; the classic mode is
+  unchanged.
+
+### Consequences
+
+- A card is as good as the agent that wrote it, but it can no longer be empty or a fragment:
+  the checks reject those. Shorthand that passes the checks is still possible; the instructions
+  name the bar so the agent writes for a reader who has forgotten everything.
+- Every agent's run context grows by one section that describes the format (about 2 KB).
+- Agents that do not send requests (older prompts, other relays) still show up, under
+  "waiting without a request", so nothing that waits on the person disappears.

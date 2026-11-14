@@ -649,13 +649,40 @@ class ConsoleServer:
                 "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "items": items,
                 "guide": build_guide(items, records=records),
-                "secretary": build_secretary(items),
+                "secretary": build_secretary(items, await self._open_requests()),
                 "slots": self._slots(),
                 "places": await self._place_list(items),
                 "views": await self._view_list(),
                 "pages": await self._page_list(),
             }
         )
+
+    async def _open_requests(self) -> list[dict[str, Any]]:
+        """The decision requests agents sent and nobody has answered (ADR-0024)."""
+        repo = getattr(self.api, "decision_repo", None)
+        if repo is None:
+            return []
+        try:
+            return [r.as_dict() for r in await repo.list_open()]
+        except Exception:
+            # The board still answers; the secretary home then lists the items as unexplained.
+            logger.exception("console: could not read decision requests")
+            return []
+
+    async def _close_requests(self, item_id: str, request_id: Any) -> None:
+        """A person answered in the Console: the request (or all of the thread's) is settled."""
+        repo = getattr(self.api, "decision_repo", None)
+        thread_id = _thread_of(item_id)
+        if repo is None or thread_id is None:
+            return
+        try:
+            if isinstance(request_id, int) and not isinstance(request_id, bool):
+                await repo.close(thread_id, reason="answered", request_id=request_id)
+            else:
+                await repo.close(thread_id, reason="replied")
+        except Exception:
+            # The reply has gone through; the card disappears anyway once the thread runs.
+            logger.exception("console: could not close the requests of %s", item_id)
 
     async def _view_list(self) -> list[dict[str, Any]]:
         """The saved views, sent with every board so all devices show the same list."""
@@ -1199,9 +1226,11 @@ class ConsoleServer:
         if err:
             return err
         text = with_attachments(text, files)
-        return await self._deliver(
-            request.match_info["item_id"], text, request[IDENTITY], metered=True
-        )
+        item_id = request.match_info["item_id"]
+        response = await self._deliver(item_id, text, request[IDENTITY], metered=True)
+        if response.status < 300:
+            await self._close_requests(item_id, body.get("request_id"))
+        return response
 
     async def _deliver(self, item_id: str, text: str, who: str, *, metered: bool) -> web.Response:
         """Queue *text* as the human's next message in the item's conversation.

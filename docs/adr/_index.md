@@ -32,4 +32,4 @@ earlier ADR instead of rewriting its history.
 
 - [ADR-0022: Measure context occupancy separately from token usage](0022-measure-context-separately-from-usage.md) — Codex compact input and truthful context measurements (accepted, 2026-11-11).
 - [ADR-0023: Persist relative pin moves atomically](0023-persist-relative-pin-moves.md)
-- [ADR-0024: Add a secretary mode built around decisions, without new model calls](0024-add-a-secretary-mode-built-around-decisions.md)
+- [ADR-0024: Add a secretary mode built around decisions, written by the agent that asks](0024-add-a-secretary-mode-built-around-decisions.md)

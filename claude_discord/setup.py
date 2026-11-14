@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from .backend_settings import BackendSettings
     from .database.ask_repo import PendingAskRepository
     from .database.claims_repo import ClaimRepository
+    from .database.decision_repo import DecisionRequestRepository
     from .database.frontend_thread_repo import FrontendThreadRepository
     from .database.ingest_repo import IngestResultRepository
     from .database.lineage_repo import ThreadLineageRepository
@@ -68,6 +69,7 @@ class BridgeComponents:
     #: can see its own fan-out instead of inferring it from thread titles.
     lineage_repo: ThreadLineageRepository | None = None
     situation_repo: ThreadSituationRepository | None = None
+    decision_repo: DecisionRequestRepository | None = None
     page_repo: PageRepository | None = None
     resume_repo: PendingResumeRepository | None = None
     ingest_repo: IngestResultRepository | None = None
@@ -113,6 +115,8 @@ class BridgeComponents:
             api_server.lineage_repo = self.lineage_repo
         if self.situation_repo is not None:
             api_server.situation_repo = self.situation_repo
+        if self.decision_repo is not None:
+            api_server.decision_repo = self.decision_repo
         if self.page_repo is not None:
             api_server.page_repo = self.page_repo
         if self.resume_repo is not None:
@@ -651,6 +655,7 @@ async def setup_bridge(
         wait_repo=stores.waits if enable_waits else None,
         lineage_repo=lineage_repo,
         situation_repo=stores.situations,
+        decision_repo=stores.decisions,
         page_repo=stores.pages,
         resume_repo=resume_repo,
         ingest_repo=ingest_repo,

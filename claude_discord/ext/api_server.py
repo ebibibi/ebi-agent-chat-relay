@@ -30,7 +30,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlsplit
 
 from aiohttp import web
@@ -58,6 +58,7 @@ from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
 from ..thread_status import request_thread_outcome
 from . import ingest_manifest, teams_reply, teams_sync
 from .attention_api import handle_attention
+from .decision_api import read_mark_request, remember_mark
 from .entra_auth import EntraTokenVerifier, looks_like_jwt
 from .pages_api import (
     handle_add_item,
@@ -82,6 +83,7 @@ if TYPE_CHECKING:
     from claude_code_core.attention_repo import HumanActivityRepository
 
     from ..database.claims_repo import ClaimRepository
+    from ..database.decision_repo import DecisionRequestRepository
     from ..database.ingest_repo import IngestResultRepository
     from ..database.lineage_repo import ThreadLineageRepository
     from ..database.lounge_repo import LoungeRepository
@@ -309,6 +311,7 @@ class ApiServer:
         claims_repo: ClaimRepository | None = None,
         lineage_repo: ThreadLineageRepository | None = None,
         situation_repo: ThreadSituationRepository | None = None,
+        decision_repo: DecisionRequestRepository | None = None,
         page_repo: PageRepository | None = None,
         transcripts_path: str | None = None,
         ingest_require_complete: bool | None = None,
@@ -344,6 +347,8 @@ class ApiServer:
         self.claims_repo = claims_repo
         self.lineage_repo = lineage_repo
         self.situation_repo = situation_repo
+        # Decision requests (ADR-0024): what agents asked the person, until answered.
+        self.decision_repo = decision_repo
         self.page_repo = page_repo
         # Human-activity metering (GET /api/attention). Wired by
         # BridgeComponents.apply_to_api_server; 503 until then.
@@ -1946,7 +1951,7 @@ class ApiServer:
 
     async def put_situation(self, request: web.Request) -> web.Response:
         """PUT /api/threads/{thread_id}/situation — replace the fields the body names."""
-        return await handle_put_situation(request, self.situation_repo)
+        return await handle_put_situation(request, self.situation_repo, self.decision_repo)
 
     async def mark_thread_waiting(self, request: web.Request) -> web.Response:
         """POST /api/threads/{thread_id}/waiting — the next move is the human's.
@@ -1977,7 +1982,20 @@ class ApiServer:
             thread_id = int(request.match_info["thread_id"])
         except (ValueError, KeyError):
             return web.json_response({"error": "Invalid thread_id"}, status=400)
+        # Checked before the mark: a refused request must not leave a bare marker behind.
+        spec, refused = await read_mark_request(request, outcome)
+        if refused is not None:
+            return refused
+        response = await self._apply_thread_outcome(thread_id, outcome)
+        if response.status in (200, 202):
+            stored = await remember_mark(self.decision_repo, thread_id, outcome, spec)
+            if stored is not None:
+                body = json.loads(cast(bytes, response.body))
+                body["request_id"] = stored.id
+                return web.json_response(body, status=response.status)
+        return response
 
+    async def _apply_thread_outcome(self, thread_id: int, outcome: str) -> web.Response:
         conversations = self.console_conversations
         if conversations is not None and await conversations.get(thread_id) is not None:
             from ..console.surface import apply_outcome

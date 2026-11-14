@@ -1,4 +1,4 @@
-"""Secretary mode: the decision fields triage adds, the summary built from the board, and the
+"""Secretary mode: the home built from the board and the agents' decision requests, and the
 trial metrics (docs/console.md, ADR-0024)."""
 
 from __future__ import annotations
@@ -6,25 +6,25 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
-import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from claude_discord.console.auth import ConsoleAuthConfig, ConsoleAuthenticator
 from claude_discord.console.secretary import (
-    MAX_DECIDE,
+    MAX_CARDS,
     SecretaryEventRepository,
     build_secretary,
 )
 from claude_discord.console.server import ConsoleServer
-from claude_discord.console.triage import (
-    Triager,
-    TriageRepository,
-    TriageResult,
-    apply_triage,
-    build_prompt,
-    parse_reply,
-)
+from claude_discord.console.surface import apply_outcome
 from claude_discord.console.work_repo import WorkItemRepository
+from claude_discord.database.decision_repo import DecisionRequestRepository
+from claude_discord.decision_request import parse_request
+from claude_discord.thread_marker import OUTCOME_WAITING
+from tests.test_console_conversations import AUTH, WRITE, _settle, _start
+from tests.test_console_conversations import env as conversation_env
+from tests.test_decision_requests import _good
+
+env = conversation_env
 
 # 12:00 in Tokyo, so "today" is the same date in UTC and in local time for the fixtures.
 NOW = datetime(2026, 11, 14, 3, 0, tzinfo=UTC)
@@ -55,126 +55,113 @@ def _item(item_id: str, **over):
     return base
 
 
-# -- triage: the same call answers "what is being asked" --------------------
-
-
-def test_the_prompt_asks_for_the_decision_only_when_the_move_is_the_persons() -> None:
-    asked = build_prompt(title="t", status="waiting", messages=[], now=NOW)
-    assert '"ask"' in asked and '"suggest"' in asked and '"options"' in asked
-    for status in ("running", "idle", "todo"):
-        plain = build_prompt(title="t", status=status, messages=[], now=NOW)
-        assert '"ask"' not in plain
-
-
-def test_the_decision_fields_are_parsed_and_clamped() -> None:
-    raw = (
-        '{"priority": 1, "ask": "  Merge   PR 12 now?  ", "suggest": "Yes, merge it",'
-        ' "options": ["Yes", "No", "Yes", 3, "", "Later", "Ask again"]}'
-    )
-    result = parse_reply(raw, now=NOW)
-    assert result is not None
-    assert result.ask == "Merge PR 12 now?"
-    assert result.suggest == "Yes, merge it"
-    assert result.options == ("Yes", "No", "Later")
-
-
-def test_a_reply_without_decision_fields_leaves_them_empty() -> None:
-    result = parse_reply('{"priority": 2, "options": "Yes"}', now=NOW)
-    assert result is not None
-    assert (result.ask, result.suggest, result.options) == ("", "", ())
-
-
-@pytest.fixture
-async def repo(tmp_path) -> TriageRepository:
-    r = TriageRepository(str(tmp_path / "sessions.db"))
-    await r.init_db()
-    return r
-
-
-async def test_the_decision_is_stored_and_reported_on_the_board(repo) -> None:
-    result = TriageResult(1, None, "r", "n", ask="Merge?", suggest="Yes", options=("Yes", "No"))
-    await repo.save("t1", result, basis="b", model="haiku", decision=True)
-    (item,) = apply_triage([_item("t1")], await repo.all(), now=NOW)
-    assert item["ai"]["ask"] == "Merge?"
-    assert item["ai"]["suggest"] == "Yes"
-    assert item["ai"]["options"] == ["Yes", "No"]
-
-
-async def test_rows_from_before_the_decision_fields_are_filled_once_for_the_persons_items(
-    repo,
-) -> None:
-    """No prompt-version bump: only items waiting on the person are asked again, once."""
-    asked: list[str] = []
-
-    async def ask(prompt: str) -> str | None:
-        asked.append(prompt.split("Item title: ")[1].split("\n")[0])
-        return '{"priority": 2, "ask": "Which one?"}'
-
-    async def read(item):
-        return [("person", "hi")]
-
-    triager = Triager(repo, ask=ask, read_messages=read, per_pass=10)
-    waiting, working = _item("t1", status="waiting"), _item("t2", status="idle")
-    from claude_discord.console.triage import _basis
-
-    # Rows written by the previous release: same basis, no decision recorded.
-    for item in (waiting, working):
-        await repo.save(item["id"], TriageResult(2, None, "", ""), basis=_basis(item), model="m")
-    assert await triager.run_once([waiting, working]) == 1
-    assert asked == ["Item t1"]
-    assert (await repo.all())["t1"].ask == "Which one?"
-
-    asked.clear()
-    assert await triager.run_once([waiting, working]) == 0
-    assert asked == []
-
-
-async def test_a_person_turn_with_no_question_is_not_asked_again(repo) -> None:
-    async def ask(prompt: str) -> str | None:
-        return '{"priority": 2}'
-
-    async def read(item):
-        return []
-
-    triager = Triager(repo, ask=ask, read_messages=read)
-    items = [_item("t1", status="review")]
-    assert await triager.run_once(items) == 1
-    assert (await repo.all())["t1"].ask == ""
-    assert triager.due(items, await repo.all()) == []
+def _request(thread: int, *, rid: int = 1, kind: str = "waiting", origin: str = "mark", **over):
+    """A stored request as the board reads it (DecisionRequest.as_dict())."""
+    base = {
+        "id": rid,
+        "thread_id": str(thread),
+        "source_thread_id": str(thread),
+        "key": "",
+        "kind": kind,
+        "origin": origin,
+        "card": {
+            "title": f"Decide {thread}",
+            "context": "What this is about, from zero.",
+            "options": [
+                {"label": "A", "effect": "Does A", "recommended": True},
+                {"label": "B", "effect": "Does B", "recommended": False},
+            ],
+            "deadline": "Today",
+        },
+        "detail": {"about": "x"},
+        "created_at": _ts(-timedelta(minutes=30)),
+    }
+    base.update(over)
+    return base
 
 
 # -- the summary: deterministic, no model ----------------------------------
 
 
-def test_decide_now_holds_at_most_three_ranked_questions() -> None:
+def test_only_written_requests_become_cards_ranked_like_focus() -> None:
     items = [
-        _item("t1", focus=120, ai={"ask": "Pick A or B?", "suggest": "A", "options": ["A", "B"]}),
-        _item("t2", focus=320, status="action", ai={"next_step": "Sign in", "reason": "MFA"}),
+        _item("t1", focus=120),
+        _item("t2", focus=320, status="action"),
         _item("t3", focus=220, status="error"),
         _item("t4", focus=120, last_activity_at=_ts(-timedelta(hours=5))),
-        _item("t5", focus=120, actionable=False, ai={"waiting_for": "tomorrow"}),
         _item("t6", status="review", bucket="me"),
     ]
-    out = build_secretary(items, now=NOW)
-    decide = out["decide"]
-    assert MAX_DECIDE == 3
-    assert [d["id"] for d in decide] == ["t2", "t3", "t4"]
-    assert decide[0]["ask"] == "Sign in"  # no question recorded: the next step stands in
-    assert decide[0]["why"] == "MFA"
-    assert decide[1]["ask"] == "Item t3"  # nothing at all: the title
-    assert out["more"] == 1  # t1 is beyond the three
-    assert out["later"] == 1  # t5 waits for something else
-    assert [r["id"] for r in out["review"]] == ["t6"]
+    requests = [
+        _request(1, rid=1),
+        _request(2, rid=2, kind="action"),
+        _request(4, rid=4),
+        _request(6, rid=6, kind="review"),
+    ]
+    out = build_secretary(items, requests, now=NOW)
+    assert [c["id"] for c in out["decide"]] == ["t2", "t4", "t1"]
+    card = out["decide"][0]
+    assert card["request_id"] == 2
+    assert card["card"]["title"] == "Decide 2"
+    assert card["detail"] == {"about": "x"}
+    assert card["since"] == _ts(-timedelta(minutes=30))
+    assert card["thread_id"] == "2"
+    assert [c["id"] for c in out["review"]] == ["t6"]
+    # t3 failed and nobody wrote a request: listed apart, never summarised by a model.
+    assert [u["id"] for u in out["unexplained"]] == ["t3"]
+    assert out["unexplained"][0]["status"] == "error"
+    assert out["calm"] is False
 
 
-def test_a_decision_carries_its_suggestion_options_and_how_long_it_has_waited() -> None:
-    items = [_item("t1", ai={"ask": "Pick?", "suggest": "A", "options": ["A", "B"]})]
-    (card,) = build_secretary(items, now=NOW)["decide"]
-    assert card["suggest"] == "A"
-    assert card["options"] == ["A", "B"]
-    assert card["since"] == _ts(-timedelta(hours=1))
-    assert card["status"] == "waiting"
-    assert card["thread_id"] == "1"
+def test_an_item_waiting_with_no_request_is_shown_as_unexplained() -> None:
+    items = [_item("t1", ai={"next_step": "Sign in", "reason": "MFA"})]
+    out = build_secretary(items, [], now=NOW)
+    assert out["decide"] == []
+    (entry,) = out["unexplained"]
+    assert entry == {
+        "id": "t1",
+        "title": "Item t1",
+        "status": "waiting",
+        "since": _ts(-timedelta(hours=1)),
+    }
+
+
+def test_a_request_is_hidden_once_its_thread_moves_on() -> None:
+    items = [
+        _item("t1", status="running", running=True, focus=None),  # the person replied
+        _item("t2", status="candidate", bucket="candidate", focus=None),
+        _item("t3", status="idle", focus=None),  # marker cleared, agent not marking again
+        _item("t4", archived=True),
+    ]
+    requests = [_request(n, rid=n) for n in (1, 2, 3, 4, 9)]  # 9: no such item
+    out = build_secretary(items, requests, now=NOW)
+    assert out["decide"] == []
+    assert out["unexplained"] == []
+
+
+def test_a_parents_ask_shows_while_the_parent_is_idle_whatever_its_marker() -> None:
+    items = [_item("t1", status="idle", focus=None), _item("t2", status="running", running=True)]
+    requests = [
+        _request(1, rid=1, origin="situation", source_thread_id="2"),
+        _request(2, rid=2, origin="situation"),
+    ]
+    out = build_secretary(items, requests, now=NOW)
+    assert [c["request_id"] for c in out["decide"]] == [1]
+    assert out["decide"][0]["origin"] == "situation"
+
+
+def test_one_thread_may_carry_two_questions() -> None:
+    requests = [_request(1, rid=5, key="b"), _request(1, rid=3, key="a")]
+    out = build_secretary([_item("t1")], requests, now=NOW)
+    assert [c["request_id"] for c in out["decide"]] == [3, 5]
+    assert out["unexplained"] == []
+
+
+def test_cards_are_capped() -> None:
+    items = [_item(f"t{n}", focus=100 + n) for n in range(1, 30)]
+    requests = [_request(n, rid=n) for n in range(1, 30)]
+    out = build_secretary(items, requests, now=NOW)
+    assert len(out["decide"]) == MAX_CARDS
+    assert out["decide_more"] == 29 - MAX_CARDS
 
 
 def test_agents_at_work_and_todays_finished_work_are_listed() -> None:
@@ -199,7 +186,8 @@ def test_agents_at_work_and_todays_finished_work_are_listed() -> None:
 
 def test_the_summary_is_the_same_twice() -> None:
     items = [_item(f"t{i}", focus=100 + i) for i in range(6)]
-    assert build_secretary(items, now=NOW) == build_secretary(items, now=NOW)
+    requests = [_request(i, rid=i) for i in range(3)]
+    assert build_secretary(items, requests, now=NOW) == build_secretary(items, requests, now=NOW)
 
 
 # -- trial metrics ---------------------------------------------------------
@@ -276,3 +264,39 @@ async def test_the_events_endpoint_validates_and_records(tmp_path) -> None:
         assert data["days"][-1]["opened_threads"] == 1
     finally:
         await client.close()
+
+
+# -- the Console: cards on the board, closed by an answer --------------------
+
+
+async def test_a_card_is_on_the_board_and_an_answer_closes_it(env, tmp_path) -> None:
+    decisions = DecisionRequestRepository(str(tmp_path / "sessions.db"))
+    env.console.api.decision_repo = decisions
+    item_id = await _start(env)
+    key = int(item_id[1:])
+    await apply_outcome(env.conversations, key, OUTCOME_WAITING)
+    spec = parse_request(_good(), kind="waiting")
+    stored = await decisions.put(key, spec, origin="mark", source_thread_id=key)
+    second = parse_request(_good(key="b"), kind="waiting")
+    await decisions.put(key, second, origin="mark", source_thread_id=key)
+
+    board = await (await env.client.get("/console/api/board", headers=AUTH)).json()
+    cards = board["secretary"]["decide"]
+    assert [c["request_id"] for c in cards] == [stored.id, stored.id + 1]
+    assert cards[0]["card"]["title"] == spec.title
+
+    replied = await env.client.post(
+        f"/console/api/items/{item_id}/reply",
+        json={"text": "A で消す", "request_id": stored.id},
+        headers=WRITE,
+    )
+    assert replied.status == 202
+    await _settle(env.host)
+    assert [r.key for r in await decisions.list_open()] == ["b"]
+
+    # Typing in the thread answers whatever it still asks.
+    await env.client.post(
+        f"/console/api/items/{item_id}/reply", json={"text": "both done"}, headers=WRITE
+    )
+    await _settle(env.host)
+    assert await decisions.list_open() == []

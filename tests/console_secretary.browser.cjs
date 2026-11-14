@@ -15,16 +15,29 @@ const items = [
   row('t2', 'Customer form', 'action', 'me', {focus: 120}),
   row('t3', 'Docs sync', 'running', 'ai', {running: true}),
   row('t4', 'Weekly digest', 'candidate', 'candidate'),
+  row('t5', 'Old thread', 'waiting', 'me', {focus: 90}),
 ];
+const detail = {about: 'Release 5.3 of the relay.', now: 'CI is green and the notes are drafted.',
+  ask: 'Merge PR 12 and publish?', choices: 'A merge now / B wait', recommendation: 'A: nothing is pending.',
+  materials: '| check | result |\n|---|---|\n| CI | **green** |', deadline: 'Today; otherwise Monday.'};
+const card = (requestId, id, kind, title, options, extra = {}) => ({request_id: requestId, id, thread_id: id.slice(1),
+  item_title: items.find((i) => i.id === id).title, kind, origin: 'mark', reasons: [], since: ago(90), place: null,
+  parent_id: null, detail, card: {title, context: 'The relay ships a release; it can be rolled back in a minute.',
+    options, deadline: 'Today 18:00'}, ...extra});
 const secretary = {
   decide: [
-    {id: 't1', title: 'Release 5.3', thread_id: '1', status: 'waiting', ask: 'Merge PR 12 and release 5.3?',
-      why: 'CI is green; the release notes are drafted', suggest: 'Yes, merge and release', options: ['Yes, merge and release', 'Wait until Monday'],
-      reasons: ['priority'], since: ago(90), place: null, parent_id: null},
-    {id: 't2', title: 'Customer form', thread_id: '2', status: 'action', ask: 'Sign in to the portal and approve',
-      why: null, suggest: null, options: [], reasons: [], since: ago(30), place: null, parent_id: null},
+    card(11, 't1', 'waiting', 'Publish release 5.3 now?', [
+      {label: 'A Merge', effect: 'Ships today; can be rolled back', recommended: true},
+      {label: 'B Wait', effect: 'Ships Monday with the next batch', recommended: false}], {reasons: ['priority']}),
+    card(12, 't2', 'action', 'Approve the customer form in the portal', [
+      {label: 'Done', effect: 'The agent sends the form', recommended: false}]),
+    card(13, 't1', 'waiting', 'Third question', [
+      {label: 'Yes', effect: 'Go', recommended: true}, {label: 'No', effect: 'Stop', recommended: false}]),
+    card(14, 't1', 'waiting', 'Fourth question', [
+      {label: 'Yes', effect: 'Go', recommended: true}, {label: 'No', effect: 'Stop', recommended: false}]),
   ],
-  more: 2, later: 1, review: [], review_more: 0,
+  decide_more: 0, review: [], review_more: 0,
+  unexplained: [{id: 't5', title: 'Old thread', status: 'waiting', since: ago(600)}], unexplained_more: 0,
   working: [{id: 't3', title: 'Docs sync', since: ago(3)}], working_more: 0,
   done_today: [{id: 't4', title: 'Weekly digest', since: ago(60), candidate: true}], calm: false,
 };
@@ -57,7 +70,7 @@ async function open(t, storage = {}) {
   });
   await page.addInitScript((s) => { for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v); }, storage);
   await page.goto('http://console.test/');
-  await page.waitForFunction(() => state.items.length === 4);
+  await page.waitForFunction(() => state.items.length === 5);
   return {page, posted, errors};
 }
 
@@ -75,32 +88,46 @@ test('the secretary home answers from a card and records the trial', {timeout: 3
   await page.locator('.mode-switch').getByRole('button', {name: '秘書'}).click();
   await page.waitForFunction(() => location.hash === '#secretary');
   assert.equal(await page.locator('#view-title').innerText(), '🗂 秘書');
-  const cards = page.locator('.sec-card');
-  assert.equal(await cards.count(), 2);
-  assert.match(await cards.first().innerText(), /Merge PR 12 and release 5\.3\?/);
-  assert.match(await page.locator('.sec-decide').innerText(), /ほか 2 件/);
+  const cards = page.locator('.sec-decide .sec-card');
+  assert.equal(await cards.count(), 3);  // the first three; the rest one click away
+  const first = await cards.first().innerText();
+  assert.match(first, /Publish release 5\.3 now\?/);
+  assert.match(first, /何の話：The relay ships a release/);
+  assert.match(first, /A Merge.*おすすめ/s);
+  assert.match(first, /期限：Today 18:00/);
+  assert.match(await page.locator('.sec-unexplained').innerText(), /Old thread/);
   assert.match(await page.locator('.sec-working').innerText(), /Docs sync/);
   assert.match(await page.locator('.sec-done').innerText(), /Weekly digest/);
   assert.equal(await page.locator('#empty').isHidden(), true);
+  await page.locator('.sec-decide').getByRole('button', {name: 'ほか 1 件を表示'}).click();
+  assert.equal(await cards.count(), 4);
 
-  // One click sends the recommended answer to the thread, through the ordinary reply endpoint.
-  await cards.first().locator('.sec-suggest').click();
+  // The folded detail renders the seven parts, Markdown included.
+  await cards.first().locator('summary').click();
+  assert.match(await cards.first().locator('.sec-detail').innerText(), /6\. 判断材料/);
+  assert.equal(await cards.first().locator('.sec-detail table').count(), 1);
+
+  // One click answers: the question restated, the choice, and the request it closes.
+  await cards.first().getByRole('button', {name: 'A Merge'}).click();
   await page.locator('.sec-card.sent').waitFor();
   const reply = posted.find((p) => p.path.endsWith('/items/t1/reply'));
-  assert.deepEqual(reply.body, {text: 'Yes, merge and release'});
+  assert.deepEqual(reply.body, {text: '「Publish release 5.3 now?」への回答: A Merge — Ships today; can be rolled back',
+    request_id: 11});
   const answer = posted.find((p) => p.path.endsWith('/secretary/events') && p.body.kind === 'answer');
   assert.equal(answer.body.item_id, 't1');
   assert.equal(answer.body.mode, 'secretary');
   assert.ok(answer.body.waited_seconds >= 5300);
 
-  // A few words of one's own go the same way.
+  // An answer of one's own goes the same way.
+  await cards.nth(1).getByRole('button', {name: '✏️ 別の答え'}).click();
   await cards.nth(1).locator('textarea').fill('承認しました');
   await cards.nth(1).getByRole('button', {name: '送る'}).click();
   await page.waitForFunction(() => document.querySelectorAll('.sec-card.sent').length === 2);
-  assert.deepEqual(posted.find((p) => p.path.endsWith('/items/t2/reply')).body, {text: '承認しました'});
+  assert.deepEqual(posted.find((p) => p.path.endsWith('/items/t2/reply')).body,
+    {text: '「Approve the customer form in the portal」への回答: 承認しました', request_id: 12});
 
   // The original thread is one click away, and opening it is recorded.
-  await cards.nth(1).getByRole('button', {name: /元のスレッドを開く/}).click();
+  await cards.nth(1).getByRole('button', {name: /Customer form/}).click();
   await page.waitForFunction(() => state.open === 't2');
   assert.ok(posted.some((p) => p.path.endsWith('/secretary/events') && p.body.kind === 'open' && p.body.item_id === 't2'));
   assert.deepEqual(errors, []);

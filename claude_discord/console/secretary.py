@@ -2,18 +2,24 @@
 
 The classic Console lists agent threads; a person juggling dozens of them opens
 each one that waits on them and re-reads it to learn what is being asked. This
-module turns the board into the person's unit instead — decisions:
+module turns the board into the person's unit instead — decisions — built from the
+**decision requests** the asking agents wrote themselves (:mod:`..decision_request`):
 
-* ``decide`` — at most :data:`MAX_DECIDE` questions, ranked like Focus, each with
-  what is asked, why, the recommended answer and ready-made replies. The words
-  come from the per-item triage call (``ask`` / ``suggest`` / ``options``); with
-  none recorded the triage's next step, then the title, stands in.
-* ``review`` — deliverables to look at.
-* ``working`` — what agents are doing, one line each; no progress text.
+* ``decide`` — cards for questions (❓) and tasks (📋), ranked like Focus;
+* ``review`` — cards for deliverables to look at (👀);
+* ``unexplained`` — items waiting on the person whose agent wrote no request. They are
+  listed apart, by title only: v1 summarised them with a cheap model, and a summary of a
+  thread's last message (a usage footer, a CI notice) explained nothing;
+* ``working`` — what agents are doing, one line each; no progress text;
 * ``done_today`` — finished today, including completion candidates to confirm.
 
-Like :mod:`.guide`, it reads only what the board already carries and asks no
-model, so every poll costs nothing and gives the same answer twice.
+A request shows only while it still stands. One sent with a mark stands while its thread
+carries a ❓/👀/📋 marker; the person's reply clears the marker and the agent starts
+running, so the card goes away even before anything closes it. One a parent carries in its
+``asks`` stands until the parent drops it, and neither shows while its thread is running.
+
+Like :mod:`.guide`, it reads only what it is given and asks no model, so every poll costs
+nothing and gives the same answer twice.
 
 :class:`SecretaryEventRepository` keeps the trial's metrics: which threads were
 opened, in which mode, and which answers were sent from a card. Metadata only.
@@ -35,14 +41,15 @@ from .guide import reasons
 if TYPE_CHECKING:
     from .server import ConsoleServer
 
-MAX_DECIDE = 3
-MAX_REVIEW = 10
+MAX_CARDS = 20
+MAX_UNEXPLAINED = 20
 MAX_WORKING = 20
 MAX_DONE = 20
 
-#: Statuses where an agent stopped and the person must answer or act.
-_DECIDE_STATUSES = frozenset({"waiting", "action", "error"})
-_REVIEW_STATUS = "review"
+#: The markers a request sent with a mark rides on.
+_MARKED_STATUSES = frozenset({"waiting", "review", "action"})
+#: Statuses where the next move is the person's, request or not.
+_PERSON_STATUSES = _MARKED_STATUSES | {"error"}
 _FINISHED_STATUSES = frozenset({"done", "candidate"})
 
 
@@ -66,37 +73,41 @@ def _order(item: Mapping[str, Any]) -> tuple[Any, ...]:
     )
 
 
-def _ai(item: Mapping[str, Any]) -> Mapping[str, Any]:
-    ai = item.get("ai")
-    return ai if isinstance(ai, Mapping) else {}
+def _title(item: Mapping[str, Any]) -> str:
+    return item.get("title") or item.get("thread_name") or ""
 
 
-def _decision(item: Mapping[str, Any], *, now: datetime) -> dict[str, Any]:
-    ai = _ai(item)
-    title = item.get("title") or item.get("thread_name") or ""
-    options = ai.get("options")
+def _stands(request: Mapping[str, Any], item: Mapping[str, Any] | None) -> bool:
+    """Whether *request* still asks something of the person (see the module docstring)."""
+    if item is None or item.get("archived"):
+        return False
+    status = item.get("status")
+    if status in _FINISHED_STATUSES or status == "running" or item.get("running"):
+        return False
+    if request.get("origin") == "mark":
+        return status in _MARKED_STATUSES
+    return True
+
+
+def _card(request: Mapping[str, Any], item: Mapping[str, Any], *, now: datetime) -> dict[str, Any]:
     return {
+        "request_id": request["id"],
         "id": item["id"],
-        "title": title,
-        "thread_id": item.get("thread_id"),
-        "status": item.get("status"),
-        "ask": ai.get("ask") or ai.get("next_step") or title,
-        "why": ai.get("reason") or None,
-        "suggest": ai.get("suggest") or None,
-        "options": [o for o in options if isinstance(o, str)] if isinstance(options, list) else [],
+        "thread_id": request.get("thread_id"),
+        "item_title": _title(item),
+        "kind": request.get("kind"),
+        "origin": request.get("origin"),
+        "card": request.get("card") or {},
+        "detail": request.get("detail") or {},
+        "since": request.get("created_at"),
         "reasons": reasons(item, now=now),
-        "since": item.get("last_activity_at"),
         "place": item.get("place"),
         "parent_id": item.get("parent_id"),
     }
 
 
 def _line(item: Mapping[str, Any]) -> dict[str, Any]:
-    return {
-        "id": item["id"],
-        "title": item.get("title") or item.get("thread_name") or "",
-        "since": item.get("last_activity_at"),
-    }
+    return {"id": item["id"], "title": _title(item), "since": item.get("last_activity_at")}
 
 
 def _local_day(value: str | None) -> date | None:
@@ -105,17 +116,33 @@ def _local_day(value: str | None) -> date | None:
 
 
 def build_secretary(
-    items: Iterable[dict[str, Any]], *, now: datetime | None = None
+    items: Iterable[dict[str, Any]],
+    requests: Iterable[Mapping[str, Any]] = (),
+    *,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
-    """The secretary home for the board *items* (already triaged), deterministically."""
+    """The secretary home for the board *items* and the open *requests*, deterministically."""
     now = now or datetime.now(UTC)
     items = [i for i in items if not i.get("archived")]
-    ranked = [
-        i for i in items if i.get("status") in _DECIDE_STATUSES and i.get("focus") is not None
+    by_thread = {str(i.get("thread_id")): i for i in items if i.get("thread_id") is not None}
+    standing = [
+        (r, by_thread[str(r.get("thread_id"))])
+        for r in requests
+        if _stands(r, by_thread.get(str(r.get("thread_id"))))
     ]
-    ready = sorted((i for i in ranked if i.get("actionable") is not False), key=_order)
-    review = sorted(
-        (i for i in items if i.get("status") == _REVIEW_STATUS and i.get("focus") is not None),
+    standing.sort(key=lambda pair: (_order(pair[1]), pair[0]["id"]))
+    cards = [_card(r, i, now=now) for r, i in standing]
+    decide = [c for c in cards if c["kind"] != "review"]
+    review = [c for c in cards if c["kind"] == "review"]
+    explained = {i["id"] for _, i in standing}
+    unexplained = sorted(
+        (
+            i
+            for i in items
+            if i.get("status") in _PERSON_STATUSES
+            and i.get("focus") is not None
+            and i["id"] not in explained
+        ),
         key=_order,
     )
     working = sorted(
@@ -135,17 +162,20 @@ def build_secretary(
         reverse=True,
     )
     return {
-        "decide": [_decision(i, now=now) for i in ready[:MAX_DECIDE]],
-        "more": max(0, len(ready) - MAX_DECIDE),
-        "later": len(ranked) - len(ready),
-        "review": [_line(i) for i in review[:MAX_REVIEW]],
-        "review_more": max(0, len(review) - MAX_REVIEW),
+        "decide": decide[:MAX_CARDS],
+        "decide_more": max(0, len(decide) - MAX_CARDS),
+        "review": review[:MAX_CARDS],
+        "review_more": max(0, len(review) - MAX_CARDS),
+        "unexplained": [
+            {**_line(i), "status": i.get("status")} for i in unexplained[:MAX_UNEXPLAINED]
+        ],
+        "unexplained_more": max(0, len(unexplained) - MAX_UNEXPLAINED),
         "working": [_line(i) for i in working[:MAX_WORKING]],
         "working_more": max(0, len(working) - MAX_WORKING),
         "done_today": [
             {**_line(i), "candidate": i.get("status") == "candidate"} for i in finished[:MAX_DONE]
         ],
-        "calm": not ready and not review,
+        "calm": not decide and not review and not unexplained,
     }
 
 
