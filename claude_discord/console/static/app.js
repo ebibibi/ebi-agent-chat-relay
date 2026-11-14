@@ -583,8 +583,8 @@ function rowNode({ item, depth, children, rowKey, family, pinId, pinPrevious, pi
     title: item.priority_by === "ai" ? T.ai_set : null, text: `P${item.priority}` })];
   side.push(dueLabel(item));
   if (pinId) side.push(h("span", { class: "pin-order" },
-    ...[["first", pinFirst, "before", T.pin_first, "⇈"], ["last", pinLast, "after", T.pin_last, "⇊"],
-      ["up", pinPrevious, "before", T.pin_up, "↑"], ["down", pinNext, "after", T.pin_down, "↓"]]
+    ...[["first", pinFirst, "before", T.pin_first, "⇈"], ["up", pinPrevious, "before", T.pin_up, "↑"],
+      ["down", pinNext, "after", T.pin_down, "↓"], ["last", pinLast, "after", T.pin_last, "⇊"]]
       .map(([direction, target, placement, label, symbol]) => h("button", {
         class: `btn pin-${direction}`, type: "button", title: label, "aria-label": label,
         disabled: !target, "data-pin-id": pinId,

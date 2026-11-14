@@ -462,7 +462,8 @@ button.family-link:hover { color: var(--accent); border-color: var(--accent); }
 .compact-status { color: var(--ai); font-size: 12px; padding-top: 4px; }
 
 /* Always visible touch/keyboard controls; do not rely on hover or dragging. */
-.pin-order { display: grid; grid-template-columns: repeat(2, auto); gap: 4px; }
-.pin-order .btn { min-width: 32px; min-height: 32px; padding: 3px 7px; }
+/* One row (#1348): a 2x2 grid made every pinned row taller than the rest. */
+.pin-order { display: flex; gap: 3px; }
+.pin-order .btn { min-width: 26px; height: 24px; padding: 0 5px; line-height: 1; }
 .pin-order .btn:focus-visible { outline: 2px solid var(--p1); outline-offset: 2px; }
-@media (pointer: coarse) { .pin-order .btn { min-width: 44px; min-height: 44px; } }
+@media (pointer: coarse) { .pin-order .btn { min-width: 38px; height: 44px; } }
