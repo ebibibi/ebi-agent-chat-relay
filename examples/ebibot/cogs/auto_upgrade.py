@@ -1,9 +1,11 @@
 """Auto Upgrade — ccdb AutoUpgradeCog configuration for EbiBot.
 
 Flow:
-1. Push to ccdb repo -> GitHub Actions -> Discord webhook "ebibot-upgrade"
-2. AutoUpgradeCog receives it -> uv lock --upgrade-package && uv sync
-3. systemctl restart discord-bot to self-restart
+1. Merge to ccdb main -> GitHub Actions -> Discord webhook "ebibot-upgrade"
+2. AutoUpgradeCog fetches the bot's own git checkout and reads the changed files
+3. No Python changed (Console static files, docs, tests): fast-forward now, no restart
+4. Otherwise: reserve a restart that waits until nobody has used the bot for
+   CCDB_RESTART_QUIET_SECONDS (default 15 min); pre-start.sh pulls on the way up
 
 This file is config-only.  Execution logic lives in ccdb's AutoUpgradeCog.
 
@@ -28,9 +30,10 @@ EBIBOT_UPGRADE_CONFIG = UpgradeConfig(
     upgrade_command=[_UV, "lock", "--upgrade-package", "claude-code-discord-bridge"],
     sync_command=[_UV, "sync"],
     restart_command=["/usr/bin/sudo", "/usr/bin/systemctl", "restart", _SERVICE_NAME],
-    upgrade_approval=True,
-    restart_approval=True,
+    upgrade_approval=False,
+    restart_approval=False,
     slash_command_enabled=True,
+    git_checkout=True,
 )
 
 

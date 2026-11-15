@@ -34,8 +34,13 @@ and `503` when no limit is configured.
 ## Reserved restart
 
 Restarting the bot while sessions run used to mean watching for an idle moment that, with new
-turns arriving, might never come. A reservation makes the moment happen:
+turns arriving, might never come. A reservation makes the moment happen, without restarting under someone who is still using the bot:
 
+0. **Wait for quiet** — nothing is held yet. The reservation waits until no person has acted for
+   `CCDB_RESTART_QUIET_SECONDS` (default 900, 15 minutes). A person acting means a message from an
+   allowed Discord user, or a change made in the Ebi AI Console; reading the Console does not
+   count, and agent sessions never do. If a person acts while the queue is held (step 1), the
+   hold is released and the reservation goes back to waiting, so their message runs at once.
 1. **Hold** — the queue stops starting runs. Running turns continue untouched; every new request
    (chat, Ebi AI Console, scheduler, `/api/spawn`) joins the queue instead of starting, and its
    waiting message says a restart is reserved.
@@ -47,10 +52,22 @@ turns arriving, might never come. A reservation makes the moment happen:
 
 ```bash
 curl -s -X POST "$CCDB_API_URL/api/restart" -H "Content-Type: application/json" \
-  -d '{"reason": "deploy v4.3", "requested_by": "thread 123"}'   # 202 reserved, 200 if already
+  -d '{"reason": "deploy v4.3", "requested_by": "thread 123"}'   # 202 reserved, 200 joined
 curl -s "$CCDB_API_URL/api/restart"                               # phase, running, waiting
 curl -s -X DELETE "$CCDB_API_URL/api/restart"                     # cancel; the queue resumes
 ```
+
+Requests made while one is pending join it (`200`, `"status": "already_reserved"`): several
+deploys in a row cost one restart, and every requester's `resume_thread_id` is resumed.
+
+`"urgent": true` skips the quiet wait and is not sent back by human activity; running turns still
+finish first. It is for a security fix or a broken bot only (ADR-0026). A pending reservation
+becomes urgent when an urgent request joins it. The Ebi AI Console's "Restart now" does the same,
+and "In 1 hour" postpones it (`docs/console.md`).
+
+`GET /api/restart` reports `phase` (`waiting_for_quiet`, `draining`, `restarting`), `quiet_at`
+(when the quiet period ends), `not_before` (a postponement), `requests` and `events`, the reasons
+for each step. The same lines are logged as `Restart reservation: …`.
 
 A session that reserves a restart for its own deploy usually wants to check the result afterwards.
 Add `"resume_thread_id": "<its thread id>", "resume_prompt": "Verify the new build"`: that thread
@@ -65,8 +82,8 @@ How the bot restarts:
 - Unset: the bot closes itself and its supervisor starts it again (systemd `Restart=always`,
   Docker `restart: unless-stopped`). Without a supervisor the bot simply stops.
 
-`"max_wait_seconds": 1800` gives up after that long if sessions are still running: the hold is
-released and nothing restarts. Without it the reservation waits as long as it takes; `DELETE`
+`"max_wait_seconds": 1800` gives up after that long if the restart has not happened (still waiting
+for quiet, or sessions still running): the hold is released and nothing restarts. Without it the reservation waits as long as it takes; `DELETE`
 cancels at any time before the restart itself begins.
 
 If the restart fails — the command exits with an error code, or this process is still alive

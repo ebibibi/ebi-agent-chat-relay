@@ -502,6 +502,15 @@ Each thread carries one-click controls for its state, on its row and in the deta
 | Paused | ▶ Resume — ask the agent to carry on from where it stopped, and clear the mark |
 | Waiting for a slot | ⏫ First — start before the others waiting; ⏬ Later — let them go first |
 
+When a merged change needs a restart, a "🔄 Update waiting" box appears under the running count.
+It says when the restart will happen (once nobody has used the bot for a while; see
+[session-queue.md](session-queue.md#reserved-restart)) and offers two buttons: **Restart now**
+(as soon as the running turns finish) and **In 1 hour** (postpone). `GET /console/api/restart`
+returns the reservation with its recent events (reserved, joined, held, released because someone
+was using the bot, postponed, restarting); `POST /console/api/restart/now` and
+`POST /console/api/restart/later` (`minutes`, default 60) answer it. Pressing them does not count
+as using the bot. The board carries the same state as `restart`.
+
 Stop and Pause work for chat threads and console conversations alike: every run registers an
 interrupt with the slot it holds (`POST /console/api/items/{id}/stop`, `/pause`, `/resume`,
 `/queue` with `action: first|later`). The pause mark is stored on the item (`paused_at`).

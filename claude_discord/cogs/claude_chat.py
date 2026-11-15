@@ -61,6 +61,7 @@ from ..discord_ui.thread_renamer import suggest_retitle, suggest_title
 from ..discord_ui.thread_retitle import RetitleTracker
 from ..discord_ui.views import RewindSelectView, StopView
 from ..execution_settings import apply_thread_execution_mode, thread_execution_mode
+from ..human_activity import note_human_activity
 from ..restart_reservation import QUEUED_RESTART_REASON, persist_queued_runs
 from ..session_slots import get_session_slots
 from ..thread_marker import (
@@ -326,6 +327,9 @@ class ClaudeChatCog(commands.Cog):
         # are the only gate (suitable for private servers).
         if self._allowed_user_ids is not None and message.author.id not in self._allowed_user_ids:
             return
+
+        # A person is using the bot: a reserved restart waits for them to go quiet.
+        note_human_activity("discord")
 
         # Inside a no-mention channel (or a thread under it) everything is for
         # Claude, and the session model applies: a channel message opens a
