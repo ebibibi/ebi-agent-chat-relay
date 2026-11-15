@@ -119,3 +119,23 @@ async def test_the_source_thread_is_stored_with_the_widget() -> None:
         assert shown["thread_id"] == "99" and "_thread_id" not in shown["data"]
     finally:
         os.unlink(path)
+
+
+def test_a_chat_threads_attachments_are_the_bots_https_files_only() -> None:
+    from types import SimpleNamespace as Ns
+
+    from claude_discord.console.request_files import attachment_files
+
+    bot, person = Ns(bot=True), Ns(bot=False)
+    messages = [
+        Ns(author=person, attachments=[Ns(filename="mine.png", url="https://cdn/x")]),
+        Ns(
+            author=bot,
+            attachments=[Ns(filename="draft.md", url="https://cdn.discordapp.com/a/draft.md?ex=1")],
+        ),
+        Ns(author=bot, attachments=[Ns(filename="bad", url="javascript:alert(1)")]),
+        Ns(author=bot, attachments=[]),
+    ]
+    assert attachment_files(messages) == [
+        {"name": "draft.md", "url": "https://cdn.discordapp.com/a/draft.md?ex=1"}
+    ]

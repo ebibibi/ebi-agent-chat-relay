@@ -70,7 +70,7 @@ from .passkeys import PasskeyService
 from .places import PlaceError, PlaceRepository
 from .places import clean_name as clean_place
 from .ratelimit import RateLimiter
-from .request_files import files_for
+from .request_files import DISCORD_CACHE_SECONDS, DISCORD_SCAN, attachment_files, files_for
 from .search import SearchRoutes
 from .secretary import SecretaryEventRepository, SecretaryRoutes, build_secretary
 from .surface import apply_outcome
@@ -326,6 +326,8 @@ class ConsoleServer:
         self._start_locks: dict[str, asyncio.Lock] = {}
         # Strong references: the loop keeps only weak ones to running tasks.
         self._tasks: set[asyncio.Task[Any]] = set()
+        #: Request id -> (expiry, files): a chat thread's attachments, read once (#1374).
+        self._request_files_cache: dict[int, tuple[float, list[dict[str, str]]]] = {}
         #: Canvas mode's resident secretary (ADR-0025); None turns the mode off.
         self.canvas = self._build_canvas(canvas_repo)
         self.app = self._build_app()
@@ -715,11 +717,35 @@ class ConsoleServer:
         for request in requests:
             # A card that asks the person to look at something shows the files it delivered.
             try:
-                request["files"] = await files_for(self.conversations, int(request["thread_id"]))
+                request["files"] = await self._request_files(request)
             except Exception:
                 logger.exception("console: files of request %s unreadable", request.get("id"))
                 request["files"] = []
         return requests
+
+    async def _request_files(self, request: dict[str, Any]) -> list[dict[str, str]]:
+        """Files the asking thread delivered: console files, or a chat thread's attachments.
+
+        A chat thread is read through the Discord API once per request and cached, so the
+        board's poll does not call Discord every few seconds.
+        """
+        thread_key = int(request["thread_id"])
+        files = await files_for(self.conversations, thread_key)
+        if files or (self.conversations and await self.conversations.get(thread_key)):
+            return files
+        cached = self._request_files_cache.get(int(request["id"]))
+        if cached is not None and cached[0] > time.monotonic():
+            return cached[1]
+        thread, err = await self._thread_for(f"t{thread_key}")
+        files = []
+        if err is None and thread is not None:
+            history = [m async for m in thread.history(limit=DISCORD_SCAN)]
+            files = attachment_files(history)
+        self._request_files_cache[int(request["id"])] = (
+            time.monotonic() + DISCORD_CACHE_SECONDS,
+            files,
+        )
+        return files
 
     async def _close_requests(self, item_id: str, request_id: Any) -> None:
         """A person answered in the Console: the request (or all of the thread's) is settled."""
