@@ -208,6 +208,14 @@ places widgets there; the right is your conversation with it. **↩ Classic scre
 - **Usage is on screen**: wakes today against the cap, turns, the secretary's context, and an
   estimate of the input it read today (the context size after each turn, summed; cached input
   is billed below it).
+- **Every turn is a fresh session.** The secretary's agent never resumes its conversation: each
+  turn gets a brief (its instructions, the last six messages, counts of notes, unread changes and
+  widgets, then the message) and runs in an empty directory without CLAUDE.md, skills or user
+  settings. The transcript you see stays one conversation. Measured: about 31k tokens per API
+  call, about 94k for a wake (ADR-0025, revision of 2026-11-15).
+- **Limits change live.** **⚙ 8/day · 10 min apart** in the canvas header sets the daily cap
+  (0 stops automatic wakes) and the interval; they apply from the next look, no restart. The
+  environment variables only set the defaults (8 a day since 2026-11-15).
 - **Model.** `claude` with `sonnet` unless `CCDB_CANVAS_SECRETARY_BACKEND`,
   `CCDB_CANVAS_SECRETARY_MODEL` or `CCDB_CANVAS_SECRETARY_EFFORT` say otherwise.
 

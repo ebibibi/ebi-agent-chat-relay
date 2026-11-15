@@ -136,6 +136,9 @@ class ClaudeRunner:
         self.images = images
         self.fork_session = fork_session
         self.effort = effort
+        #: ``--setting-sources`` value; ``""`` loads no CLAUDE.md, skills or user settings.
+        #: None (the default) leaves the CLI's own choice. Only ever narrows what loads.
+        self.setting_sources: str | None = None
         # Account-pool profile this runner spawns as (CLAUDE_CONFIG_DIR). None
         # means the relay's own environment — the behaviour without a pool.
         self.account: AccountBinding | None = None
@@ -394,6 +397,11 @@ class ClaudeRunner:
 
         if self.allowed_tools:
             args.extend(["--allowedTools", ",".join(self.allowed_tools)])
+
+        if self.setting_sources is not None:
+            if self.setting_sources not in ("", "user", "project", "local"):
+                raise ValueError(f"Invalid setting_sources: {self.setting_sources!r}")
+            args.extend(["--setting-sources", self.setting_sources])
 
         if session_id:
             if not re.match(r"^[a-f0-9\-]+$", session_id):

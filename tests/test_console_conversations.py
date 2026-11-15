@@ -1072,3 +1072,29 @@ async def test_failed_compact_keeps_context_measurements(env):
     assert result.status == 502
     assert sessions.records[key].context_used == 100000
     assert key not in env.console._compacting
+
+
+async def test_a_fresh_turn_conversation_starts_a_new_session_with_its_brief(env) -> None:
+    """The canvas secretary (ADR-0025): every turn a fresh session, never a growing one."""
+    item_id = await _start(env)
+    key = env.runs[0].surface.thread_key
+
+    async def fresh(thread_key: int, prompt: str) -> str | None:
+        return f"BRIEF\n{prompt}" if thread_key == key else None
+
+    env.host.fresh_turn = fresh
+    import tempfile
+
+    workdir = tempfile.mkdtemp() + "/secretary"
+    env.host.fresh_workdir = workdir
+    replied = await env.client.post(
+        f"/console/api/items/{item_id}/reply", json={"text": "and Monday?"}, headers=WRITE
+    )
+    assert replied.status == 202
+    await _settle(env.host)
+    second = env.runs[1]
+    assert second.session_id is None
+    assert second.prompt == "BRIEF\nand Monday?"
+    # An empty directory, no CLAUDE.md, skills or user settings: the cheap baseline.
+    assert second.runner.working_dir == workdir
+    assert second.runner.setting_sources == ""

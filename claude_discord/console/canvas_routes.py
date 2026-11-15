@@ -42,6 +42,7 @@ class CanvasRoutes:
         router.add_get(f"{prefix}/canvas", self.read)
         router.add_post(f"{prefix}/canvas/secretary", self.start)
         router.add_post(f"{prefix}/canvas/pause", self.pause)
+        router.add_post(f"{prefix}/canvas/limits", self.set_limits)
         router.add_post(f"{prefix}/canvas/widgets/{{key}}/action", self.action)
         router.add_delete(f"{prefix}/canvas/widgets/{{key}}", self.dismiss)
         router.add_post(f"{prefix}/canvas/session/finish", self.finish_session)
@@ -90,6 +91,21 @@ class CanvasRoutes:
             return _error("paused must be a boolean", 400)
         await self.canvas.set_paused(paused)
         return web.json_response({"paused": paused})
+
+    async def set_limits(self, request: web.Request) -> web.Response:
+        """The person changes the wake limits; they apply from the next look, no restart."""
+        if self.canvas is None:
+            return self._off()
+        body, err = await self.server._json(request)
+        if err:
+            return err
+        try:
+            limits = await self.canvas.set_limits(
+                body.get("max_wakes_per_day"), body.get("min_interval")
+            )
+        except ValueError as exc:
+            return _error(str(exc), 400)
+        return web.json_response(limits)
 
     async def action(self, request: web.Request) -> web.Response:
         if self.canvas is None:

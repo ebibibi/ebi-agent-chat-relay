@@ -330,6 +330,14 @@ class ConsoleServer:
         self._request_files_cache: dict[int, tuple[float, list[dict[str, str]]]] = {}
         #: Canvas mode's resident secretary (ADR-0025); None turns the mode off.
         self.canvas = self._build_canvas(canvas_repo)
+        if self.canvas is not None and self.sessions is not None:
+            # Every secretary turn starts a fresh session with a compact brief, in an empty
+            # directory without the user's CLAUDE.md and skills.
+            self.sessions.fresh_turn = self.canvas.fresh_turn
+            if self.conversations is not None:
+                self.sessions.fresh_workdir = str(
+                    Path(self.conversations.db_path).parent / "canvas_secretary"
+                )
         self.app = self._build_app()
 
     def _background(self, coro: Any) -> None:
@@ -497,7 +505,16 @@ class ConsoleServer:
             messages=self.triage_messages,
             situation=self._situation_dict,
             host=self.sessions,
+            history=self._canvas_history,
         )
+
+    async def _canvas_history(self, thread_key: int, limit: int) -> list[tuple[str, bool, str]]:
+        if self.conversations is None:
+            return []
+        return [
+            (m.author, bool(m.is_bot), m.content)
+            for m in await self.conversations.history(thread_key, limit)
+        ]
 
     async def _situation_dict(self, thread_id: int) -> dict[str, Any] | None:
         repo = self.api.situation_repo
