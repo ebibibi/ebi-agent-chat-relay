@@ -68,9 +68,10 @@ once interrupts the person.
 - A Python merge can wait a long time on a day of continuous use. That is the intended trade:
   the owner sees the pending update in the Console and can restart now when it suits them.
   `max_wait_seconds` still bounds a reservation that should give up.
-- Activity is recorded in memory per process and is not persisted. A freshly started bot treats
-  itself as quiet. Teams messages arrive through a separate relay process and are not counted
-  yet.
+- The activity clock lives in memory, fed by the frontend-neutral `AttentionRecorder` (every
+  human message on Discord, Console and Teams) and by Console changes. On startup it is seeded
+  from the latest live row of `human_activity`, so a fresh process does not treat itself as
+  quiet.
 - The allowlist must grow deliberately. A new non-Python file that the bot loads at startup
   restarts by default. Adding it to the allowlist by mistake would leave it stale until the
   next restart.
