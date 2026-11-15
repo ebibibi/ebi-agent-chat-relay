@@ -87,6 +87,17 @@ widget kind, `schedule`, with three lanes (the person, agents, waiting on others
 axis; any widget can be shown full screen. ccdb reads no calendar for it: calendar access stays
 with the agent's own tools, so the relay gains no new credential.
 
+### Addendum (#1374): the way to the source, and review cards with material
+
+The first trial found dead ends: rows and messages that named a thread but did not link to it,
+no way back once a thread was opened, and a review card that said "check the answer" while the
+answer was only an attachment the card did not show. Every piece from a thread now links to it
+and the opened thread offers the way back. Whether a card has anything to look at is decided by
+deterministic rules (`material_state`): delivered files are shown on the card with text files
+inline; a card with nothing to look at sends the person to the thread instead of asking for a
+review; and a 👀 request whose materials only point at an attachment is refused, because
+attachments are delivered after the mark and would not be on the card yet.
+
 ## Consequences
 
 - One resident conversation costs tokens on every wake. The defaults bound it to 24

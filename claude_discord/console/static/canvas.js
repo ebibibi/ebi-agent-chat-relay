@@ -31,7 +31,8 @@ window.ConsoleCanvas = (() => {
       before: "Before", after: "After", sent: "Sent to the secretary",
       expand: "Show full screen", close: "✕ Close", lanes: { you: "You", ai: "AI", external: "Waiting on others" },
       focus: (n) => `🎯 Focus session (${n})`, focus_ready: (t, n, m) => `🎯 The secretary prepared a focus session: ${t || "decisions"} — ${n} to decide, about ${m} min`,
-      focus_start: "Start",
+      focus_start: "Start", source: "↗ Open the thread", pressed: "✓ Told the secretary", back_bar: "← Back to the secretary",
+      session_back: "🎯 Back to the focus session",
     },
     ja: {
       mode: "画面秘書", title: "🗂 秘書", back: "← 秘書に戻る", classic: "↩ 通常の画面",
@@ -50,7 +51,8 @@ window.ConsoleCanvas = (() => {
       before: "変更前", after: "変更後", sent: "秘書に伝えました",
       expand: "全画面で見る", close: "✕ 閉じる", lanes: { you: "あなた", ai: "AI", external: "外部・待ち" },
       focus: (n) => `🎯 集中セッション（${n}件）`, focus_ready: (t, n, m) => `🎯 秘書が集中セッションを用意しました：${t || "決めごと"} — ${n}件・約${m}分`,
-      focus_start: "始める",
+      focus_start: "始める", source: "↗ 元のスレッドを開く", pressed: "✓ 秘書に伝えました", back_bar: "← 秘書に戻る",
+      session_back: "🎯 集中セッションに戻る",
     },
   };
   const S = () => STRINGS[document.documentElement.lang === "ja" ? "ja" : "en"];
@@ -164,6 +166,8 @@ window.ConsoleCanvas = (() => {
       buttons.push(h("button", { type: "button", class: "chip", onclick: () => start(true), text: s.restart }));
     }
     const decisions = window.ConsoleSecretary.all().length;
+    if (window.ConsoleSession && window.ConsoleSession.suspended()) buttons.unshift(h("button", { type: "button",
+      class: "chip cv-focus", onclick: () => window.ConsoleSession.resume(), text: s.session_back }));
     if (sec.item_id && decisions && window.ConsoleSession) buttons.unshift(h("button", { type: "button", class: "chip cv-focus",
       onclick: () => window.ConsoleSession.open(), text: s.focus(decisions) }));
     buttons.push(h("button", { type: "button", class: "chip", onclick: leave, text: s.classic }));
@@ -208,6 +212,7 @@ window.ConsoleCanvas = (() => {
     const head = h("div", { class: "cv-w-head" },
       h("h3", { text: w.title }),
       h("span", { class: "cv-spacer" }),
+      w.thread_id ? threadLink(w.thread_id, s.source) : null,
       h("span", { class: "dim cv-when", title: w.updated_at, text: s.updated(rel(w.updated_at)) }),
       h("button", { type: "button", class: "icon-btn cv-x cv-expand", title: s.expand, "aria-label": s.expand,
         onclick: () => full(w), text: "⛶" }),
@@ -217,16 +222,22 @@ window.ConsoleCanvas = (() => {
     const actions = (w.actions || []).length ? h("div", { class: "cv-actions" },
       // The words a button sends are shown on hover, and again in the chat once sent.
       ...w.actions.map((a, i) => h("button", { type: "button", class: "btn" + (i === 0 ? " primary" : ""),
-        title: `→ ${a.say}`, onclick: (e) => press(w, i, e.currentTarget), text: a.label }))) : null;
+        title: `→ ${a.say}`, disabled: pressed.get(w.key) === `${w.updated_at}|${i}` ? "" : null,
+        onclick: (e) => press(w, i, e.currentTarget),
+        text: pressed.get(w.key) === `${w.updated_at}|${i}` ? s.pressed : a.label }))) : null;
     return h("article", { class: `cv-w cv-k-${w.kind} cv-size-${w.size}`, "data-key": w.key },
       head, note, h("div", { class: "cv-w-body" }, draw(w.kind, w.data)), actions);
   }
 
+  const pressed = new Map(); // widget key -> "updated_at|button index" already sent
   async function press(w, index, button) {
     button.disabled = true;
     try {
       await api(`/canvas/widgets/${encodeURIComponent(w.key)}/action`, { method: "POST", body: { index } });
       toast(S().sent);
+      // Stays marked until the secretary updates the widget: the press was delivered.
+      pressed.set(w.key, `${w.updated_at}|${index}`);
+      button.textContent = S().pressed;
       await refresh();
       if (!narrow.matches && secretaryId()) openItem(secretaryId());
     } catch (err) { toast(err.message); button.disabled = false; }
@@ -266,7 +277,13 @@ window.ConsoleCanvas = (() => {
   function table(d) {
     return h("div", { class: "cv-table-wrap" }, h("table", { class: "cv-table" },
       h("thead", {}, h("tr", {}, ...d.columns.map((c) => h("th", { text: c })))),
-      h("tbody", {}, ...d.rows.map((r) => h("tr", {}, ...d.columns.map((_, i) => h("td", { text: r[i] || "" })))))));
+      h("tbody", {}, ...d.rows.map((r, n) => {
+        const thread = (d.row_threads || [])[n];
+        const cells = d.columns.map((_, i) => h("td", { text: r[i] || "" }));
+        // The first cell names the thread; it becomes the way back to it.
+        if (thread && cells.length) cells[0].replaceChildren(threadLink(thread, `↗ ${r[0] || ""}`));
+        return h("tr", {}, ...cells);
+      }))));
   }
 
   function markdown(d) { return h("div", { class: "md" }, MD.render(d.text)); }
@@ -315,7 +332,7 @@ window.ConsoleCanvas = (() => {
         const start = toMin(b.start), end = b.end ? toMin(b.end) : start + 30;
         const node = h("div", { class: "cv-s-block", style: { top: pct(start), height: `calc(${((end - start) / span) * 100}% - 3px)` },
           title: `${b.start}${b.end ? `–${b.end}` : ""} ${b.label}` },
-          h("div", { class: "cv-s-label", text: b.label }),
+          h("div", { class: "cv-s-label", text: b.thread_id ? `↗ ${b.label}` : b.label }),
           h("div", { class: "cv-s-sub dim", text: [`${b.start}${b.end ? `–${b.end}` : ""}`, b.sub].filter(Boolean).join(" · ") }));
         if (b.thread_id) { node.classList.add("link"); node.addEventListener("click", () => { chatOpen = true; openItem(`t${b.thread_id}`); }); }
         return node;
@@ -355,5 +372,23 @@ window.ConsoleCanvas = (() => {
   }
 
   const session = () => (data && data.session) || null;
-  return { on, enter, leave, paint, onBoard, onClose, load, draw, session, MODE, label: () => S().mode };
+
+  // Inside a thread opened from the canvas: a bar at the top of the conversation leads back.
+  function bar(pane) {
+    const id = secretaryId();
+    let node = pane.querySelector(":scope > .cv-detail-back");
+    const show = on() && id && state.open && state.open !== id;
+    if (!show) { if (node) node.remove(); return; }
+    if (node) return;
+    const s = S();
+    const suspended = window.ConsoleSession && window.ConsoleSession.suspended();
+    node = h("div", { class: "cv-detail-back" },
+      // Wide: the secretary's conversation on the right. Phone: the canvas itself.
+      h("button", { type: "button", class: "btn primary", onclick: () => {
+        if (narrow.matches) { chatOpen = false; markSeen(state.open); state.open = null; render(); } else openItem(id);
+      }, text: s.back_bar }),
+      suspended ? h("button", { type: "button", class: "btn", onclick: () => window.ConsoleSession.resume(), text: s.session_back }) : null);
+    pane.prepend(node);
+  }
+  return { on, enter, leave, paint, onBoard, onClose, load, draw, session, bar, MODE, label: () => S().mode };
 })();

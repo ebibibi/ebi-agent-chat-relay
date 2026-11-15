@@ -20,6 +20,7 @@ window.ConsoleSession = (() => {
       decided: "✅", later: "⏭ later", done_title: "🎉 All done for this session",
       done_body: "Each answer went to its thread. The secretary has been told.", close: "Back to the canvas",
       empty: "No open decisions right now.", deadline: "Deadline: ", irreversible: "can't be undone",
+      told: (d, l) => `Sent to the secretary: ${d} decided, ${l} for later`, open_thread: "↗ Open the thread (the session waits)",
       more: "Full request ▾", min: (m) => `${m} min`,
     },
     ja: {
@@ -32,6 +33,7 @@ window.ConsoleSession = (() => {
       decided: "✅", later: "⏭ 後回し", done_title: "🎉 この回の決めごとは終わりです",
       done_body: "答えはそれぞれのスレッドに届けました。秘書にも伝えてあります。", close: "画面に戻る",
       empty: "いま決めることはありません。", deadline: "期限：", irreversible: "戻せない",
+      told: (d, l) => `秘書に伝えました：決定 ${d}件・後回し ${l}件`, open_thread: "↗ 元のスレッドを開く（セッションは中断して待ちます）",
       more: "詳しい依頼書 ▾", min: (m) => `${m}分`,
     },
   };
@@ -64,6 +66,7 @@ window.ConsoleSession = (() => {
   }
 
   function open() {
+    suspended_ = false;
     queue = build();
     index = 0; decided = []; later = []; writing = false; busy = false;
     startedAt = Date.now();
@@ -73,9 +76,31 @@ window.ConsoleSession = (() => {
     paint();
   }
 
-  async function end() {
+  // Opening a thread from the session suspends it: the queue, the answers so far and the clock
+  // stay, and the canvas and the thread offer a way back (canvas.js).
+  let suspended_ = false;
+  function suspend() {
     if (!open_) return;
     open_ = false;
+    suspended_ = true;
+    $("cv-session")?.remove();
+  }
+  function resume() {
+    if (!suspended_) return;
+    suspended_ = false;
+    open_ = true;
+    paint();
+  }
+  function openThread(id) {
+    suspend();
+    openItem(id);
+    render();
+  }
+
+  async function end() {
+    if (!open_ && !suspended_) return;
+    open_ = false;
+    suspended_ = false;
     clearInterval(timer);
     $("cv-session")?.remove();
     if (decided.length || later.length) {
@@ -83,6 +108,7 @@ window.ConsoleSession = (() => {
         await api("/canvas/session/finish", { method: "POST", body: {
           decided: decided.map((d) => ({ title: d.title, answer: d.answer })),
           later: later.map((d) => ({ title: d.title })) } });
+        toast(S().told(decided.length, later.length));
       } catch (err) { toast(err.message); }
     }
     refresh();
@@ -167,7 +193,7 @@ window.ConsoleSession = (() => {
     // Only the negative forms: "元に戻せます" (can be undone) must not be flagged.
     if (/戻せない|戻せません|取り消せない|取り消せません|cannot be undone|can't be undone|irreversible/i.test(c.context)) tags.push(h("span", { class: "tag hot", text: s.irreversible }));
     tags.push(h("span", { class: "tag", text: `${s.deadline}${c.deadline}` }));
-    tags.push(h("button", { type: "button", class: "guide-link", onclick: () => { end(); openItem(card.id); },
+    tags.push(h("button", { type: "button", class: "guide-link", title: s.open_thread, onclick: () => openThread(card.id),
       text: `↗ ${card.item_title}` }));
     const options = c.options.map((o, i) => h("button", { type: "button",
       class: "cv-ss-option" + (o.recommended ? " rec" : ""), onclick: () => choose(i), disabled: busy ? "" : null },
@@ -183,13 +209,24 @@ window.ConsoleSession = (() => {
       h("summary", { text: s.more }),
       ...detailParts.map((k) => h("div", { class: "md" }, MD.render(card.detail[k])))) : null;
     const own = writing ? ownForm(entry) : null;
+    const files = window.ConsoleSecretary.filesBlock(card);
+    if (window.ConsoleSecretary.nothingToSee(card)) {
+      return h("section", { class: "cv-ss-main" },
+        h("div", { class: "cv-ss-tags" }, ...tags),
+        h("h1", { class: "cv-ss-title", text: c.title }),
+        h("p", { class: "cv-ss-context", text: c.context }),
+        h("p", { class: "cv-ss-nomaterial", text: window.ConsoleSecretary.strings().in_thread }),
+        h("div", { class: "cv-ss-options" }, h("button", { type: "button", class: "btn primary big",
+          onclick: () => openThread(card.id), text: window.ConsoleSecretary.strings().open_to_check })),
+        h("div", { class: "cv-ss-keys dim", text: s.keys }));
+    }
     return h("section", { class: "cv-ss-main" },
       h("div", { class: "cv-ss-tags" }, ...tags),
       h("h1", { class: "cv-ss-title", text: c.title }),
       h("p", { class: "cv-ss-context", text: c.context }),
       plan && plan.why ? h("p", { class: "dim", text: plan.why }) : null,
       h("div", { class: "cv-ss-options" }, ...options),
-      own, drawn, detail,
+      own, files, drawn, detail,
       h("div", { class: "cv-ss-keys dim", text: s.keys }));
   }
 
@@ -222,6 +259,13 @@ window.ConsoleSession = (() => {
         ...later.map((d) => h("li", { class: "dim" }, h("span", { text: s.later }), h("span", { text: ` ${d.title}` })))], s.nothing_yet));
   }
 
+  // A /#focus/t<id> link in the request's text opens the thread behind the session: suspend it.
+  document.addEventListener("click", (e) => {
+    if (!open_) return;
+    const anchor = e.target.closest && e.target.closest("#cv-session a[href]");
+    if (anchor && window.ConsoleLinks.route(anchor.href)) suspend();
+  }, true);
+
   // Keys, ahead of the Console's own shortcuts while the session is open.
   document.addEventListener("keydown", (e) => {
     if (!open_) return;
@@ -237,5 +281,5 @@ window.ConsoleSession = (() => {
     if (handled) { e.preventDefault(); e.stopImmediatePropagation(); }
   }, true);
 
-  return { open, end, isOpen: () => open_ };
+  return { open, end, suspend, resume, isOpen: () => open_, suspended: () => suspended_ };
 })();

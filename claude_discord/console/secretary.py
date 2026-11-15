@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING, Any
 import aiosqlite
 from aiohttp import web
 
+from ..decision_request import material_state
 from .guide import reasons
 
 if TYPE_CHECKING:
@@ -99,6 +100,10 @@ def _card(request: Mapping[str, Any], item: Mapping[str, Any], *, now: datetime)
         "origin": request.get("origin"),
         "card": request.get("card") or {},
         "detail": request.get("detail") or {},
+        "files": list(request.get("files") or []),
+        "material": material_state(
+            (request.get("detail") or {}).get("materials"), request.get("files") or []
+        ),
         "since": request.get("created_at"),
         "reasons": reasons(item, now=now),
         "place": item.get("place"),

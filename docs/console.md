@@ -244,6 +244,27 @@ answer relayed by the secretary, and its open request closes.
 
 On a phone the canvas comes first; **💬 Secretary** opens the conversation over it.
 
+**Always a way to the source, and back** (#1374). Everything that comes from a thread links to
+it: decision cards (**↗ title**), a widget's top-level `thread_id` (**↗ Open the thread** in its
+header), a `table`'s `row_threads` (aligned with `rows`; the first cell becomes the link),
+`timeline` entries and `schedule` blocks with a `thread_id`, and `/#focus/t<id>` links the
+secretary writes in Markdown and in its messages. A thread opened from the canvas shows
+**← Back to the secretary** at its top (on a phone it returns to the canvas). Opening a thread
+from a focus session suspends the session; **🎯 Back to the focus session** resumes it at the
+same decision.
+
+**A review card carries what to review.** A card that asks the person to look at something
+shows the files its thread delivered (the console conversation's `📎 Files` links, that thread's
+own only), with the first text files (`.md`, `.txt`, `.csv`, `.json`, `.yaml`, `.diff`, …) shown
+inline. Whether a card has anything to look at is decided by rules, not a model
+(`material_state` in `claude_discord/decision_request.py`): files delivered, a link to the thing,
+or materials of at least 160 characters or with a code block, diff or table. A review (or a card
+whose title asks to check something) with none of those does not ask for a review: it says
+there is nothing attached and offers only **↗ Open the thread to check**. A new 👀 request whose
+materials only point at an attachment is refused (400). Widget buttons stay marked
+**✓ Told the secretary** until the secretary updates the widget, and ending a focus session says
+what was sent.
+
 **Today's timetable** is a `schedule` widget: `{"lanes": {"you": [...], "ai": [...],
 "external": [...]}}`, each block `{"start": "HH:MM", "end"?: "HH:MM", "label", "sub"?,
 "thread_id"?}`. The Console draws the three lanes on one time axis with a red line at now; a

@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a day by default, pausable, with usage on screen. Decision cards answer the asking thread;
   other widget buttons and `POST /api/secretary/deliver` reach threads through the secretary.
   Classic and secretary modes are unchanged.
+- Canvas mode **flows** (#1374): everything from a thread links to it and the opened thread
+  offers **← Back to the secretary** (a focus session is suspended and resumed); review cards
+  show the files their thread delivered, text inline; a card with nothing to look at sends the
+  person to the thread; a 👀 request whose materials only point at an attachment is refused;
+  widget buttons and session ends say what was sent. Widgets take `thread_id`, tables
+  `row_threads`.
 - Canvas mode **focus session** and **today's timetable** (#1360): the secretary prepares a
   session (`PUT /api/canvas/session`) that shows the open decisions one at a time, full screen,
   with their material, answered with one key (1-3, C, S, →) and reported back to the secretary at
