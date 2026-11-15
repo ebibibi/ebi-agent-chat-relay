@@ -277,7 +277,7 @@ def test_config_reads_the_environment_and_clamps() -> None:
         {"CCDB_CANVAS_MIN_INTERVAL": "5", "CCDB_CANVAS_MAX_WAKES_PER_DAY": "x"}
     )
     assert config.min_interval == 60
-    assert config.max_wakes_per_day == 24
+    assert config.max_wakes_per_day == 8
     assert CanvasConfig.from_env({"CCDB_CANVAS_SECRETARY_MODEL": "opus"}).model == "opus"
 
 
@@ -507,3 +507,49 @@ def test_a_partial_board_after_a_restart_is_not_hundreds_of_changes() -> None:
         [_item("t1", "done")] + [_item(f"t{i}") for i in range(100, 700)], []
     )
     assert compare(partial, full_with_change) == [("t1", "status waiting → done")]
+
+
+# -- fresh turns and live limits (2026-11-15 trial: 24 wakes read about 4.1M tokens) ------------
+async def test_every_secretary_turn_gets_a_compact_brief_not_the_whole_conversation(repo) -> None:
+    board, host = Board(), FakeHost()
+    secretary = _secretary(repo, board, host, [datetime(2026, 11, 14, 12, tzinfo=UTC)])
+    long_history = [("ebi", False, f"question {i} " + "x" * 2000) for i in range(200)]
+    long_history += [("agent", True, "-# ⌨️ Running: curl ..."), ("agent", True, "answer")]
+
+    async def history(key: int, limit: int) -> list[tuple[str, bool, str]]:
+        return long_history[-limit:]
+
+    secretary._history = history
+    key = await secretary.start_secretary("ebi")
+    assert await secretary.fresh_turn(key + 1, "hi") is None, "other threads resume as usual"
+    first = host.spawned[0]["prompt"]
+    assert await secretary.fresh_turn(key, first) is None, "the opening charter runs as written"
+    brief = await secretary.fresh_turn(key, "🔔 2 thread(s) changed.")
+    assert brief is not None
+    assert "fresh session" in brief and "X-Canvas-Token" in brief
+    assert brief.endswith("🔔 2 thread(s) changed.")
+    assert "Running: curl" not in brief and "- you: answer" in brief
+    assert len(brief) < 12000, "the same size on the hundredth turn as on the second"
+
+
+async def test_wake_limits_change_live_from_the_canvas(repo) -> None:
+    board, host = Board(), FakeHost()
+    clock = [datetime(2026, 11, 14, 12, tzinfo=UTC)]
+    secretary = _secretary(repo, board, host, clock)
+    assert (await secretary.limits())["max_wakes_per_day"] == 2  # the test config
+    await secretary.set_limits(1, 60)
+    assert await secretary.limits() == {"max_wakes_per_day": 1, "min_interval": 60}
+    assert (await secretary.status())["usage"]["max_wakes"] == 1
+    with pytest.raises(ValueError):
+        await secretary.set_limits(-1, 60)
+    with pytest.raises(ValueError):
+        await secretary.set_limits(8, 10)
+    await secretary.start_secretary("ebi")
+    await secretary.tick()
+    board.items[0] = _item("t1", "done")
+    clock[0] += timedelta(minutes=2)
+    assert await secretary.tick() == "woken"
+    board.items[0] = _item("t1", "waiting")
+    clock[0] += timedelta(minutes=2)
+    secretary._secretary_running = False
+    assert await secretary.tick() == "daily cap"

@@ -124,6 +124,17 @@ const status = (started) => ({item_id: started ? 't900' : null, running: false, 
       await page.waitForFunction(() => state.open === null);
     }
 
+    // The wake limits change from the canvas, no restart.
+    const answers = ['8', '15'];
+    const onDialog = (d) => d.accept(answers.shift());
+    page.on('dialog', onDialog);
+    await page.locator('.cv-head .chip', {hasText: '⚙'}).click();
+    await page.waitForFunction(() => true);
+    await page.waitForTimeout(300);
+    page.off('dialog', onDialog);
+    const set = calls.find((c) => c.path.endsWith('/canvas/limits'));
+    assert.deepEqual(set && set.body, {max_wakes_per_day: 8, min_interval: 900});
+
     // Back to the classic screen.
     await page.getByRole('button', {name: '↩ 通常の画面'}).click();
     await page.waitForFunction(() => !document.body.classList.contains('canvas'));

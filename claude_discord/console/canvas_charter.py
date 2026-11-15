@@ -100,8 +100,15 @@ A message from "canvas watcher" is automatic: something changed. Read the digest
 notes and the canvas, then answer in one or two lines: what the person should do now, or that
 nothing needs them. Messages from the person always come first.
 
-Start now: read `?all=1`, write notes for the threads that need the person, lay out the canvas
+{start}"""
+
+_START_FIRST = """Start now: read `?all=1`, write notes for the threads that need the person, lay out the canvas
 and greet the person with what to do first."""
+
+_START_TURN = """Every turn starts a fresh session (no memory of earlier turns beyond what is below): your
+notes (`GET /api/secretary/notes`), the digest and the canvas (`GET /api/canvas`) are your memory.
+Read only what this turn needs: the digest for a wake; for the person's message, what it is about.
+Do not re-read every thread."""
 
 _WAKE = (
     "🔔 {count} thread(s) changed. Read the digest, update your notes and the canvas, "
@@ -109,14 +116,38 @@ _WAKE = (
 )
 
 
-def charter(who: str, token: str) -> str:
-    """The first message of the secretary's conversation, carrying its write key."""
+CHARTER_OPENING = "You are the person's secretary in the Ebi AI Console's canvas mode"
+
+
+def charter(who: str, token: str, *, first: bool = True) -> str:
+    """The standing instructions, carrying the write key. *first*: the opening turn."""
     return _CHARTER.format(
         who=who or "the person",
         widget_format=WIDGET_FORMAT,
         session_format=SESSION_FORMAT,
         token=token,
+        start=_START_FIRST if first else _START_TURN,
     )
+
+
+def turn_brief(
+    standing: str, recent: list[tuple[str, str]], counts: dict[str, int], prompt: str
+) -> str:
+    """What a fresh turn reads: the instructions, a little recent chat, then this turn's message.
+
+    Every secretary turn starts a new agent session (ADR-0025 revision), so the conversation
+    never grows: the brief is the same size on the hundredth turn as on the second.
+    """
+    lines = [standing, "", "## Where things stand"]
+    lines.append(
+        f"Your notes: {counts.get('notes', 0)} threads. Changes not yet read: "
+        f"{counts.get('pending', 0)}. Widgets on the canvas: {counts.get('widgets', 0)}."
+    )
+    if recent:
+        lines += ["", "## The last messages of this conversation (oldest first)"]
+        lines += [f"- {who}: {text}" for who, text in recent]
+    lines += ["", "## This turn", prompt]
+    return "\n".join(lines)
 
 
 def wake_message(count: int) -> str:

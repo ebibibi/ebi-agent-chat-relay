@@ -143,3 +143,17 @@ def test_a_chat_threads_attachments_are_this_bots_own_cdn_files_only() -> None:
     ]
     assert attachment_files(messages, bot_id=1) == [{"name": "draft.md", "url": good}]
     assert attachment_files(messages, bot_id=None) == []
+
+
+def test_the_runner_can_load_no_settings_and_refuses_other_values() -> None:
+    from claude_code_core.runner import ClaudeRunner
+
+    runner = ClaudeRunner()
+    assert "--setting-sources" not in runner._build_args("hi", None)
+    runner.setting_sources = ""
+    args = runner._build_args("hi", None)
+    assert args[args.index("--setting-sources") + 1] == ""
+    assert "hi" not in args, "the prompt goes over stdin, never next to a flag"
+    runner.setting_sources = "--dangerously-skip-permissions"
+    with pytest.raises(ValueError):
+        runner._build_args("hi", None)

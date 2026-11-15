@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a day by default, pausable, with usage on screen. Decision cards answer the asking thread;
   other widget buttons and `POST /api/secretary/deliver` reach threads through the secretary.
   Classic and secretary modes are unchanged.
+- Canvas secretary **fresh turns** (#1387): every turn starts a new agent session with a compact
+  brief in an empty directory (`--setting-sources ""`), so the context no longer grows with the
+  day; measured about 31k tokens per call instead of 58k. The default cap is 8 wakes a day and the
+  cap and interval change live from the canvas (⚙), without a restart.
 - Canvas mode **flows** (#1374): everything from a thread links to it and the opened thread
   offers **← Back to the secretary** (a focus session is suspended and resumed); review cards
   show the files their thread delivered, text inline; a card with nothing to look at sends the

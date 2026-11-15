@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from .canvas_charter import charter, wake_message
+from .canvas_charter import CHARTER_OPENING, charter, turn_brief, wake_message
 from .canvas_repo import CanvasRepository
 
 if TYPE_CHECKING:
@@ -42,9 +42,16 @@ STATE_PAUSED = "paused"
 STATE_TOKEN = "token"
 #: The focus session the secretary prepared (JSON), until the person finishes it.
 STATE_SESSION = "session"
+#: Wake limits the person set from the canvas; they override the environment, live.
+STATE_LIMITS = "limits"
+#: How much of the conversation a fresh turn carries.
+RECENT_MESSAGES = 6
+RECENT_CHARS = 400
 STATE_LAST_WAKE = "last_wake_at"
 
 TICK_SECONDS = 30
+#: What the person may set from the canvas (and the environment is clamped to).
+LIMIT_RANGES = {"max_wakes_per_day": (0, 500), "min_interval": (60, 86400)}
 #: How many changed threads a digest describes in full (with recent messages).
 DIGEST_FULL = 15
 DIGEST_MESSAGES = 4
@@ -63,7 +70,7 @@ class CanvasConfig:
     model: str | None = "sonnet"
     effort: str | None = None
     min_interval: int = 600
-    max_wakes_per_day: int = 24
+    max_wakes_per_day: int = 8
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> CanvasConfig:
@@ -80,6 +87,7 @@ class CanvasConfig:
                 return default
 
         model = (env.get("CCDB_CANVAS_SECRETARY_MODEL") or "").strip()
+        # The default cap after the 2026-11-15 trial; the canvas can change it live.
         return cls(
             backend=(env.get("CCDB_CANVAS_SECRETARY_BACKEND") or "").strip() or "claude",
             model=model or cls.model,
@@ -201,6 +209,7 @@ class CanvasSecretary:
         situation: Callable[[int], Awaitable[dict[str, Any] | None]],
         host: ConsoleSessionHost | None,
         settings: Any = None,
+        history: Callable[[int, int], Awaitable[list[tuple[str, bool, str]]]] | None = None,
         config: CanvasConfig | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
@@ -211,6 +220,8 @@ class CanvasSecretary:
         self._situation = situation
         self._host = host
         self._settings = settings
+        #: Reads the secretary's own conversation (author, is_bot, content), oldest first.
+        self._history = history
         self.config = config or CanvasConfig.from_env()
         self._clock = clock
         self._seen: dict[str, Print] | None = None
@@ -300,6 +311,71 @@ class CanvasSecretary:
         stored = {**plan, "prepared_at": _stamp(self._clock())}
         await self.repo.set_state(STATE_SESSION, json.dumps(stored, ensure_ascii=False))
 
+    async def limits(self) -> dict[str, int]:
+        """The wake limits in force: what the person set on the canvas, else the environment."""
+        out = {
+            "max_wakes_per_day": self.config.max_wakes_per_day,
+            "min_interval": self.config.min_interval,
+        }
+        raw = await self.repo.get_state(STATE_LIMITS)
+        if raw:
+            try:
+                stored = json.loads(raw)
+            except json.JSONDecodeError:
+                logger.warning("canvas: stored limits are not JSON; using the environment")
+                return out
+            for name, (low, high) in LIMIT_RANGES.items():
+                value = stored.get(name) if isinstance(stored, dict) else None
+                if isinstance(value, int) and not isinstance(value, bool) and low <= value <= high:
+                    out[name] = value
+        return out
+
+    async def set_limits(self, max_wakes_per_day: Any, min_interval: Any) -> dict[str, int]:
+        for name, value in (
+            ("max_wakes_per_day", max_wakes_per_day),
+            ("min_interval", min_interval),
+        ):
+            low, high = LIMIT_RANGES[name]
+            if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+                raise ValueError(f"{name} must be a whole number {low}-{high}")
+        await self.repo.set_state(
+            STATE_LIMITS,
+            json.dumps({"max_wakes_per_day": max_wakes_per_day, "min_interval": min_interval}),
+        )
+        return await self.limits()
+
+    async def fresh_turn(self, thread_key: int, prompt: str) -> str | None:
+        """The prompt for a secretary turn in a fresh session, or None for any other thread.
+
+        The secretary's conversation would otherwise grow with every wake, and every wake
+        would read all of it again (2026-11-15: 24 wakes read about 4.1M tokens). Its memory
+        is its notes, the digest and the canvas, so a turn needs only the instructions, the
+        last few messages and this turn's message.
+        """
+        if thread_key != await self.thread_key() or prompt.startswith(CHARTER_OPENING):
+            return None
+        token = await self.repo.get_state(STATE_TOKEN) or ""
+        recent = await self._recent(thread_key) if self._history is not None else []
+        cursor = int(await self.repo.get_state(STATE_CURSOR) or 0)
+        counts = {
+            "notes": len(await self.repo.notes()),
+            "pending": len({i for _, _, i, _ in await self.repo.changes_since(cursor)}),
+            "widgets": await self.repo.count_widgets(),
+        }
+        return turn_brief(charter("", token, first=False), recent, counts, prompt)
+
+    async def _recent(self, thread_key: int) -> list[tuple[str, str]]:
+        assert self._history is not None
+        out: list[tuple[str, str]] = []
+        for author, is_bot, content in await self._history(thread_key, RECENT_MESSAGES * 4):
+            text = " ".join(str(content or "").split())
+            # Tool lines, the charter and relay bookkeeping are not the conversation.
+            if not text or text.startswith("-#") or text.startswith(CHARTER_OPENING):
+                continue
+            who = "you" if is_bot else ("watcher" if author == WATCHER_AUTHOR else author)
+            out.append((who, text[:RECENT_CHARS]))
+        return out[-RECENT_MESSAGES:]
+
     async def paused(self) -> bool:
         return (await self.repo.get_state(STATE_PAUSED)) == "1"
 
@@ -347,10 +423,11 @@ class CanvasSecretary:
             return "paused"
         now = self._clock()
         last = _parse(await self.repo.get_state(STATE_LAST_WAKE))
-        if last is not None and (now - last).total_seconds() < self.config.min_interval:
+        limits = await self.limits()
+        if last is not None and (now - last).total_seconds() < limits["min_interval"]:
             return "too soon"
         usage = await self.repo.day_usage(_day(now))
-        if usage["wakes"] >= self.config.max_wakes_per_day:
+        if usage["wakes"] >= limits["max_wakes_per_day"]:
             return "daily cap"
         key = await self.thread_key()
         if key is None or self._host is None:
@@ -471,6 +548,7 @@ class CanvasSecretary:
             mine = next((i for i in items if i.get("id") == secretary), None)
         now = self._clock()
         usage = await self.repo.day_usage(_day(now))
+        limits = await self.limits()
         cursor = int(await self.repo.get_state(STATE_CURSOR) or 0)
         pending = len({item for _, _, item, _ in await self.repo.changes_since(cursor)})
         return {
@@ -481,8 +559,8 @@ class CanvasSecretary:
             "paused": await self.paused(),
             "pending": pending,
             "last_wake_at": await self.repo.get_state(STATE_LAST_WAKE),
-            "usage": {**usage, "max_wakes": self.config.max_wakes_per_day},
-            "min_interval": self.config.min_interval,
+            "usage": {**usage, "max_wakes": limits["max_wakes_per_day"]},
+            "min_interval": limits["min_interval"],
             "available": self._host is not None,
         }
 

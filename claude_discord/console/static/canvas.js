@@ -33,6 +33,8 @@ window.ConsoleCanvas = (() => {
       focus: (n) => `🎯 Focus session (${n})`, focus_ready: (t, n, m) => `🎯 The secretary prepared a focus session: ${t || "decisions"} — ${n} to decide, about ${m} min`,
       focus_start: "Start", source: "↗ Open the thread", pressed: "✓ Told the secretary", back_bar: "← Back to the secretary",
       session_back: "🎯 Back to the focus session",
+      limits: (n, m) => `⚙ ${n}/day · ${m} min apart`, ask_max: "Automatic wakes per day (0 stops them):",
+      ask_gap: "Minutes between automatic wakes (at least 1):", limits_set: "Limits changed; they apply from now",
     },
     ja: {
       mode: "画面秘書", title: "🗂 秘書", back: "← 秘書に戻る", classic: "↩ 通常の画面",
@@ -53,6 +55,8 @@ window.ConsoleCanvas = (() => {
       focus: (n) => `🎯 集中セッション（${n}件）`, focus_ready: (t, n, m) => `🎯 秘書が集中セッションを用意しました：${t || "決めごと"} — ${n}件・約${m}分`,
       focus_start: "始める", source: "↗ 元のスレッドを開く", pressed: "✓ 秘書に伝えました", back_bar: "← 秘書に戻る",
       session_back: "🎯 集中セッションに戻る",
+      limits: (n, m) => `⚙ 1日${n}回・${m}分おき`, ask_max: "1日に自動で起こす回数（0で止める）：",
+      ask_gap: "自動で起こす間隔（分、1以上）：", limits_set: "上限を変えました。今から効きます",
     },
   };
   const S = () => STRINGS[document.documentElement.lang === "ja" ? "ja" : "en"];
@@ -142,6 +146,22 @@ window.ConsoleCanvas = (() => {
     finally { starting = false; paint(); }
   }
 
+  // The wake limits apply from the next look: no restart (ADR-0025 revision).
+  async function editLimits() {
+    const s = S();
+    const sec = (data && data.secretary) || {};
+    const max = prompt(s.ask_max, String(sec.usage ? sec.usage.max_wakes : 8));
+    if (max === null) return;
+    const gap = prompt(s.ask_gap, String(Math.round((sec.min_interval || 600) / 60)));
+    if (gap === null) return;
+    try {
+      await api("/canvas/limits", { method: "POST",
+        body: { max_wakes_per_day: Number.parseInt(max, 10), min_interval: Number.parseInt(gap, 10) * 60 } });
+      toast(s.limits_set);
+      await load(); paint();
+    } catch (err) { toast(err.message); }
+  }
+
   async function setPaused(paused) {
     try { await api("/canvas/pause", { method: "POST", body: { paused } }); await load(); paint(); }
     catch (err) { toast(err.message); }
@@ -164,6 +184,8 @@ window.ConsoleCanvas = (() => {
     if (sec.item_id) {
       buttons.push(h("button", { type: "button", class: "chip", onclick: () => setPaused(!sec.paused), text: sec.paused ? s.resume : s.pause }));
       buttons.push(h("button", { type: "button", class: "chip", onclick: () => start(true), text: s.restart }));
+      if (sec.usage) buttons.push(h("button", { type: "button", class: "chip", onclick: editLimits,
+        text: s.limits(sec.usage.max_wakes, Math.round((sec.min_interval || 600) / 60)) }));
     }
     const decisions = window.ConsoleSecretary.all().length;
     if (window.ConsoleSession && window.ConsoleSession.suspended()) buttons.unshift(h("button", { type: "button",

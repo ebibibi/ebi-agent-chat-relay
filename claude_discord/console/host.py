@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -91,6 +92,14 @@ class ConsoleSessionHost:
         self._registry = registry
         self._worktree_manager = worktree_manager
         self._locks: dict[int, asyncio.Lock] = {}
+        #: Conversations whose every turn starts a fresh agent session (the canvas secretary,
+        #: ADR-0025): given the thread and the message, returns the prompt to send instead,
+        #: or None to resume as usual. Set by the Console; None for every other deployment.
+        self.fresh_turn: Callable[[int, str], Awaitable[str | None]] | None = None
+        #: Where fresh turns run: an empty directory, with no CLAUDE.md, skills or user settings
+        #: loaded, so a turn costs its brief plus the CLI's own baseline (measured 2026-11-15:
+        #: about 31k tokens per call instead of 58k from the home directory).
+        self.fresh_workdir: str | None = None
         # Strong references: the loop keeps only weak ones to running tasks.
         self._tasks: set[asyncio.Task[Any]] = set()
 
@@ -382,7 +391,18 @@ class ConsoleSessionHost:
         await apply_thread_execution_mode(runner, getattr(self._settings, "repo", None), thread_key)
 
         session_id = None
-        if record is not None and session_is_resumable(record.backend, backend):
+        fresh = await self._fresh_prompt(thread_key, prompt)
+        if fresh is not None:
+            # A standing conversation that must not grow: no resume, a compact brief instead.
+            prompt = fresh
+            if self.fresh_workdir is not None:
+                await asyncio.to_thread(os.makedirs, self.fresh_workdir, exist_ok=True)
+                runner.working_dir = self.fresh_workdir
+                if hasattr(runner, "setting_sources"):
+                    runner.setting_sources = ""
+            elif record is not None and record.working_dir:
+                runner.working_dir = record.working_dir
+        elif record is not None and session_is_resumable(record.backend, backend):
             session_id = record.session_id
             if record.working_dir:
                 runner.working_dir = record.working_dir
@@ -438,6 +458,16 @@ class ConsoleSessionHost:
         # the next profile, as a Discord thread does. A second rejection just reports.
         if failover is not None and failover.retry and not _account_retry:
             await self._run(surface, user_prompt, _account_retry=True, result_sink=result_sink)
+
+    async def _fresh_prompt(self, thread_key: int, prompt: str) -> str | None:
+        if self.fresh_turn is None:
+            return None
+        try:
+            return await self.fresh_turn(thread_key, prompt)
+        except Exception:
+            # Resuming costs tokens but loses nothing; a failed brief must not drop the turn.
+            logger.exception("console: fresh brief for %s failed; resuming instead", thread_key)
+            return None
 
     async def _plan_account(
         self,

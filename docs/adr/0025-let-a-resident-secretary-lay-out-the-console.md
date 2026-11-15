@@ -98,6 +98,26 @@ inline; a card with nothing to look at sends the person to the thread instead of
 review; and a 👀 request whose materials only point at an attachment is refused, because
 attachments are delivered after the mark and would not be on the card yet.
 
+### Revision (2026-11-15): every turn a fresh session; limits change live
+
+**What went wrong.** The first full day reached the cap of 24 wakes and an estimated 4.1M input
+tokens. Each wake resumed one growing conversation, so every turn re-read all earlier turns
+(about 220k tokens of context by the end of the day), and each turn makes several API calls.
+
+**Decision.**
+- **Every secretary turn starts a new agent session.** The relay replaces the turn's prompt with
+  a brief: the standing instructions, counts of notes, unread changes and widgets, the last six
+  messages of the conversation, and the turn's own message. The transcript stays one
+  conversation for the person; the agent's context does not grow. Its memory was always meant
+  to be the notes, the digest and the canvas.
+- **Turns run in an empty directory with `--setting-sources ""`**: no CLAUDE.md, skills or user
+  settings. Measured on production data with Sonnet, one read-only wake: from the home
+  directory about 58k tokens per API call (175k for the turn's three calls, $0.22); isolated
+  about 31k per call (94k for the turn, $0.11). Most of what remains is the CLI's own baseline.
+- **The default cap is 8 automatic wakes a day**, and the person changes the cap and the interval
+  from the canvas (**⚙**). The values are stored in the relay and apply from the next look,
+  without a restart.
+
 ## Consequences
 
 - One resident conversation costs tokens on every wake. The defaults bound it to 24
