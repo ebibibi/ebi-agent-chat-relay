@@ -121,21 +121,25 @@ async def test_the_source_thread_is_stored_with_the_widget() -> None:
         os.unlink(path)
 
 
-def test_a_chat_threads_attachments_are_the_bots_https_files_only() -> None:
+def test_a_chat_threads_attachments_are_this_bots_own_cdn_files_only() -> None:
     from types import SimpleNamespace as Ns
 
     from claude_discord.console.request_files import attachment_files
 
-    bot, person = Ns(bot=True), Ns(bot=False)
+    me, other_bot, person = Ns(id=1, bot=True), Ns(id=2, bot=True), Ns(id=3, bot=False)
+    good = "https://cdn.discordapp.com/attachments/1/2/draft.md?ex=1"
+
+    def msg(author, url, name="f", webhook=None):
+        return Ns(author=author, webhook_id=webhook, attachments=[Ns(filename=name, url=url)])
+
     messages = [
-        Ns(author=person, attachments=[Ns(filename="mine.png", url="https://cdn/x")]),
-        Ns(
-            author=bot,
-            attachments=[Ns(filename="draft.md", url="https://cdn.discordapp.com/a/draft.md?ex=1")],
-        ),
-        Ns(author=bot, attachments=[Ns(filename="bad", url="javascript:alert(1)")]),
-        Ns(author=bot, attachments=[]),
+        msg(person, "https://cdn.discordapp.com/attachments/9/9/mine.png"),
+        msg(other_bot, "https://cdn.discordapp.com/attachments/9/9/spoof.md"),
+        msg(me, "https://cdn.discordapp.com/attachments/9/9/hook.md", webhook=5),
+        msg(me, "https://evil.example/cdn.discordapp.com/x.md"),
+        msg(me, "https://cdn.discordapp.com.evil.example/x.md"),
+        msg(me, "javascript:alert(1)"),
+        msg(me, good, "draft.md"),
     ]
-    assert attachment_files(messages) == [
-        {"name": "draft.md", "url": "https://cdn.discordapp.com/a/draft.md?ex=1"}
-    ]
+    assert attachment_files(messages, bot_id=1) == [{"name": "draft.md", "url": good}]
+    assert attachment_files(messages, bot_id=None) == []
