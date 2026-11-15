@@ -74,6 +74,7 @@ from ..thread_marker import (
 )
 from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES, initial_thread_name
 from ..thread_status import schedule_thread_outcome
+from ..turn_ai import TurnAI
 from ._run_helper import run_claude_with_config
 from .prompt_builder import build_prompt_and_images, wants_file_attachment
 from .run_config import RunConfig
@@ -402,6 +403,7 @@ class ClaudeChatCog(commands.Cog):
         fork_session: bool,
         working_dir_override: str | None,
         effort_override: str | None,
+        ai: TurnAI | None = None,
     ) -> SessionBackend:
         """Build a runner for a session, honouring per-thread backend/model overrides.
 
@@ -425,7 +427,12 @@ class ClaudeChatCog(commands.Cog):
                 effort=effort_override if effort_override is not None else _UNSET,
             )
 
-        backend = await self._backend_settings.current_backend(thread_id)
+        # A screen AI (Console canvas mode) decides this one turn; nothing is stored.
+        backend = (
+            ai.backend
+            if ai is not None
+            else await self._backend_settings.current_backend(thread_id)
+        )
 
         # Model resolution order:
         # 1. Explicit /model command value for THIS backend (thread > global).
@@ -440,7 +447,9 @@ class ClaudeChatCog(commands.Cog):
         #    so factory.build() picks the right one.
         explicit_model = await self._backend_settings.explicit_model(backend, thread_id)
         model: str | None
-        if explicit_model:
+        if ai is not None and ai.model:
+            model = ai.model
+        elif explicit_model:
             model = explicit_model
         elif model_override and backend == "claude":
             model = model_override
@@ -469,7 +478,11 @@ class ClaudeChatCog(commands.Cog):
         #   2. Legacy ``claude_effort`` setting value (``effort_override``),
         #      left over from the removed /effort-set command — Claude only;
         #      Codex effort levels differ ("max" is not a Codex level).
-        effective_effort = await self._backend_settings.current_effort(backend, thread_id)
+        effective_effort = (
+            ai.effort
+            if ai is not None and ai.effort
+            else await self._backend_settings.current_effort(backend, thread_id)
+        )
         if effective_effort is None and backend == "claude":
             effective_effort = effort_override
         if effective_effort is not None and hasattr(runner, "effort"):
@@ -480,7 +493,13 @@ class ClaudeChatCog(commands.Cog):
 
         # Per-thread execution environment (/sandbox), bounded by the allowlist.
         await apply_thread_execution_mode(runner, self._backend_settings.repo, thread_id)
-        await apply_connection(runner, self._backend_settings, backend, thread_id)
+        await apply_connection(
+            runner,
+            self._backend_settings,
+            backend,
+            thread_id,
+            chosen=ai.connection if ai is not None else None,
+        )
 
         return runner
 
@@ -1157,6 +1176,7 @@ class ClaudeChatCog(commands.Cog):
         interrupt: bool,
         into_running_turn: bool = False,
         brief: str | None = None,
+        ai: TurnAI | None = None,
     ) -> None:
         """Feed a message from another session into this thread's Claude session.
 
@@ -1181,6 +1201,8 @@ class ClaudeChatCog(commands.Cog):
             brief: Instructions for the agent only (Ebi Workspace context). Posted
                 as a message of its own after *text*, which the Console files under
                 activity, and appended to what the agent receives.
+            ai: The AI chosen on the Console screen that sent it, for this turn only.
+                Never stored; a turn already running keeps its own AI.
         """
         try:
             if len(text) > DISCORD_MAX_CHARS:
@@ -1208,7 +1230,11 @@ class ClaudeChatCog(commands.Cog):
             with contextlib.suppress(discord.HTTPException):
                 await thread.send(brief[:DISCORD_MAX_CHARS])
 
-        if into_running_turn and await self._inject_into_running_turn(thread.id, text):
+        if (
+            into_running_turn
+            and ai is None
+            and await self._inject_into_running_turn(thread.id, text)
+        ):
             with contextlib.suppress(discord.HTTPException):
                 await seed_message.add_reaction(INJECTED_REACTION)
             return
@@ -1232,6 +1258,7 @@ class ClaudeChatCog(commands.Cog):
             chat_only=chat_only,
             interrupt_existing=interrupt,
             interrupt_notice="-# ⚡ Interrupted by another session's message...",
+            ai=ai,
         )
 
     async def cog_unload(self) -> None:
@@ -1782,6 +1809,7 @@ class ClaudeChatCog(commands.Cog):
         interrupt_existing: bool = False,
         interrupt_notice: str = "-# ⚡ Interrupted. Starting with new instruction...",
         _account_retry: bool = False,
+        ai: TurnAI | None = None,
     ) -> None:
         """Execute Claude Code CLI and stream results to the thread.
 
@@ -1834,7 +1862,9 @@ class ClaudeChatCog(commands.Cog):
                     )
 
                 model_override = await self._get_current_model()
-                effective_model = model_override or self.runner.model
+                effective_model = (ai.model if ai and ai.model else None) or (
+                    model_override or self.runner.model
+                )
 
                 async def _notify_stall() -> None:
                     threshold = status._stall_hard
@@ -1861,7 +1891,9 @@ class ClaudeChatCog(commands.Cog):
                     try:
                         account_plan, session_id, prompt = await plan_account_turn(
                             self._account_router,
-                            backend=await self._current_backend_name(thread.id),
+                            backend=ai.backend
+                            if ai is not None
+                            else await self._current_backend_name(thread.id),
                             thread_id=thread.id,
                             session_id=session_id,
                             prompt=prompt,
@@ -1878,6 +1910,7 @@ class ClaudeChatCog(commands.Cog):
                     fork_session=fork,
                     working_dir_override=working_dir_override,
                     effort_override=effort_override,
+                    ai=ai,
                 )
                 account_turn: AccountTurn | None = None
                 if account_plan is not None and hasattr(runner, "account"):
@@ -1994,4 +2027,5 @@ class ClaudeChatCog(commands.Cog):
                 chat_only=chat_only,
                 result_sink=result_sink,
                 _account_retry=True,
+                ai=ai,
             )

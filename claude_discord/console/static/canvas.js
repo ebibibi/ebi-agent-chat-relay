@@ -75,6 +75,7 @@ window.ConsoleCanvas = (() => {
     load().then(render);
   }
   function leave() {
+    window.ConsoleScreenAI.clear();
     localStorage.setItem(KEY, "classic");
     document.body.classList.remove("canvas", "canvas-chat");
     if (state.view === window.ConsoleSecretary.VIEW) state.view = "focus";
@@ -88,6 +89,7 @@ window.ConsoleCanvas = (() => {
   }
   async function onBoard() {
     if (!on()) return;
+    if (window.ConsoleScreenAI.choice()) window.ConsoleScreenAI.heartbeat();
     await load();
     const sig = JSON.stringify([data, window.ConsoleSecretary.stateKey(), summarySig()]);
     if (sig !== lastSig) { lastSig = sig; paint(); }
@@ -107,7 +109,7 @@ window.ConsoleCanvas = (() => {
     if (!active) { box.replaceChildren(); return; }
     // Someone typing an answer inside the canvas keeps their box (and its focus) until done.
     const typing = document.activeElement;
-    if (typing && box.contains(typing) && typing.matches("textarea, input")) return;
+    if (typing && box.contains(typing) && typing.matches("textarea, input, select")) return;
     const id = secretaryId();
     // Wide screens always show a conversation on the right: the secretary unless a thread is open.
     if (!narrow.matches && id && !state.open && state.byId.has(id)) {
@@ -197,7 +199,7 @@ window.ConsoleCanvas = (() => {
       ? h("button", { type: "button", class: "btn cv-back", onclick: () => openItem(sec.item_id), text: s.back }) : null;
     return h("header", { class: "cv-head" },
       h("div", { class: "cv-head-row" }, h("h1", { text: s.title }), ...tags, h("span", { class: "cv-spacer" }), ...buttons),
-      usage, back);
+      usage, window.ConsoleScreenAI.bar(), back);
   }
 
   function body() {
@@ -255,7 +257,8 @@ window.ConsoleCanvas = (() => {
   async function press(w, index, button) {
     button.disabled = true;
     try {
-      await api(`/canvas/widgets/${encodeURIComponent(w.key)}/action`, { method: "POST", body: { index } });
+      await api(`/canvas/widgets/${encodeURIComponent(w.key)}/action`, { method: "POST",
+        body: { index, ...(window.ConsoleScreenAI?.body() || {}) } });
       toast(S().sent);
       // Stays marked until the secretary updates the widget: the press was delivered.
       pressed.set(w.key, `${w.updated_at}|${index}`);

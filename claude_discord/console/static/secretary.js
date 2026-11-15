@@ -141,7 +141,7 @@ window.ConsoleSecretary = (() => {
     if (button) button.disabled = true;
     try {
       await api(`/items/${encodeURIComponent(card.id)}/reply`, { method: "POST",
-        body: { text: answerText(card, text), request_id: card.request_id } });
+        body: { text: answerText(card, text), request_id: card.request_id, ...(window.ConsoleScreenAI?.body() || {}) } });
       sent.set(card.request_id, label || text);
       delete drafts[card.request_id];
       const waited = card.since ? Math.max(0, Math.round((Date.now() - Date.parse(card.since)) / 1000)) : null;

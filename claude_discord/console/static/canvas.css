@@ -114,7 +114,7 @@ body.canvas .app.no-detail { grid-template-columns: minmax(0, 1fr); }
 
 /* The focus session: one decision at a time, the whole screen. */
 .cv-session { position: fixed; inset: 0; z-index: 25; background: var(--bg); display: flex; flex-direction: column; }
-.cv-ss-top { display: flex; align-items: center; gap: 16px; padding: calc(10px + env(safe-area-inset-top)) 22px 10px;
+.cv-ss-top { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: calc(10px + env(safe-area-inset-top)) 22px 10px;
   border-bottom: 1px solid var(--line); }
 .cv-ss-progress { flex: 1; height: 6px; background: var(--raise); border-radius: 999px; overflow: hidden; min-width: 60px; }
 .cv-ss-progress span { display: block; height: 100%; background: var(--accent); }
@@ -170,3 +170,13 @@ body.canvas .app.no-detail { grid-template-columns: minmax(0, 1fr); }
 .sec-file .md { max-height: 360px; overflow: auto; }
 .sec-card.no-material { border-style: dashed; }
 .cv-ss-nomaterial { margin: 0; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 10px; color: var(--dim); }
+
+/* The screen AI (#1401): always visible on the canvas and in the focus session. */
+.sai-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; padding: 4px 8px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.sai-bar.custom { border-color: var(--me); background: color-mix(in srgb, var(--me) 16%, var(--panel)); }
+.sai-label { font-weight: 700; }
+.sai-select { background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px; max-width: 14em; }
+.sai-help { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
+  border: 1px solid var(--line); color: var(--dim); cursor: help; font-size: 11px; }
+.cv-ss-top .sai-bar { flex-basis: 100%; }

@@ -22,11 +22,13 @@ import json
 import logging
 import os
 import secrets
+import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from ..turn_ai import TurnAI
 from .canvas_charter import CHARTER_OPENING, charter, turn_brief, wake_message
 from .canvas_repo import CanvasRepository
 
@@ -50,6 +52,8 @@ RECENT_CHARS = 400
 STATE_LAST_WAKE = "last_wake_at"
 
 TICK_SECONDS = 30
+#: How long the open canvas's AI choice lasts without the screen sending it again.
+SCREEN_AI_SECONDS = 90
 #: What the person may set from the canvas (and the environment is clamped to).
 LIMIT_RANGES = {"max_wakes_per_day": (0, 500), "min_interval": (60, 86400)}
 #: How many changed threads a digest describes in full (with recent messages).
@@ -228,6 +232,8 @@ class CanvasSecretary:
         self._secretary_running = False
         self._task: asyncio.Task[None] | None = None
         self._start_lock = asyncio.Lock()
+        #: (choice, monotonic expiry): the AI the open canvas chose, memory only.
+        self._screen_ai: tuple[TurnAI, float] | None = None
 
     # -- lifecycle -----------------------------------------------------------
     def start(self) -> None:
@@ -310,6 +316,16 @@ class CanvasSecretary:
             return
         stored = {**plan, "prepared_at": _stamp(self._clock())}
         await self.repo.set_state(STATE_SESSION, json.dumps(stored, ensure_ascii=False))
+
+    def set_screen_ai(self, ai: TurnAI | None) -> None:
+        """While the canvas is open with an AI chosen, the secretary's wakes use it."""
+        self._screen_ai = (ai, time.monotonic() + SCREEN_AI_SECONDS) if ai is not None else None
+
+    def screen_ai(self) -> TurnAI | None:
+        if self._screen_ai is None or self._screen_ai[1] < time.monotonic():
+            self._screen_ai = None
+            return None
+        return self._screen_ai[0]
 
     async def limits(self) -> dict[str, int]:
         """The wake limits in force: what the person set on the canvas, else the environment."""
@@ -436,7 +452,9 @@ class CanvasSecretary:
         await self.repo.set_state(STATE_LAST_WAKE, _stamp(now))
         await self.repo.record_turn(day=_day(now), woken=True, context_used=None)
         try:
-            await self._host.reply(key, wake_message(len(items)), WATCHER_AUTHOR)
+            await self._host.reply(
+                key, wake_message(len(items)), WATCHER_AUTHOR, ai=self.screen_ai()
+            )
         except LookupError:
             logger.warning("canvas: the secretary conversation %s is gone", key)
             await self.repo.set_state(STATE_THREAD, None)

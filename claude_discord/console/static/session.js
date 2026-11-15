@@ -174,7 +174,8 @@ window.ConsoleSession = (() => {
       h("b", { text: s.title }),
       h("span", { class: "dim", text: `${remaining >= 0 ? s.left(remaining) : s.over(-remaining)} · ${total ? s.position(shown, total) : ""}` }),
       h("div", { class: "cv-ss-progress" }, h("span", { style: { width: `${total ? (index / total) * 100 : 100}%` } })),
-      h("button", { type: "button", class: "btn", onclick: end, text: s.end }));
+      h("button", { type: "button", class: "btn", onclick: end, text: s.end }),
+      window.ConsoleScreenAI.bar());
   }
 
   function main() {
@@ -281,5 +282,5 @@ window.ConsoleSession = (() => {
     if (handled) { e.preventDefault(); e.stopImmediatePropagation(); }
   }, true);
 
-  return { open, end, suspend, resume, isOpen: () => open_, suspended: () => suspended_ };
+  return { open, end, suspend, resume, repaint: () => paint(), isOpen: () => open_, suspended: () => suspended_ };
 })();

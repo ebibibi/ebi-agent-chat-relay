@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Canvas mode **⚡ this screen's AI** (#1401): pick backend, connection, model and effort for
+  what is sent from the canvas and the focus session; it rides on each send as `ai` and runs
+  that turn only (Console conversations and chat threads), plus the secretary's wakes while the
+  screen is open. Nothing is stored; settings, scheduled tasks, waits and child threads are
+  untouched.
 - The situation panel shows a thread's open **decision request beside its conversation for
   every thread** (#1396), not only for families: cards only (no empty sections) when the thread
   stands alone; a tab on a phone. Agents are told where their cards appear.

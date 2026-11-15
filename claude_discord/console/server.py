@@ -39,6 +39,7 @@ from ..message_actions import message_actions
 from ..teams_exporter import source_tags
 from ..thread_marker import OUTCOME_DONE, thread_outcome
 from ..thread_status import request_thread_outcome, schedule_thread_outcome
+from ..turn_ai import TurnAI, TurnAIError, parse_turn_ai
 from .attention import console_activity
 from .auth import ConsoleAuthConfig, ConsoleAuthenticator, ConsoleAuthError
 from .auth_routes import AUTH_PREFIX, AuthRoutes
@@ -1333,13 +1334,19 @@ class ConsoleServer:
         if err:
             return err
         text = with_attachments(text, files)
+        try:
+            ai = parse_turn_ai(body.get("ai"))
+        except TurnAIError as exc:
+            return _error(str(exc), 400)
         item_id = request.match_info["item_id"]
-        response = await self._deliver(item_id, text, request[IDENTITY], metered=True)
+        response = await self._deliver(item_id, text, request[IDENTITY], metered=True, ai=ai)
         if response.status < 300:
             await self._close_requests(item_id, body.get("request_id"))
         return response
 
-    async def _deliver(self, item_id: str, text: str, who: str, *, metered: bool) -> web.Response:
+    async def _deliver(
+        self, item_id: str, text: str, who: str, *, metered: bool, ai: TurnAI | None = None
+    ) -> web.Response:
         """Queue *text* as the human's next message in the item's conversation.
 
         *metered*: a person typed *text*, so it counts toward their attention
@@ -1355,7 +1362,7 @@ class ConsoleServer:
             return (
                 busy
                 if key in self._compacting
-                else await self._reply_in_console(item_id, key, text, who, brief, metered)
+                else await self._reply_in_console(item_id, key, text, who, brief, metered, ai)
             )
         thread, err = await self._thread_for(item_id)
         if err:
@@ -1376,7 +1383,7 @@ class ConsoleServer:
             await self._meter_chat_reply(thread, text, who)
         self._background(
             cog.deliver_relayed_message(
-                thread, prompt, interrupt=False, into_running_turn=True, brief=brief
+                thread, prompt, interrupt=False, into_running_turn=True, brief=brief, ai=ai
             )
         )
         logger.info("console: %s replied in thread %s", _q(who), thread.id)
@@ -1712,6 +1719,7 @@ class ConsoleServer:
         who: str,
         brief: str | None,
         metered: bool,
+        ai: TurnAI | None = None,
     ) -> web.Response:
         if self.sessions is None:
             return _error("the console cannot run agents in this deployment", 503)
@@ -1721,7 +1729,7 @@ class ConsoleServer:
             return _error(str(exc), 400)
         try:
             injected = await self.sessions.reply(
-                thread_key, text, who, into_running_turn=True, brief=brief, metered=metered
+                thread_key, text, who, into_running_turn=True, brief=brief, metered=metered, ai=ai
             )
         except LookupError:
             return _error("unknown conversation", 404)
