@@ -37,9 +37,11 @@ Restarting the bot while sessions run used to mean watching for an idle moment t
 turns arriving, might never come. A reservation makes the moment happen, without restarting under someone who is still using the bot:
 
 0. **Wait for quiet** — nothing is held yet. The reservation waits until no person has acted for
-   `CCDB_RESTART_QUIET_SECONDS` (default 900, 15 minutes). A person acting means a message from an
-   allowed Discord user, or a change made in the Ebi AI Console; reading the Console does not
-   count, and agent sessions never do. If a person acts while the queue is held (step 1), the
+   `CCDB_RESTART_QUIET_SECONDS` (default 900, 15 minutes). A person acting means a human message on
+   any frontend (Discord, Ebi AI Console, Teams — the same messages attention metering sees, even
+   with metering off) or a change made in the Console; reading the Console does not count, and
+   agent sessions never do. On startup the clock starts from the latest recorded human message,
+   so a restart does not make the next one think the bot has been quiet. If a person acts while the queue is held (step 1), the
    hold is released and the reservation goes back to waiting, so their message runs at once.
 1. **Hold** — the queue stops starting runs. Running turns continue untouched; every new request
    (chat, Ebi AI Console, scheduler, `/api/spawn`) joins the queue instead of starting, and its

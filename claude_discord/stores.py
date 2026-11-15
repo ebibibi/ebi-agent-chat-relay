@@ -18,6 +18,7 @@ import os
 from dataclasses import dataclass
 
 from claude_code_core.attention_repo import HumanActivityRepository
+from claude_code_core.human_activity import note_human_activity
 
 from .database.ask_repo import PendingAskRepository
 from .database.claims_repo import ClaimRepository
@@ -86,6 +87,7 @@ async def build_session_stores(session_db_path: str) -> SessionStores:
     await summaries.init_db()
     attention = HumanActivityRepository(session_db_path)
     await attention.init_db()
+    await _seed_human_activity(attention)
     pages = PageRepository(session_db_path)
     await pages.init_db()
 
@@ -115,3 +117,14 @@ async def build_session_stores(session_db_path: str) -> SessionStores:
         waits=WaitRepository(session_db_path),
         pages=pages,
     )
+
+
+async def _seed_human_activity(attention: HumanActivityRepository) -> None:
+    """Start the restart quiet rule's clock from the latest recorded human message."""
+    try:
+        latest = await attention.latest_live_at()
+    except Exception:
+        logger.warning("Could not read the latest human activity", exc_info=True)
+        return
+    if latest is not None:
+        note_human_activity("history", at=latest.timestamp())
