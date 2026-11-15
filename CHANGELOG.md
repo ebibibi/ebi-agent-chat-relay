@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The situation panel shows a thread's open **decision request beside its conversation for
+  every thread** (#1396), not only for families: cards only (no empty sections) when the thread
+  stands alone; a tab on a phone. Agents are told where their cards appear.
 - **Turns cut off by a crash are resumed** (#1368): a turn now records itself in
   `inflight_turns` when it starts and removes the row when it ends. A row left by an earlier
   process means it died mid-turn (SIGKILL, the OOM killer) without the clean shutdown that writes

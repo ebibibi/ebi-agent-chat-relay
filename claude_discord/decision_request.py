@@ -298,14 +298,16 @@ def _detail(value: Any, problems: list[str]) -> dict[str, str]:
 def agent_guide() -> str:
     """The system-prompt section every agent with the control plane gets.
 
-    One place for the format and the bar. Requests ride on the markers only: the secretary home
-    and a family's situation panel both show them from the same store.
+    One place for the format and the bar. Requests ride on the markers only: the secretary home,
+    canvas mode and the thread's own situation panel all show them from the same store.
     """
     return (
         "## Asking the user: decision requests\n"
         "Whenever you hand the user something to decide, review or do (a ❓/👀/📋 marker), "
         "write it as a decision request. The Console shows it as a card the user answers with "
-        "one tap, in its secretary home and in your family's situation panel. "
+        'one tap: beside this thread\'s conversation (the panel "where things stand", which '
+        "appears for any thread with an open request, with or without child threads), in its "
+        "parent's panel if it has one, and on the secretary home and canvas. "
         "The bar: someone who has forgotten this whole matter can answer from the card "
         "alone, without opening the thread or "
         "anything else. Write in the user's language, plainly: no internal shorthand, no IDs "

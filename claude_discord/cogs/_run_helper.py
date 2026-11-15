@@ -357,8 +357,10 @@ async def _build_system_context(config: RunConfig) -> str | None:
 
     parts.append(
         "## Situation panel for thread families\n"
-        "Once this thread has child threads, the Console shows a panel beside the conversation "
-        "so the user can see where things stand while messages keep arriving. It measures "
+        "Beside the conversation the Console shows a panel of where things stand: for any "
+        "thread with an open decision request (only the cards), and for a thread with child "
+        "threads (the whole family) so the user can see it while messages keep arriving. "
+        "It measures "
         "by itself which threads are running or waiting; only you can say the rest. Keep it "
         "current, and always update it before ending a turn that changed it, including a turn "
         "started by a child's report:\n"

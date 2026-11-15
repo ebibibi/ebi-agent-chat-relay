@@ -831,6 +831,11 @@ family action; the individual `/items/{id}/done` API still changes only that ite
 
 ### Where things stand
 
+**Any thread with an open decision request shows it here** (#1396), whether or not it has a
+parent or children. A thread on its own with nothing written shows only **🙋 Needed from you**
+with the cards, no empty sections and no second reply box; on a phone the panel is the
+**📍 Where things stand (n)** tab beside the conversation.
+
 A thread family's conversation has a **📍 Where things stand** panel beside it, so a child's report cannot
 push what you are being asked out of view. It does not scroll with the conversation, and it follows
 the parent while you stay on a child.
