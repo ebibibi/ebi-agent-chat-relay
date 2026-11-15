@@ -75,6 +75,36 @@ FORMAT = (
 )
 
 
+# -- is the thing to look at on the card? -------------------------------------------
+#: A review whose materials are shorter than this, with no link and no attached file, only
+#: points at the thing ("see the attached file") instead of showing it.
+MIN_INLINE_MATERIAL = 160
+_URL = re.compile(r"https?://\S+")
+_STRUCTURE = re.compile(r"```|^[+-] |^\|.*\|", re.MULTILINE)
+
+MATERIAL_INLINE = "inline"  # the draft, the diff or the numbers are in the request itself
+MATERIAL_FILES = "files"  # the thread delivered files the card can show
+MATERIAL_LINK = "link"  # a link to the thing itself (a video, a page, a PR)
+MATERIAL_NONE = "none"  # nothing to look at: the card must send the person to the thread
+
+
+def material_state(materials: str | None, files: list[Any] | tuple[Any, ...] = ()) -> str:
+    """What the person can look at from the card alone. Deterministic, no model.
+
+    A request that asks the person to review something must carry that something: its text,
+    its diff, a link to it, or a file the thread delivered. "See the attached file" is none
+    of those.
+    """
+    text = (materials or "").strip()
+    if files:
+        return MATERIAL_FILES
+    if len(text) >= MIN_INLINE_MATERIAL or _STRUCTURE.search(text):
+        return MATERIAL_INLINE
+    if _URL.search(text):
+        return MATERIAL_LINK
+    return MATERIAL_NONE
+
+
 class DecisionRequestError(ValueError):
     """A request the Console cannot show as a card. ``problems`` lists every reason."""
 
@@ -155,6 +185,13 @@ def parse_request(body: Any, *, kind: str) -> DecisionRequestSpec:
         problems.append(
             f"The card is {card_chars} characters; keep it within {MAX_CARD_CHARS} and move "
             "the rest into detail"
+        )
+    if kind == "review" and material_state(detail.get("materials")) == MATERIAL_NONE:
+        problems.append(
+            "A review must carry the thing to review: put the draft text, the diff or the "
+            f"numbers themselves in detail.materials (at least {MIN_INLINE_MATERIAL} "
+            "characters), or a link to it. A pointer such as 'see the attached file' leaves "
+            "the person nothing to look at"
         )
     if problems:
         raise DecisionRequestError(problems)

@@ -26,6 +26,9 @@ window.ConsoleSecretary = (() => {
       about: "About: ", deadline: "Deadline: ", sep: ": ", recommended: "recommended", more_detail: "More ▾",
       own_answer: "✏️ Another answer", reply_ph: "Your answer…", send: "Send", open: "Open the thread",
       sent: "Sent — the agent carries on", since: (r) => `asked ${r}`, confirm: "✓ Confirm done",
+      files: "📎 What to look at", preview: "Contents", loading: "Loading…", unreadable: "Could not read this file here; open it.",
+      in_thread: "Nothing to look at was attached to this request. Open the thread to check it there.",
+      open_to_check: "↗ Open the thread to check",
       show_more: (n) => `Show ${n} more`, answer: (q, a) => `Answer to "${q}": ${a}`,
       none_working: "No agent is working right now.", none_done: "Nothing finished yet today.",
       list_more: (n) => `and ${n} more`,
@@ -46,6 +49,9 @@ window.ConsoleSecretary = (() => {
       about: "何の話：", deadline: "期限：", sep: "：", recommended: "おすすめ", more_detail: "詳しく ▾",
       own_answer: "✏️ 別の答え", reply_ph: "答えを書く…", send: "送る", open: "元のスレッドを開く",
       sent: "送りました — AIが続きを進めます", since: (r) => `${r}から待ち`, confirm: "✓ 完了にする",
+      files: "📎 確認するもの", preview: "中身", loading: "読み込み中…", unreadable: "ここでは読めないファイルです。開いて確認してください。",
+      in_thread: "この依頼には確認するものが付いていません。スレッドを開いて、そこで確認してください。",
+      open_to_check: "↗ スレッドを開いて確認する",
       show_more: (n) => `ほか ${n} 件を表示`, answer: (q, a) => `「${q}」への回答: ${a}`,
       none_working: "いまAIが進めている作業はありません。", none_done: "今日はまだ終わったものがありません。",
       list_more: (n) => `ほか ${n} 件`,
@@ -178,6 +184,49 @@ window.ConsoleSecretary = (() => {
 
   // The card: at most six lines — what to decide, what it is about, the choices, the deadline —
   // then one button per choice and the folded detail. Answerable without opening anything.
+  // What the card asks the person to look at: the files the thread delivered, the first text
+  // ones shown inline. Text files are read with the person's own session and drawn as text or
+  // sanitised Markdown; anything else is a link (and the Console's preview) as in the chat.
+  const TEXT_FILE = /\.(md|markdown|txt|csv|json|ya?ml|log|diff|patch)$/i;
+  const MAX_PREVIEW = 6000;
+  const previews = new Map(); // url -> text | null (unreadable) | undefined (loading)
+  async function loadPreview(url) {
+    if (previews.has(url)) return;
+    previews.set(url, undefined);
+    try {
+      const headers = {};
+      const token = localStorage.getItem("token");
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const res = await fetch(url, { headers, credentials: "same-origin" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      previews.set(url, (await res.text()).slice(0, MAX_PREVIEW));
+    } catch (err) {
+      console.warn("secretary: preview failed", err);
+      previews.set(url, null);
+    }
+    redraw();
+  }
+  function filesBlock(card) {
+    const s = S();
+    const files = card.files || [];
+    if (!files.length) return null;
+    const shown = files.slice(0, 3).filter((f) => TEXT_FILE.test(f.name));
+    for (const f of shown) loadPreview(f.url);
+    return h("div", { class: "sec-files" },
+      h("div", { class: "sec-files-head", text: s.files }),
+      h("div", { class: "md" }, MD.render(files.map((f) => `- [${f.name.replace(/[\[\]]/g, "")}](${f.url})`).join("\n"))),
+      ...shown.map((f) => {
+        const text = previews.get(f.url);
+        const body = text === undefined ? h("div", { class: "dim", text: s.loading })
+          : text === null ? h("div", { class: "dim", text: s.unreadable })
+          : /\.(md|markdown)$/i.test(f.name) ? h("div", { class: "md" }, MD.render(text))
+          : h("pre", { class: "sec-preview", text });
+        return h("details", { class: "sec-file", open: "" }, h("summary", { text: `${s.preview}: ${f.name}` }), body);
+      }));
+  }
+  // A review with nothing to look at is not a review: send the person to the thread.
+  const nothingToSee = (card) => card.material === "none" && (card.kind === "review" || /確認|レビュー|review|check/i.test(card.card.title || ""));
+
   function decisionCard(card) {
     const s = S();
     const c = card.card;
@@ -196,9 +245,16 @@ window.ConsoleSecretary = (() => {
         document.createTextNode(`${s.sep}${o.effect}`)))),
       h("div", { class: "sec-deadline" }, h("span", { class: "dim", text: s.deadline }), document.createTextNode(c.deadline)),
     ];
+    body.push(filesBlock(card));
     if (sent.has(card.request_id)) {
       return h("li", { class: "sec-card sent", "data-item-id": card.id }, head, ...body,
         h("div", { class: "sec-sent", text: `✅ ${s.sent}: ${sent.get(card.request_id)}` }));
+    }
+    if (nothingToSee(card)) {
+      return h("li", { class: "sec-card no-material", "data-item-id": card.id }, head, ...body,
+        h("div", { class: "sec-note", text: S().in_thread }),
+        h("div", { class: "sec-buttons" }, h("button", { type: "button", class: "btn primary",
+          onclick: () => openItem(card.id), text: S().open_to_check })));
     }
     const buttons = c.options.map((o) => h("button", { type: "button", class: o.recommended ? "btn primary" : "btn",
       onclick: (e) => answer(card, `${o.label} — ${o.effect}`, o.label, e.currentTarget), text: o.label }));
@@ -262,5 +318,5 @@ window.ConsoleSecretary = (() => {
   }
 
   return { on, onBoard, rows, nav, switcher, title, logOpen, cardsFor, card: decisionCard, stateKey, VIEW,
-    answer, all: () => (summary ? [...summary.decide, ...summary.review] : []) };
+    answer, filesBlock, nothingToSee, strings: () => S(), all: () => (summary ? [...summary.decide, ...summary.review] : []) };
 })();

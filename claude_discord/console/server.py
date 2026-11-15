@@ -70,6 +70,7 @@ from .passkeys import PasskeyService
 from .places import PlaceError, PlaceRepository
 from .places import clean_name as clean_place
 from .ratelimit import RateLimiter
+from .request_files import files_for
 from .search import SearchRoutes
 from .secretary import SecretaryEventRepository, SecretaryRoutes, build_secretary
 from .surface import apply_outcome
@@ -706,11 +707,19 @@ class ConsoleServer:
         if repo is None:
             return []
         try:
-            return [r.as_dict() for r in await repo.list_open()]
+            requests = [r.as_dict() for r in await repo.list_open()]
         except Exception:
             # The board still answers; the secretary home then lists the items as unexplained.
             logger.exception("console: could not read decision requests")
             return []
+        for request in requests:
+            # A card that asks the person to look at something shows the files it delivered.
+            try:
+                request["files"] = await files_for(self.conversations, int(request["thread_id"]))
+            except Exception:
+                logger.exception("console: files of request %s unreadable", request.get("id"))
+                request["files"] = []
+        return requests
 
     async def _close_requests(self, item_id: str, request_id: Any) -> None:
         """A person answered in the Console: the request (or all of the thread's) is settled."""

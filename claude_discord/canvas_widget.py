@@ -37,18 +37,23 @@ MAX_ACTION_SAY = 500
 MAX_THREADS = 20
 KEY = re.compile(r"^[a-z0-9][a-z0-9_.:-]{0,39}$")
 _THREAD = re.compile(r"^[0-9]{1,20}$")
-_TOP_FIELDS = frozenset({"kind", "title", "data", "size", "position", "note", "actions"})
+_TOP_FIELDS = frozenset(
+    {"kind", "title", "data", "size", "position", "note", "actions", "thread_id"}
+)
 TIMELINE_STATES = ("todo", "now", "done", "wait")
 
 #: Returned with every refusal, so the secretary can rewrite without looking anything up.
 FORMAT = (
     'Send {"kind": one of ' + ", ".join(KINDS) + ', "title": one line, "data": {...}, '
     '"size": "s"|"m"|"l" (optional), "position": number (optional, smaller first), '
-    '"note": one line on why it is here (optional), "actions": [{"label", "say"}] (optional, '
+    '"note": one line on why it is here (optional), "thread_id": the thread it is about '
+    '(optional, links back to it), "actions": [{"label", "say"}] (optional, '
     "a button that sends `say` to you as the person's message)}. data per kind: "
     'decision {"thread_id"}; diff {"diff": unified diff} or {"before", "after"}; '
-    'table {"columns": [..], "rows": [[..]]}; markdown {"text"}; '
-    'timeline {"entries": [{"time", "label", "state": todo|now|done|wait, "minutes"?}]}; '
+    'table {"columns": [..], "rows": [[..]], "row_threads"?: [thread_id|null per row]}; '
+    'markdown {"text"}; '
+    'timeline {"entries": [{"time", "label", "state": todo|now|done|wait, "minutes"?, '
+    '"thread_id"?}]}; '
     'agents {"thread_ids": [..]} (empty: every running thread); '
     'metric {"value", "label", "sub"?, "percent"? 0-100}; '
     'schedule {"lanes": {"you"|"ai"|"external": [{"start": "HH:MM", "end"?: "HH:MM", '
@@ -75,6 +80,8 @@ class WidgetSpec:
     position: float = 100.0
     note: str = ""
     actions: tuple[dict[str, str], ...] = ()
+    #: The thread the widget is about; the Console links back to it.
+    thread_id: str | None = None
 
 
 def refusal(exc: WidgetError) -> dict[str, Any]:
@@ -138,7 +145,19 @@ def _table(data: Mapping[str, Any], problems: list[str]) -> dict[str, Any]:
             problems.append("each row must be a list no longer than columns")
             continue
         body.append([_text(cell, "a cell", MAX_CELL, problems, required=False) for cell in row])
-    return {"columns": heads, "rows": body}
+    # Optional, aligned with rows: the thread each row is about, so the row links back to it.
+    raw_threads = data.get("row_threads")
+    threads: list[str | None] = []
+    if raw_threads is not None:
+        if not isinstance(raw_threads, list) or len(raw_threads) > len(body):
+            problems.append("data.row_threads must be a list no longer than rows")
+        else:
+            for raw in raw_threads:
+                thread = str(raw or "").strip()
+                if thread and not _THREAD.match(thread):
+                    problems.append("data.row_threads entries must be numeric thread ids or null")
+                threads.append(thread or None)
+    return {"columns": heads, "rows": body, "row_threads": threads}
 
 
 def _markdown(data: Mapping[str, Any], problems: list[str]) -> dict[str, Any]:
@@ -321,6 +340,9 @@ def parse_widget(body: Any) -> WidgetSpec:
     elif kind in _CHECKS:
         data = _CHECKS[kind](raw_data, problems)
     actions = _actions(body.get("actions"), problems)
+    thread = str(body.get("thread_id") or "").strip()
+    if thread and not _THREAD.match(thread):
+        problems.append("thread_id must be the numeric id of the thread the widget is about")
     if problems:
         raise WidgetError(problems)
     return WidgetSpec(
@@ -331,6 +353,7 @@ def parse_widget(body: Any) -> WidgetSpec:
         position=float(position),
         note=note,
         actions=actions,
+        thread_id=thread or None,
     )
 
 

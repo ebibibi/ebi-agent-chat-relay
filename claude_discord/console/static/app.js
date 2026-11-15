@@ -667,6 +667,7 @@ function renderDetail() {
   window.ConsoleSituation.render(item);
   window.ConsoleThreadNotes.render(item);
   window.ConsoleZen.bar(pane);
+  window.ConsoleCanvas.bar(pane);
   placeToasts();
   const msgs = $("msgs");
   if (item.thread_id) fillMessages(msgs);
