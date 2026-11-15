@@ -148,7 +148,7 @@ window.ConsoleSituation = (() => {
       text: l.updated(rel(m.written.updated_at)) + (stale ? ` · ${l.stale}` : "") });
   }
 
-  function core(m, family) {
+  function core(m, family, cardsOnly = false) {
     const l = L();
     const written = m.written || { asks: [], doing: [], decided: [] };
     const cards = m.cards.map((c) => window.ConsoleSecretary.card(c));
@@ -173,11 +173,13 @@ window.ConsoleSituation = (() => {
       h("summary", { class: "dim", text: l.done(m.finished.length) }),
       h("ul", { class: "sit-list" }, ...m.finished.map((i) => threadRow(i))))) : null;
     const others = m.members.filter((i) => !m.needs.includes(i));
+    const top = h("div", { class: "sit-top" },
+      h("h2", { class: "sit-title", text: l.title }),
+      h("button", { type: "button", class: "btn sit-hide", title: l.hide, "aria-label": l.hide, text: "›",
+        onclick: () => setHidden(true) }));
+    if (cardsOnly) return [top, section(l.asks, "asks", l.none, cards, needs, asks)];
     return [
-      h("div", { class: "sit-top" },
-        h("h2", { class: "sit-title", text: l.title }),
-        h("button", { type: "button", class: "btn sit-hide", title: l.hide, "aria-label": l.hide, text: "›",
-          onclick: () => setHidden(true) })),
+      top,
       freshness(m, family),
       section(l.asks, "asks", l.none, cards, needs, asks),
       section(l.running, "running", l.none, doing, waits),
@@ -249,14 +251,19 @@ window.ConsoleSituation = (() => {
   function render(item) {
     const body = $("d-body"), side = $("d-side");
     if (!body || !side) return;
-    const family = window.ConsoleFamily.model(state.items, item.id);
-    const inFamily = Boolean(family && (family.parent || family.rows.length));
+    // A thread on its own is a family of one: its decision requests still need a place.
+    const family = window.ConsoleFamily.model(state.items, item.id) || { root: item, parent: null, rows: [] };
+    const inFamily = Boolean(family.parent || family.rows.length);
     const holder = family ? recordHolder(item, family) : item;
     if (holder.thread_id) load(holder.id);
     const data = cache.get(holder.id)?.data || null;
     const situation = data && data.situation;
     const written = Boolean(situation && (situation.asks.length || situation.doing.length || situation.decided.length));
-    const show = Boolean(family && (inFamily || written));
+    // Any thread with an open decision request shows it here, family or not (#1396).
+    const ownCards = item.thread_id ? window.ConsoleSecretary.cardsFor(new Set([item.thread_id])).length : 0;
+    const show = Boolean(inFamily || written || ownCards);
+    // Alone and with nothing written: only the cards, no empty "running" or "decided".
+    const cardsOnly = !inFamily && !written;
     const tabs = body.dataset.layout === "tabs";
     side.hidden = !show || (hidden && tabs);
     place(show && !hidden, family);
@@ -268,7 +275,10 @@ window.ConsoleSituation = (() => {
     loadReports(m.members);
     window.ConsoleSituationReply.render(
       m.members.map((i) => ({ item: i, role: i.id === m.root.id ? "parent" : "child" })), holder.id);
-    const key = JSON.stringify([LANG, holder.id, m.written, m.waits,
+    // A thread on its own already has its reply box under the conversation.
+    const reply = $("d-side-reply");
+    if (reply) reply.hidden = cardsOnly;
+    const key = JSON.stringify([LANG, cardsOnly, holder.id, m.written, m.waits,
       m.cards.map((c) => [c.request_id, c.card]), window.ConsoleSecretary.stateKey(),
       [...m.members, ...m.candidates, ...m.finished].map((i) =>
         [i.id, i.status, i.queued, i.running, i.title, i.ai && i.ai.next_step, reports.get(i.id)?.text,
@@ -279,7 +289,7 @@ window.ConsoleSituation = (() => {
     if (slot.dataset.key === key) return;
     slot.dataset.key = key;
     const top = side.scrollTop;
-    slot.replaceChildren(...core(m, family));
+    slot.replaceChildren(...core(m, family, cardsOnly));
     side.scrollTop = top;
   }
 
