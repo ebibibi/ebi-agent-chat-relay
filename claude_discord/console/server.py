@@ -34,6 +34,7 @@ from claude_code_core.attention_repo import AttentionRecorder
 
 from ..account_turns import session_home
 from ..database.pages_repo import PageRepository
+from ..human_activity import note_human_activity
 from ..message_actions import message_actions
 from ..teams_exporter import source_tags
 from ..thread_marker import OUTCOME_DONE, thread_outcome
@@ -71,6 +72,7 @@ from .places import PlaceError, PlaceRepository
 from .places import clean_name as clean_place
 from .ratelimit import RateLimiter
 from .request_files import DISCORD_CACHE_SECONDS, DISCORD_SCAN, attachment_files, files_for
+from .restart_routes import RestartRoutes, restart_state
 from .search import SearchRoutes
 from .secretary import SecretaryEventRepository, SecretaryRoutes, build_secretary
 from .surface import apply_outcome
@@ -426,6 +428,7 @@ class ConsoleServer:
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/resume", self.resume_item)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/queue", self.queue_item)
         r.add_post(f"{API_PREFIX}/slots", self.set_slots)
+        RestartRoutes(lambda request: request[IDENTITY]).register(r, API_PREFIX)
         r.add_get(f"{API_PREFIX}/files/{{key}}/{{token}}/{{name}}", self.file)
         if self.auth_routes is not None:
             self.auth_routes.register(r, API_PREFIX)
@@ -464,6 +467,10 @@ class ConsoleServer:
                 return _error(f"{CSRF_HEADER}: 1 is required", 403)
             if not self._limiter.allow(who):
                 return _error("too many changes, slow down", 429)
+            # A change made by a person: a reserved restart waits for them to go quiet.
+            # Answering the restart banner itself is not "using" the bot.
+            if not request.path.startswith(f"{API_PREFIX}/restart"):
+                note_human_activity("console")
         request[IDENTITY] = who
         return await handler(request)
 
@@ -714,6 +721,7 @@ class ConsoleServer:
                 "guide": build_guide(items, records=records),
                 "secretary": build_secretary(items, await self._open_requests()),
                 "slots": self._slots(),
+                "restart": restart_state(),
                 "places": await self._place_list(items),
                 "views": await self._view_list(),
                 "pages": await self._page_list(),

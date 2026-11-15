@@ -114,6 +114,18 @@ uv run python -m claude_discord.main
 `scripts/pre-start.sh`・`.github/workflows/`・`examples/ebibot/cogs/` を読むこと。
 自動化されている可能性が高い。
 
+**マージ後は何もしなくてよい。`POST /api/restart` を自分で呼ばない。**（ADR-0026）
+
+1. main へのマージ → Post-merge が `🔄 ebibot-upgrade` を送る
+2. `AutoUpgradeCog`（`git_checkout=True`）が本番チェックアウトを fetch し、変更ファイルで判定する（`claude_discord/deploy_policy.py`）
+   - Python を含まない変更（Console の static、docs、tests、`.github`、`scripts`）→ その場で fast-forward。**再起動しない**（static は毎リクエストでディスクから読む）
+   - それ以外 → 再起動を予約する。予約は **人の最後の操作から `CCDB_RESTART_QUIET_SECONDS`（既定15分）経つまで何も止めない**。人が使っている間は再起動しない。複数の予約は1回にまとまる
+3. 再起動時に `scripts/pre-start.sh` が pull + `uv sync` する
+
+自分で予約してよいのは、自動アップグレードが届かない変更を反映させたいときだけ。そのときも同じ静かな時間のルールに従う。
+`"urgent": true`（静かな時間を待たない）はセキュリティ修正と Bot が壊れているときだけ。理由を `reason` に書く。
+Console の「🔄 更新待ち」から人が「今すぐ再起動」「1時間後に」を選べる。状態は `GET /api/restart`（`phase`・`quiet_at`・`events`）。
+
 ### 開発フロー（worktree + ローカルテスト）
 
 EbiBot は `/home/ebi/claude-code-discord-bridge/` から直接起動する（systemd `WorkingDirectory`）。
