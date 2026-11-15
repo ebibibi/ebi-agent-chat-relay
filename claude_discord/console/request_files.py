@@ -46,3 +46,27 @@ async def files_for(conversations: Any, thread_key: int) -> list[dict[str, str]]
     history = await conversations.history(thread_key, SCAN_MESSAGES)
     newest_first = [m.content for m in reversed(history)]
     return delivered_files(thread_key, newest_first)
+
+
+#: Discord attachments are read through the API: once per request, then reused this long.
+DISCORD_CACHE_SECONDS = 300
+DISCORD_SCAN = 25
+
+
+def attachment_files(messages: Iterable[Any]) -> list[dict[str, str]]:
+    """``{"name", "url"}`` of the files a chat thread's bot posted, newest first.
+
+    Only ``https`` CDN links Discord gave the attachment; nothing from message text.
+    """
+    found: list[dict[str, str]] = []
+    for message in messages:
+        if not getattr(getattr(message, "author", None), "bot", False):
+            continue
+        for attachment in getattr(message, "attachments", None) or []:
+            url = str(getattr(attachment, "url", "") or "")
+            if not url.startswith("https://"):
+                continue
+            found.append({"name": str(getattr(attachment, "filename", "") or "file"), "url": url})
+            if len(found) >= MAX_FILES:
+                return found
+    return found
