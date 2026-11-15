@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from typing import Any
+from urllib.parse import urlsplit
 
 from .surface import FILES_ROUTE
 
@@ -53,18 +54,37 @@ DISCORD_CACHE_SECONDS = 300
 DISCORD_SCAN = 25
 
 
-def attachment_files(messages: Iterable[Any]) -> list[dict[str, str]]:
-    """``{"name", "url"}`` of the files a chat thread's bot posted, newest first.
+#: Where Discord serves attachments. Anything else is not a file the thread delivered.
+ATTACHMENT_HOSTS = frozenset({"cdn.discordapp.com", "media.discordapp.net"})
 
-    Only ``https`` CDN links Discord gave the attachment; nothing from message text.
+
+def _attachment_url(raw: Any) -> str | None:
+    url = str(raw or "")
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return None
+    if parsed.scheme != "https" or parsed.hostname not in ATTACHMENT_HOSTS or parsed.username:
+        return None
+    return url
+
+
+def attachment_files(messages: Iterable[Any], *, bot_id: int | None) -> list[dict[str, str]]:
+    """``{"name", "url"}`` of the files this relay's own bot posted in a thread, newest first.
+
+    Only messages from *bot_id* itself, not from webhooks or other bots: a card is the
+    relay's word that the thread delivered these files. Only Discord's attachment hosts.
     """
     found: list[dict[str, str]] = []
+    if bot_id is None:
+        return found
     for message in messages:
-        if not getattr(getattr(message, "author", None), "bot", False):
+        author = getattr(message, "author", None)
+        if getattr(author, "id", None) != bot_id or getattr(message, "webhook_id", None):
             continue
         for attachment in getattr(message, "attachments", None) or []:
-            url = str(getattr(attachment, "url", "") or "")
-            if not url.startswith("https://"):
+            url = _attachment_url(getattr(attachment, "url", ""))
+            if url is None:
                 continue
             found.append({"name": str(getattr(attachment, "filename", "") or "file"), "url": url})
             if len(found) >= MAX_FILES:

@@ -740,7 +740,8 @@ class ConsoleServer:
         files = []
         if err is None and thread is not None:
             history = [m async for m in thread.history(limit=DISCORD_SCAN)]
-            files = attachment_files(history)
+            me = getattr(getattr(self.api.bot, "user", None), "id", None)
+            files = attachment_files(history, bot_id=me if isinstance(me, int) else None)
         self._request_files_cache[int(request["id"])] = (
             time.monotonic() + DISCORD_CACHE_SECONDS,
             files,
