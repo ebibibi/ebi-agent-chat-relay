@@ -1113,7 +1113,8 @@ async function sendReply(id, box) {
       if (!/^\/(backend|model|effort)\b/.test(text)) { await refresh(); setTimeout(() => loadMessages(id), 1500); }
       return;
     }
-    const body = await window.ConsolePaste.prepareText(text, files);
+    // Canvas mode's screen AI rides on what is sent from it (screenai.js); nothing is stored.
+    const body = { ...(await window.ConsolePaste.prepareText(text, files)), ...(window.ConsoleScreenAI?.body() || {}) };
     const sent = await api(`/items/${encodeURIComponent(id)}/reply`, { method: "POST", body });
     box.value = "";
     delete state.drafts[id];

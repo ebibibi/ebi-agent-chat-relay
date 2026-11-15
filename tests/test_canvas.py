@@ -553,3 +553,37 @@ async def test_wake_limits_change_live_from_the_canvas(repo) -> None:
     clock[0] += timedelta(minutes=2)
     secretary._secretary_running = False
     assert await secretary.tick() == "daily cap"
+
+
+async def test_the_open_screens_ai_runs_the_secretarys_wakes_until_it_lapses(
+    repo, monkeypatch
+) -> None:
+    from claude_discord.console import canvas as canvas_module
+    from claude_discord.turn_ai import TurnAI
+
+    class Host(FakeHost):
+        def __init__(self) -> None:
+            super().__init__()
+            self.ais: list = []
+
+        async def reply(self, key: int, prompt: str, author: str, **kw) -> bool:
+            self.ais.append(kw.get("ai"))
+            return await super().reply(key, prompt, author)
+
+    board, host = Board(), Host()
+    clock = [datetime(2026, 11, 14, 12, tzinfo=UTC)]
+    secretary = _secretary(repo, board, host, clock)
+    await secretary.set_limits(10, 60)
+    await secretary.start_secretary("ebi")
+    await secretary.tick()
+    chosen = TurnAI(backend="codex", model="gpt-6-astra")
+    secretary.set_screen_ai(chosen)
+    board.items[0] = _item("t1", "done")
+    clock[0] += timedelta(minutes=2)
+    assert await secretary.tick() == "woken"
+    assert host.ais[-1] == chosen
+    now = [1000.0]
+    monkeypatch.setattr(canvas_module.time, "monotonic", lambda: now[0])
+    secretary.set_screen_ai(chosen)
+    now[0] += canvas_module.SCREEN_AI_SECONDS + 1
+    assert secretary.screen_ai() is None, "the screen closed: back to the thread's own AI"

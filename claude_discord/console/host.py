@@ -42,6 +42,7 @@ from ..thread_marker import (
     mark_parent_thread_name,
     mark_spawned_thread_name,
 )
+from ..turn_ai import TurnAI
 from .attention import console_activity
 from .conversations import CONSOLE_FRONTEND
 from .surface import AGENT_AUTHOR, ConsoleFrontend, ConsoleSurface, apply_outcome
@@ -204,8 +205,12 @@ class ConsoleSessionHost:
         into_running_turn: bool = False,
         brief: str | None = None,
         metered: bool = False,
+        ai: TurnAI | None = None,
     ) -> bool:
         """Continue a conversation with the human's message.
+
+        *ai* — the AI chosen on the screen that sent it — runs this turn only; nothing is
+        stored, so the thread's next turn uses its own settings again.
 
         Returns True when the message went into the turn already running,
         False when it was queued as a turn of its own. *metered* marks *prompt*
@@ -223,6 +228,7 @@ class ConsoleSessionHost:
             into_running_turn=into_running_turn,
             brief=brief,
             metered=metered,
+            ai=ai,
         )
 
     async def relay(self, thread_key: int, prompt: str, author: str, *, interrupt: bool) -> str:
@@ -269,6 +275,7 @@ class ConsoleSessionHost:
         into_running_turn: bool = False,
         brief: str | None = None,
         metered: bool = False,
+        ai: TurnAI | None = None,
     ) -> bool:
         """Record the human's message and run it.
 
@@ -286,9 +293,10 @@ class ConsoleSessionHost:
                 surface.thread_key, author="Ebi Workspace", is_bot=True, content=brief
             )
             prompt = f"{prompt}\n\n{brief}"
-        if into_running_turn and await self._inject(surface.thread_key, prompt):
+        # A turn already running keeps its own AI: a screen AI needs a turn of its own.
+        if into_running_turn and ai is None and await self._inject(surface.thread_key, prompt):
             return True
-        self._spawn(surface, prompt)
+        self._spawn(surface, prompt, ai=ai)
         return False
 
     async def _meter(self, thread_key: int, message_id: int, author: str, prompt: str) -> None:
@@ -327,13 +335,18 @@ class ConsoleSessionHost:
         )
 
     def _spawn(
-        self, surface: ConsoleSurface, prompt: str, *, result_sink: ResultSink | None = None
+        self,
+        surface: ConsoleSurface,
+        prompt: str,
+        *,
+        result_sink: ResultSink | None = None,
+        ai: TurnAI | None = None,
     ) -> None:
         # Taken now, not when the task first runs: a reply arriving in between
         # must already see that this one is waiting.
         release = live_runs.hold(surface.thread_key)
         task = asyncio.create_task(
-            self._run_queued(surface, prompt, release, result_sink=result_sink)
+            self._run_queued(surface, prompt, release, result_sink=result_sink, ai=ai)
         )
         self._tasks.add(task)
         task.add_done_callback(self._finished)
@@ -350,20 +363,26 @@ class ConsoleSessionHost:
         release: Callable[[], None] = lambda: None,
         *,
         result_sink: ResultSink | None = None,
+        ai: TurnAI | None = None,
     ) -> None:
         lock = self._locks.setdefault(surface.thread_key, asyncio.Lock())
         try:
             async with lock:
                 release()
-                await self._run_locked(surface, prompt, result_sink=result_sink)
+                await self._run_locked(surface, prompt, result_sink=result_sink, ai=ai)
         finally:
             release()
 
     async def _run_locked(
-        self, surface: ConsoleSurface, prompt: str, *, result_sink: ResultSink | None = None
+        self,
+        surface: ConsoleSurface,
+        prompt: str,
+        *,
+        result_sink: ResultSink | None = None,
+        ai: TurnAI | None = None,
     ) -> None:
         try:
-            await self._run(surface, prompt, result_sink=result_sink)
+            await self._run(surface, prompt, result_sink=result_sink, ai=ai)
         except Exception:
             if result_sink is not None:
                 await result_sink(None, "Console turn failed")
@@ -381,12 +400,18 @@ class ConsoleSessionHost:
         *,
         _account_retry: bool = False,
         result_sink: ResultSink | None = None,
+        ai: TurnAI | None = None,
     ) -> None:
         user_prompt = prompt
         thread_key = surface.thread_key
         record = await self._session_repo.get(thread_key)
-        backend = await self._settings.current_backend(thread_key)
-        model = await self._settings.current_model(backend, thread_key)
+        # A screen AI (canvas mode) decides this turn only; the settings are not touched.
+        backend = ai.backend if ai is not None else await self._settings.current_backend(thread_key)
+        model = (
+            ai.model
+            if ai is not None and ai.model
+            else await self._settings.current_model(backend, thread_key)
+        )
         runner = self._factory.build(backend=backend, model=model, thread_id=thread_key)
         await apply_thread_execution_mode(runner, getattr(self._settings, "repo", None), thread_key)
 
@@ -418,10 +443,16 @@ class ConsoleSessionHost:
                     reader = history_reader_at(home)
             prompt = await carry_history_across_backends(reader, record, backend, prompt)
 
-        effort = await self._settings.current_effort(backend, thread_key)
+        effort = (
+            ai.effort
+            if ai is not None and ai.effort
+            else await self._settings.current_effort(backend, thread_key)
+        )
         if effort is not None and hasattr(runner, "effort"):
             runner.effort = effort
-        connection = await apply_connection(runner, self._settings, backend, thread_key)
+        connection = await apply_connection(
+            runner, self._settings, backend, thread_key, chosen=ai.connection if ai else None
+        )
 
         # The transcript names the model that wrote each answer, and the route it took.
         model_name = getattr(runner, "model", None)
@@ -457,7 +488,9 @@ class ConsoleSessionHost:
         # Opt-in failover (retry_on_exhaustion): rerun the same message once on
         # the next profile, as a Discord thread does. A second rejection just reports.
         if failover is not None and failover.retry and not _account_retry:
-            await self._run(surface, user_prompt, _account_retry=True, result_sink=result_sink)
+            await self._run(
+                surface, user_prompt, _account_retry=True, result_sink=result_sink, ai=ai
+            )
 
     async def _fresh_prompt(self, thread_key: int, prompt: str) -> str | None:
         if self.fresh_turn is None:

@@ -223,6 +223,19 @@ places widgets there; the right is your conversation with it. **↩ Classic scre
 charter. Widget, order, note and deliver calls must carry it as `X-Canvas-Token` and are refused
 with 403 otherwise; a digest read without it never moves the cursor. Reads are open.
 
+**⚡ This screen's AI** (#1401). The top of the canvas and of the focus session shows which AI
+what you send from there will run on. By default that is each thread's own setting. Pick a
+backend (and a connection, model, effort) and the bar turns orange: every reply, card answer and
+widget button sent from these screens carries it as `ai`, and the turn it starts runs on it. The
+secretary's own wakes use it while the screen is open (the screen re-sends it every poll; the
+relay keeps it in memory for 90 seconds). Nothing is stored — not in the browser, not in any
+setting — so each thread's saved choice, the global default, scheduled tasks, child threads and
+an automatic resume after a wait keep their own AI, and leaving the screen or closing the tab
+clears it. A turn already running is not changed: a reply with a screen AI waits for its own
+turn. The transcript names the model that actually answered. Values that are not offered
+(an unknown backend, effort or connection, a model id that is not a plain id) are refused with
+400.
+
 **Widgets are data, drawn by the Console.** The secretary sends
 `PUT /api/canvas/widgets/{key}` with a `kind`, a one-line `title`, `data`, and optionally
 `size` (`s`, `m`, `l`), `position`, a one-line `note` and up to four `actions`
