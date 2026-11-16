@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Focus session shows the **whole decision request** (all seven parts with headings, open) and a
+  large **↗ Open the source thread to work on it** button, primary for tasks (#1417).
 - Canvas mode **⚡ this screen's AI** (#1401): pick backend, connection, model and effort for
   what is sent from the canvas and the focus session; it rides on each send as `ai` and runs
   that turn only (Console conversations and chat threads), plus the secretary's wakes while the

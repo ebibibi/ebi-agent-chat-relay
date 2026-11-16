@@ -180,3 +180,7 @@ body.canvas .app.no-detail { grid-template-columns: minmax(0, 1fr); }
 .sai-help { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
   border: 1px solid var(--line); color: var(--dim); cursor: help; font-size: 11px; }
 .cv-ss-top .sai-bar { flex-basis: 100%; }
+
+/* The focus session's way into the work and the whole request (#1406). */
+.cv-ss-source .btn { font-size: 14px; padding: 8px 14px; text-align: left; overflow-wrap: anywhere; }
+.cv-ss-part h4 { margin: 10px 0 4px; font-size: 13px; color: var(--dim); }

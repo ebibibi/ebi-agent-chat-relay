@@ -21,6 +21,7 @@ window.ConsoleSession = (() => {
       done_body: "Each answer went to its thread. The secretary has been told.", close: "Back to the canvas",
       empty: "No open decisions right now.", deadline: "Deadline: ", irreversible: "can't be undone",
       told: (d, l) => `Sent to the secretary: ${d} decided, ${l} for later`, open_thread: "↗ Open the thread (the session waits)",
+      open_thread_big: "↗ Open the source thread to work on it (the session waits)",
       more: "Full request ▾", min: (m) => `${m} min`,
     },
     ja: {
@@ -34,6 +35,7 @@ window.ConsoleSession = (() => {
       done_body: "答えはそれぞれのスレッドに届けました。秘書にも伝えてあります。", close: "画面に戻る",
       empty: "いま決めることはありません。", deadline: "期限：", irreversible: "戻せない",
       told: (d, l) => `秘書に伝えました：決定 ${d}件・後回し ${l}件`, open_thread: "↗ 元のスレッドを開く（セッションは中断して待ちます）",
+      open_thread_big: "↗ 元のスレッドを開いて作業する（セッションは中断して待ちます）",
       more: "詳しい依頼書 ▾", min: (m) => `${m}分`,
     },
   };
@@ -205,10 +207,17 @@ window.ConsoleSession = (() => {
     const drawn = materials.length ? h("div", { class: "cv-ss-materials" }, ...materials.map((m) =>
       h("article", { class: `cv-w cv-k-${m.kind}` }, h("div", { class: "cv-w-head" }, h("h3", { text: m.title })),
         h("div", { class: "cv-w-body" }, window.ConsoleCanvas.draw(m.kind, m.data))))) : null;
-    const detailParts = ["about", "now", "recommendation", "materials"].filter((k) => card.detail && card.detail[k]);
-    const detail = detailParts.length ? h("details", { class: "cv-ss-detail", open: materials.length ? null : "" },
+    // The whole request, all seven parts with their headings, open: a session is where the
+    // person decides or does the work, so what the asking agent wrote must all be here (#1417).
+    const parts = window.ConsoleSecretary.strings().detail_parts.filter(([k]) => card.detail && card.detail[k]);
+    const detail = parts.length ? h("details", { class: "cv-ss-detail", open: "" },
       h("summary", { text: s.more }),
-      ...detailParts.map((k) => h("div", { class: "md" }, MD.render(card.detail[k])))) : null;
+      ...parts.map(([k, heading]) => h("section", { class: "cv-ss-part" }, h("h4", { text: heading }),
+        h("div", { class: "md" }, MD.render(card.detail[k]))))) : null;
+    // The way into the work, as large as the answers: a task is done in its thread.
+    const source = h("div", { class: "cv-ss-source" }, h("button", { type: "button",
+      class: "btn" + (card.kind === "action" ? " primary" : ""), onclick: () => openThread(card.id),
+      text: `${s.open_thread_big} — ${card.item_title}` }));
     const own = writing ? ownForm(entry) : null;
     const files = window.ConsoleSecretary.filesBlock(card);
     if (window.ConsoleSecretary.nothingToSee(card)) {
@@ -227,7 +236,7 @@ window.ConsoleSession = (() => {
       h("p", { class: "cv-ss-context", text: c.context }),
       plan && plan.why ? h("p", { class: "dim", text: plan.why }) : null,
       h("div", { class: "cv-ss-options" }, ...options),
-      own, files, drawn, detail,
+      source, own, files, drawn, detail,
       h("div", { class: "cv-ss-keys dim", text: s.keys }));
   }
 
