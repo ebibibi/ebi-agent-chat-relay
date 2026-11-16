@@ -562,6 +562,24 @@ tomorrow 09:00, `c` write down work (the first line is the title, further lines 
 view, `?` help. URLs carry the view and the open item (`/#me/t1234`), so a link can point at a
 single item.
 
+## Automation AI
+
+**⚙️ Automation AI** in the nav lists the jobs of an external scheduler and lets you choose,
+per job, the AI it runs on — separately from the default you chat with (ADR-0027):
+
+- **Use the default** — the row "Jobs without their own choice" decides.
+- **Follow the master** — whatever the global default is when the job runs.
+- **Codex / Claude**, with an optional model (empty: that backend's default) and effort.
+
+Each row also shows the AI the job's last spawn actually ran on. **Save** replaces the whole
+policy; an invalid row refuses the save and is named in the error. Until the first save the
+dialog says so: the scheduler then keeps using its own fallback file.
+
+The job list comes from `CCDB_AUTOMATION_JOBS_URL` — a JSON array of
+`{id, name, enabled, schedules}`, the shape of the scheduler's `GET /api/jobs/`. Without it, or
+when the scheduler is down, the dialog shows only the jobs already named in the policy. See
+[backends](backends.md#automation-ai-policy) for the API.
+
 ## Enable it
 
 The console is off unless `CCDB_CONSOLE_PORT` is set. It **never runs unauthenticated**: by

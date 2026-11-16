@@ -271,3 +271,75 @@ async def test_console_reads_and_writes(console):
     assert (await AutomationAIPolicy(settings).stored())["default"]["backend"] == "codex"
     bad = await client.put(url, json={"default": "gpt"}, headers=WRITE)
     assert bad.status == 400 and "default" in (await bad.json())["error"]
+
+
+# -- Console job list ------------------------------------------------------------------
+
+
+@pytest.fixture
+async def console_jobs(tmp_path, settings, monkeypatch):
+    from claude_discord import automation_routes
+    from claude_discord.console import commands
+
+    async def no_discovery(backend):
+        return [{"value": f"{backend}-model", "label": ""}]
+
+    monkeypatch.setattr(commands, "model_choices", no_discovery)
+    listed = [
+        {"id": "deep", "name": "Deep work", "enabled": True, "schedules": ["07:00"]},
+        {"id": "plain", "name": "Plain", "enabled": False, "schedules": []},
+        {"id": "bad id", "name": "ignored"},
+        "junk",
+    ]
+    state = {"fail": False}
+
+    async def fetch():
+        if state["fail"]:
+            raise automation_routes.aiohttp.ClientError("down")
+        return [j for j in map(automation_routes._clean_job, listed) if j]
+
+    monkeypatch.setattr(automation_routes, "fetch_scheduler_jobs", fetch)
+    db = str(tmp_path / "w.db")
+    work = WorkItemRepository(db)
+    await work.init_db()
+    api = MagicMock()
+    api.default_channel_id = None
+    api.lineage_repo = None
+    api.session_repo = None
+    api.bot.get_channel.return_value = None
+    api.bot.cogs = {}
+    api._running_thread_ids.return_value = set()
+    api.components.backend_settings = settings
+    server = ConsoleServer(api, work, ConsoleAuthenticator(ConsoleAuthConfig(token=TOKEN)), port=0)
+    async with TestClient(TestServer(server.app)) as client:
+        yield client, settings, state
+
+
+async def test_job_list_merges_scheduler_jobs_policy_and_last_runs(console_jobs):
+    client, settings, _ = console_jobs
+    store = AutomationAIPolicy(settings)
+    await store.save({**SCHEDULER_SHAPE, "jobs": {**SCHEDULER_SHAPE["jobs"]}}, "t")
+    await store.record_run("deep", 99, pinned=True)
+    data = await (await client.get("/console/api/automation/jobs", headers=AUTH)).json()
+    rows = {r["id"]: r for r in data["jobs"]}
+    assert rows["deep"]["name"] == "Deep work" and rows["deep"]["schedules"] == ["07:00"]
+    assert rows["deep"]["entry"]["model"] == "opus"
+    assert rows["deep"]["last_run"]["thread_id"] == "99"
+    assert rows["plain"]["entry"] is None and rows["plain"]["effective"]["backend"] == "codex"
+    assert rows["plain"]["enabled"] is False
+    # In the policy but not in the scheduler's list: still shown, so it can be removed.
+    assert rows["payroll"]["enabled"] is None
+    assert "bad id" not in rows
+    assert set(data["backends"]) == {"codex", "claude"}
+    assert data["backends"]["codex"]["models"] == ["codex-model"]
+    assert data["jobs_error"] is None
+
+
+async def test_job_list_survives_an_unreachable_scheduler(console_jobs):
+    client, _, state = console_jobs
+    state["fail"] = True
+    res = await client.get("/console/api/automation/jobs", headers=AUTH)
+    assert res.status == 200
+    data = await res.json()
+    assert data["jobs"] == [] and data["jobs_error"]
+    assert data["configured"] is False

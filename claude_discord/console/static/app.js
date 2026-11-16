@@ -504,6 +504,7 @@ function renderNav() {
     window.ConsoleNoteSearch.nav(),
     window.ConsoleBackend.nav(),
     window.ConsoleBackend.childNav(),
+    window.ConsoleAutomation ? window.ConsoleAutomation.nav() : null,
     window.ConsoleNotify ? h("button", { class: "nav-notify" + (window.ConsoleNotify.isOn() ? " on" : ""),
       onclick: () => window.ConsoleNotify.toggle() },
       h("span", { text: window.ConsoleNotify.isOn() ? T.notify_on : T.notify_off })) : null,
