@@ -86,6 +86,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Console OIDC sign-in returns to the origin it started from (#1420): with several origins in
+  `CCDB_CONSOLE_ORIGIN`, the redirect URI was always the first one, so signing in through a public
+  proxy landed on an address that may be unreachable. The URI is sealed into the flow cookie and
+  used for the token exchange; an unlisted `Host` keeps the first origin.
 - Console: a parent's child threads can be checked from the conversation again. Beside the 📍 panel
   the family list is one steady line (**▸ Child threads**, with counts) that unfolds on click, and the
   choice is remembered; phones keep it in the panel's tab. #1296 had hidden it for good.

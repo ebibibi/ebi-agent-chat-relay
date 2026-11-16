@@ -10,6 +10,7 @@ a shared limit there would let anyone lock the owner out.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -25,7 +26,7 @@ from .auth import (
     oidc_session_identity,
 )
 from .logsafe import q
-from .oidc import STATE_COOKIE, OidcClient, OidcError
+from .oidc import CALLBACK_PATH, STATE_COOKIE, OidcClient, OidcError
 from .passkey_store import PasskeyStore
 from .passkeys import PasskeyError, PasskeyService
 
@@ -235,8 +236,17 @@ class AuthRoutes:
     # -- OIDC ----------------------------------------------------------------
     async def oidc_start(self, request: web.Request) -> web.StreamResponse:
         assert self.oidc is not None
+        # Come back to the origin the sign-in started from: a console listed
+        # under several origins (a tailnet name and a public proxy) would
+        # otherwise always send the browser to the first one, which may not be
+        # reachable from where the user is. A host that is not listed (a proxy
+        # that rewrites Host) keeps the first origin, never the host itself.
+        redirect_uri = self.oidc.config.redirect_uri
+        if self._config.origins:
+            with contextlib.suppress(PasskeyError):
+                redirect_uri = f"{request_origin(request, self._config)}{CALLBACK_PATH}"
         try:
-            url, browser = await self.oidc.start()
+            url, browser = await self.oidc.start(redirect_uri)
         except OidcError as exc:
             return _signin_error(str(exc))
         response = _redirect(url)
@@ -249,7 +259,7 @@ class AuthRoutes:
             path=f"{AUTH_PREFIX}oidc/",
             httponly=True,
             samesite="Lax",
-            secure=self.oidc.config.redirect_uri.startswith("https://"),
+            secure=redirect_uri.startswith("https://"),
         )
         return response
 

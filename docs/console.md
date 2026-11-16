@@ -657,6 +657,11 @@ The console can send you to your identity provider and back, with no Cloudflare 
 Register a **web** client with the provider and use this redirect URI:
 `<your origin>/console/api/auth/oidc/callback`.
 
+When `CCDB_CONSOLE_ORIGIN` lists several origins (say a tailnet name and a public proxy), the
+browser comes back to the origin it started the sign-in from, so register the callback of
+**every** listed origin. A request whose `Host` is not listed (a proxy that rewrites it) uses the
+first origin, as before.
+
 ```dotenv
 CCDB_CONSOLE_ORIGIN=https://console.example.com      # required: the redirect URI is built from it
 CCDB_CONSOLE_OIDC_ISSUER=https://accounts.google.com
