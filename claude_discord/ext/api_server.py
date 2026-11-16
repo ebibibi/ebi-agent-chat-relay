@@ -38,6 +38,8 @@ from aiohttp import web
 from claude_code_core.thread_search import run_thread_search
 from claude_code_core.transcript_search import default_transcripts_root
 
+from ..automation_ai import AutomationAIPolicy, entry_ai, valid_job_id
+from ..automation_routes import ControlPlaneRoutes
 from ..backend_settings import ALL_BACKENDS
 from ..discord_ui.file_sender import send_file_blobs
 from ..lounge import length_hint
@@ -467,6 +469,7 @@ class ApiServer:
         self.app.router.add_post("/api/threads/{thread_id}/action", self.mark_thread_action)
         # Session spawn route
         self.app.router.add_post("/api/spawn", self.spawn)
+        ControlPlaneRoutes(self._backend_settings).register(self.app.router)
         # Authenticated external ingest route (browser extension / webhooks)
         self.app.router.add_post("/api/ingest", self.ingest)
         # Running per-thread summaries. GET (external, token) reads the stored
@@ -2061,6 +2064,9 @@ class ApiServer:
                 "connection": str|null}``. Stored as the thread's own settings, so
                 later turns keep it; wins over the parent's child preferences.
                 A value the relay does not offer is refused with 400.
+            job_id: The automation job this spawn runs (optional). With no ``ai``, the
+                stored automation AI policy picks the AI for the job; the AI it ran on is
+                recorded for the Console either way.
             parent_thread_id: The calling thread (optional). Both titles then
                 carry that thread's family code — ``🤖K2`` on the child,
                 ``🌳K2`` on the parent — and the link is recorded so
@@ -2124,8 +2130,18 @@ class ApiServer:
         except TurnAIError as exc:
             return web.json_response({"error": str(exc)}, status=400)
 
+        # An automation job names itself; with no explicit ai, its stored policy decides.
+        raw_job_id = data.get("job_id")
+        if raw_job_id is not None and not valid_job_id(raw_job_id):
+            return web.json_response({"error": "job_id must be a job id"}, status=400)
+        job_id: str = raw_job_id or ""
+        policy = self._automation_policy() if job_id else None
+        if policy is not None and ai is None:
+            entry = await policy.entry_for(job_id)
+            ai = entry_ai(entry) if entry is not None else None
+
         if getattr(self.bot, "headless", False) is True:
-            return await self._spawn_console(
+            response = await self._spawn_console(
                 prompt=prompt,
                 title=thread_name or prompt[:100],
                 auto_start=auto_start,
@@ -2133,6 +2149,10 @@ class ApiServer:
                 parent_thread_id=parent_thread_id,
                 ai=ai,
             )
+            if policy is not None and response.status == 201:
+                body = json.loads(response.text or "{}")
+                await self._record_job_run(policy, job_id, int(body["thread_id"]), ai)
+            return response
 
         raw_channel_id = data.get("channel_id") or self.default_channel_id
         if not raw_channel_id:
@@ -2195,6 +2215,8 @@ class ApiServer:
             except Exception:
                 logger.exception("Could not record spawn lineage for thread %s", thread.id)
 
+        if policy is not None:
+            await self._record_job_run(policy, job_id, thread.id, ai)
         logger.info("Spawned new Claude session in thread %s (%s)", thread.id, thread.name)
         body: dict[str, str] = {
             "status": "spawned",
@@ -2205,6 +2227,22 @@ class ApiServer:
             body["parent_thread_id"] = str(parent_thread_id)
             body["family"] = family_code(parent_thread_id)
         return web.json_response(body, status=201)
+
+    def _backend_settings(self) -> Any:
+        return getattr(self.components, "backend_settings", None)
+
+    def _automation_policy(self) -> AutomationAIPolicy | None:
+        settings = self._backend_settings()
+        return AutomationAIPolicy(settings) if settings is not None else None
+
+    async def _record_job_run(
+        self, policy: AutomationAIPolicy, job_id: str, thread_id: int, ai: TurnAI | None
+    ) -> None:
+        # Bookkeeping only: the thread already exists, so a failed write must not fail it.
+        try:
+            await policy.record_run(job_id, thread_id, pinned=ai is not None)
+        except Exception:
+            logger.exception("Could not record the AI of automation job %s", _sanitize_log(job_id))
 
     # ------------------------------------------------------------------
     # Authenticated external ingest endpoint (/api/ingest)
