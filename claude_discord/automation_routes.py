@@ -67,7 +67,14 @@ def _clean_job(raw: Any) -> dict[str, Any] | None:
         "schedules": shown,
         # None: the scheduler did not say how the job reaches an AI.
         "ai_routes": [str(r)[:30] for r in routes[:10]] if isinstance(routes, list) else None,
+        # What the scheduler itself logged for its last run: covers jobs that never spawn.
+        "scheduler_last_ai": _optional_text(raw.get("last_ai"), 200),
+        "scheduler_last_run_at": _optional_text(raw.get("last_run_at"), 40),
     }
+
+
+def _optional_text(value: Any, limit: int) -> str | None:
+    return str(value)[:limit] if isinstance(value, str) and value else None
 
 
 async def fetch_scheduler_jobs() -> list[dict[str, Any]]:
@@ -194,6 +201,8 @@ class ConsoleRoutes:
                 "enabled": None,
                 "schedules": [],
                 "ai_routes": None,
+                "scheduler_last_ai": None,
+                "scheduler_last_run_at": None,
             }
             for job_id in sorted(policy_jobs)
             if job_id not in known

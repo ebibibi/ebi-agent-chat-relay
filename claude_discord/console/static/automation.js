@@ -80,7 +80,10 @@ window.ConsoleAutomation = (() => {
         ...(job.schedules || [])].filter(Boolean).join(" · ");
       // Every route the scheduler reported is "direct": the policy cannot reach this job yet.
       const direct = Array.isArray(job.ai_routes) && job.ai_routes.length > 0 && job.ai_routes.every((r) => r === "direct");
-      const last = job.last_run ? `${t.last}: ${summary(job.last_run)}${job.last_run.mode === MASTER ? ` (${t.follow})` : ""} · ${when(job.last_run.at)}` : `${t.last}: ${t.never}`;
+      // The relay's own record (a spawn with job_id) first; else what the scheduler logged.
+      const last = job.last_run ? `${t.last}: ${summary(job.last_run)}${job.last_run.mode === MASTER ? ` (${t.follow})` : ""} · ${when(job.last_run.at)}`
+        : job.scheduler_last_ai ? `${t.last}: ${job.scheduler_last_ai}${job.scheduler_last_run_at ? ` · ${when(job.scheduler_last_run_at)}` : ""}`
+        : `${t.last}: ${t.never}`;
       const tr = h("tr", { "data-text": `${job.id} ${job.name}`.toLowerCase() },
         h("td", {}, h("div", { text: job.name }), h("div", { class: "dim", text: [job.id, badges].filter(Boolean).join(" · ") })),
         h("td", {}, p.el, h("div", { class: "dim", text: job.entry ? last : `→ ${describe(job.effective, data.master)} · ${last}` }),

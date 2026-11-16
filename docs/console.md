@@ -576,7 +576,8 @@ policy; an invalid row refuses the save and is named in the error. Until the fir
 dialog says so: the scheduler then keeps using its own fallback file.
 
 The job list comes from `CCDB_AUTOMATION_JOBS_URL` — a JSON array (or `{"jobs": [...]}`) of
-`{id|job_id, name, group, enabled, schedules|active_schedules, ai_routes}`. A job whose
+`{id|job_id, name, group, enabled, schedules|active_schedules, ai_routes, last_ai,
+last_run_at}`. `last_ai` is shown when the relay has no record of the job's last spawn. A job whose
 `ai_routes` are all `direct` is flagged: its script calls an AI itself, so the choice has no
 effect yet. Without it, or
 when the scheduler is down, the dialog shows only the jobs already named in the policy. See

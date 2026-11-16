@@ -366,5 +366,17 @@ def test_clean_job_accepts_the_ai_policy_cli_shape():
         "enabled": True,
         "schedules": ["×2"],
         "ai_routes": ["direct"],
+        "scheduler_last_ai": None,
+        "scheduler_last_run_at": None,
     }
     assert _clean_job({"id": "x", "active_schedules": True})["schedules"] == []
+
+
+def test_clean_job_keeps_the_scheduler_last_ai():
+    from claude_discord.automation_routes import _clean_job
+
+    row = _clean_job(
+        {"job_id": "a", "last_ai": "codex（yaml:default）", "last_run_at": "2026-11-15T20:30:51"}
+    )
+    assert row["scheduler_last_ai"] == "codex（yaml:default）"
+    assert row["scheduler_last_run_at"] == "2026-11-15T20:30:51"
