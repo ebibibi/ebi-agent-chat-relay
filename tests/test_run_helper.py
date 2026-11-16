@@ -1697,6 +1697,92 @@ class TestGlobalSessionSemaphore:
         assert slots.running_count == 0
 
     @pytest.mark.asyncio
+    async def test_end_of_turn_work_counts_as_finishing_until_the_turn_returns(
+        self, thread: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Issue #1400: the slot is free, but the turn is not done until it returns."""
+        configure_session_limit(1)
+        slots = get_session_slots()
+        assert slots is not None
+        reached = asyncio.Event()
+        gate = asyncio.Event()
+
+        async def slow_completion_check(*args, **kwargs):
+            reached.set()
+            await gate.wait()
+            return None
+
+        monkeypatch.setattr(_rh_module, "_get_pr_completion_prompt", slow_completion_check)
+        runner = MagicMock()
+        runner.working_dir = None
+        runner.images = None
+        runner.run = self._make_async_gen(self._simple_events())
+        config = RunConfig(thread=thread, runner=runner, prompt="test")
+
+        task = asyncio.create_task(run_claude_with_config(config))
+        await asyncio.wait_for(reached.wait(), 2)
+        assert slots.running_count == 0
+        assert slots.finishing_count == 1
+
+        gate.set()
+        await asyncio.wait_for(task, 2)
+        assert slots.finishing_count == 0
+
+    @pytest.mark.asyncio
+    async def test_a_failed_turn_does_not_stay_finishing(self, thread: MagicMock) -> None:
+        configure_session_limit(1)
+
+        async def failing_gen(*args, **kwargs):
+            raise RuntimeError("boom")
+            yield  # noqa: E501
+
+        runner = MagicMock()
+        runner.working_dir = None
+        runner.images = None
+        runner.run = failing_gen
+        await run_claude_with_config(RunConfig(thread=thread, runner=runner, prompt="test"))
+
+        slots = get_session_slots()
+        assert slots is not None
+        assert slots.running_count == 0
+        assert slots.finishing_count == 0
+
+    @pytest.mark.asyncio
+    async def test_a_rerun_is_not_counted_as_finishing_while_it_queues(
+        self, thread: MagicMock
+    ) -> None:
+        """A compact rerun waits for a slot; a held queue must not make that a deadlock."""
+        configure_session_limit(1)
+        slots = get_session_slots()
+        assert slots is not None
+        seen: list[int] = []
+        call_count = 0
+
+        async def mock_run(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            seen.append(slots.finishing_count)
+            if call_count == 1:
+                yield StreamEvent(message_type=MessageType.SYSTEM, session_id="sess-rr")
+                yield StreamEvent(message_type=MessageType.SYSTEM, is_compact=True)
+                return
+            for e in self._simple_events("sess-rr"):
+                yield e
+
+        runner = MagicMock()
+        runner.working_dir = None
+        runner.images = None
+        runner.interrupt = AsyncMock()
+        runner.run = mock_run
+        runner.clone = MagicMock(return_value=runner)
+        config = RunConfig(thread=thread, runner=runner, prompt="test", session_id="sess-rr")
+
+        assert await asyncio.wait_for(run_claude_with_config(config), 5) == "sess-rr"
+        # The rerun started with the first turn's wrap-up already ended.
+        assert seen == [0, 0]
+        assert slots.finishing_count == 0
+
+    @pytest.mark.asyncio
     async def test_compact_rerun_does_not_deadlock(self, thread: MagicMock) -> None:
         """With max=1, compact rerun must not deadlock (semaphore released before rerun)."""
         configure_session_limit(1)

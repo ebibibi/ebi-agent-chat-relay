@@ -354,7 +354,11 @@ class RestartReservation:
         self._phase = "draining"
         self._drain_started = self._clock()
         self._slots.hold()
-        self._event(f"quiet: holding the queue; {self._slots.running_count} running to finish")
+        finishing = self._slots.finishing_count
+        wrapping = f", {finishing} wrapping up" if finishing else ""
+        self._event(
+            f"quiet: holding the queue; {self._slots.running_count} running to finish{wrapping}"
+        )
 
     def _stop_drain(self) -> None:
         self._drain_started = None
@@ -394,7 +398,9 @@ class RestartReservation:
                 self._stop_drain()
                 self._event("someone is using the bot: released the queue, waiting again")
                 return "again"
-            if self._slots.running_count == 0:
+            # A turn that gave its slot back may still be delivering its result;
+            # cutting it there resumes it after the restart for nothing.
+            if self._slots.running_count == 0 and self._slots.finishing_count == 0:
                 return "done"
             await asyncio.sleep(self._poll_interval)
 
