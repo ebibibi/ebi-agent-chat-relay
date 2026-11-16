@@ -116,6 +116,10 @@ class SessionSlotScheduler:
         self._waiting: list[SlotEntry] = []
         self._seq = itertools.count()
         self._held = False
+        # Turns whose CLI run has ended (slot released) but whose end-of-turn
+        # work — outcome markers, completion checks, result delivery — is still
+        # going. A reserved restart waits for these too (see ``begin_finishing``).
+        self._finishing: dict[int, int] = {}
 
     @property
     def max_slots(self) -> int:
@@ -139,6 +143,36 @@ class SessionSlotScheduler:
     @property
     def running_count(self) -> int:
         return len(self._running)
+
+    @property
+    def finishing_count(self) -> int:
+        """Turns that gave their slot back but are still wrapping up."""
+        return sum(self._finishing.values())
+
+    def begin_finishing(self, thread_key: int) -> Callable[[], None]:
+        """Mark a turn as wrapping up; returns an idempotent function that ends it.
+
+        Call it just before releasing the slot, so there is no moment in which
+        the turn is neither running nor finishing. ``running_count == 0`` alone
+        let a reserved restart cut a turn between its last answer and its
+        bookkeeping, and the cut turn was then resumed with a needless
+        "the bot restarted" prompt.
+        """
+        self._finishing[thread_key] = self._finishing.get(thread_key, 0) + 1
+        done = False
+
+        def end() -> None:
+            nonlocal done
+            if done:
+                return
+            done = True
+            left = self._finishing.get(thread_key, 0) - 1
+            if left > 0:
+                self._finishing[thread_key] = left
+            else:
+                self._finishing.pop(thread_key, None)
+
+        return end
 
     @property
     def held(self) -> bool:
