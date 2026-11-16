@@ -127,25 +127,27 @@ class ConsoleSessionHost:
         parent_thread_id: int | None = None,
         lineage_repo: Any = None,
         result_sink: ResultSink | None = None,
-        ai: tuple[str, str | None, str | None] | None = None,
+        ai: TurnAI | tuple[str, str | None, str | None] | None = None,
     ) -> int:
         """Create native agent work, storing preferences and lineage before its first turn.
 
-        *ai* — ``(backend, model, effort)`` — pins the conversation's AI before its first turn
-        (the canvas secretary, ADR-0025); otherwise a child inherits its parent's preferences.
+        *ai* — a :class:`TurnAI` or ``(backend, model, effort)`` — is stored as the
+        conversation's own settings before its first turn, so later turns keep it (the canvas
+        secretary, ADR-0025; ``/api/spawn``'s ``ai``). Otherwise a child inherits its parent's
+        child preferences.
         """
         import uuid
 
         from claude_code_core.frontend import OutboundFile
 
-        child_ai = ai
+        child_ai = TurnAI(*ai) if isinstance(ai, tuple) else ai
         if child_ai is None and parent_thread_id is not None:
             preferences = self._settings.for_children()
             backend = await preferences.current_backend(parent_thread_id)
-            child_ai = (
-                backend,
-                await preferences.current_model(backend, parent_thread_id),
-                await preferences.current_effort(backend, parent_thread_id),
+            child_ai = TurnAI(
+                backend=backend,
+                model=await preferences.current_model(backend, parent_thread_id),
+                effort=await preferences.current_effort(backend, parent_thread_id),
             )
         surface = await self.frontend.open(
             external_id="spawn:" + uuid.uuid4().hex,
@@ -153,12 +155,9 @@ class ConsoleSessionHost:
         )
         key = surface.thread_key
         if child_ai is not None:
-            backend, model, effort = child_ai
-            await self._settings.set_backend(backend, thread_id=key)
-            if model:
-                await self._settings.set_model(backend, model, thread_id=key)
-            if effort:
-                await self._settings.set_effort(backend, effort, thread_id=key)
+            await self._settings.pin_thread(
+                key, child_ai.backend, child_ai.model, child_ai.effort, child_ai.connection
+            )
         if parent_thread_id is not None:
             if lineage_repo is not None:
                 await lineage_repo.record(key, parent_thread_id, family_code(parent_thread_id))

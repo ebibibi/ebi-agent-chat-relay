@@ -265,6 +265,28 @@ class BackendSettings:
             await self.repo.set(f"{CONNECTION_GLOBAL_PREFIX}{backend}", connection)
             logger.info("connection set: global backend=%s -> %s", backend, connection)
 
+    async def pin_thread(
+        self,
+        thread_id: int,
+        backend: str,
+        model: str | None = None,
+        effort: str | None = None,
+        connection: str | None = None,
+    ) -> None:
+        """Store a whole AI choice as *thread_id*'s own settings.
+
+        Fields left ``None`` are not written, so they fall back to the backend's default
+        (never to whatever another backend was configured with). Used by ``/api/spawn``'s
+        ``ai`` so a job's thread keeps the same AI on every later turn.
+        """
+        await self.set_backend(backend, thread_id=thread_id)
+        if model:
+            await self.set_model(backend, model, thread_id=thread_id)
+        if effort:
+            await self.set_effort(backend, effort, thread_id=thread_id)
+        if connection:
+            await self.set_connection(backend, connection, thread_id=thread_id)
+
     async def clear_effort(self, backend: str, *, thread_id: int | None = None) -> bool:
         """Remove a stored effort override. Returns True if something was deleted."""
         if backend not in ALL_BACKENDS:

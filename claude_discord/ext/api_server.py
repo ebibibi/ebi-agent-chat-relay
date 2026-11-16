@@ -56,6 +56,7 @@ from ..thread_marker import (
 )
 from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
 from ..thread_status import request_thread_outcome
+from ..turn_ai import TurnAI, TurnAIError, parse_turn_ai
 from . import ingest_manifest, teams_reply, teams_sync
 from .attention_api import handle_attention
 from .decision_api import read_mark_request, remember_mark
@@ -2055,6 +2056,11 @@ class ApiServer:
                 (optional; defaults to ``true``).  When ``false``, only the
                 thread and seed message are created — a Claude session will
                 start when a user replies in the thread.
+            ai: The AI the new thread runs on (optional):
+                ``{"backend": ..., "model": str|null, "effort": str|null,
+                "connection": str|null}``. Stored as the thread's own settings, so
+                later turns keep it; wins over the parent's child preferences.
+                A value the relay does not offer is refused with 400.
             parent_thread_id: The calling thread (optional). Both titles then
                 carry that thread's family code — ``🤖K2`` on the child,
                 ``🌳K2`` on the parent — and the link is recorded so
@@ -2111,6 +2117,13 @@ class ApiServer:
         if att_err is not None:
             return att_err
 
+        # Checked against what the relay offers, so a caller cannot put an arbitrary string
+        # on a CLI command line; stored as the new thread's settings, not just its first turn.
+        try:
+            ai = parse_turn_ai(data.get("ai"))
+        except TurnAIError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
         if getattr(self.bot, "headless", False) is True:
             return await self._spawn_console(
                 prompt=prompt,
@@ -2118,6 +2131,7 @@ class ApiServer:
                 auto_start=auto_start,
                 attachments=decoded_attachments,
                 parent_thread_id=parent_thread_id,
+                ai=ai,
             )
 
         raw_channel_id = data.get("channel_id") or self.default_channel_id
@@ -2164,6 +2178,7 @@ class ApiServer:
                 invite_user_id=invite_user_id,
                 agent_spawned=True,
                 parent_thread_id=parent_thread_id,
+                ai=ai,
             )
         except Exception as exc:
             logger.error("spawn_session failed: %s", exc, exc_info=True)
@@ -2529,6 +2544,7 @@ class ApiServer:
         auto_start: bool,
         attachments: list[tuple[str, bytes]],
         parent_thread_id: int | None,
+        ai: TurnAI | None = None,
     ) -> web.Response:
         from ..console.host import ConsoleSessionHost
 
@@ -2543,6 +2559,7 @@ class ApiServer:
                 attachments=attachments,
                 parent_thread_id=parent_thread_id,
                 lineage_repo=self.lineage_repo,
+                ai=ai,
             )
             conversation = await console.frontend.repo.get(key)
         except Exception:

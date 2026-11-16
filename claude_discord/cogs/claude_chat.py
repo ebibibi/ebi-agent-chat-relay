@@ -1049,6 +1049,7 @@ class ClaudeChatCog(commands.Cog):
         invite_user_id: int | None = None,
         agent_spawned: bool = False,
         parent_thread_id: int | None = None,
+        ai: TurnAI | None = None,
     ) -> discord.Thread:
         """Create a new thread and optionally start a Claude Code session.
 
@@ -1099,20 +1100,23 @@ class ClaudeChatCog(commands.Cog):
                         markers into readable trees. Best-effort in every
                         respect: an unreachable or unrenameable parent costs the
                         cross-link, never the spawn.
+            ai: The AI this thread runs on, stored as the thread's own settings before
+                        its first turn so every later turn keeps it. Wins over the
+                        parent's child preferences. ``None``: unchanged behaviour.
 
         Returns:
             The newly created :class:`discord.Thread`.
         """
         # Resolve before creating the thread and persist before scheduling its first turn.
         # A manager's own backend is independent from its child preferences.
-        child_ai = None
-        if parent_thread_id is not None and self._backend_settings is not None:
+        child_ai = ai
+        if child_ai is None and parent_thread_id is not None and self._backend_settings:
             settings = self._backend_settings.for_children()
             backend = await settings.current_backend(parent_thread_id)
-            child_ai = (
-                backend,
-                await settings.current_model(backend, parent_thread_id),
-                await settings.current_effort(backend, parent_thread_id),
+            child_ai = TurnAI(
+                backend=backend,
+                model=await settings.current_model(backend, parent_thread_id),
+                effort=await settings.current_effort(backend, parent_thread_id),
             )
         raw_name = thread_name or prompt
         name = (
@@ -1126,12 +1130,9 @@ class ClaudeChatCog(commands.Cog):
             auto_archive_duration=THREAD_AUTO_ARCHIVE_MINUTES,
         )
         if child_ai is not None and self._backend_settings is not None:
-            backend, model, effort = child_ai
-            await self._backend_settings.set_backend(backend, thread_id=thread.id)
-            if model:
-                await self._backend_settings.set_model(backend, model, thread_id=thread.id)
-            if effort:
-                await self._backend_settings.set_effort(backend, effort, thread_id=thread.id)
+            await self._backend_settings.pin_thread(
+                thread.id, child_ai.backend, child_ai.model, child_ai.effort, child_ai.connection
+            )
         # Added before the seed message so the requester sees the thread from its
         # first line, not after Claude has already been talking to itself.
         if invite_user_id:
