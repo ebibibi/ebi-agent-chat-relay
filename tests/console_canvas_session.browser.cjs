@@ -93,6 +93,10 @@ const status = {item_id: 't900', running: false, paused: false, pending: 0,
     assert.match(await page.locator('.cv-ss-title').innerText(), /hccjp/);
     assert.equal(await page.locator('.cv-ss-materials .cv-table td', {hasText: '356個'}).count(), 1);
     assert.equal(await page.locator('.cv-ss-tags .tag.hot').count(), 1, 'cannot be undone is flagged');
+    // The whole request is on the screen, with headings, and the way into the thread is a big button.
+    assert.equal(await page.locator('.cv-ss-detail .cv-ss-part').count(), 7);
+    assert.equal(await page.locator('.cv-ss-detail[open]').count(), 1);
+    assert.match(await page.locator('.cv-ss-source button').innerText(), /元のスレッドを開いて作業する.* — GA v2 統括/);
     assert.match(await page.locator('.cv-ss-side').innerText(), /販売ページの差分を見て反映するか/);
     assert.match(await page.locator('.cv-ss-side').innerText(), /YouTube 字幕/);
     if (process.env.SHOTS) await page.screenshot({path: `${process.env.SHOTS}/session-${width}.png`});

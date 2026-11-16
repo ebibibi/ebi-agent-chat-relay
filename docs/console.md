@@ -302,7 +302,8 @@ The canvas then offers it at the top; **🎯 Focus session (n)** in the header o
 time, with the open decision requests in order when nothing was prepared. The session fills the
 screen with one decision at a time: the card large, its material drawn beside it, the full
 request folded below, and on the right what comes next, what agents are doing and what this
-session settled. Keys: **1 2 3** answer (sent to the asking thread like a card button, closing
+session settled. The whole request is shown open (all seven parts) with a large button
+that opens the source thread to do the work; the session waits. Keys: **1 2 3** answer (sent to the asking thread like a card button, closing
 its request), **C** answer in your own words, **S** later, **→** next, **Esc** end. At the end
 the secretary receives one message listing what was decided and what was left for later
 (`POST /console/api/canvas/session/finish`), and the prepared plan is cleared.
