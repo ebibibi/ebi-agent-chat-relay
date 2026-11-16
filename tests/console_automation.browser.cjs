@@ -9,7 +9,7 @@ const JOBS={default:{mode:'backend',backend:'codex',model:null,effort:null},mast
  configured:false,jobs_error:null,backends:{codex:{efforts:['low','medium','high'],models:['gpt-5.5']},claude:{efforts:['low','high'],models:['opus','sonnet']}},
  jobs:[
   {id:'deep',name:'Deep work',enabled:true,schedules:['07:00'],entry:{mode:'master'},effective:{mode:'master'},last_run:{mode:'master',backend:'claude',model:'opus',effort:'high',thread_id:'9',at:'2026-11-16T05:00:00+00:00'}},
-  {id:'plain',name:'Plain job',enabled:false,schedules:[],entry:null,effective:{mode:'backend',backend:'codex',model:null,effort:null},last_run:null}]};
+  {id:'plain',name:'Plain job',group:'Reports',enabled:false,schedules:[],ai_routes:['direct'],entry:null,effective:{mode:'backend',backend:'codex',model:null,effort:null},last_run:null}]};
 for(const [width,height] of [[1280,800],[390,844]])test(`automation AI ${width}x${height}`,async t=>{
  const browser=await chromium.launch({headless:true,args:['--no-sandbox']});t.after(()=>browser.close());
  const page=await browser.newPage({viewport:{width,height},isMobile:width<900,hasTouch:width<900});page.setDefaultTimeout(4000);
@@ -35,7 +35,9 @@ for(const [width,height] of [[1280,800],[390,844]])test(`automation AI ${width}x
  const rows=card.locator('tbody tr');
  assert.equal(await rows.count(),2);
  assert.match(await rows.nth(0).textContent(),/Last run: Claude · opus · high \(Follow the master\)/);
- assert.match(await rows.nth(1).textContent(),/disabled/);
+ assert.match(await rows.nth(1).textContent(),/Reports · disabled/);
+ assert.match(await rows.nth(1).textContent(),/Not applied yet/);
+ assert.doesNotMatch(await rows.nth(0).textContent(),/Not applied yet/);
  // Plain job: use the default → Claude with a model and effort.
  const plain=rows.nth(1);
  await plain.locator('select.auto-choice').selectOption('claude');

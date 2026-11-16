@@ -18,6 +18,7 @@ window.ConsoleAutomation = (() => {
     off: "停止中", gone: "scheduler に無い", save: "保存", saved: "保存しました", filter: "絞り込み",
     jobsError: "scheduler のジョブ一覧を読めませんでした。方針に書いてあるジョブだけ表示しています。",
     close: "閉じる", job: "ジョブ", ai: "使うAI",
+    direct: "未対応：スクリプトがAIを直接呼んでいるので、この設定はまだ効きません",
   } : {
     nav: "⚙️ Automation AI", title: "AI for automation jobs",
     lead: "Choose the AI each job runs on, separately from the default you chat with. Applies from the next run (reversible).",
@@ -27,6 +28,7 @@ window.ConsoleAutomation = (() => {
     off: "disabled", gone: "not in the scheduler", save: "Save", saved: "Saved", filter: "Filter",
     jobsError: "Could not read the scheduler's job list; showing only the jobs named in the policy.",
     close: "Close", job: "Job", ai: "AI",
+    direct: "Not applied yet: the job's script calls an AI directly, so this choice has no effect",
   };
 
   const summary = (ai) => ai ? [LABELS[ai.backend] || ai.backend, ai.model, ai.effort].filter(Boolean).join(" · ") : "";
@@ -74,12 +76,15 @@ window.ConsoleAutomation = (() => {
     const defaultPicker = picker(data.default || { mode: MASTER }, data.backends, { allowInherit: false });
     const rows = data.jobs.map((job) => {
       const p = picker(job.entry, data.backends, { allowInherit: true });
-      const badges = [job.enabled === false ? t.off : null, job.enabled === null ? t.gone : null,
+      const badges = [job.group, job.enabled === false ? t.off : null, job.enabled === null ? t.gone : null,
         ...(job.schedules || [])].filter(Boolean).join(" · ");
+      // Every route the scheduler reported is "direct": the policy cannot reach this job yet.
+      const direct = Array.isArray(job.ai_routes) && job.ai_routes.length > 0 && job.ai_routes.every((r) => r === "direct");
       const last = job.last_run ? `${t.last}: ${summary(job.last_run)}${job.last_run.mode === MASTER ? ` (${t.follow})` : ""} · ${when(job.last_run.at)}` : `${t.last}: ${t.never}`;
       const tr = h("tr", { "data-text": `${job.id} ${job.name}`.toLowerCase() },
         h("td", {}, h("div", { text: job.name }), h("div", { class: "dim", text: [job.id, badges].filter(Boolean).join(" · ") })),
-        h("td", {}, p.el, h("div", { class: "dim", text: job.entry ? last : `→ ${describe(job.effective, data.master)} · ${last}` })));
+        h("td", {}, p.el, h("div", { class: "dim", text: job.entry ? last : `→ ${describe(job.effective, data.master)} · ${last}` }),
+          direct ? h("div", { class: "auto-warn", text: `⚠️ ${t.direct}` }) : null));
       return { id: job.id, tr, value: p.value };
     });
     const search = h("input", { type: "search", class: "auto-filter", placeholder: t.filter, oninput: () => {

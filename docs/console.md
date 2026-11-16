@@ -575,8 +575,10 @@ Each row also shows the AI the job's last spawn actually ran on. **Save** replac
 policy; an invalid row refuses the save and is named in the error. Until the first save the
 dialog says so: the scheduler then keeps using its own fallback file.
 
-The job list comes from `CCDB_AUTOMATION_JOBS_URL` — a JSON array of
-`{id, name, enabled, schedules}`, the shape of the scheduler's `GET /api/jobs/`. Without it, or
+The job list comes from `CCDB_AUTOMATION_JOBS_URL` — a JSON array (or `{"jobs": [...]}`) of
+`{id|job_id, name, group, enabled, schedules|active_schedules, ai_routes}`. A job whose
+`ai_routes` are all `direct` is flagged: its script calls an AI itself, so the choice has no
+effect yet. Without it, or
 when the scheduler is down, the dialog shows only the jobs already named in the policy. See
 [backends](backends.md#automation-ai-policy) for the API.
 

@@ -30,8 +30,8 @@ logger = logging.getLogger(__name__)
 SettingsGetter = Callable[[], Any]
 JobsFetcher = Callable[[], Awaitable[list[dict[str, Any]]]]
 
-#: Where the scheduler lists its jobs: a JSON array of ``{id, name, enabled, schedules}``
-#: (the shape of the scheduler's own ``GET /api/jobs/``). Unset: only jobs named in the policy.
+#: Where the scheduler lists its jobs: a JSON array (or ``{"jobs": [...]}``) of rows shaped like
+#: its ``GET /api/jobs/`` or ``ai-policy --json`` output. Unset: only jobs named in the policy.
 JOBS_URL_ENV = "CCDB_AUTOMATION_JOBS_URL"
 #: The backends the Console offers for automation; the scheduler reads only these two.
 AUTOMATION_BACKENDS = ("codex", "claude")
@@ -39,15 +39,34 @@ _JOBS_TIMEOUT_SECONDS = 3
 
 
 def _clean_job(raw: Any) -> dict[str, Any] | None:
-    """One job from the scheduler, reduced to what the Console shows; ``None`` if unusable."""
-    if not isinstance(raw, dict) or not valid_job_id(raw.get("id")):
+    """One job from the scheduler, reduced to what the Console shows; ``None`` if unusable.
+
+    Accepts both the scheduler's ``GET /api/jobs/`` rows (``id``, ``schedules`` list) and its
+    ``ai-policy --json`` rows (``job_id``, ``group``, ``active_schedules`` count, ``ai_routes``).
+    """
+    if not isinstance(raw, dict):
+        return None
+    job_id = raw.get("id", raw.get("job_id"))
+    if not valid_job_id(job_id):
         return None
     schedules = raw.get("schedules")
+    active = raw.get("active_schedules")
+    if isinstance(schedules, list):
+        shown = [str(x)[:60] for x in schedules[:20]]
+    elif isinstance(active, int) and not isinstance(active, bool):
+        shown = [f"×{active}"] if active else []
+    else:
+        shown = []
+    routes = raw.get("ai_routes")
+    group = raw.get("group")
     return {
-        "id": raw["id"],
-        "name": str(raw.get("name") or raw["id"])[:200],
+        "id": job_id,
+        "name": str(raw.get("name") or job_id)[:200],
+        "group": str(group)[:100] if group else None,
         "enabled": raw.get("enabled") is not False,
-        "schedules": [str(x)[:60] for x in schedules[:20]] if isinstance(schedules, list) else [],
+        "schedules": shown,
+        # None: the scheduler did not say how the job reaches an AI.
+        "ai_routes": [str(r)[:30] for r in routes[:10]] if isinstance(routes, list) else None,
     }
 
 
@@ -60,8 +79,10 @@ async def fetch_scheduler_jobs() -> list[dict[str, Any]]:
     async with aiohttp.ClientSession(timeout=timeout) as session, session.get(url) as response:
         response.raise_for_status()
         data = await response.json(content_type=None)
+    if isinstance(data, dict) and isinstance(data.get("jobs"), list):
+        data = data["jobs"]
     if not isinstance(data, list):
-        raise ValueError("the job list is not a JSON array")
+        raise ValueError("the job list is not a JSON array or an object with jobs")
     return [job for job in map(_clean_job, data) if job is not None]
 
 
@@ -166,7 +187,14 @@ class ConsoleRoutes:
         known = {job["id"] for job in listed}
         policy_jobs: dict[str, Any] = (stored or {}).get("jobs", {})
         extra = [
-            {"id": job_id, "name": job_id, "enabled": None, "schedules": []}
+            {
+                "id": job_id,
+                "name": job_id,
+                "group": None,
+                "enabled": None,
+                "schedules": [],
+                "ai_routes": None,
+            }
             for job_id in sorted(policy_jobs)
             if job_id not in known
         ]

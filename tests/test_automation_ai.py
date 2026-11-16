@@ -343,3 +343,28 @@ async def test_job_list_survives_an_unreachable_scheduler(console_jobs):
     data = await res.json()
     assert data["jobs"] == [] and data["jobs_error"]
     assert data["configured"] is False
+
+
+def test_clean_job_accepts_the_ai_policy_cli_shape():
+    from claude_discord.automation_routes import _clean_job
+
+    row = _clean_job(
+        {
+            "job_id": "nightly",
+            "name": "Nightly",
+            "group": "Reports",
+            "enabled": True,
+            "active_schedules": 2,
+            "ai_routes": ["direct"],
+            "mode": "backend",
+        }
+    )
+    assert row == {
+        "id": "nightly",
+        "name": "Nightly",
+        "group": "Reports",
+        "enabled": True,
+        "schedules": ["×2"],
+        "ai_routes": ["direct"],
+    }
+    assert _clean_job({"id": "x", "active_schedules": True})["schedules"] == []
