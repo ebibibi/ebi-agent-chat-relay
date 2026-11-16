@@ -33,6 +33,7 @@ from claude_code_core.account_pool import HOME_ENV_VAR
 from claude_code_core.attention_repo import AttentionRecorder
 
 from ..account_turns import session_home
+from ..automation_routes import ConsoleRoutes as AutomationConsoleRoutes
 from ..database.pages_repo import PageRepository
 from ..human_activity import note_human_activity
 from ..message_actions import message_actions
@@ -392,6 +393,9 @@ class ConsoleServer:
         r.add_post(f"{API_PREFIX}/places", self.place_add)
         r.add_patch(f"{API_PREFIX}/places", self.place_rename)
         r.add_delete(f"{API_PREFIX}/places", self.place_delete)
+        AutomationConsoleRoutes(self._backend_settings, lambda req: req[IDENTITY]).register(
+            r, API_PREFIX
+        )
         view_routes = ViewRoutes(self, self.views)
         r.add_get(f"{API_PREFIX}/views", view_routes.read)
         r.add_post(f"{API_PREFIX}/views", view_routes.add)
