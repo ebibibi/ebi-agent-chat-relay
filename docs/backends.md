@@ -66,6 +66,24 @@ written to the new child before its first turn, including with `auto_start: fals
 child preferences affects future children; select an existing child to change its own AI.
 These settings govern relay child threads, not a CLI's internal subagents.
 
+### Choosing the AI per spawn
+
+A caller can name the AI outright instead of relying on defaults — an automation job that
+should run on a cheaper model than the Console default, for example:
+
+```json
+POST /api/spawn
+{"prompt": "...", "ai": {"backend": "codex", "model": null, "effort": "low"}}
+```
+
+`ai` accepts `backend` (required), and optionally `model`, `effort` and `connection`
+(`null` or omitted: that backend's own default). It is validated with the same rules as the
+Console screen AI — an unknown backend, an effort the backend does not offer, a malformed model
+id or an unknown field is refused with `400` before anything is created. The choice is
+**stored as the new thread's own settings** before its first turn, so replies, wait resumes and
+relays in that thread keep the same AI; it wins over the parent's child preferences. Without
+`ai` nothing changes. Works for both the Console (headless) and Discord frontends.
+
 Console endpoints (authenticated; writes also require `X-Console-Request: 1`):
 
 - `GET/POST /console/api/defaults/children`: global child preferences.
