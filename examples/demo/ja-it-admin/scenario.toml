@@ -100,6 +100,18 @@ priority = 1
 project = "M365運用"
 tags = ["m365"]
 
+# Canvas mode (ADR-0025): switch the menu's 表示モード to 画面秘書 and press 秘書を起動する. One
+# resident agent reads every thread (the Teams question above included), keeps a note per
+# thread and lays out the left of the screen: 今やること first, the decision card, the order of
+# the evening. Ask it on the right: 「Teams の件、差分で見せて」「パスキーは後で」.
+# Then 「今15分ある」: it prepares a focus session (one decision per screen, keys 1-3) and
+# 「今日の時間割を出して」 places a three-lane timetable; ⛶ shows any widget full screen.
+[[items]]
+title = "画面秘書に今日の段取りを組んでもらう"
+note = "画面秘書を起動して、今決めることと順番、かかる時間を画面に出してもらう。決まった答えは秘書が各スレッドへ届ける。"
+priority = 2
+project = "Console確認"
+
 # Start the first one and let it spawn children to see the 📍 panel fill in. Its two children
 # are there so the panel and the family list already show on the first open.
 # In Focus, try Work through / Your next move: only the parent is offered.

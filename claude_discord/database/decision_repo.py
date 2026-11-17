@@ -107,6 +107,7 @@ class DecisionRequestRepository:
         reason: str,
         origin: str | None = None,
         request_id: int | None = None,
+        key: str | None = None,
     ) -> int:
         """Close the open requests of *thread_id* (narrowed by *origin* or *request_id*)."""
         sql = "UPDATE decision_requests SET closed_at = ?, close_reason = ?"
@@ -118,6 +119,9 @@ class DecisionRequestRepository:
         if request_id is not None:
             sql += " AND id = ?"
             args.append(int(request_id))
+        if key is not None:
+            sql += " AND req_key = ?"
+            args.append(key)
         async with aiosqlite.connect(self._db_path) as db:
             cursor = await db.execute(sql, args)
             await db.commit()

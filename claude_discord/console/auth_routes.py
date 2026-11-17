@@ -10,6 +10,7 @@ a shared limit there would let anyone lock the owner out.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -25,7 +26,7 @@ from .auth import (
     oidc_session_identity,
 )
 from .logsafe import q
-from .oidc import STATE_COOKIE, OidcClient, OidcError
+from .oidc import CALLBACK_PATH, STATE_COOKIE, OidcClient, OidcError
 from .passkey_store import PasskeyStore
 from .passkeys import PasskeyError, PasskeyService
 
@@ -139,6 +140,24 @@ class AuthRoutes:
         who = await self._signed_in(request)
         return who if who is not None and _manages_passkeys(who) else None
 
+    async def _inviter(self, request: web.Request) -> str | None:
+        """Who may add (but not remove) passkeys: a manager, or an OIDC
+        session when ``CCDB_CONSOLE_OIDC_ADDS_PASSKEYS=1``.
+
+        The opt-in is for a device the identity provider will not admit
+        (e.g. not enrolled in device management). The trade-off ADR-0012
+        names applies: a passkey added this way outlives the email's place on
+        the allowlist, so remove it from a passkey session when access ends.
+        """
+        who = await self._signed_in(request)
+        if who is None:
+            return None
+        if _manages_passkeys(who):
+            return who
+        if self._config.oidc_adds_passkeys and who.startswith("oidc:"):
+            return who
+        return None
+
     async def _signed_in(self, request: web.Request) -> str | None:
         try:
             return await self.auth.identify(request.headers, request.cookies)
@@ -192,7 +211,7 @@ class AuthRoutes:
         body = await _json(request)
         result = await self.passkeys.registration_options(
             request_origin(request, self._config),
-            signed_in=await self._manager(request) is not None,
+            signed_in=await self._inviter(request) is not None,
             code=str(body.get("code") or ""),
         )
         return web.json_response(result)
@@ -203,7 +222,7 @@ class AuthRoutes:
         passkey = await self.passkeys.finish_registration(
             str(body.get("ticket") or ""), _credential(body), str(body.get("name") or "")
         )
-        if await self._manager(request) is not None:
+        if await self._inviter(request) is not None:
             return web.json_response({"passkey": passkey.to_public()})
         token = await self.store.create_session(
             f"passkey:{passkey.name}", self._config.session_lifetime, passkey.id
@@ -235,8 +254,17 @@ class AuthRoutes:
     # -- OIDC ----------------------------------------------------------------
     async def oidc_start(self, request: web.Request) -> web.StreamResponse:
         assert self.oidc is not None
+        # Come back to the origin the sign-in started from: a console listed
+        # under several origins (a tailnet name and a public proxy) would
+        # otherwise always send the browser to the first one, which may not be
+        # reachable from where the user is. A host that is not listed (a proxy
+        # that rewrites Host) keeps the first origin, never the host itself.
+        redirect_uri = self.oidc.config.redirect_uri
+        if self._config.origins:
+            with contextlib.suppress(PasskeyError):
+                redirect_uri = f"{request_origin(request, self._config)}{CALLBACK_PATH}"
         try:
-            url, browser = await self.oidc.start()
+            url, browser = await self.oidc.start(redirect_uri)
         except OidcError as exc:
             return _signin_error(str(exc))
         response = _redirect(url)
@@ -249,7 +277,7 @@ class AuthRoutes:
             path=f"{AUTH_PREFIX}oidc/",
             httponly=True,
             samesite="Lax",
-            secure=self.oidc.config.redirect_uri.startswith("https://"),
+            secure=redirect_uri.startswith("https://"),
         )
         return response
 
@@ -277,14 +305,14 @@ class AuthRoutes:
 
     # -- signed in (the console middleware has authenticated these) ----------
     async def list_passkeys(self, request: web.Request) -> web.Response:
-        if await self._manager(request) is None:
+        if await self._inviter(request) is None:
             return _MANAGERS_ONLY()
         return web.json_response({"passkeys": [p.to_public() for p in await self.store.list_all()]})
 
     async def invite(self, request: web.Request) -> web.Response:
         if not self._config.passkeys:
             return _error("passkeys are disabled", 404)
-        if await self._manager(request) is None:
+        if await self._inviter(request) is None:
             return _MANAGERS_ONLY()
         return web.json_response({"code": self.passkeys.issue_code()})
 

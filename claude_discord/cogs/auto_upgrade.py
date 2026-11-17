@@ -24,8 +24,10 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from ..deploy_policy import restart_paths
 from ..message_actions import STYLE_SUCCESS, MessageAction, message_actions
 from ..protocols import DrainAware
+from ..restart_reservation import ensure_restart_reservation
 from ..thread_marker import OUTCOME_ACTION, OUTCOME_DONE, OUTCOME_ERROR
 from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
 from ..thread_status import request_thread_outcome
@@ -192,6 +194,15 @@ class UpgradeConfig:
     """If True, register a /upgrade slash command that manually triggers the upgrade
     pipeline. Defaults to False so existing bots are unaffected until explicitly opted in.
     When enabled, the command respects upgrade_approval and restart_approval flags."""
+    git_checkout: bool = False
+    """If True, the bot runs from a git checkout of ``git_branch`` in ``working_dir``.
+    The upgrade fetches it and looks at the changed files instead of running the
+    upgrade/sync/restart commands: a change that needs no restart (Console static
+    files, docs, tests) is fast-forwarded in place and takes effect at once; any
+    other change reserves a restart that waits until nobody is using the bot
+    (:mod:`claude_discord.restart_reservation`), whose startup script pulls it."""
+    git_remote: str = "origin"
+    git_branch: str = "main"
 
 
 class AutoUpgradeCog(commands.Cog):
@@ -408,6 +419,9 @@ class AutoUpgradeCog(commands.Cog):
             status_target: Message to add ✅/❌ reaction to on completion/failure.
                            None when triggered via slash command (no message to react to).
         """
+        if self.config.git_checkout:
+            await self._run_checkout_pipeline(thread, status_target)
+            return
         try:
             # Step 0: Optional upgrade approval before any subprocess runs
             if self.config.upgrade_approval:
@@ -468,6 +482,104 @@ class AutoUpgradeCog(commands.Cog):
             await self._report_failure(
                 thread, status_target, "❌ Upgrade failed with an unexpected error."
             )
+
+    async def _run_checkout_pipeline(
+        self,
+        thread: discord.Thread,
+        status_target: discord.Message | None,
+    ) -> None:
+        """Fetch the checkout; apply restart-free changes now, reserve a quiet restart otherwise."""
+        try:
+            outcome = await self._update_checkout(thread)
+        except discord.NotFound:
+            logger.info("Upgrade thread %d no longer exists; aborting pipeline", thread.id)
+            return
+        except TimeoutError:
+            await self._report_failure(thread, status_target, "❌ Step timed out.")
+            return
+        except Exception:
+            logger.exception("Auto-upgrade error")
+            await self._report_failure(
+                thread, status_target, "❌ Upgrade failed with an unexpected error."
+            )
+            return
+        if outcome is None:
+            await self._report_failure(thread, status_target, "❌ Could not update the checkout.")
+            return
+        await thread.send(outcome)
+        if status_target is not None:
+            await status_target.add_reaction("✅")
+        await _mark_outcome(thread, OUTCOME_DONE)
+
+    async def _update_checkout(self, thread: discord.Thread) -> str | None:
+        """The message to post, or None when a git step failed (already reported)."""
+        remote, branch = self.config.git_remote, self.config.git_branch
+        upstream = f"{remote}/{branch}"
+        if not await self._run_step(thread, "fetch", ["git", "fetch", remote, branch]):
+            return None
+        changed = await self._git_lines("diff", "--name-only", f"HEAD...{upstream}")
+        if changed is None:
+            return None
+        if not changed:
+            return "✅ Already up to date."
+        needed = restart_paths(changed)
+        if not needed:
+            return await self._fast_forward(thread, upstream, changed)
+        return self._reserve_quiet_restart(needed, len(changed))
+
+    async def _fast_forward(
+        self, thread: discord.Thread, upstream: str, changed: list[str]
+    ) -> str | None:
+        branch = await self._git_lines("branch", "--show-current")
+        local = await self._git_lines("status", "--porcelain", "--untracked-files=no")
+        if branch != [self.config.git_branch] or local:
+            # A development checkout: leave it alone; the next restart's pull decides.
+            logger.info("Auto-upgrade: checkout is not a clean %s; not fast-forwarding", branch)
+            return "⏭️ The checkout has local work, so it was left as is."
+        if not await self._run_step(
+            thread, "fast-forward", ["git", "merge", "--ff-only", upstream]
+        ):
+            return None
+        logger.info("Auto-upgrade: applied %d file(s) without a restart", len(changed))
+        return f"✅ Applied {len(changed)} file(s) without a restart (no Python changed)."
+
+    def _reserve_quiet_restart(self, needed: list[str], total: int) -> str:
+        reservation = ensure_restart_reservation(self.bot, getattr(self.bot, "resume_repo", None))
+        shown = ", ".join(needed[:3]) + (" …" if len(needed) > 3 else "")
+        if reservation is None:
+            return (
+                f"⚠️ {total} file(s) changed and need a restart ({shown}), "
+                "but no restart can be reserved (no session limit is configured)."
+            )
+        created = reservation.reserve(
+            requested_by="auto-upgrade", reason=f"{len(needed)} file(s) need a restart: {shown}"
+        )
+        minutes = reservation.quiet_seconds / 60
+        verb = "Restart reserved" if created else "Joined the restart already waiting"
+        return (
+            f"🕒 {verb}: it happens once nobody has used the bot for {minutes:.0f} min "
+            f"({len(needed)} of {total} changed file(s) need it: {shown}). "
+            "The Ebi AI Console shows it and can restart now or later."
+        )
+
+    async def _git_lines(self, *args: str) -> list[str] | None:
+        """``git <args>`` in the checkout, as non-empty output lines; None on failure."""
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            *args,
+            cwd=self.config.working_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=self.config.step_timeout
+        )
+        if proc.returncode != 0:
+            logger.warning(
+                "Auto-upgrade: git %s failed: %s", args[0], stderr.decode(errors="replace")[:500]
+            )
+            return None
+        return [line for line in stdout.decode(errors="replace").splitlines() if line.strip()]
 
     async def _report_failure(
         self,

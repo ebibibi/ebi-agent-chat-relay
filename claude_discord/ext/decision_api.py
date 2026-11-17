@@ -1,8 +1,9 @@
 """Decision requests on the control plane (ADR-0024): read with a mark, kept or closed after it.
 
 An agent that marks its thread ❓/👀/📋 may send the request in the body. A bare mark still
-works as before — it only stops showing an older request, which the new marker supersedes.
-A finished thread (🏁/✅) closes every request aimed at it.
+works and leaves the thread's open requests alone: a thread may hold several cards (#1438).
+A finished thread (🏁/✅) closes every request aimed at it; an agent closes one card whose
+matter its chat settled with ``DELETE /api/threads/{id}/decisions/{key}``.
 """
 
 from __future__ import annotations
@@ -75,11 +76,35 @@ async def remember_mark(
         return None
     if spec is not None:
         return await repo.put(thread_id, spec, origin="mark", source_thread_id=thread_id)
+    if outcome in OUTCOME_KINDS:
+        # A bare ❓/👀/📋 is about something else; the thread's cards stay (#1438).
+        return None
     try:
-        if outcome in OUTCOME_KINDS:
-            await repo.close(thread_id, reason="superseded", origin="mark")
-        else:
-            await repo.close(thread_id, reason="finished")
+        await repo.close(thread_id, reason="finished")
     except Exception:
         logger.exception("decision requests of thread %d were not closed", thread_id)
     return None
+
+
+async def close_decision(
+    repo: DecisionRequestRepository | None, raw_thread: str, key: str, reason: str | None
+) -> web.Response:
+    """DELETE /api/threads/{thread_id}/decisions/{key}: the agent says a card is settled.
+
+    For a decision the person made in the chat instead of on the card. *reason* is kept
+    (``answered`` by default). Closing a card that is not open is not an error.
+    """
+    if repo is None:
+        return web.json_response({"error": "decision requests are not available"}, status=503)
+    try:
+        thread_id = int(raw_thread)
+    except ValueError:
+        return web.json_response({"error": "Invalid thread_id"}, status=400)
+    if not 0 < len(key) <= 40:
+        return web.json_response({"error": "key must be 1-40 characters"}, status=400)
+    # A card sent without a key is stored under "": "_" names it in a URL.
+    if key == "_":
+        key = ""
+    why = (reason or "answered").strip()[:40] or "answered"
+    closed = await repo.close(thread_id, reason=why, key=key)
+    return web.json_response({"status": "closed" if closed else "not open", "closed": closed})

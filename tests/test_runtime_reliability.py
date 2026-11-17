@@ -62,6 +62,16 @@ def test_inbound_credentials_never_reach_children(runner_type, monkeypatch) -> N
     assert env["OPENAI_API_KEY"] == "provider-sentinel"
 
 
+@pytest.mark.parametrize("runner_type", [ClaudeRunner, CodexRunner])
+def test_console_sign_in_and_queue_write_secrets_never_reach_children(runner_type) -> None:
+    secrets = dict.fromkeys(
+        ("CCDB_CONSOLE_OIDC_CLIENT_SECRET", "CCDB_TEAMS_QUEUE_URL_ADD"), "test-sentinel"
+    )
+    with patch.dict(os.environ, secrets, clear=True):
+        env = runner_type()._build_env()
+    assert not set(secrets) & set(env)
+
+
 def test_overlay_cannot_restore_transport_credentials(tmp_path: Path, monkeypatch) -> None:
     overlay = tmp_path / "cli.env"
     overlay.write_text("CCDB_INGEST_TOKEN=test-sentinel\nDISCORD_BOT_TOKEN=test-sentinel\n")

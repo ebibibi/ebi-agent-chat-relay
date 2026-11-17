@@ -352,3 +352,76 @@ async def test_the_http_flow_ends_in_a_session(tmp_path, key) -> None:
         assert refused.status == 302
         assert refused.headers["Location"].startswith("/?signin_error=")
         assert (await client.get("/console/api/board")).status == 401
+
+
+async def test_the_redirect_uri_is_sealed_into_the_flow(key) -> None:
+    provider = FakeProvider(key)
+    client = make_client(provider)
+    other = "https://public.example.net/console/api/auth/oidc/callback"
+    url, browser = await client.start(other)
+    query = parse_qs(urlsplit(url).query)
+    assert query["redirect_uri"] == [other]
+    provider.nonce = query["nonce"][0]
+    await client.finish(state=query["state"][0], code="c", browser=browser)
+    assert provider.last_form["redirect_uri"] == other
+
+
+def _http_console(tmp_path, provider: FakeProvider, origins: tuple[str, ...]):
+    api = MagicMock()
+    api.default_channel_id = None
+    api.lineage_repo = None
+    api.session_repo = None
+    api.bot.get_channel.return_value = None
+    api.bot.cogs = {}
+    api._running_thread_ids.return_value = set()
+    config = ConsoleAuthConfig(
+        passkeys=False,
+        oidc_issuer=ISSUER,
+        oidc_client_id=CLIENT,
+        allowed_emails=frozenset({OWNER}),
+        origins=origins,
+    )
+    return api, config, make_client(provider, origin=origins[0])
+
+
+@pytest.mark.parametrize(
+    ("host", "expected"),
+    [
+        ("localhost:8100", "http://localhost:8100"),
+        ("proxy.localhost:8200", "http://proxy.localhost:8200"),
+        # Not listed: the first origin, never the host the request claims.
+        ("evil.example.com", "http://localhost:8100"),
+    ],
+)
+async def test_sign_in_returns_to_the_origin_it_started_from(
+    tmp_path, key, host: str, expected: str
+) -> None:
+    db = str(tmp_path / "sessions.db")
+    repo = WorkItemRepository(db)
+    await repo.init_db()
+    store = PasskeyStore(db)
+    await store.init_db()
+    provider = FakeProvider(key)
+    api, config, oidc = _http_console(
+        tmp_path, provider, ("http://localhost:8100", "http://proxy.localhost:8200")
+    )
+    server = ConsoleServer(
+        api, repo, ConsoleAuthenticator(config, sessions=store), port=0, oidc=oidc, store=store
+    )
+    async with TestClient(TestServer(server.app)) as client:
+        start = await client.get(
+            "/console/api/auth/oidc/start", headers={"Host": host}, allow_redirects=False
+        )
+        assert start.status == 302
+        query = parse_qs(urlsplit(start.headers["Location"]).query)
+        callback = f"{expected}/console/api/auth/oidc/callback"
+        assert query["redirect_uri"] == [callback]
+        provider.nonce = query["nonce"][0]
+        done = await client.get(
+            "/console/api/auth/oidc/callback",
+            params={"state": query["state"][0], "code": "c"},
+            headers={"Host": host},
+            allow_redirects=False,
+        )
+        assert done.status == 302 and done.headers["Location"] == "/"
+        assert provider.last_form["redirect_uri"] == callback

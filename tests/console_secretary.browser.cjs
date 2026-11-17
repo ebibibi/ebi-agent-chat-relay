@@ -85,7 +85,7 @@ test('classic mode keeps its home and gains only the switch', {timeout: 30000}, 
 
 test('the secretary home answers from a card and records the trial', {timeout: 30000}, async (t) => {
   const {page, posted, errors} = await open(t);
-  await page.locator('.mode-switch').getByRole('button', {name: '秘書'}).click();
+  await page.locator('.mode-switch').getByRole('button', {name: '秘書', exact: true}).click();
   await page.waitForFunction(() => location.hash === '#secretary');
   assert.equal(await page.locator('#view-title').innerText(), '🗂 秘書');
   const cards = page.locator('.sec-decide .sec-card');

@@ -15,15 +15,21 @@ from claude_code_core.connections import CONNECTION_BACKENDS, Connection, resolv
 
 
 async def apply_connection(
-    runner: Any, settings: Any, backend: str, thread_id: int | None
+    runner: Any,
+    settings: Any,
+    backend: str,
+    thread_id: int | None,
+    *,
+    chosen: str | None = None,
 ) -> Connection | None:
-    """Set ``runner.connection`` from the thread's (or the global) choice."""
+    """Set ``runner.connection`` from *chosen* (one turn's screen AI) or the thread's choice."""
     if backend not in CONNECTION_BACKENDS or not hasattr(runner, "connection"):
         return None
-    getter = getattr(settings, "chosen_connection", None)
-    pending = getter(backend, thread_id) if callable(getter) else None
-    # Settings stand-ins (tests, custom frontends) may not implement it as a coroutine.
-    chosen = await pending if inspect.isawaitable(pending) else None
+    if chosen is None:
+        getter = getattr(settings, "chosen_connection", None)
+        pending = getter(backend, thread_id) if callable(getter) else None
+        # Settings stand-ins (tests, custom frontends) may not implement it as a coroutine.
+        chosen = await pending if inspect.isawaitable(pending) else None
     if not isinstance(chosen, str):
         chosen = None
     connection = resolve(backend, chosen, cli_environment())

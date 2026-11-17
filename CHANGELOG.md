@@ -9,8 +9,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Decision cards no longer disappear when the person writes anything in their thread or the agent
+  marks it without a request (#1438). A card closes when answered on the card, replaced by the same
+  key, closed by its agent (`DELETE /api/threads/{id}/decisions/{key}`) or when the thread is
+  finished, and shows while open.
+- Escape during IME composition (cancelling a Japanese conversion) no longer blurs the text box
+  being typed in; the canvas reply box to the secretary is at least six lines and its column wider
+  (#1430).
+
 ### Added
 
+- `CCDB_CONSOLE_OIDC_ADDS_PASSKEYS=1` lets a Google / Entra ID session invite a new passkey
+  device (**🔑 Passkeys → Add a device**) for devices the identity provider will not admit;
+  removing passkeys still needs a passkey session. Off by default (#1434).
+
+- Focus session shows the **whole decision request** (all seven parts with headings, open) and a
+  large **↗ Open the source thread to work on it** button, primary for tasks (#1417).
+- Canvas mode **⚡ this screen's AI** (#1401): pick backend, connection, model and effort for
+  what is sent from the canvas and the focus session; it rides on each send as `ai` and runs
+  that turn only (Console conversations and chat threads), plus the secretary's wakes while the
+  screen is open. Nothing is stored; settings, scheduled tasks, waits and child threads are
+  untouched.
+- The situation panel shows a thread's open **decision request beside its conversation for
+  every thread** (#1396), not only for families: cards only (no empty sections) when the thread
+  stands alone; a tab on a phone. Agents are told where their cards appear.
+- **Turns cut off by a crash are resumed** (#1368): a turn now records itself in
+  `inflight_turns` when it starts and removes the row when it ends. A row left by an earlier
+  process means it died mid-turn (SIGKILL, the OOM killer) without the clean shutdown that writes
+  `pending_resumes`. On the first `on_ready` such a turn is queued as a `crash_recovery` resume,
+  quoting the message it was handling, through the same startup loop and 5-minute window as a
+  clean restart. A turn silent for longer than that window, or one that already crashed the bot
+  twice in a row, is not run again: the thread is told instead. See `docs/runtime-reliability.md`.
+
+- Console **canvas mode** (#1358, ADR-0025): a third display mode in which one resident
+  secretary agent lays out the whole screen. Widgets on the left (`decision`, `diff`, `table`,
+  `markdown`, `timeline`, `agents`, `metric`) are placed over `PUT /api/canvas/widgets/{key}` as
+  structured data and drawn by fixed renderers; its conversation is on the right. The secretary
+  keeps a note per thread in the relay, reads only what changed (`GET /api/secretary/digest`),
+  and is woken by board changes, never by a timer: at least ten minutes apart, at most 24 times
+  a day by default, pausable, with usage on screen. Decision cards answer the asking thread;
+  other widget buttons and `POST /api/secretary/deliver` reach threads through the secretary.
+  Classic and secretary modes are unchanged.
+- Canvas secretary **fresh turns** (#1387): every turn starts a new agent session with a compact
+  brief in an empty directory (`--setting-sources ""`), so the context no longer grows with the
+  day; measured about 31k tokens per call instead of 58k. The default cap is 8 wakes a day and the
+  cap and interval change live from the canvas (⚙), without a restart.
+- Canvas mode **flows** (#1374): everything from a thread links to it and the opened thread
+  offers **← Back to the secretary** (a focus session is suspended and resumed); review cards
+  show the files their thread delivered, text inline; a card with nothing to look at sends the
+  person to the thread; a 👀 request whose materials only point at an attachment is refused;
+  widget buttons and session ends say what was sent. Widgets take `thread_id`, tables
+  `row_threads`.
+- Canvas mode **focus session** and **today's timetable** (#1360): the secretary prepares a
+  session (`PUT /api/canvas/session`) that shows the open decisions one at a time, full screen,
+  with their material, answered with one key (1-3, C, S, →) and reported back to the secretary at
+  the end; a `schedule` widget draws you / AI / waiting-on-others on one time axis; any widget
+  opens full screen.
 - Console **secretary mode** (#1352, ADR-0024): a second display mode next to Classic. It is
   switched in the menu and remembered per browser. Its home shows at most three decisions
   (🔴 *Decide now*). Each one says what is asked, why, and the recommended answer, and an answer
@@ -46,6 +102,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Console OIDC sign-in returns to the origin it started from (#1420): with several origins in
+  `CCDB_CONSOLE_ORIGIN`, the redirect URI was always the first one, so signing in through a public
+  proxy landed on an address that may be unreachable. The URI is sealed into the flow cookie and
+  used for the token exchange; an unlisted `Host` keeps the first origin.
 - Console: a parent's child threads can be checked from the conversation again. Beside the 📍 panel
   the family list is one steady line (**▸ Child threads**, with counts) that unfolds on click, and the
   choice is remembered; phones keep it in the panel's tab. #1296 had hidden it for good.

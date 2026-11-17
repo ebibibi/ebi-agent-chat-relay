@@ -1072,3 +1072,68 @@ async def test_failed_compact_keeps_context_measurements(env):
     assert result.status == 502
     assert sessions.records[key].context_used == 100000
     assert key not in env.console._compacting
+
+
+async def test_a_fresh_turn_conversation_starts_a_new_session_with_its_brief(env) -> None:
+    """The canvas secretary (ADR-0025): every turn a fresh session, never a growing one."""
+    item_id = await _start(env)
+    key = env.runs[0].surface.thread_key
+
+    async def fresh(thread_key: int, prompt: str) -> str | None:
+        return f"BRIEF\n{prompt}" if thread_key == key else None
+
+    env.host.fresh_turn = fresh
+    import tempfile
+
+    workdir = tempfile.mkdtemp() + "/secretary"
+    env.host.fresh_workdir = workdir
+    replied = await env.client.post(
+        f"/console/api/items/{item_id}/reply", json={"text": "and Monday?"}, headers=WRITE
+    )
+    assert replied.status == 202
+    await _settle(env.host)
+    second = env.runs[1]
+    assert second.session_id is None
+    assert second.prompt == "BRIEF\nand Monday?"
+    # An empty directory, no CLAUDE.md, skills or user settings: the cheap baseline.
+    assert second.runner.working_dir == workdir
+    assert second.runner.setting_sources == ""
+
+
+async def test_a_screen_ai_runs_one_turn_and_writes_no_setting(env) -> None:
+    """Canvas mode's screen AI: this turn only; the thread's next turn uses its own settings."""
+    item_id = await _start(env)
+    settings = env.host._settings
+    factory = env.host._factory
+    factory.build.reset_mock()
+    replied = await env.client.post(
+        f"/console/api/items/{item_id}/reply",
+        json={"text": "with codex", "ai": {"backend": "codex", "model": "gpt-6-astra"}},
+        headers=WRITE,
+    )
+    assert replied.status == 202
+    await _settle(env.host)
+    assert factory.build.call_args.kwargs["backend"] == "codex"
+    assert factory.build.call_args.kwargs["model"] == "gpt-6-astra"
+    # Nothing was stored: no setter on the settings was called.
+    for name in ("set_backend", "set_model", "set_effort", "set_connection"):
+        assert not getattr(settings, name).called, name
+    replied = await env.client.post(
+        f"/console/api/items/{item_id}/reply", json={"text": "and again"}, headers=WRITE
+    )
+    await _settle(env.host)
+    assert factory.build.call_args.kwargs["backend"] == "claude", "back to the thread's own"
+
+
+async def test_a_screen_ai_that_is_not_offered_is_refused(env) -> None:
+    item_id = await _start(env)
+    for ai in (
+        {"backend": "evil"},
+        {"backend": "claude", "model": "--dangerously"},
+        {"backend": "claude", "effort": "ludicrous"},
+        {"backend": "claude", "x": 1},
+    ):
+        refused = await env.client.post(
+            f"/console/api/items/{item_id}/reply", json={"text": "t", "ai": ai}, headers=WRITE
+        )
+        assert refused.status == 400, ai

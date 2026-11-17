@@ -38,6 +38,8 @@ from aiohttp import web
 from claude_code_core.thread_search import run_thread_search
 from claude_code_core.transcript_search import default_transcripts_root
 
+from ..automation_ai import AutomationAIPolicy, entry_ai, valid_job_id
+from ..automation_routes import ControlPlaneRoutes
 from ..backend_settings import ALL_BACKENDS
 from ..discord_ui.file_sender import send_file_blobs
 from ..lounge import length_hint
@@ -56,6 +58,7 @@ from ..thread_marker import (
 )
 from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
 from ..thread_status import request_thread_outcome
+from ..turn_ai import TurnAI, TurnAIError, parse_turn_ai
 from . import ingest_manifest, teams_reply, teams_sync
 from .attention_api import handle_attention
 from .decision_api import read_mark_request, remember_mark
@@ -464,8 +467,12 @@ class ApiServer:
         self.app.router.add_post("/api/threads/{thread_id}/waiting", self.mark_thread_waiting)
         self.app.router.add_post("/api/threads/{thread_id}/review", self.mark_thread_review)
         self.app.router.add_post("/api/threads/{thread_id}/action", self.mark_thread_action)
+        self.app.router.add_delete(
+            "/api/threads/{thread_id}/decisions/{key}", self.close_thread_decision
+        )
         # Session spawn route
         self.app.router.add_post("/api/spawn", self.spawn)
+        ControlPlaneRoutes(self._backend_settings).register(self.app.router)
         # Authenticated external ingest route (browser extension / webhooks)
         self.app.router.add_post("/api/ingest", self.ingest)
         # Running per-thread summaries. GET (external, token) reads the stored
@@ -485,6 +492,10 @@ class ApiServer:
         self.app.router.add_post("/api/teams/reply/status", self.teams_reply_status)
         # Startup resume routes
         self.app.router.add_post("/api/mark-resume", self.mark_resume)
+        # Canvas mode: the resident secretary's widgets, notes and digest (ADR-0025)
+        from .canvas_api import CanvasApi
+
+        CanvasApi(self).register(self.app.router)
 
     def _build_external_app(self) -> web.Application:
         """Build the app served on the externally reachable listener.
@@ -1807,6 +1818,17 @@ class ApiServer:
                 names[thread_id] = name
         return names
 
+    async def close_thread_decision(self, request: web.Request) -> web.Response:
+        """Close one decision request by key (#1438); see :func:`.decision_api.close_decision`."""
+        from .decision_api import close_decision
+
+        return await close_decision(
+            self.decision_repo,
+            request.match_info["thread_id"],
+            request.match_info["key"],
+            request.rel_url.query.get("reason"),
+        )
+
     async def get_thread_messages(self, request: web.Request) -> web.Response:
         """GET /api/threads/{thread_id}/messages — read another thread's conversation.
 
@@ -2051,6 +2073,14 @@ class ApiServer:
                 (optional; defaults to ``true``).  When ``false``, only the
                 thread and seed message are created — a Claude session will
                 start when a user replies in the thread.
+            ai: The AI the new thread runs on (optional):
+                ``{"backend": ..., "model": str|null, "effort": str|null,
+                "connection": str|null}``. Stored as the thread's own settings, so
+                later turns keep it; wins over the parent's child preferences.
+                A value the relay does not offer is refused with 400.
+            job_id: The automation job this spawn runs (optional). With no ``ai``, the
+                stored automation AI policy picks the AI for the job; the AI it ran on is
+                recorded for the Console either way.
             parent_thread_id: The calling thread (optional). Both titles then
                 carry that thread's family code — ``🤖K2`` on the child,
                 ``🌳K2`` on the parent — and the link is recorded so
@@ -2107,14 +2137,36 @@ class ApiServer:
         if att_err is not None:
             return att_err
 
+        # Checked against what the relay offers, so a caller cannot put an arbitrary string
+        # on a CLI command line; stored as the new thread's settings, not just its first turn.
+        try:
+            ai = parse_turn_ai(data.get("ai"))
+        except TurnAIError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
+        # An automation job names itself; with no explicit ai, its stored policy decides.
+        raw_job_id = data.get("job_id")
+        if raw_job_id is not None and not valid_job_id(raw_job_id):
+            return web.json_response({"error": "job_id must be a job id"}, status=400)
+        job_id: str = raw_job_id or ""
+        policy = self._automation_policy() if job_id else None
+        if policy is not None and ai is None:
+            entry = await policy.entry_for(job_id)
+            ai = entry_ai(entry) if entry is not None else None
+
         if getattr(self.bot, "headless", False) is True:
-            return await self._spawn_console(
+            response = await self._spawn_console(
                 prompt=prompt,
                 title=thread_name or prompt[:100],
                 auto_start=auto_start,
                 attachments=decoded_attachments,
                 parent_thread_id=parent_thread_id,
+                ai=ai,
             )
+            if policy is not None and response.status == 201:
+                body = json.loads(response.text or "{}")
+                await self._record_job_run(policy, job_id, int(body["thread_id"]), ai)
+            return response
 
         raw_channel_id = data.get("channel_id") or self.default_channel_id
         if not raw_channel_id:
@@ -2160,6 +2212,7 @@ class ApiServer:
                 invite_user_id=invite_user_id,
                 agent_spawned=True,
                 parent_thread_id=parent_thread_id,
+                ai=ai,
             )
         except Exception as exc:
             logger.error("spawn_session failed: %s", exc, exc_info=True)
@@ -2176,6 +2229,8 @@ class ApiServer:
             except Exception:
                 logger.exception("Could not record spawn lineage for thread %s", thread.id)
 
+        if policy is not None:
+            await self._record_job_run(policy, job_id, thread.id, ai)
         logger.info("Spawned new Claude session in thread %s (%s)", thread.id, thread.name)
         body: dict[str, str] = {
             "status": "spawned",
@@ -2186,6 +2241,22 @@ class ApiServer:
             body["parent_thread_id"] = str(parent_thread_id)
             body["family"] = family_code(parent_thread_id)
         return web.json_response(body, status=201)
+
+    def _backend_settings(self) -> Any:
+        return getattr(self.components, "backend_settings", None)
+
+    def _automation_policy(self) -> AutomationAIPolicy | None:
+        settings = self._backend_settings()
+        return AutomationAIPolicy(settings) if settings is not None else None
+
+    async def _record_job_run(
+        self, policy: AutomationAIPolicy, job_id: str, thread_id: int, ai: TurnAI | None
+    ) -> None:
+        # Bookkeeping only: the thread already exists, so a failed write must not fail it.
+        try:
+            await policy.record_run(job_id, thread_id, pinned=ai is not None)
+        except Exception:
+            logger.exception("Could not record the AI of automation job %s", _sanitize_log(job_id))
 
     # ------------------------------------------------------------------
     # Authenticated external ingest endpoint (/api/ingest)
@@ -2525,6 +2596,7 @@ class ApiServer:
         auto_start: bool,
         attachments: list[tuple[str, bytes]],
         parent_thread_id: int | None,
+        ai: TurnAI | None = None,
     ) -> web.Response:
         from ..console.host import ConsoleSessionHost
 
@@ -2539,6 +2611,7 @@ class ApiServer:
                 attachments=attachments,
                 parent_thread_id=parent_thread_id,
                 lineage_repo=self.lineage_repo,
+                ai=ai,
             )
             conversation = await console.frontend.repo.get(key)
         except Exception:

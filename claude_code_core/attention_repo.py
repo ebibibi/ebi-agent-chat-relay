@@ -24,6 +24,7 @@ from .attention import (
     build_report,
     local_day_bounds_utc,
 )
+from .human_activity import note_human_activity
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +203,17 @@ class HumanActivityRepository:
             for row in rows
         ]
 
+    async def latest_live_at(self) -> datetime | None:
+        """When the latest live (not backfilled) human message was recorded, if any."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT MAX(occurred_at) FROM human_activity WHERE source = 'live'"
+            )
+            row = await cursor.fetchone()
+        if not row or not row[0]:
+            return None
+        return datetime.fromisoformat(row[0])
+
     async def count(self) -> int:
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("SELECT COUNT(*) FROM human_activity")
@@ -226,6 +238,10 @@ class AttentionRecorder:
         return self.config.enabled
 
     async def record(self, activity: HumanActivity) -> None:
+        if activity.source == "live":
+            # A person is using the bot: a reserved restart waits for them to go
+            # quiet. Kept even with metering off; it is a clock, not a record.
+            note_human_activity(activity.frontend, at=activity.occurred_at.timestamp())
         if not self.config.enabled:
             return
         try:

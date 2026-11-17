@@ -75,6 +75,36 @@ FORMAT = (
 )
 
 
+# -- is the thing to look at on the card? -------------------------------------------
+#: A review whose materials are shorter than this, with no link and no attached file, only
+#: points at the thing ("see the attached file") instead of showing it.
+MIN_INLINE_MATERIAL = 160
+_URL = re.compile(r"https?://\S+")
+_STRUCTURE = re.compile(r"```|^[+-] |^\|.*\|", re.MULTILINE)
+
+MATERIAL_INLINE = "inline"  # the draft, the diff or the numbers are in the request itself
+MATERIAL_FILES = "files"  # the thread delivered files the card can show
+MATERIAL_LINK = "link"  # a link to the thing itself (a video, a page, a PR)
+MATERIAL_NONE = "none"  # nothing to look at: the card must send the person to the thread
+
+
+def material_state(materials: str | None, files: list[Any] | tuple[Any, ...] = ()) -> str:
+    """What the person can look at from the card alone. Deterministic, no model.
+
+    A request that asks the person to review something must carry that something: its text,
+    its diff, a link to it, or a file the thread delivered. "See the attached file" is none
+    of those.
+    """
+    text = (materials or "").strip()
+    if files:
+        return MATERIAL_FILES
+    if len(text) >= MIN_INLINE_MATERIAL or _STRUCTURE.search(text):
+        return MATERIAL_INLINE
+    if _URL.search(text):
+        return MATERIAL_LINK
+    return MATERIAL_NONE
+
+
 class DecisionRequestError(ValueError):
     """A request the Console cannot show as a card. ``problems`` lists every reason."""
 
@@ -155,6 +185,13 @@ def parse_request(body: Any, *, kind: str) -> DecisionRequestSpec:
         problems.append(
             f"The card is {card_chars} characters; keep it within {MAX_CARD_CHARS} and move "
             "the rest into detail"
+        )
+    if kind == "review" and material_state(detail.get("materials")) == MATERIAL_NONE:
+        problems.append(
+            "A review must carry the thing to review: put the draft text, the diff or the "
+            f"numbers themselves in detail.materials (at least {MIN_INLINE_MATERIAL} "
+            "characters), or a link to it. A pointer such as 'see the attached file' leaves "
+            "the person nothing to look at"
         )
     if problems:
         raise DecisionRequestError(problems)
@@ -261,14 +298,16 @@ def _detail(value: Any, problems: list[str]) -> dict[str, str]:
 def agent_guide() -> str:
     """The system-prompt section every agent with the control plane gets.
 
-    One place for the format and the bar. Requests ride on the markers only: the secretary home
-    and a family's situation panel both show them from the same store.
+    One place for the format and the bar. Requests ride on the markers only: the secretary home,
+    canvas mode and the thread's own situation panel all show them from the same store.
     """
     return (
         "## Asking the user: decision requests\n"
         "Whenever you hand the user something to decide, review or do (a ❓/👀/📋 marker), "
         "write it as a decision request. The Console shows it as a card the user answers with "
-        "one tap, in its secretary home and in your family's situation panel. "
+        'one tap: beside this thread\'s conversation (the panel "where things stand", which '
+        "appears for any thread with an open request, with or without child threads), in its "
+        "parent's panel if it has one, and on the secretary home and canvas. "
         "The bar: someone who has forgotten this whole matter can answer from the card "
         "alone, without opening the thread or "
         "anything else. Write in the user's language, plainly: no internal shorthand, no IDs "
@@ -291,7 +330,14 @@ def agent_guide() -> str:
         "A request that misses a part, runs long or offers nothing to choose is refused "
         "(400) with every problem listed: rewrite it and send it again. "
         'Two open questions in one thread need distinct `"key"` values. '
-        "The user's answer arrives as a reply in the thread the card belongs to, and the "
-        "card closes by itself. A parent never copies a child's question: the child's card "
+        "The user's answer to a card arrives as a reply in the thread the card belongs to, "
+        "and that card closes by itself; so does a card you send again with the same key, and "
+        "every card when the thread is finished (🏁/✅). A reply typed in the chat and a bare "
+        "marker leave your cards open, so several can stand at once. When the user settles a "
+        "card's matter in the chat instead, close that card: "
+        '`curl -s -X DELETE "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/decisions/<key>'
+        '?reason=answered"`'
+        " (the key you sent, or `_` if you sent none). "
+        "A parent never copies a child's question: the child's card "
         "already shows in the parent's panel, and the answer goes to the child."
     )

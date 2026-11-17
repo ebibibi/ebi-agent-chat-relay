@@ -66,6 +66,47 @@ written to the new child before its first turn, including with `auto_start: fals
 child preferences affects future children; select an existing child to change its own AI.
 These settings govern relay child threads, not a CLI's internal subagents.
 
+### Choosing the AI per spawn
+
+A caller can name the AI outright instead of relying on defaults — an automation job that
+should run on a cheaper model than the Console default, for example:
+
+```json
+POST /api/spawn
+{"prompt": "...", "ai": {"backend": "codex", "model": null, "effort": "low"}}
+```
+
+`ai` accepts `backend` (required), and optionally `model`, `effort` and `connection`
+(`null` or omitted: that backend's own default). It is validated with the same rules as the
+Console screen AI — an unknown backend, an effort the backend does not offer, a malformed model
+id or an unknown field is refused with `400` before anything is created. The choice is
+**stored as the new thread's own settings** before its first turn, so replies, wait resumes and
+relays in that thread keep the same AI; it wins over the parent's child preferences. Without
+`ai` nothing changes. Works for both the Console (headless) and Discord frontends.
+
+### Automation AI policy
+
+Automation jobs can also leave the choice to a stored per-job policy (ADR-0027):
+
+```json
+{"default": {"mode": "backend", "backend": "codex", "model": null, "effort": null},
+ "jobs": {"nightly_report": {"mode": "master"},
+          "video_script": {"mode": "backend", "backend": "claude", "model": "opus", "effort": "high"}}}
+```
+
+`master` follows the global default (what the person uses interactively). Short forms are
+accepted on write (`"master"`, `"codex"`). Endpoints:
+
+| Where | Method | Path | Purpose |
+|---|---|---|---|
+| control plane | GET | `/api/automation/ai-policy` | the policy plus `master` resolved; `404` until one is saved |
+| control plane | GET | `/api/automation/ai-policy/jobs/{job_id}` | the job's entry and the AI it resolves to |
+| control plane | POST | `/api/automation/ai-policy/seed` | store an initial policy; `409` once one exists |
+| Console | GET / PUT | `/console/api/automation/ai-policy` | read / replace (strict: any bad entry → `400`) |
+
+`POST /api/spawn` with `job_id` and no `ai` uses the job's entry; the AI the thread actually
+ran on is recorded per job for the Console.
+
 Console endpoints (authenticated; writes also require `X-Console-Request: 1`):
 
 - `GET/POST /console/api/defaults/children`: global child preferences.

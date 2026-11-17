@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -41,6 +42,7 @@ from ..thread_marker import (
     mark_parent_thread_name,
     mark_spawned_thread_name,
 )
+from ..turn_ai import TurnAI
 from .attention import console_activity
 from .conversations import CONSOLE_FRONTEND
 from .surface import AGENT_AUTHOR, ConsoleFrontend, ConsoleSurface, apply_outcome
@@ -91,6 +93,14 @@ class ConsoleSessionHost:
         self._registry = registry
         self._worktree_manager = worktree_manager
         self._locks: dict[int, asyncio.Lock] = {}
+        #: Conversations whose every turn starts a fresh agent session (the canvas secretary,
+        #: ADR-0025): given the thread and the message, returns the prompt to send instead,
+        #: or None to resume as usual. Set by the Console; None for every other deployment.
+        self.fresh_turn: Callable[[int, str], Awaitable[str | None]] | None = None
+        #: Where fresh turns run: an empty directory, with no CLAUDE.md, skills or user settings
+        #: loaded, so a turn costs its brief plus the CLI's own baseline (measured 2026-11-15:
+        #: about 31k tokens per call instead of 58k from the home directory).
+        self.fresh_workdir: str | None = None
         # Strong references: the loop keeps only weak ones to running tasks.
         self._tasks: set[asyncio.Task[Any]] = set()
 
@@ -117,20 +127,27 @@ class ConsoleSessionHost:
         parent_thread_id: int | None = None,
         lineage_repo: Any = None,
         result_sink: ResultSink | None = None,
+        ai: TurnAI | tuple[str, str | None, str | None] | None = None,
     ) -> int:
-        """Create native agent work, storing preferences and lineage before its first turn."""
+        """Create native agent work, storing preferences and lineage before its first turn.
+
+        *ai* — a :class:`TurnAI` or ``(backend, model, effort)`` — is stored as the
+        conversation's own settings before its first turn, so later turns keep it (the canvas
+        secretary, ADR-0025; ``/api/spawn``'s ``ai``). Otherwise a child inherits its parent's
+        child preferences.
+        """
         import uuid
 
         from claude_code_core.frontend import OutboundFile
 
-        child_ai = None
-        if parent_thread_id is not None:
+        child_ai = TurnAI(*ai) if isinstance(ai, tuple) else ai
+        if child_ai is None and parent_thread_id is not None:
             preferences = self._settings.for_children()
             backend = await preferences.current_backend(parent_thread_id)
-            child_ai = (
-                backend,
-                await preferences.current_model(backend, parent_thread_id),
-                await preferences.current_effort(backend, parent_thread_id),
+            child_ai = TurnAI(
+                backend=backend,
+                model=await preferences.current_model(backend, parent_thread_id),
+                effort=await preferences.current_effort(backend, parent_thread_id),
             )
         surface = await self.frontend.open(
             external_id="spawn:" + uuid.uuid4().hex,
@@ -138,12 +155,9 @@ class ConsoleSessionHost:
         )
         key = surface.thread_key
         if child_ai is not None:
-            backend, model, effort = child_ai
-            await self._settings.set_backend(backend, thread_id=key)
-            if model:
-                await self._settings.set_model(backend, model, thread_id=key)
-            if effort:
-                await self._settings.set_effort(backend, effort, thread_id=key)
+            await self._settings.pin_thread(
+                key, child_ai.backend, child_ai.model, child_ai.effort, child_ai.connection
+            )
         if parent_thread_id is not None:
             if lineage_repo is not None:
                 await lineage_repo.record(key, parent_thread_id, family_code(parent_thread_id))
@@ -190,8 +204,12 @@ class ConsoleSessionHost:
         into_running_turn: bool = False,
         brief: str | None = None,
         metered: bool = False,
+        ai: TurnAI | None = None,
     ) -> bool:
         """Continue a conversation with the human's message.
+
+        *ai* — the AI chosen on the screen that sent it — runs this turn only; nothing is
+        stored, so the thread's next turn uses its own settings again.
 
         Returns True when the message went into the turn already running,
         False when it was queued as a turn of its own. *metered* marks *prompt*
@@ -209,6 +227,7 @@ class ConsoleSessionHost:
             into_running_turn=into_running_turn,
             brief=brief,
             metered=metered,
+            ai=ai,
         )
 
     async def relay(self, thread_key: int, prompt: str, author: str, *, interrupt: bool) -> str:
@@ -255,6 +274,7 @@ class ConsoleSessionHost:
         into_running_turn: bool = False,
         brief: str | None = None,
         metered: bool = False,
+        ai: TurnAI | None = None,
     ) -> bool:
         """Record the human's message and run it.
 
@@ -272,9 +292,10 @@ class ConsoleSessionHost:
                 surface.thread_key, author="Ebi Workspace", is_bot=True, content=brief
             )
             prompt = f"{prompt}\n\n{brief}"
-        if into_running_turn and await self._inject(surface.thread_key, prompt):
+        # A turn already running keeps its own AI: a screen AI needs a turn of its own.
+        if into_running_turn and ai is None and await self._inject(surface.thread_key, prompt):
             return True
-        self._spawn(surface, prompt)
+        self._spawn(surface, prompt, ai=ai)
         return False
 
     async def _meter(self, thread_key: int, message_id: int, author: str, prompt: str) -> None:
@@ -313,13 +334,18 @@ class ConsoleSessionHost:
         )
 
     def _spawn(
-        self, surface: ConsoleSurface, prompt: str, *, result_sink: ResultSink | None = None
+        self,
+        surface: ConsoleSurface,
+        prompt: str,
+        *,
+        result_sink: ResultSink | None = None,
+        ai: TurnAI | None = None,
     ) -> None:
         # Taken now, not when the task first runs: a reply arriving in between
         # must already see that this one is waiting.
         release = live_runs.hold(surface.thread_key)
         task = asyncio.create_task(
-            self._run_queued(surface, prompt, release, result_sink=result_sink)
+            self._run_queued(surface, prompt, release, result_sink=result_sink, ai=ai)
         )
         self._tasks.add(task)
         task.add_done_callback(self._finished)
@@ -336,20 +362,26 @@ class ConsoleSessionHost:
         release: Callable[[], None] = lambda: None,
         *,
         result_sink: ResultSink | None = None,
+        ai: TurnAI | None = None,
     ) -> None:
         lock = self._locks.setdefault(surface.thread_key, asyncio.Lock())
         try:
             async with lock:
                 release()
-                await self._run_locked(surface, prompt, result_sink=result_sink)
+                await self._run_locked(surface, prompt, result_sink=result_sink, ai=ai)
         finally:
             release()
 
     async def _run_locked(
-        self, surface: ConsoleSurface, prompt: str, *, result_sink: ResultSink | None = None
+        self,
+        surface: ConsoleSurface,
+        prompt: str,
+        *,
+        result_sink: ResultSink | None = None,
+        ai: TurnAI | None = None,
     ) -> None:
         try:
-            await self._run(surface, prompt, result_sink=result_sink)
+            await self._run(surface, prompt, result_sink=result_sink, ai=ai)
         except Exception:
             if result_sink is not None:
                 await result_sink(None, "Console turn failed")
@@ -367,17 +399,34 @@ class ConsoleSessionHost:
         *,
         _account_retry: bool = False,
         result_sink: ResultSink | None = None,
+        ai: TurnAI | None = None,
     ) -> None:
         user_prompt = prompt
         thread_key = surface.thread_key
         record = await self._session_repo.get(thread_key)
-        backend = await self._settings.current_backend(thread_key)
-        model = await self._settings.current_model(backend, thread_key)
+        # A screen AI (canvas mode) decides this turn only; the settings are not touched.
+        backend = ai.backend if ai is not None else await self._settings.current_backend(thread_key)
+        model = (
+            ai.model
+            if ai is not None and ai.model
+            else await self._settings.current_model(backend, thread_key)
+        )
         runner = self._factory.build(backend=backend, model=model, thread_id=thread_key)
         await apply_thread_execution_mode(runner, getattr(self._settings, "repo", None), thread_key)
 
         session_id = None
-        if record is not None and session_is_resumable(record.backend, backend):
+        fresh = await self._fresh_prompt(thread_key, prompt)
+        if fresh is not None:
+            # A standing conversation that must not grow: no resume, a compact brief instead.
+            prompt = fresh
+            if self.fresh_workdir is not None:
+                await asyncio.to_thread(os.makedirs, self.fresh_workdir, exist_ok=True)
+                runner.working_dir = self.fresh_workdir
+                if hasattr(runner, "setting_sources"):
+                    runner.setting_sources = ""
+            elif record is not None and record.working_dir:
+                runner.working_dir = record.working_dir
+        elif record is not None and session_is_resumable(record.backend, backend):
             session_id = record.session_id
             if record.working_dir:
                 runner.working_dir = record.working_dir
@@ -393,10 +442,16 @@ class ConsoleSessionHost:
                     reader = history_reader_at(home)
             prompt = await carry_history_across_backends(reader, record, backend, prompt)
 
-        effort = await self._settings.current_effort(backend, thread_key)
+        effort = (
+            ai.effort
+            if ai is not None and ai.effort
+            else await self._settings.current_effort(backend, thread_key)
+        )
         if effort is not None and hasattr(runner, "effort"):
             runner.effort = effort
-        connection = await apply_connection(runner, self._settings, backend, thread_key)
+        connection = await apply_connection(
+            runner, self._settings, backend, thread_key, chosen=ai.connection if ai else None
+        )
 
         # The transcript names the model that wrote each answer, and the route it took.
         model_name = getattr(runner, "model", None)
@@ -432,7 +487,19 @@ class ConsoleSessionHost:
         # Opt-in failover (retry_on_exhaustion): rerun the same message once on
         # the next profile, as a Discord thread does. A second rejection just reports.
         if failover is not None and failover.retry and not _account_retry:
-            await self._run(surface, user_prompt, _account_retry=True, result_sink=result_sink)
+            await self._run(
+                surface, user_prompt, _account_retry=True, result_sink=result_sink, ai=ai
+            )
+
+    async def _fresh_prompt(self, thread_key: int, prompt: str) -> str | None:
+        if self.fresh_turn is None:
+            return None
+        try:
+            return await self.fresh_turn(thread_key, prompt)
+        except Exception:
+            # Resuming costs tokens but loses nothing; a failed brief must not drop the turn.
+            logger.exception("console: fresh brief for %s failed; resuming instead", thread_key)
+            return None
 
     async def _plan_account(
         self,

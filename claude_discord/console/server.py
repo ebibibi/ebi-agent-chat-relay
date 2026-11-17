@@ -33,15 +33,21 @@ from claude_code_core.account_pool import HOME_ENV_VAR
 from claude_code_core.attention_repo import AttentionRecorder
 
 from ..account_turns import session_home
+from ..automation_routes import ConsoleRoutes as AutomationConsoleRoutes
 from ..database.pages_repo import PageRepository
+from ..human_activity import note_human_activity
 from ..message_actions import message_actions
 from ..teams_exporter import source_tags
 from ..thread_marker import OUTCOME_DONE, thread_outcome
 from ..thread_status import request_thread_outcome, schedule_thread_outcome
+from ..turn_ai import TurnAI, TurnAIError, parse_turn_ai
 from .attention import console_activity
 from .auth import ConsoleAuthConfig, ConsoleAuthenticator, ConsoleAuthError
 from .auth_routes import AUTH_PREFIX, AuthRoutes
 from .board import SessionInfo, ThreadSnapshot, build_board
+from .canvas import CanvasSecretary
+from .canvas_repo import CanvasRepository
+from .canvas_routes import CanvasRoutes
 from .cli_login import CliLogin, login_commands
 from .cli_login_routes import CliLoginRoutes
 from .codex_compact import CompactError, compact_codex_session
@@ -67,6 +73,8 @@ from .passkeys import PasskeyService
 from .places import PlaceError, PlaceRepository
 from .places import clean_name as clean_place
 from .ratelimit import RateLimiter
+from .request_files import DISCORD_CACHE_SECONDS, DISCORD_SCAN, attachment_files, files_for
+from .restart_routes import RestartRoutes, restart_state
 from .search import SearchRoutes
 from .secretary import SecretaryEventRepository, SecretaryRoutes, build_secretary
 from .surface import apply_outcome
@@ -263,6 +271,7 @@ class ConsoleServer:
         cli_login: CliLogin | None = None,
         views: SavedViewRepository | None = None,
         secretary_events: SecretaryEventRepository | None = None,
+        canvas_repo: CanvasRepository | None = None,
     ) -> None:
         self.api = api_server
         #: Secretary mode's trial metrics; None turns recording off.
@@ -321,6 +330,18 @@ class ConsoleServer:
         self._start_locks: dict[str, asyncio.Lock] = {}
         # Strong references: the loop keeps only weak ones to running tasks.
         self._tasks: set[asyncio.Task[Any]] = set()
+        #: Request id -> (expiry, files): a chat thread's attachments, read once (#1374).
+        self._request_files_cache: dict[int, tuple[float, list[dict[str, str]]]] = {}
+        #: Canvas mode's resident secretary (ADR-0025); None turns the mode off.
+        self.canvas = self._build_canvas(canvas_repo)
+        if self.canvas is not None and self.sessions is not None:
+            # Every secretary turn starts a fresh session with a compact brief, in an empty
+            # directory without the user's CLAUDE.md and skills.
+            self.sessions.fresh_turn = self.canvas.fresh_turn
+            if self.conversations is not None:
+                self.sessions.fresh_workdir = str(
+                    Path(self.conversations.db_path).parent / "canvas_secretary"
+                )
         self.app = self._build_app()
 
     def _background(self, coro: Any) -> None:
@@ -372,6 +393,9 @@ class ConsoleServer:
         r.add_post(f"{API_PREFIX}/places", self.place_add)
         r.add_patch(f"{API_PREFIX}/places", self.place_rename)
         r.add_delete(f"{API_PREFIX}/places", self.place_delete)
+        AutomationConsoleRoutes(self._backend_settings, lambda req: req[IDENTITY]).register(
+            r, API_PREFIX
+        )
         view_routes = ViewRoutes(self, self.views)
         r.add_get(f"{API_PREFIX}/views", view_routes.read)
         r.add_post(f"{API_PREFIX}/views", view_routes.add)
@@ -380,6 +404,7 @@ class ConsoleServer:
         page_routes = PageRoutes(self.api)
         secretary_routes = SecretaryRoutes(self, self.secretary_events)
         r.add_post(f"{API_PREFIX}/secretary/events", secretary_routes.record)
+        CanvasRoutes(self, self.canvas, IDENTITY).register(r, API_PREFIX)
         r.add_get(f"{API_PREFIX}/secretary/stats", secretary_routes.stats)
         r.add_post(f"{API_PREFIX}/pages/{{slug}}", page_routes.define)
         r.add_get(f"{API_PREFIX}/pages/{{slug}}/items", page_routes.items)
@@ -408,6 +433,7 @@ class ConsoleServer:
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/resume", self.resume_item)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/queue", self.queue_item)
         r.add_post(f"{API_PREFIX}/slots", self.set_slots)
+        RestartRoutes(lambda request: request[IDENTITY]).register(r, API_PREFIX)
         r.add_get(f"{API_PREFIX}/files/{{key}}/{{token}}/{{name}}", self.file)
         if self.auth_routes is not None:
             self.auth_routes.register(r, API_PREFIX)
@@ -446,6 +472,10 @@ class ConsoleServer:
                 return _error(f"{CSRF_HEADER}: 1 is required", 403)
             if not self._limiter.allow(who):
                 return _error("too many changes, slow down", 429)
+            # A change made by a person: a reserved restart waits for them to go quiet.
+            # Answering the restart banner itself is not "using" the bot.
+            if not request.path.startswith(f"{API_PREFIX}/restart"):
+                note_human_activity("console")
         request[IDENTITY] = who
         return await handler(request)
 
@@ -457,6 +487,8 @@ class ConsoleServer:
         logger.info("Ebi AI Console started: http://%s:%d", self.host, self.port)
         if self.workspace.root is not None and self._records_task is None:
             self._records_task = asyncio.ensure_future(self._records_loop())
+        if self.canvas is not None:
+            self.canvas.start()
 
     def start_triage(self, ask: Callable[[str], Awaitable[str | None]], *, model: str) -> None:
         """Triage open items in the background with *ask* (one model call per item)."""
@@ -475,7 +507,57 @@ class ConsoleServer:
         self._triager.start(self._board_items, TRIAGE_INTERVAL_SECONDS)
         logger.info("Ebi AI Console: automatic triage on (%s)", model)
 
+    def _build_canvas(self, repo: CanvasRepository | None) -> CanvasSecretary | None:
+        if repo is None:
+            return None
+        return CanvasSecretary(
+            repo,
+            board=self._board_items,
+            requests=self._open_requests,
+            messages=self.triage_messages,
+            situation=self._situation_dict,
+            host=self.sessions,
+            history=self._canvas_history,
+        )
+
+    async def _canvas_history(self, thread_key: int, limit: int) -> list[tuple[str, bool, str]]:
+        if self.conversations is None:
+            return []
+        return [
+            (m.author, bool(m.is_bot), m.content)
+            for m in await self.conversations.history(thread_key, limit)
+        ]
+
+    async def _situation_dict(self, thread_id: int) -> dict[str, Any] | None:
+        repo = self.api.situation_repo
+        if repo is None:
+            return None
+        written = await repo.get(thread_id)
+        return written.as_dict() if written else None
+
+    async def deliver_from_secretary(
+        self, thread_id: int, text: str, key: str | None = None
+    ) -> web.Response:
+        """The person's answer, given in the canvas secretary's chat, to the thread that asked.
+
+        It is marked as relayed, so the receiving agent knows the words passed through the
+        secretary, and it closes the thread's open requests as a Console reply does.
+        """
+        item_id = f"t{int(thread_id)}"
+        relayed = f"🗂 The person's answer, relayed by their secretary (canvas mode):\n\n{text}"
+        response = await self._deliver(item_id, relayed, "secretary", metered=False)
+        repo = getattr(self.api, "decision_repo", None)
+        if response.status < 300 and key and repo is not None:
+            # Only the card this answer settles; the thread's other cards stay (#1438).
+            try:
+                await repo.close(int(thread_id), reason="answered", key=key)
+            except Exception:
+                logger.exception("console: card %r of %s not closed", key, thread_id)
+        return response
+
     async def stop(self) -> None:
+        if self.canvas is not None:
+            await self.canvas.stop()
         if self._records_task is not None:
             self._records_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -651,6 +733,7 @@ class ConsoleServer:
                 "guide": build_guide(items, records=records),
                 "secretary": build_secretary(items, await self._open_requests()),
                 "slots": self._slots(),
+                "restart": restart_state(),
                 "places": await self._place_list(items),
                 "views": await self._view_list(),
                 "pages": await self._page_list(),
@@ -663,23 +746,60 @@ class ConsoleServer:
         if repo is None:
             return []
         try:
-            return [r.as_dict() for r in await repo.list_open()]
+            requests = [r.as_dict() for r in await repo.list_open()]
         except Exception:
             # The board still answers; the secretary home then lists the items as unexplained.
             logger.exception("console: could not read decision requests")
             return []
+        for request in requests:
+            # A card that asks the person to look at something shows the files it delivered.
+            try:
+                request["files"] = await self._request_files(request)
+            except Exception:
+                logger.exception("console: files of request %s unreadable", request.get("id"))
+                request["files"] = []
+        return requests
+
+    async def _request_files(self, request: dict[str, Any]) -> list[dict[str, str]]:
+        """Files the asking thread delivered: console files, or a chat thread's attachments.
+
+        A chat thread is read through the Discord API once per request and cached, so the
+        board's poll does not call Discord every few seconds.
+        """
+        thread_key = int(request["thread_id"])
+        files = await files_for(self.conversations, thread_key)
+        if files or (self.conversations and await self.conversations.get(thread_key)):
+            return files
+        cached = self._request_files_cache.get(int(request["id"]))
+        if cached is not None and cached[0] > time.monotonic():
+            return cached[1]
+        thread, err = await self._thread_for(f"t{thread_key}")
+        files = []
+        if err is None and thread is not None:
+            history = [m async for m in thread.history(limit=DISCORD_SCAN)]
+            me = getattr(getattr(self.api.bot, "user", None), "id", None)
+            files = attachment_files(history, bot_id=me if isinstance(me, int) else None)
+        self._request_files_cache[int(request["id"])] = (
+            time.monotonic() + DISCORD_CACHE_SECONDS,
+            files,
+        )
+        return files
 
     async def _close_requests(self, item_id: str, request_id: Any) -> None:
-        """A person answered in the Console: the request (or all of the thread's) is settled."""
+        """A person answered a card: that one request is settled.
+
+        A reply typed in the thread closes nothing (#1438): a thread may hold several cards,
+        and a word about something else must not take them all away. The agent closes a card
+        its chat settled (``DELETE /api/threads/{id}/decisions/{key}``).
+        """
         repo = getattr(self.api, "decision_repo", None)
         thread_id = _thread_of(item_id)
         if repo is None or thread_id is None:
             return
+        if not isinstance(request_id, int) or isinstance(request_id, bool):
+            return
         try:
-            if isinstance(request_id, int) and not isinstance(request_id, bool):
-                await repo.close(thread_id, reason="answered", request_id=request_id)
-            else:
-                await repo.close(thread_id, reason="replied")
+            await repo.close(thread_id, reason="answered", request_id=request_id)
         except Exception:
             # The reply has gone through; the card disappears anyway once the thread runs.
             logger.exception("console: could not close the requests of %s", item_id)
@@ -811,8 +931,11 @@ class ConsoleServer:
             sessions=sessions,
         )
         queued = self._queued_thread_ids()
+        secretary = await self.canvas.item_id() if self.canvas is not None else None
         for item in items:
             item["queued"] = item["thread_id"] in queued
+            # The canvas secretary is a standing service, not work: no chime per turn.
+            item["canvas_secretary"] = item["id"] == secretary
         return items
 
     async def triage_messages(self, item: dict[str, Any]) -> list[tuple[str, str]]:
@@ -1227,12 +1350,17 @@ class ConsoleServer:
         if err:
             return err
         text = with_attachments(text, files)
+        try:
+            ai = parse_turn_ai(body.get("ai"))
+        except TurnAIError as exc:
+            return _error(str(exc), 400)
         item_id = request.match_info["item_id"]
         response = await self._deliver(
             item_id,
             text,
             request[IDENTITY],
             metered=True,
+            ai=ai,
             retitle_text=retitle_text,
         )
         if response.status < 300:
@@ -1246,6 +1374,7 @@ class ConsoleServer:
         who: str,
         *,
         metered: bool,
+        ai: TurnAI | None = None,
         retitle_text: str | None = None,
     ) -> web.Response:
         """Queue *text* as the human's next message in the item's conversation.
@@ -1263,7 +1392,7 @@ class ConsoleServer:
             return (
                 busy
                 if key in self._compacting
-                else await self._reply_in_console(item_id, key, text, who, brief, metered)
+                else await self._reply_in_console(item_id, key, text, who, brief, metered, ai)
             )
         thread, err = await self._thread_for(item_id)
         if err:
@@ -1279,7 +1408,7 @@ class ConsoleServer:
             return _error(str(exc), 400)
         schedule_thread_outcome(thread, None)
         if metered and retitle_text:
-            # Use only the original human text, not agent-facing wrappers.
+            # Retitle from human text, not long-text or attachment wrappers.
             cog._schedule_retitle(thread, retitle_text)
         prompt = f"{text}\n\n-# 🖥️ via Ebi AI Console ({who})"
         if metered:
@@ -1287,7 +1416,7 @@ class ConsoleServer:
             await self._meter_chat_reply(thread, text, who)
         self._background(
             cog.deliver_relayed_message(
-                thread, prompt, interrupt=False, into_running_turn=True, brief=brief
+                thread, prompt, interrupt=False, into_running_turn=True, brief=brief, ai=ai
             )
         )
         logger.info("console: %s replied in thread %s", _q(who), thread.id)
@@ -1623,6 +1752,7 @@ class ConsoleServer:
         who: str,
         brief: str | None,
         metered: bool,
+        ai: TurnAI | None = None,
     ) -> web.Response:
         if self.sessions is None:
             return _error("the console cannot run agents in this deployment", 503)
@@ -1632,7 +1762,7 @@ class ConsoleServer:
             return _error(str(exc), 400)
         try:
             injected = await self.sessions.reply(
-                thread_key, text, who, into_running_turn=True, brief=brief, metered=metered
+                thread_key, text, who, into_running_turn=True, brief=brief, metered=metered, ai=ai
             )
         except LookupError:
             return _error("unknown conversation", 404)
@@ -1974,6 +2104,8 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
     await views.init_db()
     secretary_events = SecretaryEventRepository(api_server.session_repo.db_path)
     await secretary_events.init_db()
+    canvas_repo = CanvasRepository(api_server.session_repo.db_path)
+    await canvas_repo.init_db()
     if triage is not None:
         await triage.init_db()
     console = ConsoleServer(
@@ -1993,6 +2125,7 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
         places=places,
         views=views,
         secretary_events=secretary_events,
+        canvas_repo=canvas_repo,
         cli_login=CliLogin(login_commands()),
     )
     await console.start()

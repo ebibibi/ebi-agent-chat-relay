@@ -268,7 +268,11 @@ def test_log_values_cannot_forge_lines() -> None:
 async def test_human_console_reply_schedules_retitle_with_only_human_text(
     monkeypatch, tmp_path
 ) -> None:
+    from pathlib import Path
+
     from claude_discord.console import server as srv
+    from claude_discord.console.server import IDENTITY
+    from claude_discord.turn_ai import TurnAI
 
     repo = WorkItemRepository(str(tmp_path / "sessions.db"))
     api = MagicMock()
@@ -288,17 +292,44 @@ async def test_human_console_reply_schedules_retitle_with_only_human_text(
     monkeypatch.setattr(console, "_background", pending.append)
 
     human_text = "The deployment is ready; please check the migration logs."
-    response = await console._deliver(
-        "t123",
-        "Agent-facing text with injected footer and attachment instructions.",
-        "Ming",
-        metered=True,
-        retitle_text=human_text,
+    agent_text = "Read message.txt for the full user message and respond to it."
+    ai = TurnAI(backend="codex", model="gpt-6-astra", effort="high")
+    monkeypatch.setattr(
+        srv,
+        "parse_turn_ai",
+        lambda raw: ai,
     )
+    monkeypatch.setattr(
+        console,
+        "_json",
+        AsyncMock(
+            return_value=({"text": human_text, "request_id": 17, "ai": {"backend": "codex"}}, None)
+        ),
+    )
+    monkeypatch.setattr(
+        console,
+        "_reply_files",
+        lambda raw: ([("/uploads/report.txt", Path("/tmp/report.txt"))], None),
+    )
+    monkeypatch.setattr(console, "_attach_long_text", AsyncMock(return_value=(agent_text, None)))
+    close_requests = AsyncMock()
+    monkeypatch.setattr(console, "_close_requests", close_requests, raising=False)
+    request = MagicMock()
+    request.match_info = {"item_id": "t123"}
+    request.__getitem__.side_effect = lambda key: "Ming" if key == IDENTITY else None
+
+    response = await console.reply(request)
     await pending[0]
 
     assert response.status == 202
     cog._schedule_retitle.assert_called_once_with(thread, human_text)
+    cog.deliver_relayed_message.assert_awaited_once()
+    args, kwargs = cog.deliver_relayed_message.await_args
+    assert args[0] == thread
+    assert agent_text in args[1]
+    assert "/uploads/report.txt" in args[1]
+    assert kwargs["ai"] == ai
+    close_requests.assert_awaited_once_with("t123", 17)
 
 
 @pytest.mark.parametrize("delivery_status", [202, 409])
@@ -347,11 +378,43 @@ async def test_reply_preserves_raw_human_text_for_retitle_after_transformations(
     assert args[0] == "t123"
     assert args[1].startswith(agent_text)
     assert "/uploads/report.txt" in args[1]
-    assert kwargs == {"metered": True, "retitle_text": raw_text}
+    assert kwargs == {"metered": True, "ai": None, "retitle_text": raw_text}
     if delivery_status < 300:
         close_requests.assert_awaited_once_with("t123", 17)
     else:
         close_requests.assert_not_awaited()
+
+
+async def test_unmetered_console_delivery_does_not_schedule_retitle(monkeypatch, tmp_path) -> None:
+    from claude_discord.console import server as srv
+
+    repo = WorkItemRepository(str(tmp_path / "sessions.db"))
+    api = MagicMock()
+    api.bot.cogs = {}
+    console = ConsoleServer(api, repo, ConsoleAuthenticator(ConsoleAuthConfig(token=TOKEN)), port=0)
+    thread = MagicMock(id=123, parent_id=456)
+    cog = MagicMock()
+    cog.deliver_relayed_message = AsyncMock()
+    console._workspace_brief = AsyncMock(return_value=None)
+    console._conversation_key = AsyncMock(return_value=None)
+    console._thread_for = AsyncMock(return_value=(thread, None))
+    console._chat_cog = MagicMock(return_value=cog)
+    console.work_repo.update = AsyncMock(return_value=None)
+    monkeypatch.setattr(srv, "schedule_thread_outcome", lambda *args: None)
+    pending = []
+    monkeypatch.setattr(console, "_background", pending.append)
+
+    response = await console._deliver(
+        "t123",
+        "A canned agent prompt.",
+        "Ming",
+        metered=False,
+        retitle_text="This must not count as a human reply.",
+    )
+    await pending[0]
+
+    assert response.status == 202
+    cog._schedule_retitle.assert_not_called()
 
 
 async def test_pin_order_endpoint_and_write_guards(client) -> None:

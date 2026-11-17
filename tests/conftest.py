@@ -141,3 +141,13 @@ def simple_events(session_id: str = "sess-1") -> list[StreamEvent]:
             duration_ms=500,
         ),
     ]
+
+
+@pytest.fixture(autouse=True)
+def _forget_human_activity():
+    """A message handled by one test must not make another test's restart wait for quiet."""
+    from claude_discord.human_activity import reset_human_activity
+
+    reset_human_activity()
+    yield
+    reset_human_activity()
