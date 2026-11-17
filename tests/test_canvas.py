@@ -366,7 +366,7 @@ async def test_notes_digest_and_deliver(api) -> None:
         "/api/secretary/deliver", json={"thread_id": "12", "text": "A"}, headers=k
     )
     assert resp.status == 202
-    console.deliver_from_secretary.assert_awaited_once_with(12, "A")
+    console.deliver_from_secretary.assert_awaited_once_with(12, "A", None)
     bad = await client.post(
         "/api/secretary/deliver", json={"thread_id": "x", "text": "A"}, headers=k
     )
@@ -587,3 +587,21 @@ async def test_the_open_screens_ai_runs_the_secretarys_wakes_until_it_lapses(
     secretary.set_screen_ai(chosen)
     now[0] += canvas_module.SCREEN_AI_SECONDS + 1
     assert secretary.screen_ai() is None, "the screen closed: back to the thread's own AI"
+
+
+async def test_the_secretary_names_the_card_its_answer_settles(api) -> None:
+    client, server, console, _ = api
+    server._console = console
+    resp = await client.post(
+        "/api/secretary/deliver",
+        json={"thread_id": "12", "text": "A", "key": "buy-or-build"},
+        headers=console.key,
+    )
+    assert resp.status == 202
+    console.deliver_from_secretary.assert_awaited_once_with(12, "A", "buy-or-build")
+    bad = await client.post(
+        "/api/secretary/deliver",
+        json={"thread_id": "12", "text": "A", "key": "x" * 41},
+        headers=console.key,
+    )
+    assert bad.status == 400

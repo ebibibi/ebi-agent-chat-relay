@@ -237,4 +237,7 @@ class CanvasApi:
             return _error("thread_id (digits) and text are required", 400)
         if len(text) > MAX_DELIVER_CHARS:
             return _error(f"text must be at most {MAX_DELIVER_CHARS} characters", 400)
-        return await console.deliver_from_secretary(thread_id, text)
+        key = body.get("key")
+        if key is not None and not (isinstance(key, str) and 0 < len(key) <= 40):
+            return _error("key must be the card's key (1-40 characters)", 400)
+        return await console.deliver_from_secretary(thread_id, text, key)

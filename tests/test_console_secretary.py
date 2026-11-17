@@ -129,12 +129,14 @@ def test_a_request_is_hidden_once_its_thread_moves_on() -> None:
     items = [
         _item("t1", status="running", running=True, focus=None),  # the person replied
         _item("t2", status="candidate", bucket="candidate", focus=None),
-        _item("t3", status="idle", focus=None),  # marker cleared, agent not marking again
+        _item("t3", status="idle", focus=None),  # marker cleared by a reply about something else
         _item("t4", archived=True),
     ]
     requests = [_request(n, rid=n) for n in (1, 2, 3, 4, 9)]  # 9: no such item
     out = build_secretary(items, requests, now=NOW)
-    assert out["decide"] == []
+    # Running, finished, archived or gone: hidden. An open request with its marker cleared
+    # still stands (#1434): it is closed only by an answer, its agent or the thread finishing.
+    assert [c["request_id"] for c in out["decide"]] == [3]
     assert out["unexplained"] == []
 
 
@@ -284,9 +286,9 @@ async def test_a_card_is_on_the_board_and_an_answer_closes_it(env, tmp_path) -> 
     await _settle(env.host)
     assert [r.key for r in await decisions.list_open()] == ["b"]
 
-    # Typing in the thread answers whatever it still asks.
+    # A reply typed in the thread is about something else: the other card stays (#1434).
     await env.client.post(
-        f"/console/api/items/{item_id}/reply", json={"text": "both done"}, headers=WRITE
+        f"/console/api/items/{item_id}/reply", json={"text": "別件ですが…"}, headers=WRITE
     )
     await _settle(env.host)
-    assert await decisions.list_open() == []
+    assert [r.key for r in await decisions.list_open()] == ["b"]
