@@ -246,7 +246,7 @@ window.ConsoleSession = (() => {
     const submit = () => { const text = input.value.trim(); if (text) send(entry, text, text.slice(0, 80)); };
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); submit(); }
-      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); writing = false; paint(); }
+      if (e.key === "Escape" && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); e.stopPropagation(); writing = false; paint(); }
     });
     return h("div", { class: "cv-ss-own" }, input,
       h("button", { type: "button", class: "btn primary", onclick: submit, text: s.send }));

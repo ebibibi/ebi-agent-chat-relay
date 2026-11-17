@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Escape during IME composition (cancelling a Japanese conversion) no longer blurs the text box
+  being typed in; the canvas reply box to the secretary is at least six lines and its column wider
+  (#1430).
+
 ### Added
 
 - Focus session shows the **whole decision request** (all seven parts with headings, open) and a
