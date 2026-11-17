@@ -166,13 +166,13 @@ most 300 characters, and all seven parts of the detail. A request that fails is 
 400 and every problem listed (`problems`), plus the format (`format`), so the agent rewrites
 it in the same turn. A bare marker call still marks the thread as before; it shows no card.
 
-**When a card goes away.** Requests are stored in `decision_requests`, one open request per
-thread and `key`; a newer one with the same key replaces it. A request closes when the person
-answers from its card or replies in the Console, or when the thread is marked again without a
-request or marked 🏁/✅. It also shows only while its thread still carries ❓/👀/📋 and is not
-running, so a reply typed in Discord takes the card away as soon as the agent picks it up. Nothing here calls a model:
-the screen is computed from the board and the open requests (`claude_discord/console/secretary.py`,
-sent as `secretary` with every board).
+**When a card goes away** (#1438). A request is stored in `decision_requests`, one open request
+per thread and `key`; a newer one with the same key replaces it. A request closes when the person
+answers it on its card, when its agent closes it (`DELETE /api/threads/{id}/decisions/{key}`,
+`_` for the card sent without a key, `?reason=` optional) because the matter was settled in the
+chat, or when its thread is marked 🏁/✅. A reply typed in the thread and a bare marker close
+nothing, because a thread may ask several things at once. A card shows while its request is open,
+except while the thread is running or once it is finished.
 
 **Trial metrics.** To compare the modes over a week, the Console records which threads you
 open (in either mode) and which answers came from a card, with how long the question had

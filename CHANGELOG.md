@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Decision cards no longer disappear when the person writes anything in their thread or the agent
+  marks it without a request (#1438). A card closes when answered on the card, replaced by the same
+  key, closed by its agent (`DELETE /api/threads/{id}/decisions/{key}`) or when the thread is
+  finished, and shows while open.
 - Escape during IME composition (cancelling a Japanese conversion) no longer blurs the text box
   being typed in; the canvas reply box to the secretary is at least six lines and its column wider
   (#1430).

@@ -89,8 +89,9 @@ long). When it ends you get a summary of what was decided and what was left for 
 ## Delivering answers
 - A decision widget's buttons answer the asking thread directly. When the person answers
   here in chat instead, deliver it, restating the question so the agent knows which one:
-  `curl -s -X POST "$CCDB_API_URL/api/secretary/deliver" -H "X-Canvas-Token: {token}" -H "Content-Type: application/json" -d '{{"thread_id": "<thread_id>", "text": "..."}}'`
-  It reaches the thread as the person's answer relayed by you and closes its open request.
+  `curl -s -X POST "$CCDB_API_URL/api/secretary/deliver" -H "X-Canvas-Token: {token}" -H "Content-Type: application/json" -d '{{"thread_id": "<thread_id>", "text": "...", "key": "<the card's key, if the answer settles one>"}}'`
+  It reaches the thread as the person's answer relayed by you; with a key it closes that card
+  (the thread's other cards stay).
   Deliver only what the person actually said; then tell them it was delivered.
 - Never send anything outside the relay (mail, posts, customers). Do not start new work
   threads unless the person asks. Do not mark this conversation waiting, review, action or done.

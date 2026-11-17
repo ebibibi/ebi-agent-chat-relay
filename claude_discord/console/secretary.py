@@ -13,9 +13,10 @@ module turns the board into the person's unit instead — decisions — built fr
 * ``working`` — what agents are doing, one line each; no progress text;
 * ``done_today`` — finished today, including completion candidates to confirm.
 
-A request shows only while it still stands: while its thread carries a ❓/👀/📋 marker and is
-not running. The person's reply clears the marker and the agent starts running, so the card
-goes away even before anything closes it.
+A request shows while it stands: until it is answered on its card, replaced by the same key,
+closed by its agent or its thread is finished — and not while the thread is running. A reply
+typed in the thread or a bare marker closes nothing, because a thread may ask several things
+at once (#1438).
 
 The cards are sent whole, not only the first few: a family's situation panel shows the same
 cards for its own threads (situation.js), so the Console reads one list for both screens.
@@ -85,9 +86,9 @@ def _stands(request: Mapping[str, Any], item: Mapping[str, Any] | None) -> bool:
     if item is None or item.get("archived"):
         return False
     status = item.get("status")
-    if status in _FINISHED_STATUSES or status == "running" or item.get("running"):
-        return False
-    return status in _MARKED_STATUSES
+    # An open request stands until it is answered or closed, marker or not (#1438): a reply
+    # about something else clears the thread's marker but not the questions it still asks.
+    return not (status in _FINISHED_STATUSES or status == "running" or item.get("running"))
 
 
 def _card(request: Mapping[str, Any], item: Mapping[str, Any], *, now: datetime) -> dict[str, Any]:

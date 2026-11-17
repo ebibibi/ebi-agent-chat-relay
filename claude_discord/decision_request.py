@@ -330,7 +330,14 @@ def agent_guide() -> str:
         "A request that misses a part, runs long or offers nothing to choose is refused "
         "(400) with every problem listed: rewrite it and send it again. "
         'Two open questions in one thread need distinct `"key"` values. '
-        "The user's answer arrives as a reply in the thread the card belongs to, and the "
-        "card closes by itself. A parent never copies a child's question: the child's card "
+        "The user's answer to a card arrives as a reply in the thread the card belongs to, "
+        "and that card closes by itself; so does a card you send again with the same key, and "
+        "every card when the thread is finished (🏁/✅). A reply typed in the chat and a bare "
+        "marker leave your cards open, so several can stand at once. When the user settles a "
+        "card's matter in the chat instead, close that card: "
+        '`curl -s -X DELETE "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/decisions/<key>'
+        '?reason=answered"`'
+        " (the key you sent, or `_` if you sent none). "
+        "A parent never copies a child's question: the child's card "
         "already shows in the parent's panel, and the answer goes to the child."
     )

@@ -467,6 +467,9 @@ class ApiServer:
         self.app.router.add_post("/api/threads/{thread_id}/waiting", self.mark_thread_waiting)
         self.app.router.add_post("/api/threads/{thread_id}/review", self.mark_thread_review)
         self.app.router.add_post("/api/threads/{thread_id}/action", self.mark_thread_action)
+        self.app.router.add_delete(
+            "/api/threads/{thread_id}/decisions/{key}", self.close_thread_decision
+        )
         # Session spawn route
         self.app.router.add_post("/api/spawn", self.spawn)
         ControlPlaneRoutes(self._backend_settings).register(self.app.router)
@@ -1814,6 +1817,17 @@ class ApiServer:
             if isinstance(name, str):
                 names[thread_id] = name
         return names
+
+    async def close_thread_decision(self, request: web.Request) -> web.Response:
+        """Close one decision request by key (#1438); see :func:`.decision_api.close_decision`."""
+        from .decision_api import close_decision
+
+        return await close_decision(
+            self.decision_repo,
+            request.match_info["thread_id"],
+            request.match_info["key"],
+            request.rel_url.query.get("reason"),
+        )
 
     async def get_thread_messages(self, request: web.Request) -> web.Response:
         """GET /api/threads/{thread_id}/messages — read another thread's conversation.

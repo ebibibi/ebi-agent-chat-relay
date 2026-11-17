@@ -535,7 +535,9 @@ class ConsoleServer:
         written = await repo.get(thread_id)
         return written.as_dict() if written else None
 
-    async def deliver_from_secretary(self, thread_id: int, text: str) -> web.Response:
+    async def deliver_from_secretary(
+        self, thread_id: int, text: str, key: str | None = None
+    ) -> web.Response:
         """The person's answer, given in the canvas secretary's chat, to the thread that asked.
 
         It is marked as relayed, so the receiving agent knows the words passed through the
@@ -544,8 +546,13 @@ class ConsoleServer:
         item_id = f"t{int(thread_id)}"
         relayed = f"🗂 The person's answer, relayed by their secretary (canvas mode):\n\n{text}"
         response = await self._deliver(item_id, relayed, "secretary", metered=False)
-        if response.status < 300:
-            await self._close_requests(item_id, None)
+        repo = getattr(self.api, "decision_repo", None)
+        if response.status < 300 and key and repo is not None:
+            # Only the card this answer settles; the thread's other cards stay (#1438).
+            try:
+                await repo.close(int(thread_id), reason="answered", key=key)
+            except Exception:
+                logger.exception("console: card %r of %s not closed", key, thread_id)
         return response
 
     async def stop(self) -> None:
@@ -779,16 +786,20 @@ class ConsoleServer:
         return files
 
     async def _close_requests(self, item_id: str, request_id: Any) -> None:
-        """A person answered in the Console: the request (or all of the thread's) is settled."""
+        """A person answered a card: that one request is settled.
+
+        A reply typed in the thread closes nothing (#1438): a thread may hold several cards,
+        and a word about something else must not take them all away. The agent closes a card
+        its chat settled (``DELETE /api/threads/{id}/decisions/{key}``).
+        """
         repo = getattr(self.api, "decision_repo", None)
         thread_id = _thread_of(item_id)
         if repo is None or thread_id is None:
             return
+        if not isinstance(request_id, int) or isinstance(request_id, bool):
+            return
         try:
-            if isinstance(request_id, int) and not isinstance(request_id, bool):
-                await repo.close(thread_id, reason="answered", request_id=request_id)
-            else:
-                await repo.close(thread_id, reason="replied")
+            await repo.close(thread_id, reason="answered", request_id=request_id)
         except Exception:
             # The reply has gone through; the card disappears anyway once the thread runs.
             logger.exception("console: could not close the requests of %s", item_id)

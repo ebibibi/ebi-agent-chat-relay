@@ -76,14 +76,37 @@ async def test_a_bad_request_is_refused_before_the_mark(setup) -> None:
     assert await decisions.list_open() == []
 
 
-async def test_a_bare_mark_still_works_and_supersedes_the_old_request(setup) -> None:
+async def test_a_bare_mark_still_works_and_leaves_the_cards_open(setup) -> None:
     client, decisions, bot = setup
     await client.post(f"/api/threads/{THREAD}/waiting", json=_good())
+    await client.post(f"/api/threads/{THREAD}/waiting", json=_good(key="second"))
     bot.get_channel.return_value = _thread(f"{DEFAULT_WAITING_MARKER} Fix the build")
     resp = await client.post(f"/api/threads/{THREAD}/action")
     assert resp.status == 200
     assert "request_id" not in await resp.json()
+    # A bare mark is about something else (#1434): both cards stay.
+    assert sorted(r.key for r in await decisions.list_open()) == ["", "second"]
+
+
+async def test_the_agent_closes_one_card_by_key(setup) -> None:
+    client, decisions, _ = setup
+    await client.post(f"/api/threads/{THREAD}/waiting", json=_good())
+    await client.post(f"/api/threads/{THREAD}/waiting", json=_good(key="buy-or-build"))
+    resp = await client.delete(f"/api/threads/{THREAD}/decisions/buy-or-build?reason=decided")
+    assert (await resp.json())["closed"] == 1
+    assert [r.key for r in await decisions.list_open()] == [""]
+    resp = await client.delete(f"/api/threads/{THREAD}/decisions/_")
+    assert (await resp.json())["closed"] == 1, "_ names the card sent without a key"
     assert await decisions.list_open() == []
+    again = await client.delete(f"/api/threads/{THREAD}/decisions/buy-or-build")
+    assert again.status == 200 and (await again.json())["status"] == "not open"
+
+
+async def test_the_same_key_replaces_the_card(setup) -> None:
+    client, decisions, _ = setup
+    await client.post(f"/api/threads/{THREAD}/waiting", json=_good(key="k"))
+    await client.post(f"/api/threads/{THREAD}/waiting", json=_good(key="k"))
+    assert len(await decisions.list_open()) == 1
 
 
 async def test_finishing_the_thread_closes_every_request_aimed_at_it(setup) -> None:
