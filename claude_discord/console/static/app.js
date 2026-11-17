@@ -1276,6 +1276,9 @@ function wire() {
   $("help").addEventListener("click", () => { if ($("help").dataset.mode !== "login") showHelp(false); });
 
   document.addEventListener("keydown", (e) => {
+    // An IME is composing (Japanese input): its Escape cancels the conversion, it is not ours.
+    // Blurring here threw the person out of the reply box mid-sentence (#1430).
+    if (e.isComposing || e.keyCode === 229) return;
     // A rich editor (contenteditable, possibly inside a shadow root) is typing too.
     const typing = e.target.matches("input, textarea, select, [contenteditable]")
       || e.composedPath().some((n) => n.isContentEditable);

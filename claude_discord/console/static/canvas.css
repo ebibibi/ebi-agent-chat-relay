@@ -1,7 +1,7 @@
 /* Canvas mode (canvas.js, ADR-0025): widgets on the left, the secretary's conversation right. */
 body.canvas #usage, body.canvas .nav, body.canvas .list-pane, body.canvas .col-resize { display: none !important; }
 body.canvas .app, body.canvas .app.no-detail {
-  grid-template-columns: minmax(0, 1fr) clamp(360px, 34%, 560px); }
+  grid-template-columns: minmax(0, 1fr) clamp(420px, 40%, 680px); }
 body.canvas .app.no-detail { grid-template-columns: minmax(0, 1fr); }
 .canvas { overflow-y: auto; padding: 14px 18px 40px; border-right: 1px solid var(--line); }
 
@@ -184,3 +184,7 @@ body.canvas .app.no-detail { grid-template-columns: minmax(0, 1fr); }
 /* The focus session's way into the work and the whole request (#1406). */
 .cv-ss-source .btn { font-size: 14px; padding: 8px 14px; text-align: left; overflow-wrap: anywhere; }
 .cv-ss-part h4 { margin: 10px 0 4px; font-size: 13px; color: var(--dim); }
+
+/* Talking to the secretary is the main thing here: a reply box of six lines or more, growing with
+   the text and resizable by its handle (#1430). */
+body.canvas .reply textarea { min-height: calc(6 * 1.45em + 18px); max-height: 55vh; }
