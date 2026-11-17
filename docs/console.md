@@ -620,6 +620,7 @@ so open `http://localhost:8100`, not `http://127.0.0.1:8100`. A passkey belongs 
 | `CCDB_CONSOLE_ORIGIN` | *(from the request)* | Comma-separated origins the console may be used from, e.g. `https://console.example.com`. Set it when a proxy rewrites `Host` |
 | `CCDB_CONSOLE_SESSION_DAYS` | `30` | How long a sign-in lasts |
 | `CCDB_CONSOLE_ENROLL` | — | `1` logs a new setup code on start, even when passkeys exist |
+| `CCDB_CONSOLE_OIDC_ADDS_PASSKEYS` | — | `1` lets an OIDC session invite new passkey devices (not remove them) |
 
 Sessions are `HttpOnly`, `SameSite=Strict` cookies, and only their hash is stored. Removing a
 passkey signs out every session it opened. Only a passkey session (or the token) can add, list or remove
@@ -695,7 +696,13 @@ Entra ID, where your admins control every address, you can waive it with
 their own email.
 
 Taking an email off the allowlist, or switching to another issuer, ends its sessions at once.
-A Google or Entra ID session cannot add or remove passkeys; sign in with a passkey for that. Whether you are asked for a second
+A Google or Entra ID session cannot add or remove passkeys; sign in with a passkey for that.
+If your provider will not admit a device (for example, Entra ID Conditional Access requires a
+device enrolled in Intune) and you have no passkey session at hand, set
+`CCDB_CONSOLE_OIDC_ADDS_PASSKEYS=1`: an OIDC session can then **add** a device under
+**🔑 Passkeys → Add a device** and list passkeys, but still not remove them. A passkey added
+this way keeps working after its email leaves the allowlist, so remove it from a passkey session
+when that person's access ends. Whether you are asked for a second
 factor is the provider's policy: turn on 2-step verification or passkeys for the accounts on the
 allowlist.
 

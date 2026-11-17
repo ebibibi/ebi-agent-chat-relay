@@ -419,6 +419,7 @@ CHAT_ONLY_CHANNEL_IDS=444,555
 | `CCDB_CONSOLE_ORIGIN` | コンソールを利用できるオリジン（カンマ区切り。例: `https://console.example.com`）。プロキシが `Host` を書き換える場合に設定する | (リクエストから取得) |
 | `CCDB_CONSOLE_SESSION_DAYS` | コンソールのサインインの有効日数 | `30` |
 | `CCDB_CONSOLE_ENROLL` | `1` にすると、パスキーが登録済みでも起動時に新しい使い捨てセットアップコードをログに書き出す（パスキーをすべて失ったときの復旧用） | (optional) |
+| `CCDB_CONSOLE_OIDC_ADDS_PASSKEYS` | `1` にすると、Google・Entra ID などでサインインした画面からも「🔑 パスキー → デバイスを追加」で新しい端末を招待できる（削除はパスキーでサインインした画面だけ）。Intune 未参加などで ID プロバイダーに入れない端末向け | (optional) |
 | `CCDB_CONSOLE_TRIAGE` | `0` でコンソールの[自動トリアージ](../../console.md#automatic-triage)（高速なモデルによる優先度・期日・次の一手・場所の推定）を無効化する | `1` |
 | `CCDB_CONSOLE_TRIAGE_MODEL` | Claude バックエンドでのトリアージに使うモデル（`claude --model`） | `haiku` |
 | `CCDB_CONSOLE_TRIAGE_CODEX_MODEL` | Codex バックエンドでのトリアージに使うモデル（`codex exec -m`） | (Codex のカタログで最も安いモデル) |
