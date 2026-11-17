@@ -63,6 +63,10 @@ sign-in that any deployment gets without signing up for a third-party service.
 - OpenID Connect (Google, Entra ID, …) is available as an option (#894), with the same session
   layer. A session is only as good as the method that opened it *now*: turning passkeys off, or
   taking an email off the allowlist, ends the sessions they opened.
+  By default an OIDC session cannot add passkeys, because a passkey would outlive the email's
+  place on the allowlist. `CCDB_CONSOLE_OIDC_ADDS_PASSKEYS=1` (amendment, 2026-11) lets the
+  operator accept that trade-off: an OIDC session may invite new devices — one the provider
+  refuses, such as a device outside Intune — but removing passkeys stays with a passkey session.
 - Cloudflare Access and the bearer token keep working unchanged. If the `webauthn` package is
   missing but another way in is configured, passkeys are switched off with a warning rather than
   taking a working deployment down.

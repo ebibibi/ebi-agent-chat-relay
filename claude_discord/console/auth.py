@@ -69,6 +69,9 @@ class ConsoleAuthConfig:
     oidc_client_secret: str | None = None
     oidc_name: str | None = None
     oidc_trust_unverified_email: bool = False
+    #: Let an OIDC session invite new passkey devices (never remove them), for
+    #: devices the identity provider will not admit. Off by default: see ADR-0012.
+    oidc_adds_passkeys: bool = False
 
     @property
     def access_enabled(self) -> bool:
@@ -181,6 +184,7 @@ class ConsoleAuthConfig:
             oidc_client_secret=_env("CCDB_CONSOLE_OIDC_CLIENT_SECRET") or None,
             oidc_name=_env("CCDB_CONSOLE_OIDC_NAME") or None,
             oidc_trust_unverified_email=_env("CCDB_CONSOLE_OIDC_TRUST_UNVERIFIED_EMAIL") == "1",
+            oidc_adds_passkeys=_env("CCDB_CONSOLE_OIDC_ADDS_PASSKEYS") == "1",
         )
 
 

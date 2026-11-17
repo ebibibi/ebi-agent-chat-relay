@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -391,3 +392,55 @@ def test_missing_passkey_extra_degrades_to_oidc(monkeypatch) -> None:
     monkeypatch.setattr(auth_module, "passkeys_installed", lambda: False)
     assert OIDC_ONLY.effective().passkeys is False
     assert ConsoleAuthConfig().effective().passkeys is True  # no other way in: report it
+
+
+async def _oidc_console(tmp_path, config: ConsoleAuthConfig):
+    db = str(tmp_path / "sessions.db")
+    repo = WorkItemRepository(db)
+    await repo.init_db()
+    store = PasskeyStore(db)
+    await store.init_db()
+    await store.add(credential_id=b"x", public_key=b"k", sign_count=0, rp_id="h", name="n")
+    authenticator = ConsoleAuthenticator(config, sessions=store)
+    authenticator.identify = AsyncMock(return_value="oidc:owner@example.com")
+    server = ConsoleServer(MagicMock(), repo, authenticator, port=0, passkeys=PasskeyService(store))
+    return store, server
+
+
+async def test_an_oidc_session_cannot_add_devices_by_default(tmp_path) -> None:
+    _, server = await _oidc_console(tmp_path, OIDC_ONLY)
+    async with TestClient(TestServer(server.app)) as client:
+        invite = await client.post("/console/api/passkeys/invite", headers=HEADERS)
+        assert invite.status == 403
+
+
+async def test_an_opted_in_oidc_session_adds_devices_but_cannot_remove_them(tmp_path) -> None:
+    """CCDB_CONSOLE_OIDC_ADDS_PASSKEYS=1: a device the identity provider will not
+    let in (no device management) can still get a passkey, invited from an
+    OIDC session. Removing passkeys stays with a passkey session."""
+    config = replace(OIDC_ONLY, oidc_adds_passkeys=True)
+    store, server = await _oidc_console(tmp_path, config)
+    async with TestClient(TestServer(server.app)) as client:
+        invite = await client.post("/console/api/passkeys/invite", headers=HEADERS)
+        assert invite.status == 200
+        assert (await invite.json())["code"]
+        assert (await client.get("/console/api/passkeys", headers=HEADERS)).status == 200
+        listed = await store.list_all()
+        gone = await client.delete(f"/console/api/passkeys/{listed[0].id}", headers=HEADERS)
+        assert gone.status == 403
+
+
+async def test_the_opt_in_does_not_extend_to_access_identities(tmp_path) -> None:
+    config = replace(OIDC_ONLY, oidc_adds_passkeys=True)
+    _, server = await _oidc_console(tmp_path, config)
+    server.auth.identify = AsyncMock(return_value="owner@example.com")  # Cloudflare Access
+    async with TestClient(TestServer(server.app)) as client:
+        invite = await client.post("/console/api/passkeys/invite", headers=HEADERS)
+        assert invite.status == 403
+
+
+def test_the_oidc_opt_in_is_read_from_the_environment(monkeypatch) -> None:
+    monkeypatch.setenv("CCDB_CONSOLE_OIDC_ADDS_PASSKEYS", "1")
+    assert ConsoleAuthConfig.from_env().oidc_adds_passkeys is True
+    monkeypatch.delenv("CCDB_CONSOLE_OIDC_ADDS_PASSKEYS")
+    assert ConsoleAuthConfig.from_env().oidc_adds_passkeys is False

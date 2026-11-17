@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `CCDB_CONSOLE_OIDC_ADDS_PASSKEYS=1` lets a Google / Entra ID session invite a new passkey
+  device (**🔑 Passkeys → Add a device**) for devices the identity provider will not admit;
+  removing passkeys still needs a passkey session. Off by default (#1434).
+
 - Focus session shows the **whole decision request** (all seven parts with headings, open) and a
   large **↗ Open the source thread to work on it** button, primary for tasks (#1417).
 - Canvas mode **⚡ this screen's AI** (#1401): pick backend, connection, model and effort for
