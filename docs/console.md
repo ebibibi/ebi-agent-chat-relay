@@ -1292,3 +1292,18 @@ Agents receive the link format and the existing `/api/search?q=…&body=1` looku
 in their run context, with instructions to use verified IDs only. That search
 can find stored session summaries and local Claude transcripts; it does not make
 all external message histories searchable.
+
+
+### When a conversation is a next-move candidate
+
+An open or recently active conversation is not automatically work for the person. Automatic
+triage separates `needs_human` (a concrete outstanding human action) from `ready` (whether it
+can be done now). Acknowledgments, settled questions, background advice and optional future
+follow-ups do not create tasks. Continuing conversations remain accessible in other lists.
+
+A thread enters Focus only with a current triage result that explicitly confirms such an action
+and names it, or a current human readiness override. Old results and untriaged threads stay out
+until re-evaluated. Captured tasks still work without a model. Running and queued work cannot
+be recommended. The guide also rechecks the latest board before displaying a candidate.
+The prompt version changes once to re-evaluate older guesses; no tasks are completed or archived
+as part of this change, and pin choices are preserved.

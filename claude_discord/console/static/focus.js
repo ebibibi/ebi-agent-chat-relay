@@ -101,7 +101,11 @@ window.ConsoleFocus = (() => {
 
   function nextMove(g, byId) {
     // Re-check the latest board: a candidate may have acquired a parent.
-    const direct = g.next.filter((n) => !(byId.get(n.id) || n).parent_id);
+    const direct = g.next.filter((n) => {
+      const item = byId.get(n.id);
+      return item && !item.parent_id && item.actionable === true && item.focus != null &&
+        item.needs_human !== false && !item.running && !item.queued;
+    });
     const calm = g.calm || !direct.length;
     const pick = direct.find((n) => !elsewhere(byId.get(n.id) || n));
     if (!pick) {
