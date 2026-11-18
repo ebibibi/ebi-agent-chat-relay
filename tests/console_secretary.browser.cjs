@@ -140,3 +140,27 @@ test('secretary mode is the home after a reload, and switching back restores Foc
   await page.waitForFunction(() => state.view === 'focus');
   assert.equal(await page.locator('.sec-block').count(), 0);
 });
+
+for (const width of [1440, 390]) test(`dismiss removes just one card without replying (${width}px)`, {timeout:30000}, async t => {
+  const {page, posted} = await open(t, {consoleMode:'secretary'});
+  await page.setViewportSize({width,height:900});
+  await page.locator('.sec-card').first().waitFor();
+  let removed = false;
+  await page.route('**/items/t1/decisions/11', route => {
+    assert.equal(route.request().method(), 'DELETE'); removed = true;
+    return route.fulfill({contentType:'application/json',body:'{"closed":1}'});
+  });
+  await page.route('**/board', route => route.fulfill({contentType:'application/json',body:JSON.stringify({items,slots:{},places:[],views:[],
+    secretary:{...secretary,decide:secretary.decide.filter(c => !removed || c.request_id !== 11)}})}));
+  await page.locator('.sec-card').filter({hasText:'Publish release 5.3 now?'}).getByRole('button',{name:'消す',exact:true}).click();
+  await page.waitForFunction(() => !document.querySelector('.sec-title')?.textContent.includes('Publish release'));
+  assert.equal(await page.locator('.sec-card').filter({hasText:'Third question'}).count(), 1);
+  assert.equal(posted.filter(p => p.path.endsWith('/reply')).length, 0);
+  // The same card renderer supplies the situation panel in classic mode.
+  await page.evaluate(() => { localStorage.setItem('consoleMode','classic'); });
+  await page.reload();
+  await page.evaluate(() => openItem('t1'));
+  if (width <= 900) await page.locator('#d-tabs .sit-tab').last().click();
+  await page.locator('#d-side .sec-card').first().waitFor();
+  assert.ok(await page.locator('#d-side .sec-card').getByRole('button',{name:'消す',exact:true}).count() > 0);
+});

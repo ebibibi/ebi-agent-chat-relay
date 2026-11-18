@@ -4,7 +4,7 @@ This table is the one place a request lives. The secretary home and a family's s
 both read it, so a parent never copies its child's question: the child's card shows in the
 parent's panel as it is. One open request per thread and key: a newer request with the same
 key replaces the old one. A request is closed, never deleted, when it is answered, replaced,
-superseded by a bare mark, or its thread is finished.
+dismissed by the person, resolved in later conversation, or its thread is finished.
 """
 
 from __future__ import annotations

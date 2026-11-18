@@ -643,3 +643,13 @@ async def test_the_estimate_is_stored_and_reported_on_the_board(repo) -> None:
     assert (three["ai"]["minutes"], three["effort"]) == (None, None)
     (untriaged,) = apply_triage([_item("t4")], {}, now=NOW)
     assert "effort" not in untriaged
+
+
+@pytest.mark.parametrize("fail", [False, True])
+async def test_request_reconciliation_runs_even_without_due_triage_and_is_isolated(repo, fail):
+    from unittest.mock import AsyncMock
+
+    review = AsyncMock(side_effect=RuntimeError("offline") if fail else None, return_value=0)
+    triager = Triager(repo, ask=AsyncMock(), read_messages=AsyncMock(), review_requests=review)
+    assert await triager.run_once([]) == 0
+    review.assert_awaited_once_with([])

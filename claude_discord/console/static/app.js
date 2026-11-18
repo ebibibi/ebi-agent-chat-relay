@@ -223,7 +223,7 @@ async function refresh() {
     const data = await api("/board");
     // An unchanged poll redraws nothing: rebuilding hundreds of rows every few
     // seconds is what makes a phone stutter. Relative times still tick once a minute.
-    const sig = JSON.stringify([data.items, data.slots, data.places, data.views]);
+    const sig = JSON.stringify([data.items, data.slots, data.places, data.views, data.secretary]);
     // A search hit pushed into state.items locally still gets reconciled as before.
     const unchanged = sig === state.boardSig && state.items.length === data.items.length
       && Date.now() - state.renderedAt < STALE_RENDER_MS;

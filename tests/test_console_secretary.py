@@ -292,3 +292,38 @@ async def test_a_card_is_on_the_board_and_an_answer_closes_it(env, tmp_path) -> 
     )
     await _settle(env.host)
     assert [r.key for r in await decisions.list_open()] == ["b"]
+
+
+async def test_dismiss_one_card_without_sending_an_answer(env, tmp_path) -> None:
+    decisions = DecisionRequestRepository(str(tmp_path / "sessions.db"))
+    env.console.api.decision_repo = decisions
+    item_id = await _start(env)
+    thread = int(item_id[1:])
+    first = await decisions.put(
+        thread,
+        parse_request(_good(key="a"), kind="waiting"),
+        origin="mark",
+        source_thread_id=thread,
+    )
+    second = await decisions.put(
+        thread,
+        parse_request(_good(key="b"), kind="waiting"),
+        origin="mark",
+        source_thread_id=thread,
+    )
+    history = await env.conversations.history(thread, 100)
+    path = f"/console/api/items/{item_id}/decisions/{first.id}"
+    assert (await env.client.delete(path)).status == 401
+    assert (await env.client.delete(path, headers=AUTH)).status == 403
+    response = await env.client.delete(path, headers=WRITE)
+    assert response.status == 200
+    assert (await response.json())["closed"] == 1
+    assert [r.id for r in await decisions.list_open()] == [second.id]
+    assert await env.conversations.history(thread, 100) == history
+    assert (await (await env.client.delete(path, headers=WRITE)).json())["closed"] == 0
+    assert (
+        await env.client.delete(f"/console/api/items/t999/decisions/{second.id}", headers=WRITE)
+    ).status == 404
+    assert (
+        await env.client.delete(f"/console/api/items/{item_id}/decisions/abc", headers=WRITE)
+    ).status == 400

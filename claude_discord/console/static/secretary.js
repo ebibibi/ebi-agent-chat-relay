@@ -25,6 +25,7 @@ window.ConsoleSecretary = (() => {
       calm: "🌿 Nothing to decide right now.", calm_more: "What remains is moving on its own.",
       about: "About: ", deadline: "Deadline: ", sep: ": ", recommended: "recommended", more_detail: "More ▾",
       own_answer: "✏️ Another answer", reply_ph: "Your answer…", send: "Send", open: "Open the thread",
+      dismiss: "Dismiss", dismissHint: "Remove this card; no answer is sent",
       sent: "Sent — the agent carries on", since: (r) => `asked ${r}`, confirm: "✓ Confirm done",
       files: "📎 What to look at", preview: "Contents", loading: "Loading…", unreadable: "Could not read this file here; open it.",
       in_thread: "Nothing to look at was attached to this request. Open the thread to check it there.",
@@ -41,6 +42,7 @@ window.ConsoleSecretary = (() => {
         ["deadline", "Deadline, and what happens without a decision"]],
     },
     ja: {
+      dismiss: "消す", dismissHint: "このカードだけを消します。回答は送信しません",
       title: "🗂 秘書", mode: "表示モード", classic: "従来", secretary: "秘書",
       decide: "🔴 今決めること", review: "👀 見てほしいもの", working: "🤖 AIが進めていること", done: "✅ 今日終わったこと",
       unexplained: "📭 説明のない依頼",
@@ -227,6 +229,14 @@ window.ConsoleSecretary = (() => {
   // A review with nothing to look at is not a review: send the person to the thread.
   const nothingToSee = (card) => card.material === "none" && (card.kind === "review" || /確認|レビュー|review|check/i.test(card.card.title || ""));
 
+  async function dismiss(card, button) {
+    button.disabled = true;
+    try {
+      await api(`/items/${encodeURIComponent(card.id)}/decisions/${card.request_id}`, { method: "DELETE" });
+      await refresh();
+    } catch (err) { button.disabled = false; toast(err.message); }
+  }
+
   function decisionCard(card) {
     const s = S();
     const c = card.card;
@@ -236,7 +246,9 @@ window.ConsoleSecretary = (() => {
       card.since ? h("span", { class: "dim", text: s.since(rel(card.since)) }) : null,
       card.place ? h("span", { class: "tag place", text: `📍 ${card.place}` }) : null,
       h("button", { type: "button", class: "guide-link sec-thread", title: s.open, onclick: () => openItem(card.id),
-        text: `↗ ${card.item_title}` }));
+        text: `↗ ${card.item_title}` }),
+      h("button", { type: "button", class: "chip sec-dismiss", text: s.dismiss, title: s.dismissHint,
+        onclick: (e) => dismiss(card, e.currentTarget) }));
     const body = [
       h("h3", { class: "sec-title", text: `${card.kind === "review" ? "👀" : "🔴"} ${c.title}` }),
       h("div", { class: "sec-context" }, h("span", { class: "dim", text: s.about }), document.createTextNode(c.context)),
