@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -144,3 +145,78 @@ async def test_ordinary_unrelated_chat_is_explicitly_kept(repo):
     )
     assert len(await repo.list_open()) == 1
     assert "Unrelated replies" in ask.call_args.args[0]
+
+
+@pytest.mark.parametrize("reply", [None, "", " \n\t"])
+async def test_no_answer_preserves_cards_and_retries_after_cooldown(
+    repo, reply, caplog, monkeypatch
+):
+    card = await repo.put(
+        123, parse_request(_good(), kind="waiting"), origin="mark", source_thread_id=123
+    )
+    stamp = (datetime.now(UTC) + timedelta(seconds=5)).isoformat()
+    ask = AsyncMock(return_value=reply)
+    review = DecisionReviewer(
+        repo,
+        ask=ask,
+        read_messages=AsyncMock(
+            return_value=[{"kind": "human", "content": "Completed", "created_at": stamp}]
+        ),
+    )
+    clock = Mock(return_value=100.0)
+    monkeypatch.setattr("claude_discord.console.decision_cleanup.time", Mock(monotonic=clock))
+    item = {"thread_id": "123", "last_activity_at": stamp}
+    with caplog.at_level(logging.WARNING, logger="claude_discord.console.decision_cleanup"):
+        assert await review.run_once([item]) == 0
+    assert [r.id for r in await repo.list_open()] == [card.id]
+    assert caplog.records
+    assert all(r.levelno == logging.WARNING and r.exc_info is None for r in caplog.records)
+    clock.return_value = 159.0
+    assert await review.run_once([item]) == 0
+    assert ask.await_count == 1
+    ask.return_value = json.dumps({"resolved": [{"id": card.id, "evidence": "Completed"}]})
+    clock.return_value = 160.0
+    assert await review.run_once([item]) == 1
+    assert ask.await_count == 2
+    assert await repo.list_open() == []
+
+
+async def test_no_answer_does_not_skip_other_threads(repo):
+    first = await repo.put(
+        123, parse_request(_good(), kind="waiting"), origin="mark", source_thread_id=123
+    )
+    second = await repo.put(
+        456, parse_request(_good(), kind="waiting"), origin="mark", source_thread_id=456
+    )
+    stamp = (datetime.now(UTC) + timedelta(seconds=5)).isoformat()
+
+    async def answer(prompt):
+        if f'"id": {first.id},' in prompt:
+            return None
+        return json.dumps({"resolved": [{"id": second.id, "evidence": "Completed"}]})
+
+    review = DecisionReviewer(
+        repo,
+        ask=answer,
+        read_messages=AsyncMock(
+            return_value=[{"kind": "human", "content": "Completed", "created_at": stamp}]
+        ),
+    )
+    assert await review.run_once([{"thread_id": "123"}, {"thread_id": "456"}]) == 1
+    assert [r.id for r in await repo.list_open()] == [first.id]
+
+
+@pytest.mark.parametrize("reply", ["not json", '{"resolved":true}'])
+async def test_nonempty_invalid_answer_still_logs_an_error(repo, reply, caplog):
+    await repo.put(123, parse_request(_good(), kind="waiting"), origin="mark", source_thread_id=123)
+    stamp = (datetime.now(UTC) + timedelta(seconds=5)).isoformat()
+    review = DecisionReviewer(
+        repo,
+        ask=AsyncMock(return_value=reply),
+        read_messages=AsyncMock(
+            return_value=[{"kind": "human", "content": "Completed", "created_at": stamp}]
+        ),
+    )
+    assert await review.run_once([{"thread_id": "123"}]) == 0
+    assert len(await repo.list_open()) == 1
+    assert any(r.levelno == logging.ERROR and r.exc_info for r in caplog.records)

@@ -86,7 +86,14 @@ class DecisionReviewer:
                     ],
                 }
                 raw = await self.ask(_PROMPT + json.dumps(payload, ensure_ascii=False))
-                result = json.loads(raw or "")
+                if raw is None or not raw.strip():
+                    logger.warning(
+                        "console: decision review returned no answer for thread %s; retrying later",
+                        thread,
+                    )
+                    self._retry[thread] = time.monotonic() + 60
+                    continue
+                result = json.loads(raw)
                 if not isinstance(result, dict) or not isinstance(result.get("resolved"), list):
                     raise ValueError("invalid decision review")
                 known = {c.id: c for c in cards}
