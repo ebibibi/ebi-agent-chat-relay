@@ -5,6 +5,8 @@ name = "一人情シス（みなとテック）"
 timezone = "Asia/Tokyo"
 places = ["事務所", "自宅"]
 
+# The sidebar automatically lists #m365 under Tags; click it to see matching open requests
+# across lists, then reload to confirm the tag view stays selected. No saved rule is required.
 # Saved views: rules in the Console's filter language, listed in the menu (docs/console.md).
 [[views]]
 name = "M365 の依頼"

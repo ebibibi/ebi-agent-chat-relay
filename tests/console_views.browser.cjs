@@ -8,7 +8,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '../claude_discord/console/static');
 
 test('a rule saved as a view selects threads across lists', {timeout: 30000}, async t => {
-  const browser = await chromium.launch({headless:true,args:['--no-sandbox']});
+  const browser = await chromium.launch({headless:true,executablePath:process.env.CONSOLE_TEST_CHROMIUM,args:['--no-sandbox']});
   t.after(() => browser.close());
   const page = await browser.newPage({viewport:{width:1440,height:900},locale:'ja-JP'});
   page.setDefaultTimeout(5000);
@@ -68,4 +68,64 @@ test('a rule saved as a view selects threads across lists', {timeout: 30000}, as
   await page.locator('.view-bar').getByRole('button', {name:'🗑 削除'}).click();
   await page.waitForFunction(() => !document.querySelector('.nav-views-saved'));
   assert.equal(await page.evaluate(() => state.view), 'focus');
+});
+
+// Existing tags must be discoverable without creating a saved view first.
+for (const width of [1440, 390]) test(`tag views are automatic and survive refresh (${width}px)`, {timeout: 30000}, async t => {
+  const browser = await chromium.launch({headless:true,executablePath:process.env.CONSOLE_TEST_CHROMIUM,args:['--no-sandbox']});
+  t.after(() => browser.close());
+  const page = await browser.newPage({viewport:{width,height:900},locale:'ja-JP'});
+  page.setDefaultTimeout(5000);
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  const row = (id, bucket, tags) => ({id, title:id, thread_id:id.slice(1), bucket,
+    status:bucket === 'done' ? 'done' : bucket === 'ai' ? 'running' : 'review', priority:2, tags});
+  let items = [row('t1','me',['teams-exporter','source/日本語']), row('t2','ai',['teams-exporter']),
+    row('t3','done',['teams-exporter']), row('t4','me',[])];
+  let mutations = 0;
+  await page.route('http://console.test/**', async route => {
+    const req = route.request(), p = new URL(req.url()).pathname;
+    if (req.method() !== 'GET') mutations++;
+    if (p === '/' || p.startsWith('/static/')) {
+      const file = p === '/' ? 'index.html' : path.basename(p);
+      return route.fulfill({body:fs.readFileSync(path.join(root,file)),contentType:
+        file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html'});
+    }
+    let data = {};
+    if (p.endsWith('/board')) data = {items,slots:{},places:[],views:[]};
+    else if (p.endsWith('/workspace/plan')) data = {available:false};
+    else if (p.endsWith('/workspace')) data = {available:false,entries:[]};
+    return route.fulfill({contentType:'application/json',body:JSON.stringify(data)});
+  });
+  await page.goto('http://console.test/');
+  const nav = page.locator('.nav-views-tags');
+  await nav.waitFor({state:'attached'});
+  const openMenu = async () => { if (width <= 900) await page.locator('#nav-toggle').click(); };
+  await openMenu();
+  const teams = nav.getByRole('button', {name:'#teams-exporter 2', exact:true});
+  await teams.click();
+  await page.waitForFunction(() => document.querySelectorAll('#list .row').length === 2);
+  assert.equal(await page.locator('#view-title').innerText(), '#teams-exporter');
+  assert.equal(await page.locator('#list .row').filter({hasText:'t4'}).count(), 0);
+  assert.equal(await nav.getByRole('button', {name:'#teams-exporter 2', exact:true}).getAttribute('aria-current'), 'page');
+  assert.equal(await page.locator('.view-bar button').count(), 0); // automatic tags cannot be deleted as saved views
+  await page.fill('#filter', 'title:t1');
+  await page.waitForFunction(() => document.querySelectorAll('#list .row').length === 1);
+  await page.fill('#filter', '');
+  await page.reload();
+  await page.waitForFunction(() => document.getElementById('view-title').textContent === '#teams-exporter');
+  assert.equal(await page.locator('#list .row').count(), 2);
+  await openMenu();
+  await nav.getByRole('button', {name:'#source/日本語 1', exact:true}).click();
+  assert.equal(await page.evaluate(() => location.hash), '#tag:source%2F%E6%97%A5%E6%9C%AC%E8%AA%9E');
+  await page.reload();
+  await page.waitForFunction(() => document.getElementById('view-title').textContent === '#source/日本語');
+  assert.equal(await page.locator('#list .row').count(), 1);
+  // A board refresh updates the navigation and removes an active tag that no longer exists.
+  items = items.map(i => ({...i, tags:i.tags.filter(tag => tag !== 'source/日本語')}));
+  await page.evaluate(() => refresh());
+  await page.waitForFunction(() => state.view === 'focus');
+  assert.equal(await nav.getByRole('button', {name:/source/}).count(), 0);
+  assert.equal(mutations, 0);
+  assert.deepEqual(errors, []);
 });

@@ -988,6 +988,13 @@ thread (`POST /api/ingest` with `"tags"`). Some come from the thread's origin an
 thread started by the Teams Channel Exporter carries `teams-exporter`, including threads from before
 tags existed (it is derived from the start of the first prompt). Rows show tags as `#tag`.
 
+The sidebar automatically lists every tag present on the board under **＃ Tags**, with its open
+item count. Clicking a tag opens matching items across lists, using the same filtering and
+finished-item policy as saved views. No saved rule or setup is needed. These views update with
+each board refresh and survive reloads via `/#tag:<URL-encoded tag>`. They cannot be renamed or
+deleted as saved views; editing the items' tags updates the menu. If an active tag disappears
+from the board entirely, navigation returns to Focus.
+
 API: `GET /console/api/views` → `{"views": [{id, name, query, position}]}`; `POST` with
 `{name, query}`, `PATCH /console/api/views/{id}` with any of `name`, `query`, `position`, and
 `DELETE /console/api/views/{id}` each answer with the new list. Names are up to 40 characters,

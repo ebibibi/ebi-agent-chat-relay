@@ -8,13 +8,13 @@
 window.ConsoleViews = (() => {
   const ja = () => document.documentElement.lang === "ja";
   const L = () => ja() ? {
-    heading: "🔖 保存ビュー", save: "🔖 ビューに保存", save_hint: "いまの絞り込みに名前を付けて、メニューに置く",
+    tag_heading: "＃ タグ", heading: "🔖 保存ビュー", save: "🔖 ビューに保存", save_hint: "いまの絞り込みに名前を付けて、メニューに置く",
     name_prompt: "ビューの名前", query_prompt: "ルール（絞り込みの書き方）", rule: "ルール：",
     edit: "✎ 編集", remove: "🗑 削除", remove_confirm: (n) => `保存ビュー「${n}」を削除しますか？（スレッドは消えません）`,
     saved: (n) => `🔖「${n}」を保存しました`, removed: "保存ビューを削除しました",
     unknown: "⚠ 読めなかった条件：", syntax: "書き方のヘルプ",
   } : {
-    heading: "🔖 Saved views", save: "🔖 Save as view", save_hint: "Name the current filter and keep it in the menu",
+    tag_heading: "＃ Tags", heading: "🔖 Saved views", save: "🔖 Save as view", save_hint: "Name the current filter and keep it in the menu",
     name_prompt: "Name of the view", query_prompt: "Rule (filter syntax)", rule: "Rule:",
     edit: "✎ Edit", remove: "🗑 Delete", remove_confirm: (n) => `Delete the saved view "${n}"? (No thread is deleted.)`,
     saved: (n) => `🔖 Saved "${n}"`, removed: "Saved view deleted",
@@ -24,15 +24,21 @@ window.ConsoleViews = (() => {
     "origin:console · list:me · is:running|pinned|overdue|child|done · has:due|tag · -term (not) · \"phrase\"";
 
   let views = [];
-  const current = () => views.find((v) => v.id === state.view) || null;
-  const isKey = (key) => /^v[0-9a-f]{10}$/.test(key || "");
+  let tags = [];
+  // Tags already on the board become views without writes or per-device setup. Encode the
+  // whole tag so slashes and non-ASCII labels round-trip through #view/item deep links.
+  const boardTags = () => [...new Set(state.items.flatMap((i) => i.tags || []))].sort()
+    .map((tag) => ({ id: `tag:${encodeURIComponent(tag)}`, name: tag, query: `tag:${tag}`, tag: true }));
+  const current = () => [...views, ...tags].find((v) => v.id === state.view) || null;
+  const isKey = (key) => /^v[0-9a-f]{10}$/.test(key || "") || /^tag:.+/.test(key || "");
   const active = () => isKey(state.view);
   // The active view's rule, or null outside a saved view.
   const query = () => (active() ? current()?.query ?? "" : null);
-  const title = () => { const v = active() && current(); return v ? `🔖 ${v.name}` : null; };
+  const title = () => { const v = active() && current(); return v ? (v.tag ? `#${v.name}` : `🔖 ${v.name}`) : null; };
 
   function onBoard(list) {
     views = Array.isArray(list) ? list : [];
+    tags = boardTags();
     // A view deleted on another device leaves this one on the default list.
     if (active() && !current()) { state.view = "focus"; localStorage.setItem("view", "focus"); }
   }
@@ -43,16 +49,20 @@ window.ConsoleViews = (() => {
     return state.items.filter((i) => (done || i.bucket !== "done") && window.ConsoleQuery.test(i, parsed)).length;
   }
 
-  function nav() {
-    if (!views.length) return null;
-    return h("div", { class: "nav-views-saved" },
+  function navGroup(list, cls, heading) {
+    if (!list.length) return null;
+    return h("div", { class: cls },
       h("div", { class: "sep" }),
-      h("div", { class: "dim nav-heading", text: L().heading }),
-      ...views.map((v) => h("button", {
+      h("div", { class: "dim nav-heading", text: heading }),
+      ...list.map((v) => h("button", {
         class: state.view === v.id ? "active" : "", "aria-current": state.view === v.id ? "page" : null,
         title: v.query, onclick: () => setView(v.id),
-      }, h("span", { text: v.name }), h("span", { class: "count", text: String(count(v) || "") }))));
+      }, h("span", { text: v.tag ? `#${v.name}` : v.name }),
+      h("span", { class: "count", text: String(count(v)) }))));
   }
+
+  const nav = () => navGroup(views, "nav-views-saved", L().heading);
+  const tagNav = () => navGroup(tags, "nav-views-tags", L().tag_heading);
 
   // A saved view lists its items in board order, under project headings when grouping is on.
   const rows = (items) => window.ConsoleWsFilter.rows(items);
@@ -79,7 +89,7 @@ window.ConsoleViews = (() => {
 
   async function edit() {
     const v = current();
-    if (!v) return;
+    if (!v || v.tag) return;
     const name = prompt(L().name_prompt, v.name);
     if (name === null) return;
     const q = prompt(L().query_prompt, v.query);
@@ -89,7 +99,7 @@ window.ConsoleViews = (() => {
 
   async function remove() {
     const v = current();
-    if (!v || !confirm(L().remove_confirm(v.name))) return;
+    if (!v || v.tag || !confirm(L().remove_confirm(v.name))) return;
     if (await call(`/views/${encodeURIComponent(v.id)}`, "DELETE")) {
       toast(L().removed);
       setView("focus");
@@ -105,8 +115,8 @@ window.ConsoleViews = (() => {
     const v = active() && current();
     if (v) {
       parts.push(h("span", { class: "dim", text: l.rule }), h("code", { class: "view-rule", text: v.query }),
-        h("button", { type: "button", class: "chip", onclick: edit, text: l.edit }),
-        h("button", { type: "button", class: "chip", onclick: remove, text: l.remove }));
+        ...(v.tag ? [] : [h("button", { type: "button", class: "chip", onclick: edit, text: l.edit }),
+        h("button", { type: "button", class: "chip", onclick: remove, text: l.remove })]));
     }
     if (unread.length) parts.push(h("span", { class: "view-unknown", title: SYNTAX, text: `${l.unknown} ${unread.join(" ")}` }));
     return parts.length ? h("li", { class: "place-bar view-bar" }, ...parts) : null;
@@ -122,5 +132,5 @@ window.ConsoleViews = (() => {
     $("filter").title = `${L().syntax}: ${SYNTAX}`;
   }
 
-  return { onBoard, active, isKey, query, title, nav, rows, bar, save, syncSaveButton, list: () => views };
+  return { onBoard, active, isKey, query, title, nav, tagNav, rows, bar, save, syncSaveButton, list: () => views };
 })();
