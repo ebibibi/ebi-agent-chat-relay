@@ -674,6 +674,7 @@ class Triager:
         registered_places: Callable[[], Awaitable[list[str]]] | None = None,
         workspace_index: Callable[[], Awaitable[list[tuple[str, str]]]] | None = None,
         on_workspace: Callable[[dict[str, Any], str], Awaitable[None]] | None = None,
+        review_requests: Callable[[Sequence[dict[str, Any]]], Awaitable[int]] | None = None,
     ) -> None:
         self.repo = repo
         self._ask = ask
@@ -684,6 +685,7 @@ class Triager:
         self._registered = registered_places
         self._workspace_index = workspace_index
         self._on_workspace = on_workspace
+        self._review_requests = review_requests
         self._failed: dict[str, tuple[str, float]] = {}
         self._task: asyncio.Task[None] | None = None
 
@@ -724,6 +726,11 @@ class Triager:
                 return await self._triage(item, places, workspace)
 
         results = await asyncio.gather(*(one(i) for i in batch))
+        if self._review_requests is not None:
+            try:
+                await self._review_requests(items)
+            except Exception:
+                logger.exception("console: request cleanup failed")
         return sum(results)
 
     async def _triage(

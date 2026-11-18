@@ -15,8 +15,9 @@ module turns the board into the person's unit instead — decisions — built fr
 
 A request shows while it stands: until it is answered on its card, replaced by the same key,
 closed by its agent or its thread is finished — and not while the thread is running. A reply
-typed in the thread or a bare marker closes nothing, because a thread may ask several things
-at once (#1438).
+typed in the thread or a bare marker directly closes nothing: a thread may ask several things
+at once (#1438). Background reconciliation may close an individual card when a later human
+answer is confirmed; the person can also dismiss a card without replying.
 
 The cards are sent whole, not only the first few: a family's situation panel shows the same
 cards for its own threads (situation.js), so the Console reads one list for both screens.

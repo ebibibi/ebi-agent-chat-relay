@@ -170,9 +170,21 @@ it in the same turn. A bare marker call still marks the thread as before; it sho
 per thread and `key`; a newer one with the same key replaces it. A request closes when the person
 answers it on its card, when its agent closes it (`DELETE /api/threads/{id}/decisions/{key}`,
 `_` for the card sent without a key, `?reason=` optional) because the matter was settled in the
-chat, or when its thread is marked 🏁/✅. A reply typed in the thread and a bare marker close
-nothing, because a thread may ask several things at once. A card shows while its request is open,
+chat, or when its thread is marked 🏁/✅. A reply typed in the thread and a bare marker do not directly close
+cards, because a thread may ask several things at once. A card shows while its request is open,
 except while the thread is running or once it is finished.
+
+Each card also has **Dismiss** (消す), in both the situation panel and secretary home. It closes
+only that request, preserves its history, sends no answer and does not complete the thread.
+`DELETE /console/api/items/{item_id}/decisions/{request_id}` provides the same authenticated action.
+
+When automatic triage is enabled, its existing backend also checks cards after new conversation
+activity, in the background after the thread stops running. A card closes automatically only when
+the model identifies a specific later human answer, withdrawal or completion report and supplies
+an exact quote found in that later message. Old messages, agent drafts, unrelated chat and elapsed
+deadlines alone do not close cards. An uncertain or failed check leaves the card for the person or
+agent to dismiss. Checks are cached until the conversation or open requests change; board polling
+does not make model calls.
 
 **Trial metrics.** To compare the modes over a week, the Console records which threads you
 open (in either mode) and which answers came from a card, with how long the question had

@@ -62,6 +62,7 @@ from .commands import (
     skill_prompt,
 )
 from .conversations import ConversationRepository
+from .decision_cleanup import DecisionReviewer
 from .files import resolve_file
 from .guide import build_guide
 from .logsafe import q as _q
@@ -404,6 +405,9 @@ class ConsoleServer:
         page_routes = PageRoutes(self.api)
         secretary_routes = SecretaryRoutes(self, self.secretary_events)
         r.add_post(f"{API_PREFIX}/secretary/events", secretary_routes.record)
+        r.add_delete(
+            f"{API_PREFIX}/items/{{item_id}}/decisions/{{request_id}}", self.dismiss_request
+        )
         CanvasRoutes(self, self.canvas, IDENTITY).register(r, API_PREFIX)
         r.add_get(f"{API_PREFIX}/secretary/stats", secretary_routes.stats)
         r.add_post(f"{API_PREFIX}/pages/{{slug}}", page_routes.define)
@@ -495,6 +499,12 @@ class ConsoleServer:
         if self.triage is None or self._triager is not None:
             return
         places = self.places
+        decisions = getattr(self.api, "decision_repo", None)
+        reviewer = (
+            DecisionReviewer(decisions, ask=ask, read_messages=self.decision_messages)
+            if decisions is not None
+            else None
+        )
         self._triager = Triager(
             self.triage,
             ask=ask,
@@ -503,6 +513,7 @@ class ConsoleServer:
             registered_places=places.names if places is not None else None,
             workspace_index=self.workspace_index if self.workspace.root is not None else None,
             on_workspace=self._bind_inferred,
+            review_requests=reviewer.run_once if reviewer is not None else None,
         )
         self._triager.start(self._board_items, TRIAGE_INTERVAL_SECONDS)
         logger.info("Ebi AI Console: automatic triage on (%s)", model)
@@ -785,6 +796,24 @@ class ConsoleServer:
         )
         return files
 
+    async def dismiss_request(self, request: web.Request) -> web.Response:
+        """Dismiss this exact card without replying or changing the thread's state."""
+        item_id = request.match_info["item_id"]
+        thread = _thread_of(item_id)
+        try:
+            rid = int(request.match_info["request_id"])
+        except ValueError:
+            return _error("Invalid request_id", 400)
+        if not 0 < rid <= 2**63 - 1:
+            return _error("Invalid request_id", 400)
+        if thread is None or not any(i["id"] == item_id for i in await self._board_items()):
+            return _error("Item not found", 404)
+        repo = getattr(self.api, "decision_repo", None)
+        if repo is None:
+            return _error("Decision requests unavailable", 503)
+        closed = await repo.close(thread, reason="dismissed", request_id=rid)
+        return web.json_response({"closed": closed})
+
     async def _close_requests(self, item_id: str, request_id: Any) -> None:
         """A person answered a card: that one request is settled.
 
@@ -942,21 +971,23 @@ class ConsoleServer:
         """What the triage model reads for *item*: its human and agent messages."""
         if not item.get("thread_id"):
             return [("note", item.get("note") or "")]
+        return [
+            ("person" if m["kind"] == "human" else "agent", str(m.get("content") or ""))
+            for m in await self.decision_messages(item)
+            if m["kind"] != "activity"
+        ]
+
+    async def decision_messages(self, item: dict[str, Any]) -> list[dict[str, Any]]:
+        """Timestamped conversation for card cleanup; machine activity is not a human answer."""
         limit = MAX_TRIAGE_MESSAGES
         key = await self._conversation_key(item["id"])
         if key is not None and self.conversations is not None:
-            raw = [with_kind(m.as_dict()) for m in await self.conversations.history(key, limit)]
-        else:
-            thread, err = await self._thread_for(item["id"])
-            if err:
-                return []
-            history = [m async for m in thread.history(limit=limit)]
-            raw = [serialize_message(m) for m in reversed(history)]
-        return [
-            ("person" if m["kind"] == "human" else "agent", str(m.get("content") or ""))
-            for m in raw
-            if m["kind"] != "activity"
-        ]
+            return [with_kind(m.as_dict()) for m in await self.conversations.history(key, limit)]
+        thread, err = await self._thread_for(item["id"])
+        if err:
+            return []
+        history = [m async for m in thread.history(limit=limit)]
+        return [serialize_message(m) for m in reversed(history)]
 
     async def usage_read(self, request: web.Request) -> web.Response:
         if self.usage is None:
