@@ -51,7 +51,13 @@ def _parse(value: str | None) -> datetime | None:
 
 
 def _ranked(item: Mapping[str, Any]) -> bool:
-    return item.get("focus") is not None and item.get("actionable") is not False
+    return (
+        item.get("focus") is not None
+        and item.get("actionable") is True
+        and item.get("needs_human") is not False
+        and not item.get("running")
+        and not item.get("queued")
+    )
 
 
 def _order(item: Mapping[str, Any]) -> tuple[Any, ...]:

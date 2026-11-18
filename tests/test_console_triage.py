@@ -16,6 +16,7 @@ from claude_discord.console.triage import (
     Triager,
     TriageRepository,
     TriageResult,
+    _basis,
     apply_triage,
     ask_model,
     build_prompt,
@@ -291,13 +292,30 @@ async def test_an_urgent_wait_is_not_actionable_until_its_time(repo) -> None:
     later = (NOW + timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
     await repo.save(
         "t1",
-        TriageResult(0, None, "r", "設定する", ready=False, ready_at=later, waiting_for="20時"),
-        basis="b",
+        TriageResult(
+            0,
+            None,
+            "r",
+            "設定する",
+            ready=False,
+            ready_at=later,
+            waiting_for="20時",
+            needs_human=True,
+        ),
+        basis=_basis(_item("t1")),
         model="haiku",
     )
-    await repo.save("t2", TriageResult(3, None, "r", "読む"), basis="b", model="haiku")
     await repo.save(
-        "t3", TriageResult(1, None, "r", "n", ready=False, waiting_for="先方"), basis="b", model="m"
+        "t2",
+        TriageResult(3, None, "r", "読む", needs_human=True),
+        basis=_basis(_item("t2")),
+        model="haiku",
+    )
+    await repo.save(
+        "t3",
+        TriageResult(1, None, "r", "n", ready=False, waiting_for="先方", needs_human=True),
+        basis=_basis(_item("t3")),
+        model="m",
     )
     rows = await repo.all()
     wait, now_, open_wait = apply_triage([_item("t1"), _item("t2"), _item("t3")], rows, now=NOW)
@@ -307,7 +325,7 @@ async def test_an_urgent_wait_is_not_actionable_until_its_time(repo) -> None:
     [due] = apply_triage([_item("t1")], rows, now=NOW + timedelta(hours=4))
     assert due["actionable"] is True  # …and doable once its time has come
     [untriaged] = apply_triage([_item("t9")], rows, now=NOW)
-    assert untriaged["actionable"] is True
+    assert untriaged["actionable"] is None  # an unknown conversation is not a task
 
 
 async def test_a_table_from_the_first_version_gains_the_new_columns(tmp_path) -> None:
@@ -326,6 +344,7 @@ async def test_a_table_from_the_first_version_gains_the_new_columns(tmp_path) ->
     await repo.init_db()
     await repo.init_db()  # twice is harmless
     assert (await repo.all())["t1"].ready is None
+    assert (await repo.all())["t1"].needs_human is None
 
 
 def test_a_new_prompt_version_retriages_everything() -> None:
@@ -349,9 +368,9 @@ def test_a_place_is_parsed_and_known_places_are_offered() -> None:
 async def test_a_guessed_place_fills_in_and_a_persons_place_wins(repo) -> None:
     from claude_discord.console.triage import known_places
 
-    result = TriageResult(1, None, "r", "n", place="自宅")
+    result = TriageResult(1, None, "r", "n", place="自宅", needs_human=True)
     for item_id in ("t1", "t2", "t3"):
-        await repo.save(item_id, result, basis="b", model="haiku")
+        await repo.save(item_id, result, basis=_basis(_item(item_id)), model="haiku")
     await repo.pin("t3", place=True)
     rows = await repo.all()
     items = [_item("t1"), _item("t2", place="会社PC"), _item("t3")]
@@ -526,7 +545,10 @@ async def test_a_persons_readiness_overrides_the_guess(repo) -> None:
 
 async def test_activity_after_the_override_returns_a_thread_to_the_guess(repo) -> None:
     await repo.save(
-        "t1", TriageResult(1, None, "r", "n", ready=False, waiting_for="先方"), basis="b", model="m"
+        "t1",
+        TriageResult(1, None, "r", "n", ready=False, waiting_for="先方", needs_human=True),
+        basis=_basis(_item("t1")),
+        model="m",
     )
     rows = await repo.all()
     stale = {"readiness": "now", "readiness_at": "2026-10-12T01:00:00Z"}
@@ -552,7 +574,7 @@ async def test_an_override_does_not_rank_work_that_is_not_the_persons(repo) -> N
 # -- a job that opens a fresh thread every run is one row in Focus ------------------
 
 
-def test_same_title_items_fold_into_the_newest_in_focus() -> None:
+async def test_same_title_items_fold_into_the_newest_in_focus(repo) -> None:
     def upgrade(item_id: str, at: str, **over):
         return _item(item_id, title="🔄 ebibot-upgrade", last_activity_at=at, **over)
 
@@ -565,7 +587,14 @@ def test_same_title_items_fold_into_the_newest_in_focus() -> None:
         _item("t6"),
     ]
 
-    old, newest, middle, pinned, done, other = apply_triage(items, {}, now=NOW)
+    for source in items:
+        await repo.save(
+            source["id"],
+            TriageResult(2, None, "A task remains", "Review output", needs_human=True),
+            basis=_basis(source),
+            model="test",
+        )
+    old, newest, middle, pinned, done, other = apply_triage(items, await repo.all(), now=NOW)
 
     assert (newest["series"], newest["focus"] is not None) == (3, True)
     assert all(i["focus"] is None and i["series_of"] == "t2" for i in (old, middle))

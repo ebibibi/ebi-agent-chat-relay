@@ -92,3 +92,15 @@ for (const width of [1280, 390]) test(`Focus guide stays above pins (${width}px)
   assert.equal(await page.locator('.guide-card').count(), 0);
   assert.equal(await page.locator('#list > li').first().getAttribute('class'), 'group pinned-group');
 });
+
+test('a stale guide cannot recommend a now-settled or untriaged conversation', {timeout:20000}, async t => {
+  const items = [item('a',{needs_human:false,focus:null,actionable:null}),
+    item('b',{triage_current:false,needs_human:false,focus:null,actionable:null})];
+  const guide = {next:[{id:'a',title:'Earlier suggestion',reasons:[]},
+    {id:'b',title:'Unknown suggestion',reasons:[]}],calm:false,
+    counts:{me:0,running:0,waiting:0,candidate:0},batches:[],drift:null};
+  const page = await open(t,{items,guide,slots:{},places:[]});
+  await page.locator('.guide-card').waitFor();
+  assert.equal(await page.locator('.guide-next').count(),0);
+  assert.equal(await page.locator('.guide-calm').count(),1);
+});
