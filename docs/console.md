@@ -539,7 +539,8 @@ interrupt with the slot it holds (`POST /console/api/items/{id}/stop`, `/pause`,
 
 📌 in the detail header (or `p`) pins a thread as what you are working on now. Pinned threads
 open every list but Done and Recent under a highlighted "📌 Working on now" strip, and
-bring their family with them rather than duplicating it in the tree. The pin is stored with the item
+bring their family with them rather than duplicating it in the tree. In Focus, the "Next move"
+guide stays above the pinned strip, so the recommended next action is always first. The pin is stored with the item
 (`PATCH /console/api/items/{id}` with `pinned: true|false`), so every device sees it.
 Use ↑ / ↓ to move a pin one place, or ⇈ / ⇊ to move straight to the top / bottom of the
 visible pinned list (touch and keyboard work too).

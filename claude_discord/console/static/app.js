@@ -362,7 +362,10 @@ function ungroupedRows() {
   const bar = SF.bar(all);
   const rows = SF.active() ? pinnedFirst(SF.apply(items)) : all;
   const viewBar = window.ConsoleViews.bar();
-  return [viewBar && { node: viewBar }, wsBar && { node: wsBar }, bar && { node: bar }, ...rows].filter(Boolean);
+  // The next move is the anchor of Focus, above pins and list filters alike.
+  const guide = state.view === "focus" ? window.ConsoleFocus.card(items) : null;
+  return [guide && { node: guide }, viewBar && { node: viewBar }, wsBar && { node: wsBar },
+    bar && { node: bar }, ...rows].filter(Boolean);
 }
 const chronologicalView = () => state.view === "recent" && !window.ConsoleViews.active();
 function pinnedFirst(items) {
