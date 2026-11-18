@@ -149,8 +149,6 @@ window.ConsoleFocus = (() => {
     const later = live.filter((i) => i.actionable === false)
       .sort((a, b) => readyAt(a).localeCompare(readyAt(b)) || byImportance(a, b));
     const out = [];
-    const guideCard = card(items);
-    if (guideCard) out.push({ node: guideCard });
     out.push({ node: placeBar() });
     out.push({ node: effortBar(items) });
     // Ebi Workspace (focusws.js): today's plan, its ranked next actions after the AI work
@@ -234,6 +232,6 @@ window.ConsoleFocus = (() => {
         onclick: () => setReadiness(item, null), text: `🤖 ${T.ready_back_ai}` }) : null);
   }
 
-  return { rows, count, note, drawerLine, placeTag, setGuide, readyToggle,
+  return { rows, card, count, note, drawerLine, placeTag, setGuide, readyToggle,
     elsewhere, byImportance, effortOk, effortChosen, effortLabel, effortTag };
 })();
