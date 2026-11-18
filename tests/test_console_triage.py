@@ -94,6 +94,54 @@ def test_the_prompt_keeps_the_latest_messages_and_states_the_time() -> None:
 # -- the board -------------------------------------------------------------
 
 
+async def test_no_human_work_is_excluded_even_if_model_says_ready(repo) -> None:
+    from claude_discord.console.guide import build_guide
+
+    result = parse_reply(
+        '{"priority": 3, "next": "No action needed in this thread",'
+        ' "needs_human": false, "ready": true, "ready_at": "2026-10-12"}',
+        now=NOW,
+    )
+    assert result is not None
+    await repo.save("t1", result, basis="b", model="test")
+    rows = await repo.all()
+    [item] = apply_triage([_item()], rows, now=NOW + timedelta(days=2))
+    assert item["focus"] is None
+    assert item["ai"]["needs_human"] is False
+    guide = build_guide([item], now=NOW)
+    assert guide["calm"] is True
+    assert guide["next"] == []
+    assert guide["counts"]["waiting"] == 0
+    # Excluding a recommendation must never mark a conversation finished.
+    assert item["status"] == "idle"
+
+
+async def test_a_person_can_override_the_no_work_guess(repo) -> None:
+    result = parse_reply('{"priority": 2, "needs_human": false}', now=NOW)
+    assert result is not None
+    await repo.save("t1", result, basis="b", model="test")
+    [item] = apply_triage(
+        [_item(readiness="now", readiness_at="2026-10-12T03:00:00Z")],
+        await repo.all(),
+        now=NOW,
+    )
+    assert item["focus"] is not None
+    assert item["actionable"] is True
+
+
+async def test_new_activity_can_restore_human_work(repo) -> None:
+    for required in (False, True):
+        result = parse_reply(
+            '{"priority": 1, "next": "Approve the revised draft",'
+            f' "needs_human": {str(required).lower()}, "ready": true}}',
+            now=NOW,
+        )
+        assert result is not None
+        await repo.save("t1", result, basis=str(required), model="test")
+        [item] = apply_triage([_item()], await repo.all(), now=NOW)
+        assert (item["focus"] is not None) is required
+
+
 async def test_a_guess_fills_only_what_a_human_left_unset(repo) -> None:
     due = (NOW - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     result = TriageResult(priority=0, due_at=due, reason="今日締切", next_step="提出する")
