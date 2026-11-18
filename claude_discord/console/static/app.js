@@ -496,6 +496,7 @@ function renderNav() {
     }, h("span", { text: T[v.key] }), h("span", {
       class: "count" + (v.hot && counts[v.key] ? " hot" : ""), text: counts[v.key] || "",
     }))),
+    window.ConsoleViews.tagNav(),
     window.ConsoleViews.nav(),
     window.ConsolePages.nav(),
     window.ConsoleSlots.nav(),
