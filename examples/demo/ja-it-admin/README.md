@@ -26,3 +26,12 @@ unanswered in the folded 後回し section. Another card in the same thread must
 Reload, open 後回し and press 戻す: the original card returns without sending a reply.
 Repeat at phone width. If every request in a thread is deferred, its next-move recommendation
 must disappear until an active request exists again.
+
+## Situation comment input
+
+Open a family's situation panel and choose 別の答え on a decision card. The comment
+editor and the panel's reply composer each provide at least six lines. Type Japanese,
+leave a selection in the middle, and let other threads update: focus, composition and
+the selection must stay in the connected editor while surrounding progress changes.
+Repeat on a phone's situation tab and on the secretary home. Removing or resolving the
+request must still remove its editor; an explicit click elsewhere must keep its focus.

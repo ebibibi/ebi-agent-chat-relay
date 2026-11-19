@@ -134,7 +134,34 @@ window.ConsoleSecretary = (() => {
     if (item && window.ConsoleSituation) window.ConsoleSituation.render(item);
   }
   // What the panel's redraw key needs to know about the cards' own state.
-  const stateKey = () => JSON.stringify([[...sent], [...writingOwn]]);
+  const stateKey = () => JSON.stringify([[...sent], [...writingOwn],
+    document.activeElement?.closest(".sec-card")?.dataset.requestId || null]);
+
+  // Retain the connected editing card AND its ancestor chain. Moving even the same
+  // textarea into a new card blurs it and cancels IME composition. Surrounding cards
+  // and reports still update. A removed, answered or deferred request is not retained.
+  function replaceContent(container, ...children) {
+    const editor = document.activeElement;
+    const card = editor?.matches(".sec-reply") && editor.closest(".sec-card");
+    if (!card || !container.contains(card)) { container.replaceChildren(...children); return; }
+    const next = document.createDocumentFragment();
+    next.append(...children);
+    const replacement = [...next.querySelectorAll(".sec-card")].find((n) =>
+      n.dataset.requestId === card.dataset.requestId && n.querySelector(".sec-reply"));
+    if (!replacement) { container.replaceChildren(next); return; }
+    const patch = (oldParent, newParent) => {
+      if (oldParent === card) return;
+      const oldBranch = [...oldParent.children].find((n) => n === card || n.contains(card));
+      const newBranch = [...newParent.children].find((n) => n === replacement || n.contains(replacement));
+      patch(oldBranch, newBranch);
+      const wanted = [...newParent.childNodes].map((n) => n === newBranch ? oldBranch : n);
+      for (const n of [...oldParent.childNodes]) if (!wanted.includes(n)) n.remove();
+      wanted.forEach((n, i) => {
+        if (oldParent.childNodes[i] !== n) oldParent.insertBefore(n, oldParent.childNodes[i] || null);
+      });
+    };
+    patch(container, next);
+  }
 
   // What reaches the thread: the question restated, so the agent knows which one is answered.
   const answerText = (card, text) => S().answer(card.card.title || card.item_title, text);
@@ -175,14 +202,15 @@ window.ConsoleSecretary = (() => {
 
   function replyForm(card) {
     const s = S();
-    const input = h("textarea", { class: "sec-reply", rows: "1", maxlength: "4000", placeholder: s.reply_ph,
-      "aria-label": s.reply_ph, oninput: (e) => { drafts[card.request_id] = e.target.value; } });
+    const input = h("textarea", { class: "sec-reply", rows: "6", maxlength: "4000", placeholder: s.reply_ph,
+      "aria-label": s.reply_ph, oninput: (e) => { drafts[card.request_id] = e.target.value;
+        e.target.style.height = `${Math.max(e.target.offsetHeight, e.target.scrollHeight + 2)}px`; } });
     input.value = drafts[card.request_id] || "";
     const sendBtn = h("button", { type: "submit", class: "btn primary", text: s.send });
     const form = h("form", { class: "sec-form", onsubmit: (e) => { e.preventDefault(); answer(card, input.value, null, sendBtn); } },
       input, sendBtn);
     input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); form.requestSubmit(); }
+      if (isSendKey(e)) { e.preventDefault(); form.requestSubmit(); }
     });
     return form;
   }
@@ -274,17 +302,17 @@ window.ConsoleSecretary = (() => {
       h("div", { class: "sec-deadline" }, h("span", { class: "dim", text: s.deadline }), document.createTextNode(c.deadline)),
     ];
     if (card.deferred_at) {
-      return h("li", { class: "sec-card deferred", "data-item-id": card.id }, head,
+      return h("li", { class: "sec-card deferred", "data-item-id": card.id, "data-request-id": String(card.request_id) }, head,
         h("h3", { class: "sec-title", text: c.title }),
         h("div", { class: "sec-context", text: c.context }), detailBlock(card));
     }
     body.push(filesBlock(card));
     if (sent.has(card.request_id)) {
-      return h("li", { class: "sec-card sent", "data-item-id": card.id }, head, ...body,
+      return h("li", { class: "sec-card sent", "data-item-id": card.id, "data-request-id": String(card.request_id) }, head, ...body,
         h("div", { class: "sec-sent", text: `✅ ${s.sent}: ${sent.get(card.request_id)}` }));
     }
     if (nothingToSee(card)) {
-      return h("li", { class: "sec-card no-material", "data-item-id": card.id }, head, ...body,
+      return h("li", { class: "sec-card no-material", "data-item-id": card.id, "data-request-id": String(card.request_id) }, head, ...body,
         h("div", { class: "sec-note", text: S().in_thread }),
         h("div", { class: "sec-buttons" }, h("button", { type: "button", class: "btn primary",
           onclick: () => openItem(card.id), text: S().open_to_check })));
@@ -295,7 +323,7 @@ window.ConsoleSecretary = (() => {
     buttons.push(h("button", { type: "button", class: "chip", "aria-expanded": writing ? "true" : "false",
       onclick: () => { if (writing) writingOwn.delete(card.request_id); else writingOwn.add(card.request_id); redraw(); },
       text: s.own_answer }));
-    return h("li", { class: "sec-card", "data-item-id": card.id }, head, ...body,
+    return h("li", { class: "sec-card", "data-item-id": card.id, "data-request-id": String(card.request_id) }, head, ...body,
       h("div", { class: "sec-buttons" }, ...buttons), writing ? replyForm(card) : null, detailBlock(card));
   }
 
@@ -353,6 +381,6 @@ window.ConsoleSecretary = (() => {
     return all.filter((c) => threadIds.has(c.thread_id));
   }
 
-  return { on, onBoard, rows, nav, switcher, title, logOpen, cardsFor, card: decisionCard, stateKey, VIEW,
+  return { replaceContent, on, onBoard, rows, nav, switcher, title, logOpen, cardsFor, card: decisionCard, stateKey, VIEW,
     answer, filesBlock, nothingToSee, strings: () => S(), all: () => (summary ? [...summary.decide, ...summary.review] : []) };
 })();

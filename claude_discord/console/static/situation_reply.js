@@ -16,7 +16,7 @@ window.ConsoleSituationReply = (() => {
 
   function build(slot) {
     const l = L();
-    const box = h("textarea", { id: "sit-reply", rows: 2, placeholder: l.ph,
+    const box = h("textarea", { id: "sit-reply", rows: 6, placeholder: l.ph,
       oninput: (e) => { drafts.set(target, e.target.value); grow(e.target); },
       onkeydown: (e) => { if (isSendKey(e)) { e.preventDefault(); send(); } } });
     const select = h("select", { id: "sit-to", "aria-label": l.to,
