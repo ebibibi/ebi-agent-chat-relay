@@ -327,3 +327,50 @@ async def test_dismiss_one_card_without_sending_an_answer(env, tmp_path) -> None
     assert (
         await env.client.delete(f"/console/api/items/{item_id}/decisions/abc", headers=WRITE)
     ).status == 400
+
+
+async def test_defer_and_restore_card_without_delivering_a_reply(env, tmp_path) -> None:
+    decisions = DecisionRequestRepository(str(tmp_path / "sessions.db"))
+    env.console.api.decision_repo = decisions
+    item_id = await _start(env)
+    thread = int(item_id[1:])
+    a = await decisions.put(
+        thread,
+        parse_request(_good(key="a"), kind="waiting"),
+        origin="mark",
+        source_thread_id=thread,
+    )
+    b = await decisions.put(
+        thread,
+        parse_request(_good(key="b"), kind="waiting"),
+        origin="mark",
+        source_thread_id=thread,
+    )
+    history = await env.conversations.history(thread, 100)
+    path = f"/console/api/items/{item_id}/decisions/{a.id}/defer"
+    assert (await env.client.post(path, json={"deferred": True})).status == 401
+    assert (await env.client.post(path, headers=AUTH, json={"deferred": True})).status == 403
+    assert (await env.client.post(path, headers=WRITE, json={"deferred": "true"})).status == 400
+    assert (
+        await env.client.post(
+            f"/console/api/items/t999/decisions/{b.id}/defer",
+            headers=WRITE,
+            json={"deferred": True},
+        )
+    ).status == 404
+    assert (
+        await env.client.post(
+            f"/console/api/items/{item_id}/decisions/abc/defer",
+            headers=WRITE,
+            json={"deferred": True},
+        )
+    ).status == 400
+    assert (await env.client.post(path, headers=WRITE, json={"deferred": True})).status == 200
+    data = await (await env.client.get("/console/api/board", headers=AUTH)).json()
+    assert [c["request_id"] for c in data["secretary"]["deferred"]] == [a.id]
+    assert [c["request_id"] for c in data["secretary"]["decide"]] == [b.id]
+    assert await env.conversations.history(thread, 100) == history
+    assert (await env.client.post(path, headers=WRITE, json={"deferred": False})).status == 200
+    data = await (await env.client.get("/console/api/board", headers=AUTH)).json()
+    assert data["secretary"]["deferred"] == []
+    assert len(data["secretary"]["decide"]) == 2

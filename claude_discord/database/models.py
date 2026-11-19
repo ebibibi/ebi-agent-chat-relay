@@ -164,7 +164,8 @@ CREATE TABLE IF NOT EXISTS decision_requests (
     detail TEXT NOT NULL,
     created_at TEXT NOT NULL,
     closed_at TEXT,
-    close_reason TEXT
+    close_reason TEXT,
+    deferred_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_decision_requests_open ON decision_requests(closed_at, thread_id);
@@ -299,6 +300,7 @@ _MIGRATIONS = [
     ),
     "CREATE INDEX IF NOT EXISTS idx_decision_requests_open"
     " ON decision_requests(closed_at, thread_id)",
+    "ALTER TABLE decision_requests ADD COLUMN deferred_at TEXT",
 ]
 
 

@@ -77,7 +77,7 @@ from .ratelimit import RateLimiter
 from .request_files import DISCORD_CACHE_SECONDS, DISCORD_SCAN, attachment_files, files_for
 from .restart_routes import RestartRoutes, restart_state
 from .search import SearchRoutes
-from .secretary import SecretaryEventRepository, SecretaryRoutes, build_secretary
+from .secretary import SecretaryEventRepository, SecretaryRoutes, apply_deferrals, build_secretary
 from .surface import apply_outcome
 from .triage import INTERVAL_SECONDS as TRIAGE_INTERVAL_SECONDS
 from .triage import (
@@ -407,6 +407,9 @@ class ConsoleServer:
         r.add_post(f"{API_PREFIX}/secretary/events", secretary_routes.record)
         r.add_delete(
             f"{API_PREFIX}/items/{{item_id}}/decisions/{{request_id}}", self.dismiss_request
+        )
+        r.add_post(
+            f"{API_PREFIX}/items/{{item_id}}/decisions/{{request_id}}/defer", self.defer_request
         )
         CanvasRoutes(self, self.canvas, IDENTITY).register(r, API_PREFIX)
         r.add_get(f"{API_PREFIX}/secretary/stats", secretary_routes.stats)
@@ -796,6 +799,29 @@ class ConsoleServer:
         )
         return files
 
+    async def defer_request(self, request: web.Request) -> web.Response:
+        """Persist a per-card Later/Restore action without sending a reply."""
+        body, err = await self._json(request)
+        if err:
+            return err
+        if type(body.get("deferred")) is not bool:
+            return _error("deferred must be a boolean", 400)
+        item_id = request.match_info["item_id"]
+        thread = _thread_of(item_id)
+        try:
+            rid = int(request.match_info["request_id"])
+        except ValueError:
+            return _error("Invalid request_id", 400)
+        if not 0 < rid <= 2**63 - 1:
+            return _error("Invalid request_id", 400)
+        if thread is None or not any(i["id"] == item_id for i in await self._board_items()):
+            return _error("Item not found", 404)
+        repo = getattr(self.api, "decision_repo", None)
+        if repo is None:
+            return _error("Decision requests unavailable", 503)
+        changed = await repo.defer(thread, rid, deferred=body["deferred"])
+        return web.json_response({"changed": changed})
+
     async def dismiss_request(self, request: web.Request) -> web.Response:
         """Dismiss this exact card without replying or changing the thread's state."""
         item_id = request.match_info["item_id"]
@@ -965,6 +991,12 @@ class ConsoleServer:
             item["queued"] = item["thread_id"] in queued
             # The canvas secretary is a standing service, not work: no chime per turn.
             item["canvas_secretary"] = item["id"] == secretary
+        repo = getattr(self.api, "decision_repo", None)
+        if repo is not None:
+            try:
+                items = apply_deferrals(items, [r.as_dict() for r in await repo.list_open()])
+            except Exception:
+                logger.exception("console: could not read deferred requests")
         return items
 
     async def triage_messages(self, item: dict[str, Any]) -> list[tuple[str, str]]:

@@ -164,3 +164,33 @@ for (const width of [1440, 390]) test(`dismiss removes just one card without rep
   await page.locator('#d-side .sec-card').first().waitFor();
   assert.ok(await page.locator('#d-side .sec-card').getByRole('button',{name:'消す',exact:true}).count() > 0);
 });
+
+for (const width of [1440,390]) test(`defer and restore one unanswered card (${width}px)`,{timeout:30000},async t=>{
+  const {page,posted}=await open(t,{consoleMode:'secretary'});
+  await page.setViewportSize({width,height:900});
+  await page.locator('.sec-card').first().waitFor();
+  let deferred=false;
+  await page.route('**/items/t1/decisions/11/defer',route=>{
+    assert.equal(route.request().method(),'POST');
+    deferred=route.request().postDataJSON().deferred;
+    return route.fulfill({contentType:'application/json',body:'{"changed":1}'});
+  });
+  await page.route('**/board',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({items,slots:{},places:[],views:[],
+    secretary:{...secretary,decide:secretary.decide.filter(c=>!deferred||c.request_id!==11),
+      deferred:deferred?[{...secretary.decide[0],deferred_at:ago(0)}]:[]}})}));
+  await page.locator('.sec-decide .sec-card').filter({hasText:'Publish release 5.3 now?'}).getByRole('button',{name:'後回し',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('.sec-later'));
+  assert.equal(await page.locator('.sec-decide .sec-card').filter({hasText:'Publish release 5.3 now?'}).count(),0);
+  assert.equal(await page.locator('.sec-decide .sec-card').filter({hasText:'Third question'}).count(),1);
+  await page.reload();
+  await page.locator('.sec-later > details > summary').click();
+  const later=page.locator('.sec-later .sec-card');
+  await later.waitFor();
+  assert.match(await later.innerText(),/Publish release 5.3 now/);
+  assert.equal(await later.getByRole('button',{name:'A Merge',exact:true}).count(),0);
+  assert.equal(await page.evaluate(()=>ConsoleSecretary.cardsFor(new Set(['1'])).some(c=>c.request_id===11)),false);
+  await later.getByRole('button',{name:'戻す',exact:true}).click();
+  await page.waitForFunction(()=>!document.querySelector('.sec-later'));
+  assert.equal(await page.locator('.sec-decide .sec-card').filter({hasText:'Publish release 5.3 now?'}).count(),1);
+  assert.equal(posted.filter(p=>p.path.endsWith('/reply')).length,0);
+});
