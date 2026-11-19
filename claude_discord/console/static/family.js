@@ -19,7 +19,7 @@ window.ConsoleFamily = (() => {
       counts: (c) => `全${c.total}件 · 実行中 ${c.running} · 確認待ち ${c.attention} · 完了 ${c.done}` },
   };
   const L = () => STRINGS[document.documentElement.lang === 'ja' ? 'ja' : 'en'];
-  const needsAttention = (i) => !i.running && !i.queued && ['waiting', 'review', 'action', 'error'].includes(i.status);
+  const needsAttention = (i) => !i.decision_deferred && !i.running && !i.queued && ['waiting', 'review', 'action', 'error'].includes(i.status);
   function model(items, id) {
     const byId = new Map(items.map(i => [i.id, i]));
     const selected = byId.get(id);

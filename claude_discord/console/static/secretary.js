@@ -25,6 +25,7 @@ window.ConsoleSecretary = (() => {
       calm: "🌿 Nothing to decide right now.", calm_more: "What remains is moving on its own.",
       about: "About: ", deadline: "Deadline: ", sep: ": ", recommended: "recommended", more_detail: "More ▾",
       own_answer: "✏️ Another answer", reply_ph: "Your answer…", send: "Send", open: "Open the thread",
+      defer: "Later", restore: "Restore", deferred: "⏸ Later", deferHint: "Keep unanswered for later; restore it when ready",
       dismiss: "Dismiss", dismissHint: "Remove this card; no answer is sent",
       sent: "Sent — the agent carries on", since: (r) => `asked ${r}`, confirm: "✓ Confirm done",
       files: "📎 What to look at", preview: "Contents", loading: "Loading…", unreadable: "Could not read this file here; open it.",
@@ -42,6 +43,7 @@ window.ConsoleSecretary = (() => {
         ["deadline", "Deadline, and what happens without a decision"]],
     },
     ja: {
+      defer: "後回し", restore: "戻す", deferred: "⏸ 後回し", deferHint: "未回答のまま後回しにします。「戻す」で再開できます",
       dismiss: "消す", dismissHint: "このカードだけを消します。回答は送信しません",
       title: "🗂 秘書", mode: "表示モード", classic: "従来", secretary: "秘書",
       decide: "🔴 今決めること", review: "👀 見てほしいもの", working: "🤖 AIが進めていること", done: "✅ 今日終わったこと",
@@ -79,6 +81,7 @@ window.ConsoleSecretary = (() => {
   // Card blocks the person expanded past the first few.
   const showAll = new Set();
   const FIRST_CARDS = 3;
+  let laterOpen = false;
 
   function onBoard(next) {
     summary = next;
@@ -237,6 +240,17 @@ window.ConsoleSecretary = (() => {
     } catch (err) { button.disabled = false; toast(err.message); }
   }
 
+  async function defer(card, button) {
+    button.disabled = true;
+    try {
+      await api(`/items/${encodeURIComponent(card.id)}/decisions/${card.request_id}/defer`, {
+        method: "POST", body: { deferred: !card.deferred_at },
+      });
+      writingOwn.delete(card.request_id);
+      await refresh();
+    } catch (err) { button.disabled = false; toast(err.message); }
+  }
+
   function decisionCard(card) {
     const s = S();
     const c = card.card;
@@ -247,6 +261,8 @@ window.ConsoleSecretary = (() => {
       card.place ? h("span", { class: "tag place", text: `📍 ${card.place}` }) : null,
       h("button", { type: "button", class: "guide-link sec-thread", title: s.open, onclick: () => openItem(card.id),
         text: `↗ ${card.item_title}` }),
+      h("button", { type: "button", class: "chip sec-defer", text: card.deferred_at ? s.restore : s.defer,
+        title: s.deferHint, onclick: (e) => defer(card, e.currentTarget) }),
       h("button", { type: "button", class: "chip sec-dismiss", text: s.dismiss, title: s.dismissHint,
         onclick: (e) => dismiss(card, e.currentTarget) }));
     const body = [
@@ -257,6 +273,11 @@ window.ConsoleSecretary = (() => {
         document.createTextNode(`${s.sep}${o.effect}`)))),
       h("div", { class: "sec-deadline" }, h("span", { class: "dim", text: s.deadline }), document.createTextNode(c.deadline)),
     ];
+    if (card.deferred_at) {
+      return h("li", { class: "sec-card deferred", "data-item-id": card.id }, head,
+        h("h3", { class: "sec-title", text: c.title }),
+        h("div", { class: "sec-context", text: c.context }), detailBlock(card));
+    }
     body.push(filesBlock(card));
     if (sent.has(card.request_id)) {
       return h("li", { class: "sec-card sent", "data-item-id": card.id }, head, ...body,
@@ -315,6 +336,9 @@ window.ConsoleSecretary = (() => {
       out.push(block("sec-unexplained", s.unexplained, sum.unexplained.map((e) => line(e,
         h("span", { class: "tag", text: s.status[e.status] || e.status }))), "", sum.unexplained_more, s.unexplained_note));
     }
+    if (sum.deferred?.length) out.push(h("li", { class: "sec-block sec-later" },
+      h("details", { open: laterOpen, ontoggle: (e) => { laterOpen = e.currentTarget.open; } }, h("summary", { text: `${s.deferred} · ${sum.deferred.length + (sum.deferred_more || 0)}` }),
+        h("ul", {}, cardBlock("sec-deferred", s.deferred, sum.deferred, sum.deferred_more)))));
     const confirm = (entry) => entry.candidate ? h("button", { type: "button", class: "chip",
       onclick: () => window.ConsoleFinish.finish(entry.id), text: s.confirm }) : null;
     out.push(block("sec-working", s.working, sum.working.map((e) => line(e)), s.none_working, sum.working_more));

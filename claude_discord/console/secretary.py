@@ -95,6 +95,7 @@ def _stands(request: Mapping[str, Any], item: Mapping[str, Any] | None) -> bool:
 def _card(request: Mapping[str, Any], item: Mapping[str, Any], *, now: datetime) -> dict[str, Any]:
     return {
         "request_id": request["id"],
+        "deferred_at": request.get("deferred_at"),
         "id": item["id"],
         "thread_id": request.get("thread_id"),
         "item_title": _title(item),
@@ -122,6 +123,25 @@ def _local_day(value: str | None) -> date | None:
     return moment.astimezone().date() if moment is not None else None
 
 
+def apply_deferrals(
+    items: Iterable[dict[str, Any]], requests: Iterable[Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    """Suppress next-move recommendations only when every open request was deferred."""
+    by_thread: dict[str, list[bool]] = {}
+    for request in requests:
+        by_thread.setdefault(str(request.get("thread_id")), []).append(
+            bool(request.get("deferred_at"))
+        )
+    return [
+        {
+            **item,
+            "decision_deferred": bool(by_thread.get(str(item.get("thread_id"))))
+            and all(by_thread[str(item.get("thread_id"))]),
+        }
+        for item in items
+    ]
+
+
 def build_secretary(
     items: Iterable[dict[str, Any]],
     requests: Iterable[Mapping[str, Any]] = (),
@@ -139,8 +159,9 @@ def build_secretary(
     ]
     standing.sort(key=lambda pair: (_order(pair[1]), pair[0]["id"]))
     cards = [_card(r, i, now=now) for r, i in standing]
-    decide = [c for c in cards if c["kind"] != "review"]
-    review = [c for c in cards if c["kind"] == "review"]
+    deferred = [c for c in cards if c["deferred_at"]]
+    decide = [c for c in cards if not c["deferred_at"] and c["kind"] != "review"]
+    review = [c for c in cards if not c["deferred_at"] and c["kind"] == "review"]
     explained = {i["id"] for _, i in standing}
     unexplained = sorted(
         (
@@ -169,6 +190,8 @@ def build_secretary(
         reverse=True,
     )
     return {
+        "deferred": deferred[:MAX_CARDS],
+        "deferred_more": max(0, len(deferred) - MAX_CARDS),
         "decide": decide[:MAX_CARDS],
         "decide_more": max(0, len(decide) - MAX_CARDS),
         "review": review[:MAX_CARDS],

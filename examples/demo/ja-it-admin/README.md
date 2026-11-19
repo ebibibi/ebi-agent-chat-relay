@@ -18,3 +18,11 @@ Keep a continuing conversation open after acknowledging an answer. It must not b
 move just because it was updated or its project still has tasks. A distinct unanswered review
 should remain eligible after triage. Newly untriaged or stale conversations wait for fresh
 assessment; captured tasks continue to work before assessment.
+
+## Put one decision off until later
+
+In the secretary home, press 後回し on one decision. It leaves 今決めること but remains
+unanswered in the folded 後回し section. Another card in the same thread must remain active.
+Reload, open 後回し and press 戻す: the original card returns without sending a reply.
+Repeat at phone width. If every request in a thread is deferred, its next-move recommendation
+must disappear until an active request exists again.

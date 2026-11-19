@@ -1307,3 +1307,22 @@ until re-evaluated. Captured tasks still work without a model. Running and queue
 be recommended. The guide also rechecks the latest board before displaying a candidate.
 The prompt version changes once to re-evaluate older guesses; no tasks are completed or archived
 as part of this change, and pin choices are preserved.
+
+
+### Putting a decision off until later
+
+**Later** (後回し) on a decision card moves only that request out of Decide now / To review
+into the secretary home's folded **Later** section. It stays unanswered; no reply is sent and
+the conversation is not finished or snoozed as a whole. Open Later and press **Restore** (戻す)
+to return it to its original decision/review list. Deferral has no automatic expiry and is
+stored on the server, so it survives reloads and is shared across devices.
+
+Other requests in the same thread stay active. A thread whose open requests are all deferred
+is not recommended as the next move or listed as waiting without an explanation. Restore
+reactivates its request; the normal readiness and eligibility checks still apply. A newly
+submitted request is active even if it replaces a deferred request with the same key.
+
+`POST /console/api/items/{item_id}/decisions/{request_id}/defer` accepts
+`{"deferred": true}` or `{"deferred": false}` and returns `{"changed": n}`. The same Console
+authentication, CSRF protection, visible-thread scope and exact request ID checks apply as for
+Dismiss. History and the request's open state are preserved.

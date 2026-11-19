@@ -656,7 +656,8 @@ def focus_score(item: dict[str, Any], *, now: datetime) -> int | None:
     Whether it can be done now is a separate axis: see ``actionable``.
     """
     if (
-        item.get("running")
+        item.get("decision_deferred")
+        or item.get("running")
         or item.get("queued")
         or item.get("bucket") in ("done", "snoozed", "ai")
         or item.get("status") in _SKIP_STATUSES

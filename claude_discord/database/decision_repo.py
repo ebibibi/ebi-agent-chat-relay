@@ -37,6 +37,7 @@ class DecisionRequest:
     deadline: str
     detail: dict[str, str]
     created_at: str
+    deferred_at: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -55,6 +56,7 @@ class DecisionRequest:
             },
             "detail": self.detail,
             "created_at": self.created_at,
+            "deferred_at": self.deferred_at,
         }
 
 
@@ -77,6 +79,7 @@ def _row(row: aiosqlite.Row) -> DecisionRequest:
         deadline=card["deadline"],
         detail=json.loads(row["detail"]),
         created_at=row["created_at"],
+        deferred_at=row["deferred_at"],
     )
 
 
@@ -124,6 +127,17 @@ class DecisionRequestRepository:
             args.append(key)
         async with aiosqlite.connect(self._db_path) as db:
             cursor = await db.execute(sql, args)
+            await db.commit()
+            return cursor.rowcount
+
+    async def defer(self, thread_id: int, request_id: int, *, deferred: bool) -> int:
+        """Move one open request to Later, or restore it; never close or answer it."""
+        async with aiosqlite.connect(self._db_path) as db:
+            cursor = await db.execute(
+                "UPDATE decision_requests SET deferred_at = ?"
+                " WHERE thread_id = ? AND id = ? AND closed_at IS NULL",
+                (_now() if deferred else None, int(thread_id), int(request_id)),
+            )
             await db.commit()
             return cursor.rowcount
 

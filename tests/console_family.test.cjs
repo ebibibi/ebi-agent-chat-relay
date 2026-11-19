@@ -44,3 +44,7 @@ test('progress uses agent messages, skips tool and automatic activity', () => {
   assert.equal(F.excerpt([{is_bot: true, content: '<img onerror=alert(1)>'}]), '<img onerror=alert(1)>');
   assert.equal(F.excerpt([{kind: 'tool', content: 'command'}]), '');
 });
+test('deferred-only requests are not an unexplained family attention item', () => {
+  assert.equal(F.needsAttention({status:'waiting', decision_deferred:true}), false);
+  assert.equal(F.needsAttention({status:'waiting', decision_deferred:false}), true);
+});

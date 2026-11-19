@@ -474,6 +474,8 @@ class CanvasSecretary:
         by_id = {str(i.get("id")): i for i in items}
         requests: dict[str, list[dict[str, Any]]] = {}
         for request in await self._requests():
+            if request.get("deferred_at"):
+                continue
             requests.setdefault(f"t{request.get('thread_id')}", []).append(request)
         notes = await self.repo.notes()
         whats: dict[str, list[str]] = {}
@@ -593,7 +595,9 @@ def _counts(
             counts["running"] += 1
         elif status == "done":
             counts["done"] += 1
-        elif status in ("waiting", "action", "review", "error"):
+        elif status in ("waiting", "action", "review", "error") and not item.get(
+            "decision_deferred"
+        ):
             open_requests = requests.get(str(item.get("id")), [])
             if not open_requests:
                 counts["waiting_without_request"] += 1
