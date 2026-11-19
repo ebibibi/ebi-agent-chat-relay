@@ -553,7 +553,7 @@ function renderList() {
       group.list.append(node);
     } else { group = null; nodes.push(node); }
   }
-  list.replaceChildren(...nodes);
+  window.ConsoleSecretary.replaceContent(list, ...nodes);
   window.ConsoleBulk?.toolbar();
   const empty = $("empty");
   empty.hidden = rows.some((r) => r.item) || state.view === window.ConsoleSecretary.VIEW;

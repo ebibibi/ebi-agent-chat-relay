@@ -289,7 +289,7 @@ window.ConsoleSituation = (() => {
     if (slot.dataset.key === key) return;
     slot.dataset.key = key;
     const top = side.scrollTop;
-    slot.replaceChildren(...core(m, family, cardsOnly));
+    window.ConsoleSecretary.replaceContent(slot, ...core(m, family, cardsOnly));
     side.scrollTop = top;
   }
 
