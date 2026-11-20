@@ -4,7 +4,7 @@ title: Codex compact returns HTTP 500 on a long conversation
 symptom: /compact fails with ValueError or LimitOverrunError before compaction starts.
 status: solved
 date: 2026-10-14
-updated: 2026-10-14
+updated: 2026-11-13
 component: [console, codex-compact]
 tags: [codex, compact, asyncio, stream-limit]
 scope: context
@@ -40,3 +40,23 @@ response must reach compaction completion; an 11 MiB response must return the ex
 bounded error. Existing tests also cover unknown sessions, no-op completion, timeout and
 session-ID validation. `tests/test_console_conversations.py` covers the Console command API.
 These tests do not call a model or compact a real user's session.
+
+## App-server chat resume can exceed even 10 MiB
+
+Issue [#1341](https://github.com/ebibibi/ebi-agent-chat-relay/issues/1341) tracks the same
+signature in `AppServerSession._read`, where the stream limit was already 10 MiB.
+The daily check found 33 occurrences. The logged traceback proves a line-size overflow,
+but does not identify the payload; full resume history is a plausible source.
+
+The chat runner now sends `excludeTurns: true` with `thread/resume`: it consumes only
+`result.thread.id`, so returning the entire history serves no purpose. The installed
+Codex CLI 0.167.1's generated `ThreadResumeParams` schema documents this as returning
+metadata and live-resume state without populating `thread.turns`. The server still
+resumes the existing conversation. Fresh starts and missing-session recovery omit
+this resume-only field. The bounded reader remains in place.
+
+`tests/test_codex_app_server.py::test_resume_omits_large_unused_history` uses a real
+stdio peer that returns 11 MiB of history unless exclusion is requested. Before the
+change, the resume case reproduces the exact stream-limit exception; afterwards it
+reaches turn completion. This verifies the resume mitigation, not the identity of the
+original production payload. Oversized non-history events can still exceed the bound.
