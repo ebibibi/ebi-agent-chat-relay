@@ -2847,9 +2847,13 @@ class ApiServer:
                     answer = text or ""
                     await ingest_repo.set_result(captured_id, answer)
                     if answer and spawned_thread:
+                        answer_bytes = answer.encode("utf-8")
                         await send_file_blobs(
                             spawned_thread[0],
-                            [("ccdb-answer.md", answer.encode("utf-8"))],
+                            [
+                                ("ccdb-answer.md", answer_bytes),
+                                ("ccdb-answer.txt", answer_bytes),
+                            ],
                             content="-# 📎 Answer attached",
                         )
                     body = "✅ 回答ができました（このスレッドの最新メッセージ）。"
