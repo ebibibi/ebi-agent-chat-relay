@@ -125,19 +125,31 @@ def test_an_item_waiting_with_no_request_is_shown_as_unexplained() -> None:
     }
 
 
-def test_a_request_is_hidden_once_its_thread_moves_on() -> None:
+def test_a_request_is_hidden_once_its_thread_is_finished_or_gone() -> None:
     items = [
-        _item("t1", status="running", running=True, focus=None),  # the person replied
         _item("t2", status="candidate", bucket="candidate", focus=None),
         _item("t3", status="idle", focus=None),  # marker cleared by a reply about something else
         _item("t4", archived=True),
+        _item("t5", status="done", bucket="done", focus=None),
     ]
-    requests = [_request(n, rid=n) for n in (1, 2, 3, 4, 9)]  # 9: no such item
+    requests = [_request(n, rid=n) for n in (2, 3, 4, 5, 9)]  # 9: no such item
     out = build_secretary(items, requests, now=NOW)
-    # Running, finished, archived or gone: hidden. An open request with its marker cleared
+    # Finished, archived or gone: hidden. An open request with its marker cleared
     # still stands (#1434): it is closed only by an answer, its agent or the thread finishing.
     assert [c["request_id"] for c in out["decide"]] == [3]
     assert out["unexplained"] == []
+
+
+def test_answering_one_of_several_cards_keeps_the_others_while_the_thread_runs() -> None:
+    # #1503: the thread asked four things; the person answered the first (closed server-side),
+    # which started a turn. The three still open must not vanish while that turn runs.
+    items = [_item("t1", status="running", bucket="ai", running=True, focus=None)]
+    requests = [_request(1, rid=n, key=f"k{n}") for n in (2, 3, 4)]
+    out = build_secretary(items, requests, now=NOW)
+    assert [c["request_id"] for c in out["decide"]] == [2, 3, 4]
+    assert [r["id"] for r in out["working"]] == ["t1"]
+    queued = [_item("t1", status="idle", queued=True, focus=None)]
+    assert len(build_secretary(queued, requests, now=NOW)["decide"]) == 3
 
 
 def test_one_thread_may_carry_two_questions() -> None:

@@ -175,7 +175,8 @@ answers it on its card, when its agent closes it (`DELETE /api/threads/{id}/deci
 `_` for the card sent without a key, `?reason=` optional) because the matter was settled in the
 chat, or when its thread is marked 🏁/✅. A reply typed in the thread and a bare marker do not directly close
 cards, because a thread may ask several things at once. A card shows while its request is open,
-except while the thread is running or once it is finished.
+until the thread is finished. It keeps showing while the thread is running: answering one of
+several cards starts a turn, and the questions not yet answered still stand (#1503).
 
 Each card also has **Dismiss** (消す), in both the situation panel and secretary home. It closes
 only that request, preserves its history, sends no answer and does not complete the thread.

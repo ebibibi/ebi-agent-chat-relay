@@ -14,7 +14,8 @@ module turns the board into the person's unit instead — decisions — built fr
 * ``done_today`` — finished today, including completion candidates to confirm.
 
 A request shows while it stands: until it is answered on its card, replaced by the same key,
-closed by its agent or its thread is finished — and not while the thread is running. A reply
+closed by its agent or its thread is finished. It keeps showing while its thread is running: an
+answer to one of several cards starts a turn, and the other questions still stand (#1503). A reply
 typed in the thread or a bare marker directly closes nothing: a thread may ask several things
 at once (#1438). Background reconciliation may close an individual card when a later human
 answer is confirmed; the person can also dismiss a card without replying.
@@ -89,7 +90,9 @@ def _stands(request: Mapping[str, Any], item: Mapping[str, Any] | None) -> bool:
     status = item.get("status")
     # An open request stands until it is answered or closed, marker or not (#1438): a reply
     # about something else clears the thread's marker but not the questions it still asks.
-    return not (status in _FINISHED_STATUSES or status == "running" or item.get("running"))
+    # A running thread hides nothing either (#1503): answering one of several cards starts a
+    # turn, and the cards not yet answered must not vanish with it.
+    return status not in _FINISHED_STATUSES
 
 
 def _card(request: Mapping[str, Any], item: Mapping[str, Any], *, now: datetime) -> dict[str, Any]:
