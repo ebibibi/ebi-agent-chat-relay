@@ -349,6 +349,10 @@ async def _build_system_context(config: RunConfig) -> str | None:
         "The relay applies the user's saved child AI preferences (backend, model, effort) "
         "before the first turn. Do not switch the child to your own backend or model. "
         "These settings govern relay child threads, not a backend's native subagents. "
+        "Add notify_parent: true when this thread should see the child's result: the "
+        "relay then queues a short report here each time the child marks itself "
+        "finished or waiting on the user, so you can follow up with the child and give "
+        "the user one combined report instead of one per child. "
         "Creating a child thread still requires authorization to delegate."
     )
 
