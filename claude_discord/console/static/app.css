@@ -494,3 +494,10 @@ button.family-link:hover { color: var(--accent); border-color: var(--accent); }
 .nav .restart-detail { color: var(--dim); }
 .nav .restart-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .nav .restart-btn { padding: 2px 8px; font-size: 12px; }
+
+/* The night shift's answer under the capture box (#1511). */
+.night-panel { margin: 6px 0; padding: 8px 10px; border: 1px solid var(--line, #ccc); border-radius: 8px; }
+.night-panel .night-head { display: flex; justify-content: space-between; align-items: center; }
+.night-panel .night-list { margin: 6px 0; padding-left: 18px; }
+.night-panel .night-item.cancelled, .night-panel .night-item.skipped { opacity: .55; }
+.night-panel .night-foot { display: flex; gap: 8px; align-items: center; justify-content: space-between; }

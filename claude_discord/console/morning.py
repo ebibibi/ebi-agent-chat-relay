@@ -45,6 +45,7 @@ LABELS: dict[str, dict[str, str]] = {
         "more": "ほか {n} 件",
         "candidate": "完了候補",
         "recommended": "推奨",
+        "night": "🌙 夜番が任せたもの",
         "window": "{since} 以降",
     },
     "en": {
@@ -56,8 +57,21 @@ LABELS: dict[str, dict[str, str]] = {
         "more": "{n} more",
         "candidate": "completion candidate",
         "recommended": "recommended",
+        "night": "🌙 Handed over by the night shift",
         "window": "since {since}",
     },
+}
+
+
+STATUS_ICON = {
+    "running": "🔄",
+    "candidate": "🏁",
+    "done": "✅",
+    "waiting": "❓",
+    "review": "👀",
+    "action": "📋",
+    "error": "⚠️",
+    "idle": "💤",
 }
 
 
@@ -106,6 +120,7 @@ async def build_morning_brief(
     now: datetime | None = None,
     hours: int = DEFAULT_HOURS,
     base_url: str = "",
+    shift: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The brief for the board *items* and open *requests* over the last *hours*."""
     now = now or datetime.now(UTC)
@@ -156,7 +171,35 @@ async def build_morning_brief(
         "decide_more": max(0, waiting - TOP_DECISIONS),
         "continuing": [await _continuing(i, situation, base_url) for i in working[:MAX_CONTINUING]],
         "continuing_more": max(0, len(working) - MAX_CONTINUING),
+        "night": _night(shift, items, since, base_url),
     }
+
+
+def _night(
+    shift: Mapping[str, Any] | None,
+    items: list[dict[str, Any]],
+    since: datetime,
+    base_url: str,
+) -> list[dict[str, Any]]:
+    """What the night shift handed over inside the window, with each thread's status now."""
+    if not shift:
+        return []
+    by_id = {str(i.get("id")): i for i in items}
+    out = []
+    for entry in shift.get("items") or []:
+        sent = _parse(entry.get("sent_at"))
+        if entry.get("state") != "sent" or sent is None or sent < since:
+            continue
+        item = by_id.get(str(entry.get("id")))
+        out.append(
+            {
+                "id": entry.get("id"),
+                "title": _title(item) if item else entry.get("title"),
+                "status": (item or {}).get("status"),
+                "link": _link(str(entry.get("id")), base_url),
+            }
+        )
+    return out
 
 
 async def _continuing(
@@ -219,4 +262,13 @@ def render_markdown(brief: Mapping[str, Any], lang: str = "ja") -> str:
         ],
         brief["continuing_more"],
     )
+    if brief.get("night"):
+        section(
+            "night",
+            [
+                f"- [{n['title']}]({n['link']}) — {STATUS_ICON.get(n.get('status') or '', '·')}"
+                for n in brief["night"]
+            ],
+            0,
+        )
     return "\n".join(lines).rstrip() + "\n"

@@ -1267,7 +1267,7 @@ function wire() {
     capture(text).then((ok) => { if (ok) { input.value = ""; grow(input); } });
   };
   window.ConsolePaste.attach($("capture-input"), CAPTURE, $("capture-tray"));
-  $("capture-attach").replaceWith(window.ConsolePaste.button(CAPTURE), window.ConsoleNight.button($("capture-input")));
+  $("capture-attach").replaceWith(window.ConsolePaste.button(CAPTURE), window.ConsoleNight.shiftButton($("capture-input")));
   $("capture").addEventListener("submit", (e) => { e.preventDefault(); submitCapture(); });
   // Do not let a drop/paste add files to the pending submission's attachment tray.
   for (const type of ["drop", "paste"]) $("capture").addEventListener(type, (e) => {
