@@ -338,3 +338,23 @@ async def test_pending_set_follows_the_scheduled_completion() -> None:
     host.running.clear()
     await _drain(completer)
     assert auto_completion_pending(THREAD) is False
+
+
+async def test_host_complete_reports_to_an_opted_in_parent() -> None:
+    """Auto-completion bypasses the mark endpoint, so it must notify the parent itself (#820)."""
+    from claude_discord.ext.auto_complete_api import ApiCompletionHost
+    from claude_discord.thread_marker import OUTCOME_DONE
+
+    api = MagicMock()
+    api._console = None
+    api.console_conversations = None
+    api._apply_thread_outcome = AsyncMock()
+    api.notify_parent_of_outcome = AsyncMock(return_value="sent")
+    channel = MagicMock()
+    channel.name = "✅ Audit DNS"
+    api.bot.get_channel.return_value = channel
+
+    await ApiCompletionHost(api).complete(THREAD)
+
+    api._apply_thread_outcome.assert_awaited_once_with(THREAD, OUTCOME_DONE)
+    api.notify_parent_of_outcome.assert_awaited_once_with(THREAD, OUTCOME_DONE, "✅ Audit DNS")
