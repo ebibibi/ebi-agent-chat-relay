@@ -349,3 +349,12 @@ async def test_spawn_stores_the_opt_in(
     assert resp.status == 201
     assert (await resp.json())["notify_parent"] is expected
     assert (await lineage.notify_target(CHILD) is not None) is expected
+
+
+async def test_public_hook_reports_for_other_marking_paths(api, lineage) -> None:
+    """Automatic completion marks threads without the HTTP mark endpoint."""
+    server, _ = api
+    await _opted_in_child(lineage)
+    result = await server.notify_parent_of_outcome(CHILD, OUTCOME_DONE, "Audit DNS")
+    assert result == "sent"
+    server._dispatch_relay.assert_awaited_once()

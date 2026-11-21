@@ -2043,15 +2043,27 @@ class ApiServer:
 
     async def _report_to_parent(self, thread_id: int, outcome: str, response: web.Response) -> None:
         """Queue a report to the parent of an opted-in child (Issue #820)."""
-        notifier = self._parent_notifier()
-        if notifier is None:
-            return
         body = json.loads(cast(bytes, response.body))
-        await notifier.on_outcome(
+        await self.notify_parent_of_outcome(
             thread_id,
             outcome,
-            thread_name=str(body.get("thread_name") or ""),
+            str(body.get("thread_name") or ""),
             changed=body.get("status") != "unchanged",
+        )
+
+    async def notify_parent_of_outcome(
+        self, thread_id: int, outcome: str, thread_name: str, *, changed: bool = True
+    ) -> str:
+        """Report a child's new outcome to its parent if it opted in (Issue #820).
+
+        The entry point for any path that marks a thread outside
+        ``_mark_thread_outcome`` (e.g. automatic completion). Never raises.
+        """
+        notifier = self._parent_notifier()
+        if notifier is None:
+            return "no_lineage"
+        return await notifier.on_outcome(
+            thread_id, outcome, thread_name=thread_name, changed=changed
         )
 
     async def _apply_thread_outcome(self, thread_id: int, outcome: str) -> web.Response:
