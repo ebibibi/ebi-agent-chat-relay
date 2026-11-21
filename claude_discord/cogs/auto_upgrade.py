@@ -24,6 +24,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from ..auto_close import KIND_UPGRADE, Closure, close_system_thread
 from ..deploy_policy import restart_paths
 from ..message_actions import STYLE_SUCCESS, MessageAction, message_actions
 from ..protocols import DrainAware
@@ -56,6 +57,20 @@ async def _mark_outcome(thread: object, outcome: str, *, wait: bool = False) -> 
     if wait:
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(asyncio.shield(task), _FINAL_OUTCOME_TIMEOUT)
+
+
+async def _close_if_allowed(thread_id: int, outcome: str) -> None:
+    """Close a finished upgrade thread when the operator enabled it (#1490).
+
+    Only outcomes that need nothing from a human qualify; a warning or a
+    failure keeps the thread on the human's list.
+    """
+    if not outcome.startswith(("✅", "🕒")):
+        return
+    await close_system_thread(
+        thread_id,
+        Closure(kind=KIND_UPGRADE, reason="the upgrade finished", summary=outcome[:300]),
+    )
 
 
 #: Settings key holding the thread that asked for the restart now under way. The
@@ -274,13 +289,15 @@ class AutoUpgradeCog(commands.Cog):
         except Exception:
             logger.warning("Could not read the pending restart notice", exc_info=True)
             return
+        text = self._restarted_text()
         try:
             channel = self.bot.get_channel(thread_id) or await self.bot.fetch_channel(thread_id)
-            await channel.send(self._restarted_text())  # type: ignore[union-attr]
+            await channel.send(text)  # type: ignore[union-attr]
         except discord.HTTPException:
             logger.info("Could not post the restart notice to thread %d", thread_id)
             return
         logger.info("Restart notice posted to thread %d", thread_id)
+        await _close_if_allowed(thread_id, text)
 
     def _restarted_text(self) -> str:
         name = self.config.package_name
@@ -469,8 +486,10 @@ class AutoUpgradeCog(commands.Cog):
             else:
                 if status_target is not None:
                     await status_target.add_reaction("✅")
-                await thread.send("✅ Upgrade complete (no restart configured).")
+                done_text = "✅ Upgrade complete (no restart configured)."
+                await thread.send(done_text)
                 await _mark_outcome(thread, OUTCOME_DONE)
+                await _close_if_allowed(thread.id, done_text)
 
         except discord.NotFound:
             # The thread was deleted mid-pipeline (e.g. swept while awaiting approval).
@@ -510,6 +529,7 @@ class AutoUpgradeCog(commands.Cog):
         if status_target is not None:
             await status_target.add_reaction("✅")
         await _mark_outcome(thread, OUTCOME_DONE)
+        await _close_if_allowed(thread.id, outcome)
 
     async def _update_checkout(self, thread: discord.Thread) -> str | None:
         """The message to post, or None when a git step failed (already reported)."""
