@@ -35,6 +35,9 @@ window.ConsoleCanvas = (() => {
       session_back: "🎯 Back to the focus session",
       limits: (n, m) => `⚙ ${n}/day · ${m} min apart`, ask_max: "Automatic wakes per day (0 stops them):",
       ask_gap: "Minutes between automatic wakes (at least 1):", limits_set: "Limits changed; they apply from now",
+      unplaced: (n) => `❓ Questions the secretary has not placed yet (${n})`,
+      unplaced_note: "Open decision requests always show here, even before the secretary's next wake.",
+      unplaced_more: (n) => `Show ${n} more`,
     },
     ja: {
       mode: "画面秘書", title: "🗂 秘書", back: "← 秘書に戻る", classic: "↩ 通常の画面",
@@ -57,6 +60,9 @@ window.ConsoleCanvas = (() => {
       session_back: "🎯 集中セッションに戻る",
       limits: (n, m) => `⚙ 1日${n}回・${m}分おき`, ask_max: "1日に自動で起こす回数（0で止める）：",
       ask_gap: "自動で起こす間隔（分、1以上）：", limits_set: "上限を変えました。今から効きます",
+      unplaced: (n) => `❓ 秘書がまだ並べていない質問（${n}件）`,
+      unplaced_note: "AIからの判断依頼は、秘書が次に起きるのを待たずにここへ出ます。",
+      unplaced_more: (n) => `ほか ${n} 件を表示`,
     },
   };
   const S = () => STRINGS[document.documentElement.lang === "ja" ? "ja" : "en"];
@@ -65,6 +71,8 @@ window.ConsoleCanvas = (() => {
   let lastSig = "";
   let starting = false;
   let chatOpen = false; // narrow screens: the conversation covers the canvas while open
+  let unplacedAll = false; // the person unfolded every unplaced card
+  const FIRST_UNPLACED = 3;
 
   const on = () => localStorage.getItem(KEY) === MODE;
   const secretaryId = () => (data && data.secretary && data.secretary.item_id) || null;
@@ -95,8 +103,15 @@ window.ConsoleCanvas = (() => {
     if (sig !== lastSig) { lastSig = sig; paint(); }
   }
   // The decision cards come from the secretary summary in the board; redraw when they change.
-  const summarySig = () => JSON.stringify(window.ConsoleSecretary.cardsFor(new Set(decisionThreads())).map((c) => c.request_id));
+  // Every open card counts, placed or not: a new one must appear without the secretary (#1499).
+  const summarySig = () => JSON.stringify(window.ConsoleSecretary.all().map((c) => c.request_id));
   const decisionThreads = () => ((data && data.widgets) || []).filter((w) => w.kind === "decision").map((w) => w.data.thread_id);
+  // Open requests whose thread has no decision widget. The secretary wakes a few times a day at
+  // most, so a card opened after its last wake would otherwise wait for the next day (#1499).
+  const unplacedCards = () => {
+    const placed = new Set(decisionThreads().map(String));
+    return window.ConsoleSecretary.all().filter((c) => !placed.has(String(c.thread_id)));
+  };
 
   // Called from render(): the mode owns the layout while it is on.
   function paint() {
@@ -220,8 +235,19 @@ window.ConsoleCanvas = (() => {
       out.push(h("div", { class: "cv-banner" }, h("span", { text: s.focus_ready(plan.title, plan.items.length, plan.minutes) }),
         h("button", { type: "button", class: "btn primary", onclick: () => window.ConsoleSession.open(), text: s.focus_start })));
     }
-    if (!widgets.length) out.push(h("p", { class: "cv-empty dim", text: s.empty }));
-    else out.push(h("div", { class: "cv-grid" }, ...widgets.map(widget)));
+    const unplaced = unplacedCards();
+    if (unplaced.length) {
+      const shown = unplacedAll ? unplaced : unplaced.slice(0, FIRST_UNPLACED);
+      const more = unplaced.length - shown.length;
+      out.push(h("section", { class: "cv-unplaced" },
+        h("h2", { text: s.unplaced(unplaced.length) }),
+        h("div", { class: "dim", text: s.unplaced_note }),
+        h("ul", { class: "sec-cards" }, ...shown.map((c) => window.ConsoleSecretary.card(c))),
+        more ? h("button", { type: "button", class: "guide-link", onclick: () => { unplacedAll = true; paint(); },
+          text: s.unplaced_more(more) }) : null));
+    }
+    if (!widgets.length && !unplaced.length) out.push(h("p", { class: "cv-empty dim", text: s.empty }));
+    if (widgets.length) out.push(h("div", { class: "cv-grid" }, ...widgets.map(widget)));
     if (narrow.matches) out.push(h("button", { type: "button", class: "btn primary cv-chat", onclick: chat, text: s.chat }));
     return out;
   }

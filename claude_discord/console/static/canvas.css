@@ -21,6 +21,10 @@ body.canvas .app.no-detail { grid-template-columns: minmax(0, 1fr); }
 .cv-start p { margin: 0; line-height: 1.7; }
 .cv-empty { margin: 10vh auto; max-width: 480px; text-align: center; line-height: 1.7; }
 
+/* Open questions the secretary has not placed yet (#1499): shown without waiting for a wake. */
+.cv-unplaced { margin-bottom: 16px; padding: 12px 14px; border: 1px solid var(--accent); border-radius: 12px; background: var(--panel); }
+.cv-unplaced h2 { font-size: 15px; margin: 0 0 4px; }
+.cv-unplaced .sec-cards { margin-top: 8px; }
 .cv-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px; align-items: start; }
 .cv-w { grid-column: span 6; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
   padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
