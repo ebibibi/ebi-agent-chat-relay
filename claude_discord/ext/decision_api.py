@@ -38,7 +38,9 @@ async def read_mark_request(
     request: web.Request, outcome: str
 ) -> tuple[DecisionRequestSpec | None, web.Response | None]:
     """The request a mark carries, ``(None, None)`` for a bare mark, or a 400 to return."""
-    if not request.can_read_body:
+    # body_exists, not can_read_body: /candidate reads the body first for its
+    # evidence, and aiohttp then reports it as unreadable though text() is cached.
+    if not request.body_exists:
         return None, None
     raw = await request.text()
     if not raw.strip():

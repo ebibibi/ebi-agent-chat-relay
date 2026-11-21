@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Evidence-based auto-completion (#1477): `/candidate` accepts an `evidence` body; with
+  `CCDB_AUTO_COMPLETE=on` a thread whose waits, decision requests and child threads are all settled
+  completes itself after the turn ends. Off by default; `dry-run` reports the verdict only. See
+  `docs/auto-complete.md`.
+
 ### Fixed
 
 - Decision cards no longer disappear when the person writes anything in their thread or the agent

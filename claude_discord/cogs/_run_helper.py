@@ -152,6 +152,31 @@ def _truncate_result(content: str) -> str:
     return content[:TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
 
 
+def _auto_complete_hint() -> str:
+    """How to send evidence with /candidate, only while the operator has it enabled (#1477)."""
+    from ..auto_complete import MODE_OFF, AutoCompletePolicy
+
+    policy = AutoCompletePolicy.from_env()
+    if policy.mode == MODE_OFF:
+        return ""
+    verification = (
+        "required" if policy.require_verification else "optional, but list it when you have it"
+    )
+    return (
+        "Evidence: this deployment completes a candidate without the user when the evidence "
+        "shows the work is finished. Send it as the body of the same call:\n"
+        '  `-H "Content-Type: application/json" -d \'{"evidence": {"deliverables": '
+        '["<PR/commit/file URL>"], "verification": ["<check and its result>"], '
+        '"within_scope": true, "external_effects": []}}\'`\n'
+        f"Deliverables are required; verification is {verification}. Set within_scope "
+        "true only if you did nothing beyond what you were asked. List in external_effects "
+        "anything you sent, published, paid or deleted in production: those always need the "
+        "user, and listing one keeps the thread a candidate. ccdb itself checks waits, open "
+        "decision requests and child threads, and completes only after your turn ends; the "
+        "response's `auto_complete` says whether it will. Never invent evidence.\n"
+    )
+
+
 def _build_done_marker_section(config: RunConfig) -> str | None:
     """Tell the agent how to propose that this thread can be closed.
 
@@ -178,6 +203,7 @@ def _build_done_marker_section(config: RunConfig) -> str | None:
         "below). Do NOT mark it when you are asking "
         "a question, waiting for a pipeline or a decision, or leaving work pending. "
         "If the user replies later, the marker is removed automatically.\n"
+        f"{_auto_complete_hint()}"
         'Exception — the user explicitly asks you to close a thread ("mark the finished '
         'child threads done"): then close it for them, this thread or one it spawned:\n'
         '  `curl -s -X POST "$CCDB_API_URL/api/threads/<thread_id>/complete" '

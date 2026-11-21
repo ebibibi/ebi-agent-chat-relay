@@ -366,6 +366,10 @@ class ApiServer:
         # An agent running in one marks its outcome through the same
         # /api/threads/{id}/done|waiting|review|action as a chat thread.
         self.console_conversations: Any = None
+        # Evidence-based completion of /candidate marks (#1477); off unless configured.
+        from .auto_complete_api import ApiCompletionHost, AutoCompleter
+
+        self.auto_completer = AutoCompleter(ApiCompletionHost(self))
         self.attention_params: AttentionParams | None = None
         # Where Claude Code transcripts live, for /api/search?body=1. Falls back
         # to the standard ~/.claude/projects location so body search is
@@ -643,6 +647,7 @@ class ApiServer:
 
     async def stop(self) -> None:
         """Stop the API server."""
+        self.auto_completer.cancel_all()
         if self._runner:
             await self._runner.cleanup()
         if self._ext_runner:
@@ -1915,6 +1920,11 @@ class ApiServer:
         keeps its name for the prompts that already call it. The chat cog
         removes the marker again when a human replies in the thread.
 
+        An optional ``evidence`` object lets the thread complete itself after
+        the turn when ``CCDB_AUTO_COMPLETE=on`` and every check passes; see
+        :mod:`claude_discord.auto_complete`. The verdict is returned as
+        ``auto_complete``.
+
         Idempotent: an already-marked thread is not renamed, because Discord
         allows a thread only two renames per ten minutes.
 
@@ -1923,7 +1933,13 @@ class ApiServer:
         Discord's rate limit and will land on its own; 404 for an unknown
         channel, 400 when it is not a thread, 502 when the rename fails.
         """
-        return await self._mark_thread_outcome(request, OUTCOME_CANDIDATE)
+        from .auto_complete_api import handle_candidate
+
+        return await handle_candidate(
+            request,
+            self.auto_completer,
+            lambda: self._mark_thread_outcome(request, OUTCOME_CANDIDATE),
+        )
 
     async def complete_thread(self, request: web.Request) -> web.Response:
         """POST /api/threads/{thread_id}/complete — close it on the user's explicit request.
