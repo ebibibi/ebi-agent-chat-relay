@@ -103,6 +103,24 @@ async def persist_queued_runs(slots: SessionSlotScheduler, resume_repo: Any) -> 
     return written
 
 
+async def _wait_for_bot_shutdown(bot: Any, timeout: float) -> bool:
+    """Wait for the bot's signal handler to begin closing it after its service is stopped."""
+    is_closed = getattr(bot, "is_closed", None)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max(0.0, timeout)
+    while True:
+        if callable(is_closed):
+            try:
+                if is_closed() is True:
+                    return True
+            except Exception:
+                logger.debug("Could not inspect bot shutdown state", exc_info=True)
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return False
+        await asyncio.sleep(min(0.05, remaining))
+
+
 def build_restart_action(
     bot: Any,
     *,
@@ -134,7 +152,15 @@ def build_restart_action(
         # way, not a failure. Whether it worked is decided by this process surviving below.
         if code > 0:
             raise RuntimeError(f"restart command exited with {code}")
-        await asyncio.sleep(grace_seconds)
+        if await _wait_for_bot_shutdown(bot, grace_seconds):
+            # The supervisor has started closing this bot. Keep the held queue and
+            # saved resumes intact; releasing them here can start work in a dying
+            # process immediately before startup replays the same runs.
+            return
+        if code < 0:
+            raise RuntimeError(
+                f"restart command exited with {code} but this process was not stopped"
+            )
         raise RuntimeError("restart command succeeded but this process was not restarted")
 
     async def _close_bot() -> None:
