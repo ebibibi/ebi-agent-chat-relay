@@ -18,6 +18,9 @@ before.
 
 ## Terms of service
 
+A pool may contain only the instance owner's own logins. Never route one person's
+turns through another person's seat; see [ADR-0013](adr/0013-keep-the-relay-an-interface-layer.md).
+
 You are responsible for complying with each vendor's terms for every login you
 put in a pool. This feature only selects among logins you already hold — for
 example a personal plan and an organisation plan that you legitimately use — and
