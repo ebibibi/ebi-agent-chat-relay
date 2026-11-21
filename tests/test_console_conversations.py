@@ -8,6 +8,8 @@ itself, resumes the same session on a reply, and shows outcomes on the board.
 from __future__ import annotations
 
 import asyncio
+import logging
+import sqlite3
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import quote
@@ -386,10 +388,46 @@ async def test_live_and_stop_endpoints(env) -> None:
     await surface.offer_interrupt(on_stop)
     stop = await env.client.post(f"/console/api/items/{item_id}/stop", json={}, headers=WRITE)
     assert stop.status == 202 and pressed == [True]
+    assert await stop.json() == {"status": "stopping"}
     history = await env.conversations.history(int(item_id[1:]), 10)
     assert history[-1].content == "⏹ Stopped by token"
+    assert sum(m.content == "⏹ Stopped by token" for m in history) == 1
 
     assert (await env.client.get("/console/api/items/t1/live", headers=AUTH)).status == 404
+
+
+async def test_stop_stays_accepted_when_audit_append_hits_sqlite_lock(env, caplog) -> None:
+    item_id = await _start(env)
+    thread_key = int(item_id[1:])
+    surface = await env.host.frontend.resolve_surface(thread_key)
+    pressed: list[bool] = []
+
+    async def on_stop() -> None:
+        pressed.append(True)
+
+    await surface.offer_interrupt(on_stop)
+    lock = sqlite3.connect(env.conversations.db_path, timeout=0)
+    try:
+        lock.execute("BEGIN IMMEDIATE")
+        with caplog.at_level(logging.ERROR, logger="claude_discord.console.host"):
+            response = await env.client.post(
+                f"/console/api/items/{item_id}/stop", json={}, headers=WRITE
+            )
+        assert response.status == 202
+        assert await response.json() == {
+            "status": "stopping",
+            "warning": "stop_transcript_not_saved",
+        }
+        assert pressed == [True]
+        assert any(
+            "transcript persistence failed" in record.getMessage() for record in caplog.records
+        )
+    finally:
+        lock.rollback()
+        lock.close()
+
+    history = await env.conversations.history(thread_key, 20)
+    assert not any(m.content == "⏹ Stopped by token" for m in history)
 
 
 async def test_files_need_authentication_and_a_real_path(env) -> None:
