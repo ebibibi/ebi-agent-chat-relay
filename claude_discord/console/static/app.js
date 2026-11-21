@@ -54,6 +54,8 @@ const I18N = {
     clear: "Clear", loading: "Loading…", capturing: "Adding task…", sent: "Sent — the agent will pick it up", sent_live: "Sent into the running turn — the agent reads it while it works", started: "Started", captured: "Added to To do",
     today: "Today", yesterday: "Yesterday",
     saved: "Saved", offline: "offline", updated: "updated", no_project: "No project", queued: "queued",
+    sync_reconnecting: "Reconnecting", sync_auth_required: "Sign-in required",
+    sync_server_error: "Server error", sync_render_error: "Page update error",
     st: { running: "running", waiting: "waiting for you", review: "to review", action: "your task",
           error: "failed", candidate: "done? (AI thinks so)", done: "done", someday: "someday", todo: "to do", idle: "idle" },
     help: [["j / k", "next / previous"], ["Enter", "open"], ["Esc", "close"], ["e", "done"],
@@ -104,6 +106,8 @@ const I18N = {
     clear: "解除", loading: "読み込み中…", capturing: "タスクを登録中…", sent: "送りました。エージェントが拾います", sent_live: "実行中のエージェントに届けました。作業を続けながら読みます", started: "スレッドを開始しました", captured: "「やること」に追加しました",
     today: "今日", yesterday: "昨日",
     saved: "保存しました", offline: "接続できません", updated: "更新", no_project: "案件なし", queued: "待ち",
+    sync_reconnecting: "再接続中", sync_auth_required: "再ログインが必要です",
+    sync_server_error: "サーバーエラー", sync_render_error: "画面更新エラー",
     st: { running: "実行中", waiting: "あなたの返事待ち", review: "確認待ち", action: "あなたの作業",
           error: "失敗", candidate: "完了候補（AI判断）", done: "完了", someday: "いつか", todo: "やること", idle: "止まっている" },
     help: [["j / k", "次 / 前"], ["Enter", "開く"], ["Esc", "閉じる"], ["e", "完了"],
@@ -207,7 +211,12 @@ async function api(path, { method = "GET", body } = {}) {
     body: body === undefined ? undefined : JSON.stringify(body) });
   let data = null;
   try { data = await res.json(); } catch { /* empty body */ }
-  if (res.status === 401) { showLogin(); throw new Error((data && data.error) || "HTTP 401"); }
+  if (res.status === 401) {
+    showLogin();
+    const err = new Error((data && data.error) || "HTTP 401");
+    err.status = 401;
+    throw err;
+  }
   if (!res.ok) {
     // Callers that care (a 409 carrying the current version) read status and data.
     const err = new Error((data && data.error) || `HTTP ${res.status}`);
@@ -219,8 +228,15 @@ async function api(path, { method = "GET", body } = {}) {
 }
 
 async function refresh() {
+  let boardResponseReceived = false;
   try {
     const data = await api("/board");
+    if (!data || !Array.isArray(data.items)) {
+      const err = new Error("The board response is missing its items list");
+      err.syncFailureKind = "response";
+      throw err;
+    }
+    boardResponseReceived = true;
     // An unchanged poll redraws nothing: rebuilding hundreds of rows every few
     // seconds is what makes a phone stutter. Relative times still tick once a minute.
     const sig = JSON.stringify([data.items, data.slots, data.places, data.views, data.secretary]);
@@ -257,7 +273,11 @@ async function refresh() {
     if (open && open.thread_id && (open.running || open.queued)) loadMessages(open.id);
   } catch (err) {
     $("sync").className = "sync bad";
-    $("sync").textContent = `${T.offline}: ${err.message}`;
+    const kind = window.ConsoleSyncErrors.classifySyncFailure(err, boardResponseReceived);
+    const label = kind === "auth" ? T.sync_auth_required
+      : kind === "server" ? T.sync_server_error
+        : kind === "render" ? T.sync_render_error : T.sync_reconnecting;
+    $("sync").textContent = `${label}: ${err.message}`;
   }
 }
 
