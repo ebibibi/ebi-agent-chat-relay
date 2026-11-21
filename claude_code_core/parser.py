@@ -66,8 +66,27 @@ def parse_line(line: str) -> StreamEvent | None:
         _parse_rate_limit_event(data, event)
     elif msg_type == MessageType.STREAM_EVENT:
         _parse_stream_event(data, event)
+    elif msg_type == MessageType.CONTROL_REQUEST:
+        _parse_control_request(data, event)
 
     return event
+
+
+def _parse_control_request(data: dict[str, Any], event: StreamEvent) -> None:
+    """Parse what ``--permission-prompt-tool stdio`` sends when a tool needs a decision."""
+    request_id = data.get("request_id", "")
+    request = data.get("request") or {}
+    if request.get("subtype") != "can_use_tool":
+        logger.warning("Unsupported control_request: %s", request.get("subtype"))
+        event.unsupported_control_request_id = request_id
+        return
+    event.permission_request = PermissionRequest(
+        request_id=request_id,
+        tool_name=request.get("tool_name", ""),
+        tool_input=request.get("input") or {},
+        reason=request.get("decision_reason") or "",
+    )
+    logger.info("Permission request: %s", request.get("tool_name"))
 
 
 def _parse_system(data: dict[str, Any], event: StreamEvent) -> None:

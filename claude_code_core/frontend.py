@@ -403,6 +403,9 @@ class ChoicePrompt:
     #: this to the denying choice so an unattended session fails closed.
     default_on_timeout: str | None = None
     notify: Mention | None = None
+    #: External user IDs who may answer. ``None`` lets anyone who can see it
+    #: answer; an empty set lets nobody.
+    allowed_user_ids: frozenset[str] | None = None
 
     def __post_init__(self) -> None:
         if not self.question:

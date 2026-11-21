@@ -33,6 +33,7 @@ class MessageType(Enum):
     PROGRESS = "progress"
     STREAM_EVENT = "stream_event"  # low-level streaming events; parsed but not acted on
     RATE_LIMIT_EVENT = "rate_limit_event"  # rate limit info from Anthropic API
+    CONTROL_REQUEST = "control_request"  # the CLI asks its host to decide something
 
 
 class ContentBlockType(Enum):
@@ -122,6 +123,8 @@ class PermissionRequest:
     request_id: str
     tool_name: str
     tool_input: dict[str, Any] = field(default_factory=dict)
+    #: Why the CLI is asking, e.g. the reason a PreToolUse hook returned with "ask".
+    reason: str = ""
 
 
 @dataclass
@@ -216,6 +219,9 @@ class StreamEvent:
     todo_list: list[TodoItem] | None = None
     is_plan_approval: bool = False
     permission_request: PermissionRequest | None = None
+    #: request_id of a control_request this host cannot answer. The CLI blocks
+    #: until it gets a response, so the runner has to refuse it.
+    unsupported_control_request_id: str | None = None
     elicitation: ElicitationRequest | None = None
     is_compact: bool = False
     compact_trigger: str | None = None

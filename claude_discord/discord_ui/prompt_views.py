@@ -85,13 +85,24 @@ class ChoiceView(discord.ui.View):
             self._resolve((default,) if default is not None else None)
             return (default,) if default is not None else None
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        allowed = self._prompt.allowed_user_ids
+        if allowed is None or str(interaction.user.id) in allowed:
+            return True
+        with contextlib.suppress(discord.HTTPException):
+            await interaction.response.send_message(
+                "You are not allowed to answer this.", ephemeral=True
+            )
+        return False
+
     def console_actions(self, message: discord.Message) -> list[MessageAction]:
         """The choices as actions the Ebi AI Console can press.
 
         Single choice only: a multi-select needs a form, so the console
-        answers those by replying in text as before.
+        answers those by replying in text as before. A prompt limited to
+        certain users stays on Discord, where the presser's ID can be checked.
         """
-        if self._prompt.multi_select:
+        if self._prompt.multi_select or self._prompt.allowed_user_ids is not None:
             return []
         return [
             MessageAction(
