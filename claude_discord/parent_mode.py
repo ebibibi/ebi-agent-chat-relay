@@ -170,6 +170,13 @@ def build_parent_section(thread_id: int, max_children: int) -> str:
         "links), what needs their decision, what is still moving. Keep the situation "
         "panel current. A child's decision requests already appear in your panel: do not "
         "copy them; the user answers the child directly.\n"
+        "- When several children ask the user the same question, combine them into one "
+        f"card: list the family's open cards with GET $CCDB_API_URL/api/threads/{thread_id}"
+        "/decisions?family=1, send your own card (one that answers every child's question), "
+        f"then POST $CCDB_API_URL/api/threads/{thread_id}/decisions/<your key>/covers with "
+        '{"request_ids": [<their ids>]}. Their cards close, and the user\'s answer to yours '
+        "is delivered to each of those children too. Only combine questions that truly have "
+        "one answer; different questions stay separate.\n"
         "- Publishing, sending, paying and deleting production data still need the "
         "user's explicit approval, whichever thread does the work."
     )
