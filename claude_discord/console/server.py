@@ -69,6 +69,7 @@ from .files import resolve_file
 from .guide import build_guide
 from .logsafe import q as _q
 from .messages import KIND_ACTIVITY, serialize_message, with_kind
+from .night_shift import NightShift
 from .oidc import OidcClient, OidcConfig, provider_name
 from .pages import PageRoutes
 from .parent_mode_routes import ParentModeRoutes
@@ -339,6 +340,10 @@ class ConsoleServer:
         self._request_files_cache: dict[int, tuple[float, list[dict[str, str]]]] = {}
         #: Canvas mode's resident secretary (ADR-0025); None turns the mode off.
         self.canvas = self._build_canvas(canvas_repo)
+        #: The 🌙 night shift (#1511): hands the agents' own next moves over for the night.
+        self.night_shift = self._build_night_shift(canvas_repo)
+        if self.canvas is not None:
+            self.canvas.night_shift = self.night_shift
         if self.canvas is not None and self.sessions is not None:
             # Every secretary turn starts a fresh session with a compact brief, in an empty
             # directory without the user's CLAUDE.md and skills.
@@ -507,6 +512,8 @@ class ConsoleServer:
         self._start_decision_defaults()
         if self.canvas is not None:
             self.canvas.start()
+        if self.night_shift is not None:
+            self.night_shift.start()
 
     def _start_decision_defaults(self) -> None:
         """Proceed with due cards inside the owner's approved scopes (#1478).
@@ -562,6 +569,37 @@ class ConsoleServer:
             history=self._canvas_history,
         )
 
+    def _build_night_shift(self, repo: CanvasRepository | None) -> NightShift | None:
+        if repo is None or self.canvas is None:
+            return None
+        canvas = self.canvas
+
+        async def deliver(item_id: str, text: str) -> bool:
+            response = await self._deliver(item_id, text, "night shift", metered=False)
+            return response.status < 300
+
+        async def waiting() -> set[int]:
+            waits = getattr(self.api, "wait_repo", None)
+            return set(await waits.active_thread_ids()) if waits is not None else set()
+
+        def scopes() -> list[str]:
+            policy = policy_from_env()
+            return list(policy.scopes.values()) if policy is not None else []
+
+        async def limit() -> int:
+            return (await canvas.night_settings()).shift_limit
+
+        return NightShift(
+            repo,
+            board=self._board_items,
+            requests=self._open_requests,
+            deliver=deliver,
+            waiting=waiting,
+            scopes=scopes,
+            limit=limit,
+            exclude=canvas.item_id,
+        )
+
     async def _canvas_history(self, thread_key: int, limit: int) -> list[tuple[str, bool, str]]:
         if self.conversations is None:
             return []
@@ -608,6 +646,8 @@ class ConsoleServer:
     async def stop(self) -> None:
         if self.canvas is not None:
             await self.canvas.stop()
+        if self.night_shift is not None:
+            await self.night_shift.stop()
         if self._defaulter is not None:
             await self._defaulter.stop()
             self._defaulter = None

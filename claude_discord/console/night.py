@@ -37,6 +37,9 @@ MAX_TEMPLATE_CHARS = 4000
 MAX_KEYWORDS = 20
 MAX_KEYWORD_CHARS = 40
 MAX_PLACE_CHARS = 200
+#: How many threads one night shift hands over at most (#1511); the person may change it.
+DEFAULT_SHIFT_LIMIT = 8
+SHIFT_LIMIT_RANGE = (1, 20)
 #: Board statuses a person may mark as urgent enough to ring at night.
 URGENT_STATUSES = frozenset({"error", "waiting", "action", "review"})
 _HHMM = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
@@ -109,6 +112,7 @@ class NightSettings:
     urgent_keywords: tuple[str, ...] = field(default_factory=tuple)
     morning_at: str | None = None
     morning_place: str | None = None
+    shift_limit: int = DEFAULT_SHIFT_LIMIT
 
     @property
     def quiet_enabled(self) -> bool:
@@ -203,9 +207,15 @@ def parse_night_settings(body: Any, current: NightSettings | None = None) -> Nig
     if place is not None and (not isinstance(place, str) or len(place) > MAX_PLACE_CHARS):
         problems.append(f"morning_place must be text of at most {MAX_PLACE_CHARS} characters")
         place = None
+    limit = pick("shift_limit")
+    low, high = SHIFT_LIMIT_RANGE
+    if isinstance(limit, bool) or not isinstance(limit, int) or not low <= limit <= high:
+        problems.append(f"shift_limit must be a whole number {low}-{high}")
+        limit = DEFAULT_SHIFT_LIMIT
     if problems:
         raise NightSettingsError(problems)
     return NightSettings(
+        shift_limit=limit,
         quiet_start=quiet_start,
         quiet_end=quiet_end,
         urgent_statuses=tuple(dict.fromkeys(statuses)),

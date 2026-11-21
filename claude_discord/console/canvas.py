@@ -242,6 +242,8 @@ class CanvasSecretary:
         self._start_lock = asyncio.Lock()
         #: (choice, monotonic expiry): the AI the open canvas chose, memory only.
         self._screen_ai: tuple[TurnAI, float] | None = None
+        #: The 🌙 night shift (#1511), set by the Console; its last shift shows in the brief.
+        self.night_shift: Any = None
 
     # -- lifecycle -----------------------------------------------------------
     def start(self) -> None:
@@ -589,6 +591,7 @@ class CanvasSecretary:
             now=self._clock(),
             hours=hours,
             base_url=base_url,
+            shift=await self.night_shift.current() if self.night_shift is not None else None,
         )
 
     # -- what the Console shows ---------------------------------------------------
