@@ -55,6 +55,7 @@ class FakeHost:
     teams: set[int] = field(default_factory=set)
     notes: list[tuple[int, str]] = field(default_factory=list)
     completed: list[int] = field(default_factory=list)
+    recorded: list[int] = field(default_factory=list)
 
     def running_thread_ids(self) -> set[int]:
         return set(self.running)
@@ -82,6 +83,9 @@ class FakeHost:
 
     async def post_note(self, thread_id: int, text: str) -> None:
         self.notes.append((thread_id, text))
+
+    async def record(self, thread_id: int, evidence: Evidence) -> None:
+        self.recorded.append(thread_id)
 
     async def complete(self, thread_id: int) -> None:
         self.completed.append(thread_id)
@@ -150,6 +154,20 @@ class TestFinish:
         assert host.notes and host.notes[0][0] == THREAD
         assert "https://github.com/o/r/pull/1" in host.notes[0][1]
         assert "reopen" in host.notes[0][1].lower()
+        # The rescue record (#1490) is kept before the completion.
+        assert host.recorded == [THREAD]
+
+    async def test_a_failed_record_does_not_block_completion(self) -> None:
+        host = FakeHost(titles={THREAD: CANDIDATE_TITLE})
+
+        async def broken(thread_id: int, evidence: Evidence) -> None:
+            raise RuntimeError("db locked")
+
+        host.record = broken  # type: ignore[method-assign]
+        completer = _completer(host)
+        completer.schedule(THREAD, EVIDENCE)
+        await _drain(completer)
+        assert host.completed == [THREAD]
 
     async def test_a_human_reply_cancels(self) -> None:
         # The reply removes the 🏁 and starts a new turn.

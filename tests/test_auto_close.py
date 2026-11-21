@@ -392,3 +392,27 @@ def test_closure_note_shape() -> None:
     assert note.startswith("[auto-closed 2026-11-21T10:00")
     assert "No human next step" in note
     assert json.dumps(SWEEP.as_dict())
+
+
+class TestEvidenceRecord:
+    @pytest.mark.asyncio
+    async def test_api_host_records_evidence_completion(self, db_path: str) -> None:
+        from claude_discord.auto_complete import Evidence
+        from claude_discord.ext.auto_complete_api import ApiCompletionHost
+
+        console = await _console(db_path)
+        host = ApiCompletionHost(_fake_api(console))
+        evidence = Evidence(deliverables=("https://example.test/pr/1",), within_scope=True)
+        await host.record(THREAD, evidence)
+        item = await console.work_repo.get(thread_item_id(THREAD))
+        assert item is not None
+        assert {AUTO_CLOSED_TAG, f"{AUTO_CLOSED_TAG}:evidence"} <= set(item.tags)
+        assert item.note is not None and "https://example.test/pr/1" in item.note
+
+    @pytest.mark.asyncio
+    async def test_without_console_nothing_is_recorded(self) -> None:
+        from claude_discord.auto_complete import Evidence
+        from claude_discord.ext.auto_complete_api import ApiCompletionHost
+
+        host = ApiCompletionHost(_fake_api(None))
+        await host.record(THREAD, Evidence(deliverables=("x",)))

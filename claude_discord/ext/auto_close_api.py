@@ -47,6 +47,7 @@ from .auto_complete_api import ApiCompletionHost
 
 __all__ = [
     "AutoCloser",
+    "record_closure",
     "handle_auto_close",
     "handle_list_auto_closures",
     "handle_sweep_threads",
@@ -65,6 +66,26 @@ _FINISHED = frozenset({OUTCOME_CANDIDATE, OUTCOME_DONE})
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+async def record_closure(console: Any, thread_id: int, closure: Closure) -> None:
+    """Tag the thread's work item ``auto-closed`` and append why, so it can be rescued.
+
+    Shared by routine closes and evidence-based completion. A deployment
+    without the Console has no work items, so there is nothing to record.
+    """
+    if console is None:
+        return
+    from ..console.work_repo import thread_item_id
+
+    repo = console.work_repo
+    item_id = thread_item_id(thread_id)
+    current = await repo.get(item_id)
+    record = closure_note(closure, closed_at=_now().isoformat())
+    note = f"{current.note}\n\n{record}" if current is not None and current.note else record
+    tags = sorted({*(current.tags if current is not None else ()), *closure_tags(closure)})
+    # Keep the newest record when a long note would overflow: it is the one that matters.
+    await repo.update(item_id, {"note": note[-_MAX_NOTE_CHARS:], "tags": tags})
 
 
 class AutoCloser:
@@ -125,19 +146,7 @@ class AutoCloser:
         return verdict
 
     async def _record(self, thread_id: int, closure: Closure) -> None:
-        console = self._api._console
-        if console is None:
-            return
-        from ..console.work_repo import thread_item_id
-
-        repo = console.work_repo
-        item_id = thread_item_id(thread_id)
-        current = await repo.get(item_id)
-        record = closure_note(closure, closed_at=_now().isoformat())
-        note = f"{current.note}\n\n{record}" if current is not None and current.note else record
-        tags = sorted({*(current.tags if current is not None else ()), *closure_tags(closure)})
-        # Keep the newest record when a long note would overflow: it is the one that matters.
-        await repo.update(item_id, {"note": note[-_MAX_NOTE_CHARS:], "tags": tags})
+        await record_closure(self._api._console, thread_id, closure)
 
     async def _complete(self, thread_id: int) -> None:
         console = self._api._console

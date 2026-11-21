@@ -41,6 +41,7 @@ from typing import Any
 __all__ = [
     "AUTO_CLOSED_TAG",
     "HUMAN_NEXT_TAG",
+    "KIND_EVIDENCE",
     "KIND_SWEEP",
     "KIND_UPGRADE",
     "MODE_DRY_RUN",
@@ -69,6 +70,9 @@ _MODES = frozenset({MODE_OFF, MODE_DRY_RUN, MODE_ON})
 KIND_UPGRADE = "upgrade"
 #: A housekeeping job's review of candidates and stalled threads.
 KIND_SWEEP = "sweep"
+#: Evidence-based completion (:mod:`claude_discord.auto_complete`). Recorded the
+#: same way so it can be rescued, but governed by ``CCDB_AUTO_COMPLETE``, not here.
+KIND_EVIDENCE = "evidence"
 KINDS = frozenset({KIND_UPGRADE, KIND_SWEEP})
 
 MODE_ENV_VAR = "CCDB_AUTO_CLOSE"

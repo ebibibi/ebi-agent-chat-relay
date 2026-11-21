@@ -34,6 +34,10 @@ Every automatic close:
 3. marks the item done **without** marking the bound Workspace entry done — the thread is over, not
    necessarily the task it served.
 
+Evidence-based completion ([auto-complete.md](auto-complete.md)) keeps the same record with kind
+`evidence`, so threads that closed themselves on evidence are listed and reopened the same way. It
+still mirrors into the Workspace entry as before, because its evidence says the work itself is done.
+
 Reopen it with one tap (**Reopen** on a done thread in the Console) or by replying in the thread.
 A saved view on the `auto-closed` tag shows them all; `GET /api/auto-closures?days=N` lists the
 closures of the rescue window (`CCDB_AUTO_CLOSE_RESCUE_DAYS`), newest first. The record is never
