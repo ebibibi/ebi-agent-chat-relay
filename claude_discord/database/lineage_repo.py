@@ -64,6 +64,16 @@ class ThreadLineageRepository:
         rows = list(rows)
         return int(rows[0][0]) if rows else None
 
+    async def children_of(self, thread_id: int) -> list[int]:
+        """Return the threads *thread_id* spawned directly, oldest first."""
+        async with aiosqlite.connect(self._db_path) as db:
+            rows = await db.execute_fetchall(
+                "SELECT thread_id FROM thread_lineage WHERE parent_thread_id = ?"
+                " ORDER BY created_at, thread_id",
+                (int(thread_id),),
+            )
+        return [int(row[0]) for row in rows]
+
     async def list_all(self, limit: int = 500) -> list[Lineage]:
         """Return the most recent links, newest first."""
         async with aiosqlite.connect(self._db_path) as db:
