@@ -1508,6 +1508,7 @@ class ConsoleServer:
         if err:
             return err
         text = str(body.get("text") or "").strip()
+        retitle_text = text
         # "images" is the field older clients send; "files" carries any attachment.
         files, err = self._reply_files([*_listed(body.get("images")), *_listed(body.get("files"))])
         if err:
@@ -1523,7 +1524,14 @@ class ConsoleServer:
         except TurnAIError as exc:
             return _error(str(exc), 400)
         item_id = request.match_info["item_id"]
-        response = await self._deliver(item_id, text, request[IDENTITY], metered=True, ai=ai)
+        response = await self._deliver(
+            item_id,
+            text,
+            request[IDENTITY],
+            metered=True,
+            ai=ai,
+            retitle_text=retitle_text,
+        )
         if response.status < 300:
             await self._close_requests(item_id, body.get("request_id"))
             await self._answer_covered(item_id, body.get("request_id"), text)
@@ -1564,7 +1572,14 @@ class ConsoleServer:
                 )
 
     async def _deliver(
-        self, item_id: str, text: str, who: str, *, metered: bool, ai: TurnAI | None = None
+        self,
+        item_id: str,
+        text: str,
+        who: str,
+        *,
+        metered: bool,
+        ai: TurnAI | None = None,
+        retitle_text: str | None = None,
     ) -> web.Response:
         """Queue *text* as the human's next message in the item's conversation.
 
@@ -1596,6 +1611,9 @@ class ConsoleServer:
         except WorkItemError as exc:
             return _error(str(exc), 400)
         schedule_thread_outcome(thread, None)
+        if metered and retitle_text:
+            # Retitle from human text, not long-text or attachment wrappers.
+            cog._schedule_retitle(thread, retitle_text)
         prompt = f"{text}\n\n-# 🖥️ via Ebi AI Console ({who})"
         if metered:
             # Posted by the bot, so the chat frontend's own metering skips it.
