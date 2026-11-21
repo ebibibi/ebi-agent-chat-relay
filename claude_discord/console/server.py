@@ -35,6 +35,7 @@ from claude_code_core.attention_repo import AttentionRecorder
 from ..account_turns import session_home
 from ..automation_routes import ConsoleRoutes as AutomationConsoleRoutes
 from ..database.pages_repo import PageRepository
+from ..decision_default import policy_from_env
 from ..human_activity import note_human_activity
 from ..message_actions import message_actions
 from ..teams_exporter import source_tags
@@ -63,6 +64,7 @@ from .commands import (
 )
 from .conversations import ConversationRepository
 from .decision_cleanup import DecisionReviewer
+from .decision_defaults import DecisionDefaulter
 from .files import resolve_file
 from .guide import build_guide
 from .logsafe import q as _q
@@ -298,6 +300,7 @@ class ConsoleServer:
         #: Item id → the activity whose drifted records the board already wrote back.
         self._written_back: dict[str, str] = {}
         self._records_task: asyncio.Task[None] | None = None
+        self._defaulter: DecisionDefaulter | None = None
         self._vault: Vault | None = None
         self._note_index: NoteIndex | None = None
         self._workspace_index_cache: tuple[float, list[tuple[str, str]]] | None = None
@@ -494,8 +497,26 @@ class ConsoleServer:
         logger.info("Ebi AI Console started: http://%s:%d", self.host, self.port)
         if self.workspace.root is not None and self._records_task is None:
             self._records_task = asyncio.ensure_future(self._records_loop())
+        self._start_decision_defaults()
         if self.canvas is not None:
             self.canvas.start()
+
+    def _start_decision_defaults(self) -> None:
+        """Proceed with due cards inside the owner's approved scopes (#1478).
+
+        Always running and cheap: without ``CCDB_DECISION_DEFAULTS_FILE`` each pass returns at
+        once, and the file is re-read every pass so the owner's list applies without a restart.
+        """
+        repo = getattr(self.api, "decision_repo", None)
+        if repo is None or self._defaulter is not None:
+            return
+
+        async def deliver(item_id: str, text: str) -> bool:
+            response = await self._deliver(item_id, text, "automatic default", metered=False)
+            return response.status < 300
+
+        self._defaulter = DecisionDefaulter(repo, policy=policy_from_env, deliver=deliver)
+        self._defaulter.start(self._board_items)
 
     def start_triage(self, ask: Callable[[str], Awaitable[str | None]], *, model: str) -> None:
         """Triage open items in the background with *ask* (one model call per item)."""
@@ -572,6 +593,9 @@ class ConsoleServer:
     async def stop(self) -> None:
         if self.canvas is not None:
             await self.canvas.stop()
+        if self._defaulter is not None:
+            await self._defaulter.stop()
+            self._defaulter = None
         if self._records_task is not None:
             self._records_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -839,6 +863,22 @@ class ConsoleServer:
             return _error("Decision requests unavailable", 503)
         closed = await repo.close(thread, reason="dismissed", request_id=rid)
         return web.json_response({"closed": closed})
+
+    async def _close_finished_cards(self, item_id: str) -> None:
+        """Done closes the item's open cards, as the 🏁/✅ markers do (#1478).
+
+        Without this, a card outlived the thread the person finished and came back the moment
+        anything touched that thread again.
+        """
+        repo = getattr(self.api, "decision_repo", None)
+        thread_id = _thread_of(item_id)
+        if repo is None or thread_id is None:
+            return
+        try:
+            await repo.close(thread_id, reason="finished")
+        except Exception:
+            # The item is done; a card left open is hidden while it stays done.
+            logger.exception("console: could not close the cards of %s", item_id)
 
     async def _close_requests(self, item_id: str, request_id: Any) -> None:
         """A person answered a card: that one request is settled.
@@ -1359,6 +1399,7 @@ class ConsoleServer:
         request. Raises :class:`WorkItemError` for an item that cannot move.
         """
         item = await self.work_repo.update(item_id, {"state": STATE_DONE, "snoozed_until": None})
+        await self._close_finished_cards(item_id)
         key = await self._conversation_key(item_id)
         if key is not None and self.conversations is not None:
             await apply_outcome(self.conversations, key, OUTCOME_DONE)
