@@ -353,9 +353,11 @@ async def _build_system_context(config: RunConfig) -> str | None:
     )
 
     if getattr(config.runner, "api_port", None) is not None:
+        from ..decision_default import policy_from_env
         from ..decision_request import agent_guide
 
-        parts.append(agent_guide())
+        policy = policy_from_env()
+        parts.append(agent_guide(policy.scopes if policy is not None else None))
 
     parts.append(
         "## Situation panel for thread families\n"

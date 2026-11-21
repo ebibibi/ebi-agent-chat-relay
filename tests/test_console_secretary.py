@@ -389,3 +389,20 @@ async def test_the_console_serves_the_night_template_and_settings(tmp_path) -> N
         assert en["template"].startswith("Goal:")
     finally:
         await client.close()
+
+
+async def test_done_closes_the_items_open_cards(env, tmp_path) -> None:
+    """Finishing an item in the Console closes its cards, as 🏁/✅ do (#1478)."""
+    decisions = DecisionRequestRepository(str(tmp_path / "sessions.db"))
+    env.console.api.decision_repo = decisions
+    item_id = await _start(env)
+    key = int(item_id[1:])
+    await decisions.put(
+        key, parse_request(_good(), kind="waiting"), origin="mark", source_thread_id=key
+    )
+    other = await decisions.put(
+        key + 1, parse_request(_good(), kind="waiting"), origin="mark", source_thread_id=key + 1
+    )
+    done = await env.client.post(f"/console/api/items/{item_id}/done", json={}, headers=WRITE)
+    assert done.status == 200
+    assert [r.id for r in await decisions.list_open()] == [other.id]

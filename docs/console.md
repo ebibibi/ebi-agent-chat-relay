@@ -148,6 +148,9 @@ Deadline: before the deletion on 11/17
   their results, the recommendation and why, the material to decide with (the draft, the
   diff, the numbers, rendered as Markdown), and the deadline.
 - **👀 To review** — the same cards for deliverables (👀).
+- **Proceeding unanswered** — off by default. The owner may list kinds of reversible work
+  for which a card proceeds with its recommendation once its time passes; see
+  [decision-defaults.md](decision-defaults.md).
 - **📭 Waiting without a request** — threads that wait on you (❓/👀/📋/⚠️) but whose agent
   wrote no request, by title only. Nothing is summarised for them; open the thread.
 - **🤖 Agents at work** (one line each, no progress text) and **✅ Finished today**, where a

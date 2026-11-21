@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 #: The markers that hand the next move to the person; a request carries one of them.
@@ -40,7 +41,8 @@ DETAIL_FIELDS = (
     "deadline",  # the deadline and what happens without a decision
 )
 CARD_FIELDS = ("title", "context", "options", "deadline")
-_FIELDS = frozenset({*CARD_FIELDS, "detail", "key"})
+_FIELDS = frozenset({*CARD_FIELDS, "detail", "key", "if_no_answer"})
+_IF_NO_ANSWER_FIELDS = frozenset({"after", "scope"})
 _OPTION_FIELDS = frozenset({"label", "effect", "recommended"})
 
 # Card limits, in characters. Six lines: the title, the context, up to three choices and the
@@ -124,6 +126,17 @@ class Option:
 
 
 @dataclass(frozen=True)
+class IfNoAnswer:
+    """Proceed with the recommended option after *after*, within the approved *scope* (#1478)."""
+
+    after: datetime
+    scope: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {"after": self.after.isoformat(), "scope": self.scope}
+
+
+@dataclass(frozen=True)
 class DecisionRequestSpec:
     """A validated request, not yet stored."""
 
@@ -134,14 +147,18 @@ class DecisionRequestSpec:
     options: tuple[Option, ...]
     deadline: str
     detail: dict[str, str]
+    if_no_answer: IfNoAnswer | None = None
 
     def card(self) -> dict[str, Any]:
-        return {
+        card: dict[str, Any] = {
             "title": self.title,
             "context": self.context,
             "options": [o.as_dict() for o in self.options],
             "deadline": self.deadline,
         }
+        if self.if_no_answer is not None:
+            card["if_no_answer"] = self.if_no_answer.as_dict()
+        return card
 
 
 def has_request(body: Any) -> bool:
@@ -158,8 +175,14 @@ def refusal(error: DecisionRequestError) -> dict[str, Any]:
     }
 
 
-def parse_request(body: Any, *, kind: str) -> DecisionRequestSpec:
-    """Validate *body* as a request of *kind*, or raise with every problem found."""
+def parse_request(
+    body: Any, *, kind: str, scopes: Mapping[str, str] | None = None
+) -> DecisionRequestSpec:
+    """Validate *body* as a request of *kind*, or raise with every problem found.
+
+    *scopes* are the kinds of work the owner approved to proceed unanswered
+    (:mod:`claude_discord.decision_default`); ``None`` means that feature is off.
+    """
     if kind not in KINDS:
         raise ValueError(f"kind must be one of {', '.join(KINDS)}")
     if not isinstance(body, Mapping):
@@ -175,6 +198,7 @@ def parse_request(body: Any, *, kind: str) -> DecisionRequestSpec:
     deadline = _line(body, "deadline", MIN_DEADLINE, MAX_DEADLINE, problems)
     options = _options(body.get("options"), kind, problems)
     detail = _detail(body.get("detail"), problems)
+    if_no_answer = _if_no_answer(body.get("if_no_answer"), kind, options, scopes, problems)
     key = body.get("key", "")
     if not isinstance(key, str) or (key and not _KEY.match(key)):
         problems.append("key must be 1-40 letters, digits or _.:- (or left out)")
@@ -203,7 +227,57 @@ def parse_request(body: Any, *, kind: str) -> DecisionRequestSpec:
         options=tuple(options),
         deadline=deadline,
         detail=detail,
+        if_no_answer=if_no_answer,
     )
+
+
+def _if_no_answer(
+    value: Any,
+    kind: str,
+    options: list[Option],
+    scopes: Mapping[str, str] | None,
+    problems: list[str],
+) -> IfNoAnswer | None:
+    if value is None:
+        return None
+    if scopes is None:
+        problems.append(
+            "if_no_answer is not enabled in this deployment: leave it out, and the card waits "
+            "for the person"
+        )
+        return None
+    if not isinstance(value, Mapping):
+        problems.append('if_no_answer must be {"after": ISO 8601 with offset, "scope": key}')
+        return None
+    unknown = sorted(set(value) - _IF_NO_ANSWER_FIELDS)
+    if unknown:
+        problems.append(f"if_no_answer has unknown field {unknown[0]!r}")
+    if kind == "action":
+        problems.append("An action card cannot carry if_no_answer: only the person can do the task")
+    if not any(o.recommended for o in options):
+        problems.append("if_no_answer needs one option marked recommended: that is what runs")
+    after = _aware(value.get("after"))
+    if after is None:
+        problems.append(
+            "if_no_answer.after must be an ISO 8601 time with an offset, e.g. "
+            "2026-11-23T09:00:00+09:00"
+        )
+    scope = value.get("scope")
+    if not isinstance(scope, str) or scope not in scopes:
+        allowed = ", ".join(f"{k} ({v})" for k, v in scopes.items())
+        problems.append(f"if_no_answer.scope must be one the owner approved: {allowed}")
+        return None
+    return IfNoAnswer(after=after, scope=scope) if after is not None else None
+
+
+def _aware(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        moment = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return moment if moment.tzinfo is not None else None
 
 
 def _line(body: Mapping[str, Any], name: str, low: int, high: int, problems: list[str]) -> str:
@@ -295,12 +369,34 @@ def _detail(value: Any, problems: list[str]) -> dict[str, str]:
     return detail
 
 
-def agent_guide() -> str:
+def agent_guide(scopes: Mapping[str, str] | None = None) -> str:
     """The system-prompt section every agent with the control plane gets.
 
     One place for the format and the bar. Requests ride on the markers only: the secretary home,
     canvas mode and the thread's own situation panel all show them from the same store.
+    *scopes* (the owner's approved defaults, #1478) adds the ``if_no_answer`` paragraph.
     """
+    return _guide_base() + _guide_defaults(scopes)
+
+
+def _guide_defaults(scopes: Mapping[str, str] | None) -> str:
+    if not scopes:
+        return ""
+    listed = "; ".join(f"`{key}`: {label}" for key, label in scopes.items())
+    return (
+        "\nProceeding when nobody answers: the owner approved these kinds of reversible work "
+        f"in advance — {listed}. Only when your recommended option lies entirely within one "
+        'of them, add `"if_no_answer": {"after": "<ISO 8601 time with offset>", "scope": '
+        '"<key>"}` and say in `"deadline"` that you will proceed with the recommendation then. '
+        "If nobody answers by that time, the relay posts an automatic notice in this thread; "
+        "then do the recommended option and stay inside that scope. Never use it for "
+        "publishing, sending, payment, deletion or production changes, and never on an "
+        "action card (a task only the user can do). Without `if_no_answer` the card waits "
+        "for the user."
+    )
+
+
+def _guide_base() -> str:
     return (
         "## Asking the user: decision requests\n"
         "Whenever you hand the user something to decide, review or do (a ❓/👀/📋 marker), "
@@ -339,5 +435,8 @@ def agent_guide() -> str:
         '?reason=answered"`'
         " (the key you sent, or `_` if you sent none). "
         "A parent never copies a child's question: the child's card "
-        "already shows in the parent's panel, and the answer goes to the child."
+        "already shows in the parent's panel, and the answer goes to the child. "
+        "An open card does not stop you: keep doing the work in this thread that is "
+        "independent of the answer, and end your turn only when nothing is left that the "
+        "answer does not decide."
     )
