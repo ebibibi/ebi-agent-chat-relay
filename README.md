@@ -134,7 +134,9 @@ which model types**:
   status and latest report. You talk to the manager; it coordinates the children.
 - **Spread the load across subscriptions.** Claude and Codex have separate quotas. Running the
   manager on one and the workers on the other uses both flat-rate plans in parallel instead of
-  exhausting one. [Account pools](docs/account-pools.md) rotate several logins per backend on top.
+  exhausting one. [Account pools](docs/account-pools.md) can rotate logins, but they hold only the
+  instance owner's own accounts — never route one person's turns through another person's seat
+  ([ADR-0013](docs/adr/0013-keep-the-relay-an-interface-layer.md)).
 - **Housekeeping on the cheapest model.** Console triage uses the cheapest model of your backend
   (Haiku on Claude, the cheapest catalog model on Codex), one-shot and without tools.
 - **Pin scheduled jobs to a model.** Nightly audits and digests can run on a small model while

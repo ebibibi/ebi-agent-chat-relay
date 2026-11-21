@@ -12,6 +12,9 @@ existing setup keeps working as it is.
 The JSON API under `/console/api` is the contract. The bundled web client is one consumer of it.
 For recording a demo without your own data on screen, see [docs/demo.md](demo.md).
 
+**One owner per instance.** Console sign-ins are for the instance owner. Serving several people
+means one instance and one execution environment per person ([ADR-0013](adr/0013-keep-the-relay-an-interface-layer.md)).
+
 See [ADR-0010](adr/0010-add-an-api-first-console-on-its-own-listener.md) and, for sign-in,
 [ADR-0012](adr/0012-sign-in-to-the-console-with-passkeys-by-default.md).
 
