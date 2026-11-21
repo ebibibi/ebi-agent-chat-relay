@@ -71,6 +71,7 @@ from .logsafe import q as _q
 from .messages import KIND_ACTIVITY, serialize_message, with_kind
 from .oidc import OidcClient, OidcConfig, provider_name
 from .pages import PageRoutes
+from .parent_mode_routes import ParentModeRoutes
 from .passkey_store import PasskeyStore
 from .passkeys import PasskeyService
 from .places import PlaceError, PlaceRepository
@@ -400,6 +401,12 @@ class ConsoleServer:
         AutomationConsoleRoutes(self._backend_settings, lambda req: req[IDENTITY]).register(
             r, API_PREFIX
         )
+        ParentModeRoutes(
+            self._backend_settings,
+            lambda item_id: self._command_key(item_id),
+            lambda thread_id: self._parent_of(thread_id),
+            lambda req: req[IDENTITY],
+        ).register(r, API_PREFIX)
         view_routes = ViewRoutes(self, self.views)
         r.add_get(f"{API_PREFIX}/views", view_routes.read)
         r.add_post(f"{API_PREFIX}/views", view_routes.add)
@@ -736,6 +743,12 @@ class ConsoleServer:
         return web.json_response(
             {"situation": written.as_dict() if written else None, "waits": waits}
         )
+
+    async def _parent_of(self, thread_id: int) -> int | None:
+        """The thread that spawned *thread_id*, or None (also when lineage is unavailable)."""
+        if self.api.lineage_repo is None:
+            return None
+        return await self.api.lineage_repo.parent_of(thread_id)
 
     async def _lineage(self) -> dict[int, int]:
         if self.api.lineage_repo is None:

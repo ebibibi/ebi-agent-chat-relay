@@ -2152,9 +2152,12 @@ class ApiServer:
                 ``GET /api/sessions`` can report it without parsing titles.
             notify_parent: Queue a short report into the parent thread each time
                 the child marks itself candidate/done/waiting/review/action
-                (optional boolean; needs ``parent_thread_id``). Absent → the
-                deployment default ``CCDB_NOTIFY_PARENT_DEFAULT`` (off). See
-                :mod:`claude_discord.ext.parent_notify`.
+                (optional boolean; needs ``parent_thread_id``). Absent → true when
+                the parent runs in parent mode, else the deployment default
+                ``CCDB_NOTIFY_PARENT_DEFAULT`` (off). See
+                :mod:`claude_discord.ext.parent_notify`. A parent in parent mode
+                with ``max_children`` unfinished children is refused with 429
+                (:mod:`claude_discord.ext.parent_mode_api`).
             user_id: Discord user to add to the new thread (optional), so the
                 thread appears in their joined list instead of having to be
                 found in the channel. Mirrors what ``/api/ingest`` does for the
@@ -2196,6 +2199,19 @@ class ApiServer:
         notify_parent = notify_opt_in if notify_opt_in is not None else notify_default_enabled()
         if notify_opt_in and parent_thread_id is None:
             return web.json_response({"error": "notify_parent needs parent_thread_id"}, status=400)
+        if parent_thread_id is not None:
+            gate = await self._parent_mode_gate(parent_thread_id)
+            if gate is not None and gate.refusal is not None:
+                return web.json_response(
+                    {
+                        "error": gate.refusal,
+                        "unfinished_children": gate.unfinished,
+                        "max_children": gate.max_children,
+                    },
+                    status=429,
+                )
+            if gate is not None and gate.parent_mode and notify_opt_in is None:
+                notify_parent = True
 
         raw_user_id = data.get("user_id")
         invite_user_id: int | None = None
@@ -2347,6 +2363,30 @@ class ApiServer:
 
     def _backend_settings(self) -> Any:
         return getattr(self.components, "backend_settings", None)
+
+    async def _parent_mode_gate(self, parent_thread_id: int) -> Any:
+        """Parent mode's verdict on a spawn from *parent_thread_id* (#1489).
+
+        None when the deployment has no settings store. A lookup failure is logged
+        and treated as "not in parent mode", so a broken setting never blocks a spawn
+        that worked before parent mode existed.
+        """
+        settings_owner = self._backend_settings()
+        if settings_owner is None:
+            return None
+        from ..parent_mode import ParentModeSettings
+        from .auto_complete_api import ApiCompletionHost
+        from .parent_mode_api import check_spawn
+
+        try:
+            return await check_spawn(
+                ParentModeSettings(settings_owner.repo), ApiCompletionHost(self), parent_thread_id
+            )
+        except Exception:
+            logger.warning(
+                "Parent mode check failed for thread %s", parent_thread_id, exc_info=True
+            )
+            return None
 
     def _automation_policy(self) -> AutomationAIPolicy | None:
         settings = self._backend_settings()
