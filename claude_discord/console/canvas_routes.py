@@ -19,6 +19,7 @@ from claude_code_core.connections import connections_for
 from ..backend_settings import ALL_BACKENDS
 from ..turn_ai import TurnAIError, parse_turn_ai
 from .commands import effort_levels, model_choices
+from .night import NightSettings, night_template
 
 if TYPE_CHECKING:
     from .canvas import CanvasSecretary
@@ -55,9 +56,16 @@ class CanvasRoutes:
         router.add_post(f"{prefix}/canvas/widgets/{{key}}/action", self.action)
         router.add_delete(f"{prefix}/canvas/widgets/{{key}}", self.dismiss)
         router.add_post(f"{prefix}/canvas/session/finish", self.finish_session)
+        router.add_get(f"{prefix}/night", self.night)
 
     def _off(self) -> web.Response:
         return _error("canvas mode is not available in this deployment", 404)
+
+    async def night(self, request: web.Request) -> web.Response:
+        """The 🌙 button's text and the quiet hours the Console's notifications follow (#1476)."""
+        lang = "en" if request.rel_url.query.get("lang") == "en" else "ja"
+        settings = await self.canvas.night_settings() if self.canvas else NightSettings()
+        return web.json_response({"template": night_template(lang), "settings": settings.as_dict()})
 
     async def read(self, request: web.Request) -> web.Response:
         if self.canvas is None:

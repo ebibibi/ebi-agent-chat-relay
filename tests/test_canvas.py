@@ -605,3 +605,31 @@ async def test_the_secretary_names_the_card_its_answer_settles(api) -> None:
         headers=console.key,
     )
     assert bad.status == 400
+
+
+async def test_morning_brief_and_night_settings_on_the_control_plane(api) -> None:
+    """#1476: the brief reads the board; the night settings are off until set."""
+    client, server, console, _ = api
+    assert (await client.get("/api/secretary/morning")).status == 503
+    server._console = console
+    resp = await client.get("/api/secretary/morning?hours=12&base=https://c.example")
+    brief = await resp.json()
+    assert resp.status == 200 and brief["hours"] == 12
+    assert {"done", "decide", "continuing", "markdown"} <= brief.keys()
+    assert brief["continuing"][0]["link"] == "https://c.example/#focus/t2"
+    md = await client.get("/api/secretary/morning?format=markdown&lang=en")
+    assert md.content_type == "text/markdown" and "Morning brief" in await md.text()
+    bad = await client.get("/api/secretary/morning?base=javascript:alert(1)")
+    assert bad.status == 400
+
+    night = await (await client.get("/api/secretary/night")).json()
+    assert night["quiet_enabled"] is False
+    put = await client.put(
+        "/api/secretary/night",
+        json={"quiet_start": "23:00", "quiet_end": "07:00", "urgent_statuses": ["error"]},
+    )
+    assert put.status == 200 and (await put.json())["quiet_enabled"] is True
+    refused = await client.put("/api/secretary/night", json={"quiet_start": "7pm"})
+    assert refused.status == 400 and (await refused.json())["problems"]
+    kept = await (await client.get("/api/secretary/night")).json()
+    assert kept["quiet_start"] == "23:00" and kept["urgent_statuses"] == ["error"]

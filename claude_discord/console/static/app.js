@@ -704,7 +704,7 @@ function buildDetail(pane, item, key) {
     const meta = h("div", { class: "reply-meta", hidden: true });
     const form = h("form", { class: "reply", onsubmit: (e) => { e.preventDefault(); sendReply(item.id, box); } },
       h("div", { class: "reply-main" }, meta, tray, box),
-      h("div", { class: "reply-side" }, window.ConsolePaste.button(item.id),
+      h("div", { class: "reply-side" }, window.ConsolePaste.button(item.id), window.ConsoleNight.button(box),
         h("button", { class: "btn primary", type: "submit", text: T.send })));
     main.push(form);
     box.value = state.drafts[item.id] || "";
@@ -1266,7 +1266,7 @@ function wire() {
     capture(text).then((ok) => { if (ok) { input.value = ""; grow(input); } });
   };
   window.ConsolePaste.attach($("capture-input"), CAPTURE, $("capture-tray"));
-  $("capture-attach").replaceWith(window.ConsolePaste.button(CAPTURE));
+  $("capture-attach").replaceWith(window.ConsolePaste.button(CAPTURE), window.ConsoleNight.button($("capture-input")));
   $("capture").addEventListener("submit", (e) => { e.preventDefault(); submitCapture(); });
   // Do not let a drop/paste add files to the pending submission's attachment tray.
   for (const type of ["drop", "paste"]) $("capture").addEventListener(type, (e) => {
