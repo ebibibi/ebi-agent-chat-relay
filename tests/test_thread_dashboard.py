@@ -321,3 +321,40 @@ def _thread_info(
     description: str,
 ) -> _ThreadInfo:
     return _ThreadInfo(thread_id=thread_id, description=description, state=state)
+
+
+class TestNoMentionForFinishedThreads:
+    """A finished thread needs no reply: pinging the owner there is noise (#1477)."""
+
+    @pytest.mark.asyncio
+    async def test_no_mention_in_a_done_thread(self) -> None:
+        dashboard, _ = _make_dashboard(owner_id=42)
+        await dashboard.initialize()
+        thread = _make_thread(10)
+        thread.name = "✅ nightly check"
+        await dashboard.set_state(10, ThreadState.WAITING_INPUT, "w", thread=thread)
+        thread.send.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_no_mention_while_an_auto_completion_is_pending(self) -> None:
+        from claude_discord.ext import auto_complete_api
+
+        dashboard, _ = _make_dashboard(owner_id=42)
+        await dashboard.initialize()
+        thread = _make_thread(10)
+        thread.name = "\U0001f3c1 work"
+        auto_complete_api._PENDING_IDS.add(10)
+        try:
+            await dashboard.set_state(10, ThreadState.WAITING_INPUT, "w", thread=thread)
+        finally:
+            auto_complete_api._PENDING_IDS.discard(10)
+        thread.send.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_plain_candidate_still_mentions(self) -> None:
+        dashboard, _ = _make_dashboard(owner_id=42)
+        await dashboard.initialize()
+        thread = _make_thread(10)
+        thread.name = "\U0001f3c1 work"
+        await dashboard.set_state(10, ThreadState.WAITING_INPUT, "w", thread=thread)
+        thread.send.assert_called_once()

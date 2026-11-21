@@ -35,7 +35,7 @@ from ..auto_complete import (
 )
 from ..thread_marker import OUTCOME_CANDIDATE, OUTCOME_DONE, thread_outcome
 
-__all__ = ["ApiCompletionHost", "AutoCompleter", "CompletionHost"]
+__all__ = ["ApiCompletionHost", "AutoCompleter", "CompletionHost", "auto_completion_pending"]
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,15 @@ IDLE_TIMEOUT_SECONDS = 3 * 3600.0
 TITLE_TIMEOUT_SECONDS = 15 * 60.0
 
 _FINISHED_OUTCOMES = frozenset({OUTCOME_CANDIDATE, OUTCOME_DONE})
+
+#: Threads with a completion scheduled, across completers: the turn-end owner
+#: ping reads it so a thread about to close itself does not ask for a reply.
+_PENDING_IDS: set[int] = set()
+
+
+def auto_completion_pending(thread_id: int) -> bool:
+    """Whether *thread_id* is waiting for its turn to end to complete itself."""
+    return thread_id in _PENDING_IDS
 
 
 class CompletionHost(Protocol):
@@ -150,11 +159,13 @@ class AutoCompleter:
             previous.cancel()
         task = asyncio.create_task(self._finish(thread_id, evidence))
         self._pending[thread_id] = task
+        _PENDING_IDS.add(thread_id)
         task.add_done_callback(lambda t: self._forget(thread_id, t))
 
     def _forget(self, thread_id: int, task: asyncio.Task[None]) -> None:
         if self._pending.get(thread_id) is task:
             del self._pending[thread_id]
+            _PENDING_IDS.discard(thread_id)
 
     async def join(self) -> None:
         """Wait for every pending completion (tests and shutdown)."""

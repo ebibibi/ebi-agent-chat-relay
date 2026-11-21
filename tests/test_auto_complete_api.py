@@ -326,3 +326,15 @@ async def test_host_posts_a_mention_free_note_in_a_discord_thread() -> None:
     kwargs = channel.send.await_args.kwargs
     assert kwargs["allowed_mentions"].everyone is False
     assert isinstance(kwargs["allowed_mentions"], discord.AllowedMentions)
+
+
+async def test_pending_set_follows_the_scheduled_completion() -> None:
+    from claude_discord.ext.auto_complete_api import auto_completion_pending
+
+    host = FakeHost(running={THREAD}, titles={THREAD: CANDIDATE_TITLE})
+    completer = _completer(host)
+    completer.schedule(THREAD, EVIDENCE)
+    assert auto_completion_pending(THREAD) is True
+    host.running.clear()
+    await _drain(completer)
+    assert auto_completion_pending(THREAD) is False
