@@ -19,6 +19,8 @@ import aiosqlite
 from ..decision_request import DecisionRequestSpec
 
 ORIGIN_MARK = "mark"
+#: ``close_reason`` of a request a parent's card covers: ``bundled:<parent request id>`` (#1493).
+BUNDLED_PREFIX = "bundled:"
 
 
 @dataclass(frozen=True)
@@ -147,6 +149,48 @@ class DecisionRequestRepository:
             await db.commit()
             return cursor.rowcount
 
+    async def get_open(self, thread_id: int, key: str) -> DecisionRequest | None:
+        """The open request of *thread_id* with *key*, or None."""
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            rows = list(
+                await db.execute_fetchall(
+                    "SELECT * FROM decision_requests"
+                    " WHERE thread_id = ? AND req_key = ? AND closed_at IS NULL",
+                    (int(thread_id), key),
+                )
+            )
+        return _row(rows[0]) if rows else None
+
+    async def bundle(self, into_id: int, request_ids: list[int]) -> int:
+        """Close the open *request_ids* as covered by request *into_id* (#1493).
+
+        The caller has checked that the requests belong to the covering thread's family. A
+        request that is no longer open is skipped. Returns how many were covered.
+        """
+        if not request_ids:
+            return 0
+        marks = ",".join("?" for _ in request_ids)
+        async with aiosqlite.connect(self._db_path) as db:
+            cursor = await db.execute(
+                "UPDATE decision_requests SET closed_at = ?, close_reason = ?"
+                f" WHERE closed_at IS NULL AND id != ? AND id IN ({marks})",
+                [_now(), f"{BUNDLED_PREFIX}{int(into_id)}", int(into_id)]
+                + [int(i) for i in request_ids],
+            )
+            await db.commit()
+            return cursor.rowcount
+
+    async def covered_by(self, request_id: int) -> list[DecisionRequest]:
+        """The requests the card *request_id* covers, oldest first."""
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            rows = await db.execute_fetchall(
+                "SELECT * FROM decision_requests WHERE close_reason = ? ORDER BY id",
+                (f"{BUNDLED_PREFIX}{int(request_id)}",),
+            )
+        return [_row(r) for r in rows]
+
     async def list_open(self) -> list[DecisionRequest]:
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
@@ -164,6 +208,13 @@ class DecisionRequestRepository:
         source_thread_id: int,
     ) -> int:
         now = _now()
+        replaced = list(
+            await db.execute_fetchall(
+                "SELECT id FROM decision_requests"
+                " WHERE thread_id = ? AND req_key = ? AND closed_at IS NULL",
+                (int(thread_id), spec.key),
+            )
+        )
         await db.execute(
             "UPDATE decision_requests SET closed_at = ?, close_reason = 'replaced'"
             " WHERE thread_id = ? AND req_key = ? AND closed_at IS NULL",
@@ -185,6 +236,12 @@ class DecisionRequestRepository:
         )
         if cursor.lastrowid is None:  # pragma: no cover - SQLite always reports it
             raise RuntimeError("decision request was not stored")
+        # A rewritten card keeps the questions it covers (#1493).
+        for (old_id,) in replaced:
+            await db.execute(
+                "UPDATE decision_requests SET close_reason = ? WHERE close_reason = ?",
+                (f"{BUNDLED_PREFIX}{cursor.lastrowid}", f"{BUNDLED_PREFIX}{old_id}"),
+            )
         return cursor.lastrowid
 
     async def _get(self, request_id: int) -> DecisionRequest:

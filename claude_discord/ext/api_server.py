@@ -486,6 +486,10 @@ class ApiServer:
         self.app.router.add_delete(
             "/api/threads/{thread_id}/decisions/{key}", self.close_thread_decision
         )
+        self.app.router.add_get("/api/threads/{thread_id}/decisions", self.list_thread_decisions)
+        self.app.router.add_post(
+            "/api/threads/{thread_id}/decisions/{key}/covers", self.cover_thread_decisions
+        )
         # Session spawn route
         self.app.router.add_post("/api/spawn", self.spawn)
         ControlPlaneRoutes(self._backend_settings).register(self.app.router)
@@ -1855,6 +1859,31 @@ class ApiServer:
             request.match_info["thread_id"],
             request.match_info["key"],
             request.rel_url.query.get("reason"),
+        )
+
+    async def list_thread_decisions(self, request: web.Request) -> web.Response:
+        """Open requests of a thread, or its family with ``?family=1`` (#1493)."""
+        from .decision_bundle_api import family_requests
+
+        family = request.rel_url.query.get("family", "") in ("1", "true", "yes")
+        return await family_requests(
+            self.decision_repo, self.lineage_repo, request.match_info["thread_id"], family
+        )
+
+    async def cover_thread_decisions(self, request: web.Request) -> web.Response:
+        """A parent's card covers the same question from its descendants (#1493)."""
+        from .decision_bundle_api import covers
+
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            return web.json_response({"error": "Invalid JSON"}, status=400)
+        return await covers(
+            self.decision_repo,
+            self.lineage_repo,
+            request.match_info["thread_id"],
+            request.match_info["key"],
+            body,
         )
 
     async def get_thread_messages(self, request: web.Request) -> web.Response:

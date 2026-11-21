@@ -587,8 +587,16 @@ class ConsoleServer:
         """
         item_id = f"t{int(thread_id)}"
         relayed = f"🗂 The person's answer, relayed by their secretary (canvas mode):\n\n{text}"
-        response = await self._deliver(item_id, relayed, "secretary", metered=False)
         repo = getattr(self.api, "decision_repo", None)
+        card = None
+        if key and repo is not None:
+            try:
+                card = await repo.get_open(int(thread_id), key)
+            except Exception:
+                logger.exception("console: card %r of %s unreadable", key, thread_id)
+        response = await self._deliver(item_id, relayed, "secretary", metered=False)
+        if response.status < 300 and card is not None:
+            await self._answer_covered(item_id, card.id, text)
         if response.status < 300 and key and repo is not None:
             # Only the card this answer settles; the thread's other cards stay (#1438).
             try:
@@ -1478,7 +1486,42 @@ class ConsoleServer:
         response = await self._deliver(item_id, text, request[IDENTITY], metered=True, ai=ai)
         if response.status < 300:
             await self._close_requests(item_id, body.get("request_id"))
+            await self._answer_covered(item_id, body.get("request_id"), text)
         return response
+
+    async def _answer_covered(self, item_id: str, request_id: Any, text: str) -> None:
+        """Give the answer to a combined card to every child question it covers (#1493).
+
+        Best-effort per child: the person's answer reached the card's own thread, and a
+        delivery that fails here is logged rather than turned into an error for the reply.
+        """
+        repo = getattr(self.api, "decision_repo", None)
+        parent = _thread_of(item_id)
+        if repo is None or parent is None:
+            return
+        if not isinstance(request_id, int) or isinstance(request_id, bool):
+            return
+        try:
+            covered = await repo.covered_by(request_id)
+        except Exception:
+            logger.exception("console: questions covered by card %s unreadable", request_id)
+            return
+        for question in covered:
+            relayed = (
+                "🗂 The person answered your question on a combined card in your manager "
+                f'thread {parent} (your card: "{question.title}"). Their answer:\n\n{text}'
+            )
+            try:
+                result = await self._deliver(
+                    f"t{question.thread_id}", relayed, "combined card", metered=False
+                )
+            except Exception:
+                logger.exception("console: answer not relayed to %s", question.thread_id)
+                continue
+            if result.status >= 300:
+                logger.warning(
+                    "console: answer not relayed to %s (HTTP %s)", question.thread_id, result.status
+                )
 
     async def _deliver(
         self, item_id: str, text: str, who: str, *, metered: bool, ai: TurnAI | None = None
