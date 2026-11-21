@@ -11,6 +11,7 @@ const NOTES = {
   'A/Home.md': {text: [
     '---', 'tags: [x]', 'status: active', '---',
     '# Home', 'Go to [[Other|the other note]] or [[Missing]].',
+    '自分が**なぜこうした?**と問う。', '日本語**強調？**と続く。', '𠮷**太郎?**さん', 'English **bold** remains bold.', 'foo**bar**baz', 'foo_bar_baz',
     '', '> [!warning] Careful', '> body line', '',
     '- [ ] open task', '- [x] done task', '',
     '![[pic.png]]', '', '![[Other]]', '',
@@ -57,6 +58,15 @@ test('Note viewer', {timeout: 30000}, async t => {
   const body = page.locator('.note-content');
   await body.locator('> h1').waitFor();
   assert.equal(await body.locator('> h1').innerText(), 'Home');
+  const bodyText = await body.innerText();
+  assert.ok(bodyText.includes('自分がなぜこうした?と問う。'), 'CJK punctuation-adjacent strong text should render');
+  assert.ok(bodyText.includes('English bold remains bold.'), 'ordinary emphasis must remain unchanged');
+  assert.ok(bodyText.includes('foo_bar_baz'), 'non-CJK underscore intraword syntax must remain unchanged');
+  assert.equal(await body.locator('strong').filter({hasText: 'bar'}).innerText(), 'bar');
+  assert.equal(await body.locator('strong').filter({hasText: 'なぜこうした?'}).innerText(), 'なぜこうした?');
+  assert.equal(await body.locator('strong').filter({hasText: '強調？'}).innerText(), '強調？');
+  assert.equal(await body.locator('strong').filter({hasText: '太郎?'}).innerText(), '太郎?');
+  assert.equal(await body.locator('strong').filter({hasText: 'bold'}).innerText(), 'bold');
   // Front matter, callout, tasks, image, embed.
   assert.match(await page.locator('.note-props').innerText(), /プロパティ/);
   assert.equal(await page.locator('.note-props td').first().textContent(), '[x]');
