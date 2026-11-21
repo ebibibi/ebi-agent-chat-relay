@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `POST /api/threads/{id}/auto-close` (`CCDB_AUTO_CLOSE_KINDS=upgrade,sweep`). Every automatic close is
   tagged `auto-closed` with its reason, last state and where any human next step went, and is listed
   by `GET /api/auto-closures` for reopening. Off by default. See `docs/auto-close.md`.
+- Evidence-based auto-completion now leaves the same rescue record (`auto-closed:evidence`), so it is
+  listed by `GET /api/auto-closures` and can be reopened from the Console (#1507).
 
 ### Fixed
 

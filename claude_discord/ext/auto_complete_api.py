@@ -72,6 +72,7 @@ class CompletionHost(Protocol):
     async def open_requests(self, thread_id: int) -> int: ...
     async def teams_reply_draft(self, thread_id: int) -> bool: ...
     async def post_note(self, thread_id: int, text: str) -> None: ...
+    async def record(self, thread_id: int, evidence: Evidence) -> None: ...
     async def complete(self, thread_id: int) -> None: ...
 
 
@@ -83,7 +84,10 @@ def completion_note(evidence: Evidence) -> str:
     if evidence.verification:
         lines.append("Verification:")
         lines.extend(f"- {v}" for v in evidence.verification)
-    lines.append("Reply in this thread to reopen it.")
+    lines.append(
+        "Reply in this thread, or press Reopen in the Console's Done list "
+        "(listed under `auto-closed`), to reopen it."
+    )
     return "\n".join(lines)
 
 
@@ -221,6 +225,11 @@ class AutoCompleter:
             )
             return
         await self._host.post_note(thread_id, completion_note(evidence))
+        try:
+            await self._host.record(thread_id, evidence)
+        except Exception:
+            # The record helps a later rescue; it must not hold back a verified completion.
+            logger.exception("auto-complete: could not record thread %d for rescue", thread_id)
         await asyncio.sleep(self._settle)
         await self._host.complete(thread_id)
         logger.info("thread %d completed automatically: %s", thread_id, evidence.as_dict())
@@ -305,6 +314,19 @@ class ApiCompletionHost:
 
         # The evidence is the agent's text: it must not ping anyone.
         await channel.send(text, allowed_mentions=discord.AllowedMentions.none())
+
+    async def record(self, thread_id: int, evidence: Evidence) -> None:
+        """Keep the rescue record an automatic close leaves (#1490)."""
+        from ..auto_close import KIND_EVIDENCE, MAX_SUMMARY_CHARS, Closure
+        from .auto_close_api import record_closure
+
+        summary = "; ".join(evidence.deliverables)[:MAX_SUMMARY_CHARS]
+        closure = Closure(
+            kind=KIND_EVIDENCE,
+            reason="the evidence met the completion policy",
+            summary=summary,
+        )
+        await record_closure(self._api._console, thread_id, closure)
 
     async def complete(self, thread_id: int) -> None:
         console = self._api._console
