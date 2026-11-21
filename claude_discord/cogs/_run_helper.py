@@ -283,6 +283,37 @@ def _waiting_marker_hint() -> str:
     )
 
 
+async def _build_parent_mode_section(config: RunConfig) -> str | None:
+    """Parent mode instructions for this thread, or for a child of a parent-mode thread.
+
+    Needs the control-plane API (the agent spawns through it) and the settings
+    store. A settings failure leaves the section out: the thread then behaves as
+    it did before parent mode existed, which is the safe direction.
+    """
+    settings_owner = config.backend_settings
+    if settings_owner is None or getattr(config.runner, "api_port", None) is None:
+        return None
+    from ..database.lineage_repo import ThreadLineageRepository
+    from ..parent_mode import ParentModeSettings, build_child_section, build_parent_section
+
+    thread_id = config.surface.thread_key
+    try:
+        repo = settings_owner.repo
+        settings = ParentModeSettings(repo)
+        lineage = ThreadLineageRepository(repo.db_path)
+        parent_id = await lineage.parent_of(thread_id)
+        if (await settings.resolve(thread_id, is_child=parent_id is not None)).enabled:
+            return build_parent_section(thread_id, await settings.max_children())
+        if parent_id is None:
+            return None
+        grandparent_id = await lineage.parent_of(parent_id)
+        if (await settings.resolve(parent_id, is_child=grandparent_id is not None)).enabled:
+            return build_child_section(parent_id)
+    except Exception:
+        logger.warning("Parent mode lookup failed for thread %d", thread_id, exc_info=True)
+    return None
+
+
 async def _build_system_context(config: RunConfig) -> str | None:
     """Build ephemeral system context from AI Lounge and concurrency notice.
 
@@ -381,6 +412,10 @@ async def _build_system_context(config: RunConfig) -> str | None:
         "the user one combined report instead of one per child. "
         "Creating a child thread still requires authorization to delegate."
     )
+
+    parent_mode_section = await _build_parent_mode_section(config)
+    if parent_mode_section:
+        parts.append(parent_mode_section)
 
     if getattr(config.runner, "api_port", None) is not None:
         from ..decision_default import policy_from_env

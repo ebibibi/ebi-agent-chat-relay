@@ -508,6 +508,7 @@ function renderNav() {
     window.ConsoleNoteSearch.nav(),
     window.ConsoleBackend.nav(),
     window.ConsoleBackend.childNav(),
+    window.ConsoleBackend.parentNav ? window.ConsoleBackend.parentNav() : null,
     window.ConsoleAutomation ? window.ConsoleAutomation.nav() : null,
     window.ConsoleNotify ? h("button", { class: "nav-notify" + (window.ConsoleNotify.isOn() ? " on" : ""),
       onclick: () => window.ConsoleNotify.toggle() },
