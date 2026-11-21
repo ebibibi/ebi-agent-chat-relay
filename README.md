@@ -212,6 +212,11 @@ channels and writes `.env` for you. Full walkthrough: **[Getting Started](docs/g
 | [Ebi AI Console](docs/console.md) · [Backends](docs/backends.md) · [Teams setup](docs/teams-setup.md) | Deep dives |
 | [Security](docs/SECURITY.md) · [Execution environments](docs/execution-environments.md) · [ADRs](docs/adr/) | Why things are the way they are |
 
+Discord-backed ingest runs keep `ccdb-answer.md` as the canonical answer attachment
+and also provide an identical `ccdb-answer.txt` companion for plain-text previews.
+Headless Console runs return their answer through `result_id` polling instead. See the
+[ingest API guide](docs/guide/features.md) for details.
+
 ---
 
 ## 🤝 Contributing — humans and agents welcome
