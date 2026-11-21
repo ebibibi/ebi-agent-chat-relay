@@ -290,3 +290,20 @@ async def test_finishing_instructions_keep_customer_drafts_and_exporter_threads_
     assert "Teams Channel Exporter" in context
     assert "Never autonomously mark these threads done" in context
     assert "review" in context and "action" in context
+
+
+async def test_prompt_documents_evidence_only_when_auto_complete_is_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = RunConfig(
+        surface=MemorySurface(capabilities=DISCORD_CAPABILITIES),
+        runner=_runner(8080),
+        prompt="do it",
+    )
+    monkeypatch.delenv("CCDB_AUTO_COMPLETE", raising=False)
+    assert '"evidence"' not in (await _build_system_context(config) or "")
+    monkeypatch.setenv("CCDB_AUTO_COMPLETE", "on")
+    context = await _build_system_context(config)
+    assert '"evidence"' in context
+    assert "external_effects" in context
+    assert "verification is required" in context
