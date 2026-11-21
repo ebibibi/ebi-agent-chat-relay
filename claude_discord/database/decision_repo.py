@@ -38,6 +38,8 @@ class DecisionRequest:
     detail: dict[str, str]
     created_at: str
     deferred_at: str | None = None
+    #: ``{"after": ISO 8601, "scope": key}`` when the card may proceed unanswered (#1478).
+    if_no_answer: dict[str, str] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -53,6 +55,7 @@ class DecisionRequest:
                 "context": self.context,
                 "options": self.options,
                 "deadline": self.deadline,
+                **({"if_no_answer": self.if_no_answer} if self.if_no_answer else {}),
             },
             "detail": self.detail,
             "created_at": self.created_at,
@@ -80,6 +83,9 @@ def _row(row: aiosqlite.Row) -> DecisionRequest:
         detail=json.loads(row["detail"]),
         created_at=row["created_at"],
         deferred_at=row["deferred_at"],
+        if_no_answer=card.get("if_no_answer")
+        if isinstance(card.get("if_no_answer"), dict)
+        else None,
     )
 
 

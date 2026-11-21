@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from aiohttp import web
 
+from ..decision_default import policy_from_env
 from ..decision_request import (
     KINDS,
     DecisionRequestError,
@@ -55,7 +56,10 @@ async def read_mark_request(
             {"error": "A decision request goes with /waiting, /review or /action"}, status=400
         )
     try:
-        return parse_request(body, kind=kind), None
+        # Read per request, so the owner's scope list applies without a restart (#1478).
+        policy = policy_from_env()
+        scopes = policy.scopes if policy is not None else None
+        return parse_request(body, kind=kind, scopes=scopes), None
     except DecisionRequestError as exc:
         return None, web.json_response(refusal(exc), status=400)
 
