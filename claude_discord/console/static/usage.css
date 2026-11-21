@@ -21,6 +21,9 @@ body > .app { flex: 1 1 0; min-height: 0; height: auto; }
 .u-win.warn .u-pct { color: var(--me); }
 .u-win.hot .u-pct { color: var(--err); }
 .u-out { color: var(--err); font-weight: 700; }
+/* Phone, folded: a non-default backend that is nearly used up stays out and stands out. */
+.u-be.alert { border-width: 2px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--err) 35%, transparent); }
+.u-be.alert .u-name::before { content: "⚠"; color: var(--err); }
 
 /* CLI sign-in (clilogin.js): a chip per CLI that is not signed in, and its dialog. */
 .cl-btn { font: inherit; font-size: 12px; padding: 1px 8px; border-radius: 5px; border: 1px solid var(--line);

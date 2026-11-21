@@ -458,7 +458,9 @@ window (5-hour, weekly, …) a bar, the percentage used and the time until it re
 amber at 70% and red at 90%. A backend that is at its limit shows **⛔ back HH:MM** with the time
 remaining. On a phone the strip folds to the default backend (the one new conversations start
 with): a **+N ▾** button on the same row shows the others, **▴** folds them again. Sign-in chips
-stay visible while folded. Every page load starts folded.
+stay visible while folded, and so does any other backend that is nearly used up (a window at
+90% or more) or at its limit: it stays out with a ⚠ and a red outline until it recovers, and the
+**+N** counts only the backends still folded away. Every page load starts folded.
 
 - **Claude**: the windows the CLI reports after every turn. A window whose reset time has passed
   reads as reset until the next turn refreshes it.

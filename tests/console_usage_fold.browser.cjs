@@ -1,25 +1,26 @@
 // On a phone the usage strip folds to the default backend: the others sit behind a +N toggle on
-// the same row, a sign-in chip stays out, and changing the default re-folds. Wide screens show all.
+// the same row, a sign-in chip stays out, changing the default re-folds, and a backend that is
+// nearly used up stays out, outlined, even while folded. Wide screens show all.
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {chromium}=require('playwright');
 const fs=require('node:fs'),path=require('node:path');
 const root=path.resolve(__dirname,'../claude_discord/console/static');
 const win=(type,utilization)=>({type,utilization,resets_at:Math.floor(Date.now()/1000)+3600,status:'allowed',reset:false});
-const USAGE={backends:[
+const USAGE=(agy)=>({backends:[
  {backend:'claude',profile:null,available:true,unavailable_until:null,windows:[win('five_hour',.09),win('seven_day',.34)]},
  {backend:'codex',profile:null,available:true,unavailable_until:null,windows:[win('five_hour',.1)]},
- {backend:'antigravity',profile:null,available:true,unavailable_until:null,windows:[win('gemini',.95)]}]};
+ {backend:'antigravity',profile:null,available:true,unavailable_until:null,windows:[win('gemini',agy)]}]});
 for(const [width,height] of [[1280,800],[390,844]])test(`usage fold ${width}x${height}`,async t=>{
  const browser=await chromium.launch({headless:true,args:['--no-sandbox']});t.after(()=>browser.close());
  const page=await browser.newPage({viewport:{width,height},isMobile:width<900,hasTouch:width<900});page.setDefaultTimeout(4000);
  const errors=[];page.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
- let def='claude';
+ let def='claude',agy=.5;
  await page.route('http://console.test/**',async route=>{
   const name=new URL(route.request().url()).pathname;
   if(name==='/'||name.startsWith('/static/')){const file=name==='/'?'index.html':path.basename(name);return route.fulfill({body:fs.readFileSync(path.join(root,file)),contentType:file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html'});}
   const data=name.endsWith('/board')?{items:[],slots:{},places:[]}
-   :name.endsWith('/usage')?{now:Math.floor(Date.now()/1000),...USAGE}
+   :name.endsWith('/usage')?{now:Math.floor(Date.now()/1000),...USAGE(agy)}
    :name.endsWith('/defaults')?{backend:def,model:null,effort:null}
    :name.endsWith('/cli-login')?{backends:[{backend:'claude',logged_in:true,method:null,flow:null},{backend:'codex',logged_in:false,method:null,flow:null}]}
    :{};
@@ -61,4 +62,17 @@ for(const [width,height] of [[1280,800],[390,844]])test(`usage fold ${width}x${h
  assert.deepEqual(await names(),['Codex']);
  assert.equal(await toggle.textContent(),'+2 ▾');
  assert.equal(await toggle.getAttribute('aria-expanded'),'false');
+ // A non-default backend at 90% or more stays out while folded, outlined; the others stay folded.
+ agy=.95;
+ await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
+ await page.waitForFunction(()=>document.querySelectorAll('#usage .u-be.alert').length===1);
+ assert.deepEqual(await names(),['Codex','Antigravity']);
+ assert.equal(await toggle.textContent(),'+1 ▾');
+ assert.equal(await page.locator('#usage .u-be.alert .u-name').evaluate(e=>e.firstChild.textContent),'Antigravity');
+ // Once it recovers it folds away again.
+ agy=.5;
+ await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
+ await page.waitForFunction(()=>document.querySelectorAll('#usage .u-be.alert').length===0);
+ assert.deepEqual(await names(),['Codex']);
+ assert.equal(await toggle.textContent(),'+2 ▾');
 });

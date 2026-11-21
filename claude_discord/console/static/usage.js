@@ -1,5 +1,6 @@
 // Usage strip: how much each backend has left and when an exhausted one is back.
-// Always on screen, above the board; on a phone it folds to the default backend until opened.
+// Always on screen, above the board; on a phone it folds to the default backend (plus any backend
+// that is nearly used up) until opened.
 // Server data reaches the page through textContent only.
 "use strict";
 
@@ -35,6 +36,8 @@
     return e;
   };
   const level = (u) => (u >= 0.9 ? "hot" : u >= 0.7 ? "warn" : "ok");
+  // Nearly or fully used up: red in the strip, and never folded away on a phone.
+  const tight = (b) => !b.available || b.windows.some((w) => !w.reset && level(w.utilization) === "hot");
 
   function countdown(epoch) {
     let s = Math.max(0, Math.round(epoch - now()));
@@ -94,21 +97,25 @@
     const signIn = window.consoleCliLogin ? window.consoleCliLogin.chips() : [];
     strip.hidden = backends.length === 0 && signIn.length === 0;
     const blocks = backends.map(backendBlock);
-    // A phone folds the strip to the default backend; sign-in chips stay, they need action.
+    // A phone folds the strip to the default backend; sign-in chips stay, they need action, and so
+    // does any other backend that is nearly or fully used up: it stays out, outlined, until it recovers.
     const def = window.ConsoleBackend && window.ConsoleBackend.defaultBackend();
-    const others = backends.filter((b) => b.backend !== def).length;
-    const fold = narrow.matches && others > 0;
-    strip.classList.toggle("folded", fold && !open);
+    const fold = narrow.matches && backends.some((b) => b.backend !== def);
+    const alert = backends.map((b) => fold && b.backend !== def && tight(b));
+    const hidden = backends.filter((b, i) => b.backend !== def && !alert[i]).length;
+    alert.forEach((on, i) => blocks[i].classList.toggle("alert", on));
+    // One row only while the default stands alone; an alerting backend may take a row of its own.
+    strip.classList.toggle("folded", fold && !open && !alert.includes(true));
     // Every render replaces the toggle; whoever was on it (keyboard, screen reader) stays on it.
     const focused = document.activeElement?.classList.contains("u-toggle");
-    if (fold) {
-      const toggle = el("button", "u-toggle", open ? "▴" : `+${others} ▾`);
+    if (fold && (hidden > 0 || open)) {
+      const toggle = el("button", "u-toggle", open ? "▴" : `+${hidden} ▾`);
       toggle.type = "button";
       toggle.title = open ? L.less : L.more;
       toggle.setAttribute("aria-label", toggle.title);
       toggle.setAttribute("aria-expanded", String(open));
       toggle.onclick = () => { open = !open; render(); };
-      const shown = open ? blocks : blocks.filter((_, i) => backends[i].backend === def);
+      const shown = open ? blocks : blocks.filter((_, i) => backends[i].backend === def || alert[i]);
       strip.replaceChildren(...shown, ...signIn, toggle);
       if (focused) toggle.focus();
     } else {
