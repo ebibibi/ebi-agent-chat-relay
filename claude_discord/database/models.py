@@ -137,7 +137,12 @@ CREATE TABLE IF NOT EXISTS thread_lineage (
     thread_id INTEGER PRIMARY KEY,
     parent_thread_id INTEGER NOT NULL,
     family_code TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    -- Opt-in child→parent reports (ext/parent_notify.py).
+    notify_parent INTEGER NOT NULL DEFAULT 0,
+    notified_outcome TEXT,
+    notified_at REAL,
+    notified_count INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_thread_lineage_parent ON thread_lineage(parent_thread_id);
@@ -301,6 +306,11 @@ _MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_decision_requests_open"
     " ON decision_requests(closed_at, thread_id)",
     "ALTER TABLE decision_requests ADD COLUMN deferred_at TEXT",
+    # child→parent reports on spawned threads (Issue #820)
+    "ALTER TABLE thread_lineage ADD COLUMN notify_parent INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE thread_lineage ADD COLUMN notified_outcome TEXT",
+    "ALTER TABLE thread_lineage ADD COLUMN notified_at REAL",
+    "ALTER TABLE thread_lineage ADD COLUMN notified_count INTEGER NOT NULL DEFAULT 0",
 ]
 
 

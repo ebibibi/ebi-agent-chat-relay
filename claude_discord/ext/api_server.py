@@ -71,6 +71,9 @@ from .pages_api import (
     handle_put_page,
     handle_resolve_item,
 )
+from .parent_notify import ParentNotifier
+from .parent_notify import default_enabled as notify_default_enabled
+from .parent_notify import parse_opt_in as parse_notify_opt_in
 from .restart_api import handle_cancel_restart, handle_get_restart, handle_reserve_restart
 from .situation_api import handle_get_situation, handle_put_situation
 from .teams_store import MAX_ATTACHMENT_BYTES as TEAMS_MAX_ATTACHMENT_BYTES
@@ -1291,9 +1294,17 @@ class ApiServer:
                 self.relay_guard.release(reservation)
 
     async def _dispatch_relay(
-        self, thread_id: int, *, text: str, from_thread: int, mode: str, hop: int
+        self,
+        thread_id: int,
+        *,
+        text: str,
+        from_thread: int,
+        mode: str,
+        hop: int,
+        prompt: str | None = None,
     ) -> web.Response:
-        prompt = build_relay_prompt(text=text, from_thread=from_thread, hop=hop)
+        if prompt is None:
+            prompt = build_relay_prompt(text=text, from_thread=from_thread, hop=hop)
 
         # An Ebi AI Console conversation shares the thread-key space but has no
         # Discord channel behind it: looking one up would fail with "Unknown Channel".
@@ -2010,12 +2021,38 @@ class ApiServer:
             return refused
         response = await self._apply_thread_outcome(thread_id, outcome)
         if response.status in (200, 202):
+            await self._report_to_parent(thread_id, outcome, response)
             stored = await remember_mark(self.decision_repo, thread_id, outcome, spec)
             if stored is not None:
                 body = json.loads(cast(bytes, response.body))
                 body["request_id"] = stored.id
                 return web.json_response(body, status=response.status)
         return response
+
+    def _parent_notifier(self) -> ParentNotifier | None:
+        if self.lineage_repo is None:
+            return None
+
+        async def dispatch(parent: int, prompt: str, child: int) -> bool:
+            response = await self._dispatch_relay(
+                parent, text=prompt, from_thread=child, mode=MODE_QUEUE, hop=0, prompt=prompt
+            )
+            return response.status == 202
+
+        return ParentNotifier(self.lineage_repo, self.relay_guard, dispatch)
+
+    async def _report_to_parent(self, thread_id: int, outcome: str, response: web.Response) -> None:
+        """Queue a report to the parent of an opted-in child (Issue #820)."""
+        notifier = self._parent_notifier()
+        if notifier is None:
+            return
+        body = json.loads(cast(bytes, response.body))
+        await notifier.on_outcome(
+            thread_id,
+            outcome,
+            thread_name=str(body.get("thread_name") or ""),
+            changed=body.get("status") != "unchanged",
+        )
 
     async def _apply_thread_outcome(self, thread_id: int, outcome: str) -> web.Response:
         conversations = self.console_conversations
@@ -2085,6 +2122,11 @@ class ApiServer:
                 carry that thread's family code — ``🤖K2`` on the child,
                 ``🌳K2`` on the parent — and the link is recorded so
                 ``GET /api/sessions`` can report it without parsing titles.
+            notify_parent: Queue a short report into the parent thread each time
+                the child marks itself candidate/done/waiting/review/action
+                (optional boolean; needs ``parent_thread_id``). Absent → the
+                deployment default ``CCDB_NOTIFY_PARENT_DEFAULT`` (off). See
+                :mod:`claude_discord.ext.parent_notify`.
             user_id: Discord user to add to the new thread (optional), so the
                 thread appears in their joined list instead of having to be
                 found in the channel. Mirrors what ``/api/ingest`` does for the
@@ -2119,6 +2161,13 @@ class ApiServer:
                 )
             if parent_thread_id <= 0:
                 return web.json_response({"error": "parent_thread_id must be positive"}, status=400)
+        try:
+            notify_opt_in = parse_notify_opt_in(data.get("notify_parent"))
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        notify_parent = notify_opt_in if notify_opt_in is not None else notify_default_enabled()
+        if notify_opt_in and parent_thread_id is None:
+            return web.json_response({"error": "notify_parent needs parent_thread_id"}, status=400)
 
         raw_user_id = data.get("user_id")
         invite_user_id: int | None = None
@@ -2163,6 +2212,11 @@ class ApiServer:
                 parent_thread_id=parent_thread_id,
                 ai=ai,
             )
+            if response.status == 201 and parent_thread_id is not None:
+                body = json.loads(response.text or "{}")
+                response = await self._apply_notify_opt_in(
+                    response, int(body["thread_id"]), notify_parent
+                )
             if policy is not None and response.status == 201:
                 body = json.loads(response.text or "{}")
                 await self._record_job_run(policy, job_id, int(body["thread_id"]), ai)
@@ -2240,7 +2294,28 @@ class ApiServer:
         if parent_thread_id is not None:
             body["parent_thread_id"] = str(parent_thread_id)
             body["family"] = family_code(parent_thread_id)
+            return await self._apply_notify_opt_in(
+                web.json_response(body, status=201), thread.id, notify_parent
+            )
         return web.json_response(body, status=201)
+
+    async def _apply_notify_opt_in(
+        self, response: web.Response, thread_id: int, enabled: bool
+    ) -> web.Response:
+        """Store the child→parent report opt-in and echo what was stored.
+
+        Bookkeeping after the thread exists: a failed write never fails the
+        spawn, it only reports ``notify_parent: false``.
+        """
+        stored = False
+        if enabled and self.lineage_repo is not None:
+            try:
+                stored = await self.lineage_repo.set_notify_parent(thread_id, True)
+            except Exception:
+                logger.exception("Could not store notify_parent for thread %s", thread_id)
+        body = json.loads(cast(bytes, response.body))
+        body["notify_parent"] = stored
+        return web.json_response(body, status=response.status)
 
     def _backend_settings(self) -> Any:
         return getattr(self.components, "backend_settings", None)

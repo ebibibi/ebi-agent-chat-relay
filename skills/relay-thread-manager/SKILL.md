@@ -50,6 +50,11 @@ curl -s -X POST "$CCDB_API_URL/api/spawn" \
   children the same family code in their titles (`🌳K2` on you, `🤖K2` on each child),
   so the human can see the tree in the channel list.
 - **Keep the returned `thread_id`.** It is the only handle you have on the worker.
+- **Add `"notify_parent": true` to hear back without polling.** Each time the worker
+  marks itself finished (`candidate`/`done`) or waiting on the human
+  (`waiting`/`review`/`action`), the relay queues a short report into your thread, which
+  wakes you if you are idle. Verify the result, send follow-ups, and report to the human
+  once for the whole family — do not forward each worker's report separately.
 - Optional: `"user_id": <discord user id>` adds the human to the thread so it shows up
   in their joined list; `"channel_id"` targets a different channel;
   `"auto_start": false` posts the brief without starting the agent (use it for
