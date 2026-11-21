@@ -312,8 +312,12 @@ class ApiCompletionHost:
             from ..console.work_repo import thread_item_id
 
             await console.complete_item(thread_item_id(thread_id))
-            return
-        await self._api._apply_thread_outcome(thread_id, OUTCOME_DONE)
+        else:
+            await self._api._apply_thread_outcome(thread_id, OUTCOME_DONE)
+        # This path bypasses the mark endpoint, so tell an opted-in parent here (#820).
+        await self._api.notify_parent_of_outcome(
+            thread_id, OUTCOME_DONE, await self.thread_title(thread_id) or ""
+        )
 
 
 async def handle_candidate(
