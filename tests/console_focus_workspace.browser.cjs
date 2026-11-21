@@ -12,7 +12,7 @@ function planFixture() {
     today_plan:'### オススメ着手順\n1. Ship the website',
     items:[
       {kind:'project',path:'Work/Website',text:'**Ship** the [[Docs/guide|guide]]',score:80,line:3,
-        raw:'**Ship** the [[Docs/guide|guide]] 🔁毎週',revision:'v1',priority:'P1',more:1,status:'Ready',due:'2026-10-14',days:-2},
+        raw:'**Ship** the [[Docs/guide|guide]] 🔁毎週',revision:'v1',priority:'P1',more:1,status:'Ready',due:'2026-10-14',days:-2,milestone:'Launch'},
       {kind:'follow_up',path:'Work/Website',text:'Client / Feedback',score:70,line:null,raw:null,revision:null,
         priority:'P1',due:'2026-10-16',days:0},
       {kind:'single',path:'Work',text:'Call back',score:40,line:2,raw:'[P2] Call back 📅2026-10-17',
@@ -87,6 +87,9 @@ for (const mode of ['available','plugin-missing']) {
     assert.equal(await rows.nth(0).locator('.ws-focus-text').innerText(), 'Ship the guide');
     assert.match(await rows.nth(0).innerText(), /期限2日超過/);
     assert.match(await rows.nth(0).innerText(), /ほか 1 件/);
+    // The milestone that set the deadline, so the reason for the rank is visible.
+    assert.equal(await rows.nth(0).locator('.ws-focus-milestone').innerText(), '🎯 Launch');
+    assert.equal(await rows.nth(1).locator('.ws-focus-milestone').count(), 0);
     assert.equal(await rows.nth(1).getByRole('button', {name:'✅ 完了'}).count(), 0);
     assert.match(await page.locator('.ws-focus-lapsed').innerText(), /2 件/);
     // Stalled card: first five open with a stall tag, the rest folded; no next action says so.

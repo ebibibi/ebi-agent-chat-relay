@@ -29,7 +29,7 @@ from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
-from . import teams_sync
+from . import teams_reply, teams_sync
 from .teams_sync import IncomingMessage, StoredMessage, ThreadRef
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,8 @@ ORGS_FILE = "orgs.json"
 # (teams-channel-exporter, MAX_EMBED_BYTES) uses the same value and batches its
 # pushes so one request carries at most one file of this size.
 MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024
+# A saved reply body. A reply is a few KB; anything near this is not a reply.
+MAX_REPLY_DRAFT_BYTES = 1024 * 1024
 
 
 def default_vault_root(working_dir: str | Path | None = None) -> Path:
@@ -428,6 +430,49 @@ class TeamsVaultStore:
             "unavailable": unavailable,
         }
 
+    def reply_draft_path(self, thread_dir: Path, result_id: str) -> Path | None:
+        """Where a run's reply body belongs, or None if that leaves the thread."""
+        return self._contained(
+            thread_dir,
+            thread_dir / teams_reply.REPLY_DRAFT_DIR / teams_reply.draft_file_name(result_id),
+        )
+
+    def prepare_reply_draft(self, thread_dir: Path, result_id: str) -> Path | None:
+        """Create the folder a session saves its reply body in; return the path."""
+        path = self.reply_draft_path(thread_dir, result_id)
+        if path is None:
+            return None
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def read_reply_draft(self, thread_dir: Path, result_id: str) -> teams_reply.Draft | None:
+        """The saved reply body, or None if the session has not left a usable one.
+
+        A session writes this file, so it gets the same distrust as a network
+        input: a symlink out of the thread is refused by ``reply_draft_path`` and
+        a file that cannot be read is logged, not treated as an empty reply.
+        """
+        path = self.reply_draft_path(thread_dir, result_id)
+        if path is None or not path.is_file():
+            return None
+        try:
+            with path.open("rb") as fh:
+                raw = fh.read(MAX_REPLY_DRAFT_BYTES + 1)
+            if len(raw) > MAX_REPLY_DRAFT_BYTES:
+                logger.warning("Reply draft %s is too large to serve", path.name)
+                return None
+            # The customer-reply skill also produces Windows text (BOM, CRLF).
+            text = raw.decode("utf-8-sig").replace("\r\n", "\n").strip()
+            updated_at = datetime.fromtimestamp(path.stat().st_mtime).isoformat(
+                sep=" ", timespec="seconds"
+            )
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning("Could not read reply draft %s: %s", path.name, exc)
+            return None
+        if not text:
+            return None
+        return teams_reply.Draft(text=text, source=teams_reply.SOURCE_FILE, updated_at=updated_at)
+
     def _existing_first_synced(self, note: Path) -> str | None:
         """Preserve the original sync time across a rewrite."""
         try:
@@ -556,6 +601,7 @@ class TeamsVaultStore:
         *,
         pending: list[dict],
         unavailable: list[dict] | None = None,
+        ignored_items: list[dict] | None = None,
         coverage: dict,
         now: str | None = None,
     ) -> dict:
@@ -565,6 +611,17 @@ class TeamsVaultStore:
         latest = self.latest_chain(thread_dir)
         previous = self.read_meta(thread_dir)
         unavailable = unavailable or []
+        # An ignore outlives later syncs; it ends only when the bytes turn up.
+        kept_ignored = [
+            item
+            for item in (
+                previous.get("ignored_attachments") or []
+                if ignored_items is None
+                else ignored_items
+            )
+            if str(item.get("name") or "")
+            not in self._attachments_present(thread_dir, str(item.get("mid") or ""))
+        ]
         saved_total = sum(len(self._attachments_present(thread_dir, mid)) for mid in latest)
         scan = coverage.get("attachment_scan") or {}
         previous_summary = previous.get("attachment_summary") or {}
@@ -597,6 +654,7 @@ class TeamsVaultStore:
             "coverage": {**(previous.get("coverage") or {}), **coverage},
             "pending_attachments": pending,
             "unavailable_attachments": unavailable,
+            "ignored_attachments": kept_ignored,
             "attachment_summary": attachment_summary,
             "first_synced_at": previous.get("first_synced_at") or now,
             "last_synced_at": now,
@@ -631,15 +689,17 @@ class TeamsVaultStore:
             for msg in pushed or []
         }
         merged: dict[tuple[str, str], dict] = {}
-        unavailable_keys = {
-            (str(item.get("mid") or ""), str(item.get("name") or "")) for item in unavailable or []
+        meta = self.read_meta(thread_dir)
+        excluded_keys = {
+            (str(item.get("mid") or ""), str(item.get("name") or ""))
+            for item in (unavailable or []) + (meta.get("ignored_attachments") or [])
         }
-        for item in (self.read_meta(thread_dir).get("pending_attachments") or []) + fresh:
+        for item in (meta.get("pending_attachments") or []) + fresh:
             mid = str(item.get("mid") or "")
             name = str(item.get("name") or "")
             if not mid or not name:
                 continue
-            if (mid, name) in unavailable_keys:
+            if (mid, name) in excluded_keys:
                 continue
             if mid in declared_by_mid and name not in declared_by_mid[mid]:
                 continue
@@ -674,10 +734,15 @@ class TeamsVaultStore:
         }
         fresh_keys = {(str(item.get("mid") or ""), str(item.get("name") or "")) for item in fresh}
         merged: dict[tuple[str, str], dict] = {}
-        for item in (self.read_meta(thread_dir).get("unavailable_attachments") or []) + fresh:
+        meta = self.read_meta(thread_dir)
+        ignored_keys = {
+            (str(item.get("mid") or ""), str(item.get("name") or ""))
+            for item in meta.get("ignored_attachments") or []
+        }
+        for item in (meta.get("unavailable_attachments") or []) + fresh:
             mid = str(item.get("mid") or "")
             name = str(item.get("name") or "")
-            if not mid or not name:
+            if not mid or not name or (mid, name) in ignored_keys:
                 continue
             if mid in declared_by_mid and name not in declared_by_mid[mid]:
                 continue
@@ -687,3 +752,32 @@ class TeamsVaultStore:
                 continue
             merged[(mid, name)] = {**item, "mid": mid, "name": name}
         return sorted(merged.values(), key=lambda i: (i["mid"], i["name"]))
+
+    def set_ignored(
+        self,
+        thread_dir: Path,
+        ref: ThreadRef,
+        items: list[tuple[str, str]],
+        *,
+        ignore: bool,
+        now: str | None = None,
+    ) -> tuple[dict, list[tuple[str, str]]]:
+        """Move gaps to or from the ignored list. Returns (meta, unmatched items).
+
+        Undoing returns a file to ``pending``, the retryable side: the reason it
+        was ignored may no longer hold, and one failed retry costs little.
+        """
+        now = now or datetime.now().astimezone().isoformat(timespec="seconds")
+        pending, unavailable, kept, unmatched = teams_sync.move_gaps(
+            self.read_meta(thread_dir), items, ignore=ignore, now=now
+        )
+        written = self.write_meta(
+            thread_dir,
+            ref,
+            pending=pending,
+            unavailable=unavailable,
+            ignored_items=kept,
+            coverage={},
+            now=now,
+        )
+        return written, unmatched

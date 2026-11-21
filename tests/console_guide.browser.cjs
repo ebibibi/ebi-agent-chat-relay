@@ -66,3 +66,41 @@ test('a board without a guide (older server) renders Focus as before', {timeout:
   await page.locator('.place-bar').waitFor();
   assert.equal(await page.locator('.guide-card').count(), 0);
 });
+
+for (const width of [1280, 390]) test(`Focus guide stays above pins (${width}px)`, {timeout: 20000}, async t => {
+  const items = [item('a', {pinned_at:'2026-11-18T00:00:00Z',pin_position:1}),
+    item('b', {pinned_at:'2026-11-18T00:01:00Z',pin_position:0}), item('c')];
+  const guide = {next:[{id:'c',title:'Do this next',reasons:['asked']}],
+    batches:[],drift:null,calm:false,counts:{me:3,running:0,waiting:0,candidate:0}};
+  const page = await open(t, {items,slots:{},places:[],guide});
+  await page.setViewportSize({width,height:900});
+  await page.locator('.guide-card').waitFor();
+  const check = async () => {
+    assert.equal(await page.locator('#list > li').first().getAttribute('class'), 'guide-card');
+    assert.equal(await page.locator('.guide-card').count(), 1);
+    assert.deepEqual(await page.locator('#list .row.pinned').evaluateAll(rs => rs.map(r => r.dataset.itemId)), ['b','a']);
+    for (const id of ['a','b','c']) assert.equal(await page.locator(`#list .row[data-item-id="${id}"]`).count(), 1);
+  };
+  await check();
+  await page.evaluate(() => refresh());
+  await check();
+  await page.reload();
+  await page.locator('.guide-card').waitFor();
+  await check();
+  // The guide belongs only to Focus. Other views retain their pinned-first layout.
+  await page.evaluate(() => setView('me'));
+  assert.equal(await page.locator('.guide-card').count(), 0);
+  assert.equal(await page.locator('#list > li').first().getAttribute('class'), 'group pinned-group');
+});
+
+test('a stale guide cannot recommend a now-settled or untriaged conversation', {timeout:20000}, async t => {
+  const items = [item('a',{needs_human:false,focus:null,actionable:null}),
+    item('b',{triage_current:false,needs_human:false,focus:null,actionable:null})];
+  const guide = {next:[{id:'a',title:'Earlier suggestion',reasons:[]},
+    {id:'b',title:'Unknown suggestion',reasons:[]}],calm:false,
+    counts:{me:0,running:0,waiting:0,candidate:0},batches:[],drift:null};
+  const page = await open(t,{items,guide,slots:{},places:[]});
+  await page.locator('.guide-card').waitFor();
+  assert.equal(await page.locator('.guide-next').count(),0);
+  assert.equal(await page.locator('.guide-calm').count(),1);
+});

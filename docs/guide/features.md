@@ -147,7 +147,16 @@ curl -X POST "$CCDB_API_URL/api/threads/<their_thread_id>/message" \
 - The relayed text is **posted into the thread** before it reaches Claude, so the humans watching see the whole AI-to-AI exchange. A relay is never a back channel.
 - Every message is **wrapped in a marker** naming the sending thread and stating that it is not from the human — an unmarked instruction would be obeyed as if the owner had written it.
 
-Loops are the real risk (two sessions answering each other burn tokens and interrupt each other indefinitely), so a guard bounds every chain: **max 2 hops**, a 60s cooldown per thread pair, 5 relays per sender per 10 minutes, and no self-sends. Refusals come back as 429 with the reason.
+Loops are the real risk (two sessions answering each other burn tokens and interrupt each other indefinitely). The guard measures different risks separately:
+
+- **Declared chains:** max 2 hops and no self-sends.
+- **Duplicates:** the same whitespace-normalized text from the same sender to the same recipient is blocked for 60 seconds. A distinct follow-up or the same instruction to another worker is allowed immediately.
+- **Rapid exchanges:** 20 messages per rolling minute between a pair, counting both directions together. Resetting `hop` or changing the text does not evade this bound; other peers keep their own budget.
+- **Sender flood:** 120 messages per rolling minute across recipients, as an emergency ceiling rather than a five-message coordination quota.
+
+Queue and interrupt requests share these budgets. In-flight dispatches reserve capacity before any asynchronous lookup, and failed dispatches release it. Discord acceptance means the delivery task was scheduled; failures after that point still count. Text is fingerprinted in memory rather than retained by the guard, and expired state is pruned across all senders and pairs. These are process-local limits and reset on restart.
+
+Refusals return 429 with `error` and a stable `reason` (`duplicate`, `pair_burst`, `sender_burst`, `hop_limit`, `invalid_hop`, or `self_send`). Temporary refusals also include `retry_after_seconds` and the `Retry-After` header. Hop and self-send refusals have no timer: do not retry them unchanged. There is no force bypass. These rules detect repetition and bursts, not the semantic importance of a message.
 
 The lounge prompt also gives sessions a tie-break rule so the conversation converges instead of ending in mutual politeness: whoever has commits or a PR beats whoever is still investigating; otherwise the earlier session continues; ties go to the lower thread ID. Whoever stands down pushes its branch first and hands over what it learned.
 
@@ -230,6 +239,12 @@ curl -X POST "$CCDB_API_URL/api/spawn" \
 
 The link is also recorded, so a session managing a fan-out can read it instead of parsing titles: `GET /api/sessions` reports `parent_thread_id`, `family` and `children` per thread. Renaming, cross-linking and recording are each best-effort — a parent that was archived or renamed past Discord's two-per-ten-minutes limit costs the decoration, never the spawn. `CCDB_SPAWN_PARENT_MARKER` changes `🌳` (empty disables it), mirroring `CCDB_SPAWN_THREAD_MARKER`.
 
+**Hearing back from a child (`notify_parent`)** — add `"notify_parent": true` to the spawn and the child reports back on its own: each time it marks itself `candidate`, `done`, `waiting`, `review` or `action`, the relay queues one short report into the parent thread (title, state, and where to read the result). `queue` delivery means an idle parent starts a turn and a busy one reads it after the current turn, so the parent can check the result, send follow-up work, and give its human one combined report instead of the human relaying every child by hand. Only a link the relay recorded at spawn is followed; a mark that changed nothing or repeats the same state within 10 minutes is not reported again; each child reports at most `CCDB_NOTIFY_PARENT_MAX_PER_CHILD` times (default 10) so a parent and child cannot wake each other forever; and every report passes the same relay guard as `/api/threads/{id}/message`. Off unless asked for: `CCDB_NOTIFY_PARENT_DEFAULT=1` opts in every spawn that names a parent and does not say `false`.
+
+**Parent mode (multi-agent by default)** — a thread in parent mode acts as a manager without being told: it splits substantial work into child threads (spawned with its `parent_thread_id`), keeps small tasks (a lookup, a one-file edit, anything that takes a few minutes) to itself, follows each child's progress, CI and failures, and reports to its human once, in that thread. The human talks only to the parent. Switch it per conversation from the Console ("👪 Parent mode": on / off / follow the default) and set the deployment default and the cap from the nav ("👪 Parent mode default"). What changes: the thread's prompt gains a "Parent mode" section; spawns from it default to `notify_parent: true` (an explicit `false` still wins); and `/api/spawn` refuses with `429` while the parent already has `max_children` unfinished children (a child counts as finished once it is a candidate, done, or closed by a human). Children never follow the default — they stay workers and are told not to create children of their own, so the tree stays one level deep unless someone turns a child on explicitly. Off unless the operator turns it on: `CCDB_PARENT_MODE_DEFAULT=1` sets the initial default, `CCDB_PARENT_MODE_MAX_CHILDREN` (default 5, 1–50) the initial cap; values saved from the Console win over both. Console API: `GET/POST /console/api/defaults/parent-mode` (`{"enabled", "max_children"}`) and `GET/POST /console/api/items/{id}/parent-mode` (`{"mode": "on"|"off"|"default"}`).
+
+**One card for the same question across a family** — when several children ask the human the same thing, their parent can answer it with one card. It lists the family's open cards (`GET /api/threads/{id}/decisions?family=1`), sends its own card, and covers theirs with `POST /api/threads/{id}/decisions/{key}/covers` `{"request_ids": [...]}`. Only cards from threads it spawned (directly or further down) can be covered; anything else refuses the whole call. Covered cards close (`close_reason` `bundled:<card id>`) and leave every panel; when the human answers the parent's card in the Console or through the secretary, the same answer is delivered to each covered child, labelled as given on a combined card. A parent that rewrites its card under the same key keeps what it covers. Parent mode tells the agent when to do this.
+
 Claude subprocesses receive `DISCORD_THREAD_ID` as an environment variable, so a running session can spawn child sessions to parallelize work.
 
 **Manager sessions (bundled skill)** — The endpoints above are the mechanics; [`skills/relay-thread-manager`](../../skills/relay-thread-manager/SKILL.md) teaches an agent the workflow on top of them: when to fan out, how to write a self-contained brief, tracking workers through the lineage in `/api/sessions`, relaying follow-ups within the hop and rate limits, verifying reports against the actual PR or commit, escalating to the human, and closing the tree with `✅`. It is plain `curl`, so it works the same for Claude Code and Codex. Install it by copying or symlinking the directory into the agent's skill folder:
@@ -242,6 +257,8 @@ ln -s "$PWD/skills/relay-thread-manager" ~/.codex/skills/relay-thread-manager   
 Then ask a thread to "split this across three worker threads and report back".
 
 When a thread's work looks finished, the agent tells the user the thread can be closed and calls `POST /api/threads/{thread_id}/candidate` (the older `/done` does the same), which prefixes the title with **🏁** — a completion candidate. It is a proposal, not a verdict: only a human closes the work (✅, Done in the console), so an agent's guess never makes an unfinished request disappear from the list. A new human reply removes the marker automatically. `CCDB_CANDIDATE_THREAD_MARKER` changes `🏁` (empty disables the marker and the instruction); `CCDB_DONE_THREAD_MARKER` changes the human's `✅`.
+
+Optionally, a candidate that comes with evidence (deliverables, verification, scope) can close itself once ccdb has checked that no wait, decision request or unfinished child thread remains — never because time passed, and never for sends, publications or payments. Off by default; see [Evidence-based auto-completion](../auto-complete.md).
 
 A thread that a scheduled task will post into later — a follow-up registered with `thread_id`, or a `ScheduleWakeup` — carries **⏰** at the front of its title for as long as the task is waiting, so a thread that will resume on its own no longer looks abandoned. The scheduler reconciles the marker from the task table every tick: it disappears when a one-shot fires or the task is disabled or deleted, sits behind `✅` when both apply, and survives an automatic retitle. Threads with an active wait (`POST /api/waits`) carry the same **⏰** until the wait finishes or is cancelled. `CCDB_SCHEDULED_THREAD_MARKER` changes `⏰` (empty disables it).
 
@@ -350,6 +367,24 @@ Hashes are only compared within one scheme: when a client changes its hash formu
 ```
 
 `next` is deliberately **not** stored: writing it would mean rewriting an existing file on every new reply. Order lives in `chain.jsonl`, and because the identity is the upstream Unix-ms message id, filenames sort chronologically on their own.
+
+#### Getting the reply back to the upstream thread (`/api/teams/reply/status`)
+
+A client that sends `reply_target: {"thread": …}` with `POST /api/ingest` links the run to that thread. ccdb records the newest stored message as the run's base and tells the session to save the plain reply body to `reply-drafts/{result_id}.txt` in the thread folder, on later turns too.
+
+`POST /api/teams/reply/status` takes the same body as `/plan`, with each message's text, and answers from the newest linked run. The client keeps no state, so reopening it on any thread gets that thread's reply.
+
+| State | Meaning |
+|---|---|
+| `none` | No run is linked to this thread |
+| `generating` | A turn is in flight, or the run has only just started |
+| `ready` | The saved body is current |
+| `unverified` | No body file, so `draft` is the session's final message. It may be a work report, so show it before copying |
+| `stale` | A message is newer than the base, or an earlier one was edited. `changes` lists them; `draft` is still returned |
+| `posted` | The thread contains the body, allowing light edits, and nothing after it |
+| `failed` | The run ended without a body. `reason` says why |
+
+A failed link never stops the session: the `/api/ingest` response reports it under `reply_link`.
 
 The directory is the single source of truth — `plan` is answered by reading it. Delete a message file and the next sync fetches it again; an interrupted push completes on the next one; pressing the button twice is a no-op. An attachment that could not be stored is **never** reported as success: it is listed in `thread.json`, in the folder's `README.md`, in the push response, and it keeps appearing in `want_attachments` until its bytes actually arrive.
 

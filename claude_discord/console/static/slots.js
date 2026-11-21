@@ -84,6 +84,30 @@ window.ConsoleSlots = (() => {
       label, h("span", { class: "slots-steps" }, step(-1, "−", T.slots_down), step(1, "+", T.slots_up)));
   }
 
+  // A restart that a merged change is waiting for: why, from when, and the two choices.
+  // Empty when nothing is reserved. The server waits for a quiet moment on its own;
+  // the buttons only let the person in front of it decide sooner or later.
+  function restartBanner() {
+    const r = state.restart || {};
+    if (!r.reserved) return null;
+    const clock = (epoch) => new Date(epoch * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    let title = T.restart_waiting;
+    let detail = r.quiet_at ? T.restart_after(clock(r.quiet_at)) : "";
+    if (r.phase === "draining") { title = T.restart_draining; detail = ""; }
+    if (r.phase === "restarting") { title = T.restart_restarting; detail = ""; }
+    const reason = r.reason ? ` — ${r.reason}` : "";
+    const btn = (text, path, done) => h("button", { class: "btn restart-btn", type: "button", text,
+      onclick: () => post(path, {}, done) });
+    const actions = r.phase === "restarting" ? [] : [
+      btn(T.restart_now, "/restart/now", T.restart_now_toast),
+      btn(T.restart_later, "/restart/later", T.restart_later_toast),
+    ];
+    return h("div", { class: "restart-banner", role: "status", title: `${T.restart_hint}${r.reason || ""}` },
+      h("div", { class: "restart-title", text: title }),
+      detail ? h("div", { class: "restart-detail", text: detail + reason }) : null,
+      actions.length ? h("div", { class: "restart-actions" }, ...actions) : null);
+  }
+
   const id = (item) => encodeURIComponent(item.id);
 
   // The buttons for *item*'s state; empty when nothing applies. *compact* drops the words.
@@ -106,5 +130,5 @@ window.ConsoleSlots = (() => {
     return out;
   }
 
-  return { nav, controls, setLimit, stopButton, onBoard };
+  return { nav, restartBanner, controls, setLimit, stopButton, onBoard };
 })();

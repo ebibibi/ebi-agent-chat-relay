@@ -62,6 +62,20 @@ CREATE TABLE IF NOT EXISTS pending_resumes (
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
+-- Turns that are running right now, one row per thread. Written when a turn
+-- starts and deleted when it ends, so a row left by an earlier process means
+-- that process died mid-turn (SIGKILL, OOM, power loss) without the clean
+-- shutdown that writes pending_resumes. See InflightTurnRepository.
+CREATE TABLE IF NOT EXISTS inflight_turns (
+    thread_id INTEGER PRIMARY KEY,
+    boot_id TEXT NOT NULL,
+    session_id TEXT,
+    prompt TEXT,
+    crash_count INTEGER NOT NULL DEFAULT 0,
+    started_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    heartbeat_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
 -- Thread inbox: persistent status tracking across bot restarts.
 -- Populated when a Claude session ends; cleared when the user replies.
 -- status: 'waiting' (user's reply needed) | 'ambiguous' (unclear)
@@ -123,10 +137,43 @@ CREATE TABLE IF NOT EXISTS thread_lineage (
     thread_id INTEGER PRIMARY KEY,
     parent_thread_id INTEGER NOT NULL,
     family_code TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    -- Opt-in child→parent reports (ext/parent_notify.py).
+    notify_parent INTEGER NOT NULL DEFAULT 0,
+    notified_outcome TEXT,
+    notified_at REAL,
+    notified_count INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_thread_lineage_parent ON thread_lineage(parent_thread_id);
+
+-- What a parent thread says about where its work stands (situation_repo.py).
+CREATE TABLE IF NOT EXISTS thread_situation (
+    thread_id INTEGER PRIMARY KEY,
+    asks TEXT NOT NULL DEFAULT '[]',
+    doing TEXT NOT NULL DEFAULT '[]',
+    decided TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT NOT NULL
+);
+
+-- Decision requests an agent sent the person (decision_repo.py, ADR-0024).
+-- closed_at NULL: still open. One open request per (thread_id, req_key).
+CREATE TABLE IF NOT EXISTS decision_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id INTEGER NOT NULL,
+    req_key TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL,
+    origin TEXT NOT NULL,
+    source_thread_id INTEGER NOT NULL,
+    card TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    closed_at TEXT,
+    close_reason TEXT,
+    deferred_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_decision_requests_open ON decision_requests(closed_at, thread_id);
 
 -- Waits (claude_discord/waits.py): a probe ccdb re-runs until it says done,
 -- then resumes the thread. Lets a session end its turn while CI runs instead
@@ -232,6 +279,38 @@ _MIGRATIONS = [
         "created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')))"
     ),
     "CREATE INDEX IF NOT EXISTS idx_thread_lineage_parent ON thread_lineage(parent_thread_id)",
+    # thread_situation added for the Console's family panel
+    (
+        "CREATE TABLE IF NOT EXISTS thread_situation ("
+        "thread_id INTEGER PRIMARY KEY, "
+        "asks TEXT NOT NULL DEFAULT '[]', "
+        "doing TEXT NOT NULL DEFAULT '[]', "
+        "decided TEXT NOT NULL DEFAULT '[]', "
+        "updated_at TEXT NOT NULL)"
+    ),
+    # decision_requests added for secretary mode v2 (ADR-0024)
+    (
+        "CREATE TABLE IF NOT EXISTS decision_requests ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "thread_id INTEGER NOT NULL, "
+        "req_key TEXT NOT NULL DEFAULT '', "
+        "kind TEXT NOT NULL, "
+        "origin TEXT NOT NULL, "
+        "source_thread_id INTEGER NOT NULL, "
+        "card TEXT NOT NULL, "
+        "detail TEXT NOT NULL, "
+        "created_at TEXT NOT NULL, "
+        "closed_at TEXT, "
+        "close_reason TEXT)"
+    ),
+    "CREATE INDEX IF NOT EXISTS idx_decision_requests_open"
+    " ON decision_requests(closed_at, thread_id)",
+    "ALTER TABLE decision_requests ADD COLUMN deferred_at TEXT",
+    # child→parent reports on spawned threads (Issue #820)
+    "ALTER TABLE thread_lineage ADD COLUMN notify_parent INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE thread_lineage ADD COLUMN notified_outcome TEXT",
+    "ALTER TABLE thread_lineage ADD COLUMN notified_at REAL",
+    "ALTER TABLE thread_lineage ADD COLUMN notified_count INTEGER NOT NULL DEFAULT 0",
 ]
 
 

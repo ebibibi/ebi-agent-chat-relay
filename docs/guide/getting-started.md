@@ -420,6 +420,7 @@ for idle deadlines, attachment retries, credentials and startup rollback.
 | `CCDB_CONSOLE_ORIGIN` | Comma-separated origins the console may be used from (e.g. `https://console.example.com`). Set it when a proxy rewrites `Host` | (from the request) |
 | `CCDB_CONSOLE_SESSION_DAYS` | How long a console sign-in lasts, in days | `30` |
 | `CCDB_CONSOLE_ENROLL` | `1` logs a new single-use passkey setup code on start, even when passkeys exist (recovery after losing every passkey) | (optional) |
+| `CCDB_CONSOLE_OIDC_ADDS_PASSKEYS` | `1` lets a Google / Entra ID session invite a new passkey device under **🔑 Passkeys → Add a device** (removing stays with a passkey session). For devices the identity provider will not admit, e.g. not enrolled in Intune | (optional) |
 | `CCDB_CONSOLE_TRIAGE` | `0` turns off the console's [automatic triage](../console.md#automatic-triage) (priority, due date, next step and place guessed by a fast model) | `1` |
 | `CCDB_CONSOLE_TRIAGE_MODEL` | Model for triage on the Claude backend (`claude --model`) | `haiku` |
 | `CCDB_CONSOLE_TRIAGE_CODEX_MODEL` | Model for triage on the Codex backend (`codex exec -m`) | (cheapest in Codex's catalog) |

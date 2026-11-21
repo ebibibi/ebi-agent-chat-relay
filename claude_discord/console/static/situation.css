@@ -1,0 +1,63 @@
+/* The conversation and, for a thread family, the panel that does not scroll with it. */
+.d-body { flex: 1; min-height: 0; min-width: 0; display: flex; }
+.d-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.d-side { flex: none; width: min(560px, 50%); min-height: 0; overflow-y: auto; border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; }
+.d-side[hidden], .d-tabs[hidden] { display: none; }
+.d-side-core { padding: 10px 14px; display: flex; flex-direction: column; gap: 12px; flex: 1 0 auto; }
+.sit-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sit-hide { min-width: 32px; padding: 2px 8px; font-size: 16px; line-height: 1; }
+/* Folded: a rail that says how many things wait on the person and reopens the panel. */
+.d-side.collapsed { width: 40px; overflow: hidden; }
+.d-side.collapsed > :not(.d-side-rail) { display: none; }
+.d-side-rail { margin: 8px 4px; padding: 8px 0; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  background: transparent; border: 1px solid var(--line); border-radius: 6px; color: var(--text); cursor: pointer; font-size: 16px; }
+.d-side-rail[hidden] { display: none; }
+.d-side-rail:hover { border-color: var(--accent); }
+.sit-rail-count { font-size: 12px; font-weight: 700; color: var(--p1); }
+/* The panel's own reply box stays at the bottom while the panel scrolls. */
+.d-side-reply { position: sticky; bottom: 0; background: var(--panel); border-top: 1px solid var(--line); padding: 8px 10px; }
+.sit-reply { display: flex; flex-direction: column; gap: 6px; }
+.sit-to { display: flex; align-items: center; gap: 6px; font-size: 12px; min-width: 0; }
+.sit-to select { flex: 1; min-width: 0; max-width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; font: inherit; font-size: 12px; }
+.sit-reply textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 150px; max-height: 40vh;
+  background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; line-height: 1.5; }
+.sit-reply .btn { align-self: flex-end; }
+.sit-member { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; display: flex; flex-direction: column; gap: 4px; }
+.sit-member-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 8px; }
+.sit-report { margin: 0; font-size: 12px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.sit-ask .sit-report { color: var(--text); }
+.d-side .ws-pane { border-top: 1px solid var(--line); border-bottom: 0; flex: none; }
+.sit-title { margin: 0; font-size: 15px; }
+.sit-updated { margin: -8px 0 0; font-size: 12px; }
+.sit-updated.stale { color: var(--p1); }
+.sit-section { display: flex; flex-direction: column; gap: 4px; }
+.sit-head { margin: 0; font-size: 13px; font-weight: 700; }
+.sit-section.asks .sit-head { color: var(--p1); }
+.sit-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.sit-row { font-size: 13px; overflow-wrap: anywhere; }
+.sit-ask { padding: 6px 8px; border: 1px solid color-mix(in srgb, var(--p1) 45%, var(--line)); border-radius: 6px; display: flex; flex-direction: column; gap: 4px; }
+.sit-text p { margin: 0; }
+.sit-answer { align-self: flex-end; font-size: 12px; }
+.sit-thread { display: block; text-align: left; padding: 0; }
+.sit-detail { font-size: 12px; }
+.sit-empty { font-size: 12px; }
+
+/* Narrow: the panel takes the conversation's place behind a tab; the reply box stays. */
+.d-tabs { display: flex; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--line); flex: none; }
+.sit-tab { flex: 1; min-height: 36px; background: transparent; color: var(--dim); border: 1px solid var(--line); border-radius: 6px; font-size: 13px; cursor: pointer; }
+.sit-tab.on { color: var(--text); border-color: var(--accent); font-weight: 600; }
+.d-body[data-layout="tabs"] { flex-direction: column; }
+.d-body[data-layout="tabs"] .d-main { display: contents; }
+.d-body[data-layout="tabs"] .d-tabs { order: -1; }
+.d-body[data-layout="tabs"] .d-side { order: 2; flex: 1; width: auto; border-left: 0; }
+.d-body[data-layout="tabs"][data-tab="situation"] .reply { display: none; }
+.d-body[data-layout="tabs"] .msgs-wrap { order: 2; }
+.d-body[data-layout="tabs"] .live-slot, .d-body[data-layout="tabs"] .reply { order: 3; }
+.d-body[data-layout="tabs"][data-tab="chat"] .d-side { display: none; }
+.d-body[data-layout="tabs"][data-tab="situation"] .msgs-wrap,
+.d-body[data-layout="tabs"][data-tab="situation"] .live-slot { display: none; }
+
+/* An answer to a child's report or a finished wait, not to the person. */
+.msg.background { opacity: .72; }
+.msg.background:hover { opacity: 1; }
+.msg-background { font-size: 11px; margin-bottom: 2px; }

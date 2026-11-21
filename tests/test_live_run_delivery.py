@@ -146,7 +146,11 @@ async def test_unread_messages_ride_along_with_a_pause_resume(
         return slot if len(acquired) == 1 else None  # the resume runs unslotted
 
     monkeypatch.setattr(
-        helper, "get_session_slots", lambda: SimpleNamespace(release=lambda _slot: None)
+        helper,
+        "get_session_slots",
+        lambda: SimpleNamespace(
+            release=lambda _slot: None, begin_finishing=lambda _key: lambda: None
+        ),
     )
     monkeypatch.setattr(helper, "_acquire_slot", _acquire)
 
@@ -260,7 +264,9 @@ async def test_unread_images_ride_along_with_a_continuation(
         return slot if len(configs) == 1 else None
 
     monkeypatch.setattr(
-        helper, "get_session_slots", lambda: SimpleNamespace(release=lambda _s: None)
+        helper,
+        "get_session_slots",
+        lambda: SimpleNamespace(release=lambda _s: None, begin_finishing=lambda _key: lambda: None),
     )
     monkeypatch.setattr(helper, "_acquire_slot", _acquire)
 

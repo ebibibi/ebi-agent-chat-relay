@@ -66,3 +66,60 @@ test('single-thread focus hides the list and leaves with Esc',async t=>{
  await page.keyboard.press('z');
  assert.ok(await page.evaluate(()=>document.body.classList.contains('zen')));
 });
+
+for(const width of [1280,390]) {
+ test(`queue excludes descendants on start and refresh ${width}`,async t=>{
+  const items=[item('t1','Parent',230,'quick',2),item('t2','Standalone',220,'quick',2),
+   item('t3','Higher child',900,'quick',1,{parent_id:'t1'}),
+   item('t4','Grandchild',950,'quick',1,{parent_id:'t3'}),
+   item('t5','Absent parent',990,'quick',1,{parent_id:'missing'})];
+  const page=await open(t,width,items,[]);
+  assert.match(await page.locator('.zen-start').textContent(),/\(2\)/);
+  await page.locator('.zen-start').click();
+  await page.waitForFunction(()=>state.open==='t1');
+  // A queued item becomes a child, and a higher-ranked child arrives mid-run.
+  items[1].parent_id='t1';
+  items.push(item('t6','Late child',1000,'quick',1,{parent_id:'t1'}));
+  await page.evaluate(()=>refresh());
+  assert.match(await page.locator('.zen-bar').textContent(),/0 left/);
+  await page.locator('.zen-skip').click();
+  await page.waitForSelector('#zen-empty:not([hidden])');
+  assert.equal(await page.evaluate(()=>state.open),null);
+  // A new standalone still joins automatically; reparenting the current item drops it.
+  items.push(item('t7','Late standalone',200,'quick',1));
+  await page.evaluate(()=>refresh());
+  await page.waitForFunction(()=>state.open==='t7');
+  items.at(-1).parent_id='missing';
+  await page.evaluate(()=>refresh());
+  await page.waitForSelector('#zen-empty:not([hidden])');
+  assert.equal(await page.evaluate(()=>state.open),null);
+ });
+ test(`only children cannot start a queue; explicit inspection works ${width}`,async t=>{
+  const page=await open(t,width,[item('t1','Child',900,'quick',1,{parent_id:'missing'})],[]);
+  assert.match(await page.locator('.zen-start').textContent(),/\(0\)/);
+  assert.equal(await page.locator('.zen-start').isDisabled(),true);
+  await page.evaluate(()=>openItem('t1'));
+  assert.equal(await page.evaluate(()=>state.open),'t1');
+ });
+ test(`next move skips stale child candidates and keeps place selection ${width}`,async t=>{
+  const items=[item('t1','Child',900,'quick',1,{parent_id:'missing'}),
+   item('t2','Away',300,'quick',1,{place:'office'}),item('t3','Parent',200,'quick',1)];
+  const page=await open(t,width,items,[]);
+  await page.evaluate(()=>{
+   localStorage.setItem('here',JSON.stringify(['home']));
+   ConsoleFocus.setGuide({next:state.items.map(i=>({...i,reasons:[]})),counts:{},calm:false});
+   render();
+  });
+  assert.equal(await page.locator('.guide-next').textContent(),'Away');
+  // The configured location takes effect on reload.
+  await page.reload();
+  await page.waitForSelector('.effort-bar');
+  await page.evaluate(()=>{ConsoleFocus.setGuide({next:state.items.map(i=>({...i,reasons:[]})),counts:{},calm:false});render();});
+  assert.equal(await page.locator('.guide-next').textContent(),'Parent');
+  items[2].parent_id='missing';
+  await page.evaluate(()=>refresh());
+  await page.evaluate(()=>{ConsoleFocus.setGuide({next:[{id:'t3',title:'Stale parent',reasons:[]}, {id:'absent',parent_id:'missing',title:'Absent child',reasons:[]}],counts:{},calm:false});render();});
+  assert.equal(await page.locator('.guide-next').count(),0);
+  assert.match(await page.locator('.guide-calm').textContent(),/Nothing needs you/);
+ });
+}

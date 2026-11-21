@@ -100,3 +100,9 @@ class TestCancel:
         nid = await repo.create(message="test", scheduled_at="2026-01-01T09:00:00")
         await repo.mark_sent(nid)
         assert await repo.cancel(nid) is False
+
+
+async def test_first_start_creates_notification_database_parent(tmp_path):
+    repo = NotificationRepository(str(tmp_path / "fresh" / "nested" / "notifications.db"))
+    await repo.init_db()
+    assert (tmp_path / "fresh" / "nested" / "notifications.db").is_file()

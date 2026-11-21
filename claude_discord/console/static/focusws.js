@@ -142,6 +142,7 @@ window.ConsoleFocusWorkspace = (() => {
       h("div", { class: "ws-focus-meta" },
         h("span", { class: "dim ws-focus-path", text: item.path }),
         ...tags),
+      item.milestone ? h("div", { class: "dim ws-focus-milestone", text: `🎯 ${plain(item.milestone)}` }) : null,
       item.status ? h("div", { class: "dim ws-focus-status", text: `📍 ${plain(item.status)}` }) : null,
       h("div", { class: "ws-focus-actions", title: usable ? "" : l.no_line },
         ...actions,

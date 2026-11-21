@@ -39,3 +39,15 @@
 .lightbox-img { max-width: 100%; max-height: calc(100% - 56px); object-fit: contain; cursor: default; border-radius: 4px; }
 
 .pv-bar { flex-wrap: wrap; }
+
+/* Reading mode fills the viewport on desktop and mobile without changing scroll/content. */
+.pv-shade.pv-fullscreen { padding: 0; }
+.pv-fullscreen .pv-panel { width: 100%; height: 100%; border-radius: 0; }
+.pv-fullscreen .pv-bar { padding-top: max(8px, env(safe-area-inset-top)); }
+.pv-doc img { display: block; max-width: 100%; height: auto; margin: 12px 0; }
+.pv-image-missing { display: block; color: var(--dim); margin: 12px 0; }
+@media (max-width: 600px) {
+  .pv-bar .pv-name { flex-basis: 100%; }
+  .pv-bar { gap: 6px; padding: 8px; }
+  .pv-doc { padding: 12px; }
+}

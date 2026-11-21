@@ -41,7 +41,7 @@ window.ConsoleZen = (() => {
   const F = () => window.ConsoleFocus;
   // What the queue offers: a thread whose move is yours, that you can take here and now,
   // within the chosen time bucket. A running or queued turn is the agent's move.
-  const wanted = (i) => Boolean(i && i.thread_id) && i.focus !== null && i.focus !== undefined &&
+  const wanted = (i) => Boolean(i && i.thread_id) && !i.parent_id && i.focus !== null && i.focus !== undefined &&
     i.actionable !== false && !i.running && !i.queued && !F().elsewhere(i) && F().effortOk(i);
   const ranked = () => state.items.filter(wanted).sort(F().byImportance);
   const settled = (i) => {
@@ -131,7 +131,9 @@ window.ConsoleZen = (() => {
     if (mode !== "queue") return;
     const before = order.length;
     grow();
-    if (!state.open && order.length > before) advance();
+    // A queued conversation can become a child after this run started.
+    if ((state.open && state.byId.get(state.open)?.parent_id) ||
+        (!state.open && order.length > before)) advance();
   }
 
   // Esc outside a text box: leave the mode, keep the thread open.

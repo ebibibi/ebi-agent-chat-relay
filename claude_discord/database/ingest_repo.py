@@ -32,7 +32,9 @@ CREATE TABLE IF NOT EXISTS ingest_results (
     thread_name    TEXT,
     summary_key    TEXT,
     pending_marker TEXT,
-    created_at     TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    teams_thread_key TEXT,
+    teams_base_mid TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     updated_at     TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
@@ -44,6 +46,8 @@ CREATE INDEX IF NOT EXISTS idx_ingest_results_created ON ingest_results(created_
 _ADDED_COLUMNS = {
     "summary_key": "TEXT",
     "pending_marker": "TEXT",
+    "teams_thread_key": "TEXT",
+    "teams_base_mid": "TEXT",
 }
 
 
@@ -79,6 +83,8 @@ class IngestResultRepository:
         thread_name: str | None = None,
         summary_key: str | None = None,
         pending_marker: str | None = None,
+        teams_thread_key: str | None = None,
+        teams_base_mid: str | None = None,
     ) -> dict:
         """Insert a new ingest result in the 'running' state and return it.
 
@@ -86,13 +92,26 @@ class IngestResultRepository:
         summary (see ThreadSummaryRepository): when the session later saves an
         updated summary via ``POST /api/ingest/summary`` referencing this
         ``result_id``, ccdb advances the summary's marker to ``pending_marker``.
+
+        ``teams_thread_key`` / ``teams_base_mid`` link this run to the Teams thread
+        it answers and the newest message stored when it started (see
+        ``ext/teams_reply.py``).
         """
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
                 "INSERT INTO ingest_results "
-                "(result_id, status, thread_id, thread_name, summary_key, pending_marker) "
-                "VALUES (?, 'running', ?, ?, ?, ?)",
-                (result_id, thread_id, thread_name, summary_key, pending_marker),
+                "(result_id, status, thread_id, thread_name, summary_key, pending_marker, "
+                "teams_thread_key, teams_base_mid) "
+                "VALUES (?, 'running', ?, ?, ?, ?, ?, ?)",
+                (
+                    result_id,
+                    thread_id,
+                    thread_name,
+                    summary_key,
+                    pending_marker,
+                    teams_thread_key,
+                    teams_base_mid,
+                ),
             )
             # Prune old rows, keeping only the most recent MAX_STORED_RESULTS.
             await db.execute(
@@ -114,6 +133,18 @@ class IngestResultRepository:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT * FROM ingest_results WHERE result_id = ?", (result_id,)
+            )
+            row = await cursor.fetchone()
+        return dict(row) if row is not None else None
+
+    async def latest_for_teams_thread(self, teams_thread_key: str) -> dict | None:
+        """Return the newest run linked to a Teams thread, or None."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM ingest_results WHERE teams_thread_key = ? "
+                "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                (teams_thread_key,),
             )
             row = await cursor.fetchone()
         return dict(row) if row is not None else None

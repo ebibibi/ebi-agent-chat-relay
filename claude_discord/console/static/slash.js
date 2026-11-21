@@ -50,7 +50,7 @@ window.ConsoleSlash = (() => {
     const q = (spaced ? rest || "" : name).toLowerCase();
     if (!spaced) {
       const all = [
-        ...[...c.commands, ...(c.builtins || [])].map((x) => ({ insert: `/${x.name} `, label: `/${x.name}`, hint: T.slash_desc[x.name] || x.description })),
+        ...[...c.commands, ...(c.builtins || [])].map((x) => ({ insert: `/${x.name} `, label: `/${x.name}`, hint: (x.name === "compact" && x.handled ? T.compact_enter_hint + " · " : "") + (T.slash_desc[x.name] || x.description) })),
         ...c.skills.map((s) => ({ insert: `/${s.name} `, label: `/${s.name}`, hint: s.description || "" })),
       ];
       return rank(all, q, (o) => o.label.slice(1));
@@ -117,7 +117,18 @@ window.ConsoleSlash = (() => {
     el.addEventListener("blur", () => setTimeout(close, 120));
     // Capture: the menu's keys win over the box's own Ctrl+Enter handling.
     el.addEventListener("keydown", (e) => {
-      if (!options.length || e.isComposing) return;
+      if (e.isComposing) return;
+      // A complete Codex /compact is an action, not another completion. Partial
+      // names still complete; Shift+Enter keeps the normal multiline behavior.
+      const catalog = catalogs.get(id);
+      if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.shiftKey &&
+          /^\/compact[ \t]*$/.test(el.value) &&
+          catalog?.builtins?.some(b => b.name === "compact" && b.handled) && el.form) {
+        e.preventDefault(); e.stopImmediatePropagation(); close();
+        el.form.requestSubmit();
+        return;
+      }
+      if (!options.length) return;
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         active = (active + (e.key === "ArrowDown" ? 1 : options.length - 1)) % options.length;
@@ -143,13 +154,19 @@ window.ConsoleSlash = (() => {
     const known = c.commands.some((x) => x.name === name) || c.skills.some((s) => s.name === name) ||
       (c.builtins || []).some((b) => b.name === name && b.handled);
     if (!known) return false; // Claude's built-ins (/compact) and pasted paths go out as text
-    if (name === "compact") toast(T.compacting);
-    const res = await api(`/items/${encodeURIComponent(id)}/command`, { method: "POST", body: { name, arg } });
+    const progress = name === "compact" ? h("div", {
+      class: "compact-status", role: "status", "aria-live": "polite", text: T.compacting,
+    }) : null;
+    if (progress && id === itemId) box?.form?.querySelector(".reply-main")?.append(progress);
+    let res;
+    try {
+      res = await api(`/items/${encodeURIComponent(id)}/command`, { method: "POST", body: { name, arg } });
+    } finally { progress?.remove(); }
     if (res && res.catalog) {
       catalogs.set(id, res.catalog);
       if (id === itemId) drawMeta();
     }
-    toast(res && res.message ? `✅ ${res.message}` : T.sent);
+    toast(name === "compact" ? `✅ ${T.compact_done}` : res && res.message ? `✅ ${res.message}` : T.sent);
     close();
     return true;
   }

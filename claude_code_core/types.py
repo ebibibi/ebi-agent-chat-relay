@@ -229,6 +229,8 @@ class StreamEvent:
     cache_read_tokens: int | None = None
     cache_creation_tokens: int | None = None
     context_window: int | None = None
+    # Direct context occupancy, when input_tokens already includes cached input (Codex).
+    context_used: int | None = None
     error: str | None = None
     rate_limit_info: RateLimitInfo | None = None
     # Every window a rate_limit_event reported (``unifiedWindows``), including

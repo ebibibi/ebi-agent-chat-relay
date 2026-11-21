@@ -20,8 +20,9 @@ const I18N = {
     first_hint: "Start this one before the others waiting", later_hint: "Let the others waiting go first",
     paused_toast: "Paused", stopping: "Stopping…", resumed_toast: "Resumed",
     slots_hint: "Threads running now / the most that may run at once", slots_up: "Allow one more at once",
-    slots_down: "Allow one fewer at once", slots_set: (n) => `Up to ${n} at once`, pinned_group: "📌 Working on now", status_filter: "Status:", status_all: "All", pin: "Pin", unpin: "Pinned",
-    pin_hint: "Pin as what you are working on now; pinned threads lead every list (p)", capture_pin: "📌 Pin", capture_pin_hint: "Pin this request as what you are working on now (this one only)", hide_done_off: "✅ Showing done", hide_done_on: "✅ Done hidden",
+    slots_down: "Allow one fewer at once", slots_set: (n) => `Up to ${n} at once`, restart_waiting: "🔄 Update waiting", restart_draining: "🔄 Restarting when the running turns finish", restart_restarting: "🔄 Restarting…", restart_after: (t) => `Restarts once nobody has used the bot for a while (after ${t})`, restart_now: "Restart now", restart_later: "In 1 hour", restart_now_toast: "Restarting as soon as the running turns finish", restart_later_toast: "Postponed by 1 hour", restart_hint: "A merged change needs a restart. It waits until nobody has used the bot for a while, so it never restarts under you. ", pinned_group: "📌 Working on now", status_filter: "Status:", status_all: "All", pin: "Pin", unpin: "Pinned",
+    pin_up: "Move pin up", pin_down: "Move pin down", pin_first: "Move pin to top", pin_last: "Move pin to bottom",
+    pin_hint: "Pin as what you are working on now; pinned threads lead the work lists; Recent stays chronological (p)", capture_pin: "📌 Pin", capture_pin_hint: "Pin this request as what you are working on now (this one only)", hide_done_off: "✅ Showing done", hide_done_on: "✅ Done hidden",
     hide_done_hint: "Hide or show finished items in every list (h)", hide_done_in_done: "The Done list always shows finished items", context_hint: (d) => `Context window used by the last turn: ${d}`, due_over: "overdue", due_in: (x) => `in ${x}`, u_min: "m", u_hour: "h", u_day: "d", focus_ready: "can do now", ready_now: "Can do now", ready_wait: "Waiting", ready_hint: "Whether you can act on this now (click to switch). Dashed: the AI's guess", ready_yours: "Your call. New activity in the conversation hands it back to the AI", ready_back_ai: "Back to the AI's call", focus_from: (d) => `from ${d}`, ai_guess: "AI guess", ai_set: "set by AI", series: (n) => `×${n}`, series_hint: (n) => `${n} items share this title; Focus shows only the newest`,
     guide_title: "🧭 Your next move", guide_unblocks: "▶ Once you answer, the agent carries on", guide_open: "Open",
     guide_reasons: { overdue: "overdue", due_soon: "due within 24h", priority: "high priority", asked: "the agent asked you", review: "a deliverable to review", action: "a step only you can do", error: "the last turn failed" },
@@ -46,7 +47,7 @@ const I18N = {
     attach_failed: "Could not attach the file", attach_hint: "Attach files",
     attach_big: (n, max) => `${n} is larger than ${max}`, attach_many: (n) => `At most ${n} files per reply`,
     paste_wait: "A file is still uploading",
-    slash_hint: "Type / for commands", compacting: "Compacting the conversation… (up to a few minutes)", slash_desc: { backend: "Switch the AI backend for this conversation",
+    slash_hint: "Type / for commands", compact_enter_hint: "Enter to compact", compact_done: "Conversation compacted. Context usage will be measured on the next reply.", compacting: "Compacting the conversation… (up to a few minutes)", slash_desc: { backend: "Switch the AI backend for this conversation",
       model: "Choose the model for the current backend", effort: "Set the reasoning effort",
       compact: "Summarize the conversation to free up context", context: "Show context window usage", cost: "Show token usage and cost" }, send: "Send", hour: "1h", tomorrow: "Tomorrow", week: "Next week",
     pressed: (l) => `Pressed: ${l}`,
@@ -69,8 +70,9 @@ const I18N = {
     first_hint: "待っているほかのスレッドより先に始めます", later_hint: "待っているほかのスレッドを先にします",
     paused_toast: "一時停止しました", stopping: "停止中…", resumed_toast: "再開しました",
     slots_hint: "いま実行中の数 / 同時に動かせる上限", slots_up: "同時に動かせる数を1つ増やす",
-    slots_down: "同時に動かせる数を1つ減らす", slots_set: (n) => `同時実行の上限を ${n} にしました`, pinned_group: "📌 いまやってる", status_filter: "ステータス：", status_all: "すべて", pin: "ピン留め", unpin: "ピン中",
-    pin_hint: "いまやってる目印。ピン留めしたスレッドはどの一覧でも一番上に出ます（p）", capture_pin: "📌 ピン留め", capture_pin_hint: "この依頼を「いまやってる」としてピン留めします（この1件だけ）", hide_done_off: "✅ 完了も表示", hide_done_on: "✅ 完了を隠す中",
+    slots_down: "同時に動かせる数を1つ減らす", slots_set: (n) => `同時実行の上限を ${n} にしました`, restart_waiting: "🔄 更新待ち", restart_draining: "🔄 実行中の処理が終わったら再起動します", restart_restarting: "🔄 再起動しています…", restart_after: (t) => `しばらく誰も使っていないときに再起動します（${t} 以降）`, restart_now: "今すぐ再起動", restart_later: "1時間後に", restart_now_toast: "実行中の処理が終わり次第、再起動します", restart_later_toast: "再起動を1時間延ばしました", restart_hint: "マージされた変更の反映に再起動が必要です。使っている最中には再起動せず、しばらく誰も使っていないときに行います。", pinned_group: "📌 いまやってる", status_filter: "ステータス：", status_all: "すべて", pin: "ピン留め", unpin: "ピン中",
+    pin_up: "ピンを上へ移動", pin_down: "ピンを下へ移動", pin_first: "ピンを一番上へ移動", pin_last: "ピンを一番下へ移動",
+    pin_hint: "いまやってる目印。ピン留めは作業一覧の先頭に表示。「更新順」は日時順のままです（p）", capture_pin: "📌 ピン留め", capture_pin_hint: "この依頼を「いまやってる」としてピン留めします（この1件だけ）", hide_done_off: "✅ 完了も表示", hide_done_on: "✅ 完了を隠す中",
     hide_done_hint: "完了したタスクを全部の一覧で隠す／表示する（h）", hide_done_in_done: "「完了」の一覧では常に表示します", context_hint: (d) => `直近のターンで使ったコンテキスト：${d}`, due_over: "超過", due_in: (x) => `あと${x}`, u_min: "分", u_hour: "時間", u_day: "日", focus_ready: "今すぐできる", ready_now: "今できる", ready_wait: "待ち", ready_hint: "いま手を付けられるか（クリックで切り替え）。点線はAIの見立て", ready_yours: "あなたの判断。会話に新しい動きがあればAIの見立てに戻ります", ready_back_ai: "AIの見立てに戻す", focus_from: (d) => `${d}〜`, ai_guess: "AIの見立て", ai_set: "AIが推定", series: (n) => `×${n}`, series_hint: (n) => `同じ名前のスレッド${n}件を、いちばん新しいものにまとめています`,
     guide_title: "🧭 今やる一手", guide_unblocks: "▶ 返すとAIが続きを進めます", guide_open: "開く",
     guide_reasons: { overdue: "期限超過", due_soon: "24時間以内に期限", priority: "優先度が高い", asked: "AIが質問中", review: "成果物の確認待ち", action: "本人しかできない作業", error: "直前のターンが失敗" },
@@ -95,7 +97,7 @@ const I18N = {
     attach_failed: "ファイルを添付できませんでした", attach_hint: "ファイルを添付",
     attach_big: (n, max) => `${n} は ${max} を超えています`, attach_many: (n) => `添付は1回 ${n} 件までです`,
     paste_wait: "ファイルをアップロード中です",
-    slash_hint: "/ でコマンド", compacting: "会話を圧縮しています…（数分かかることがあります）", slash_desc: { backend: "この会話のAIバックエンドを切り替える",
+    slash_hint: "/ でコマンド", compact_enter_hint: "Enterで圧縮", compact_done: "会話を圧縮しました。コンテキスト使用量は次の返信後に更新されます。", compacting: "会話を圧縮しています…（数分かかることがあります）", slash_desc: { backend: "この会話のAIバックエンドを切り替える",
       model: "今のバックエンドのモデルを選ぶ", effort: "推論の強さ（effort）を設定する",
       compact: "ここまでの会話を要約してコンテキストを空ける", context: "コンテキストの使用量を見る", cost: "トークン使用量と料金を見る" }, send: "送信", hour: "1時間", tomorrow: "明日", week: "来週",
     pressed: (l) => `押しました: ${l}`,
@@ -127,7 +129,8 @@ const VIEWS = [
   { sep: true }, { key: "recent" }, { key: "tree" }, { key: "snoozed" }, { key: "done" },
 ];
 // A built-in list, or a saved view (views.js) — known once the first board arrives.
-const isViewKey = (key) => VIEWS.some((v) => v.key === key) || window.ConsoleViews.isKey(key);
+const isViewKey = (key) => VIEWS.some((v) => v.key === key) || window.ConsoleViews.isKey(key) ||
+  (key === window.ConsoleSecretary.VIEW && window.ConsoleSecretary.on());
 const VIEW_KEYS = { f: "focus", i: "me", c: "candidate", a: "ai", u: "recent", t: "tree", w: "todo", d: "done" };
 
 const state = {
@@ -142,6 +145,9 @@ const state = {
   drawerOpen: localStorage.getItem("drawerOpen") === "1",
   unseen: 0,
 };
+// Secretary mode (secretary.js) is its own home; with the mode off its view falls back to Focus.
+if (window.ConsoleSecretary.on() && !location.hash.slice(1)) state.view = window.ConsoleSecretary.VIEW;
+if (state.view === window.ConsoleSecretary.VIEW && !window.ConsoleSecretary.on()) state.view = "focus";
 
 // ---------------------------------------------------------------- dom helpers
 function h(tag, attrs = {}, ...children) {
@@ -217,12 +223,14 @@ async function refresh() {
     const data = await api("/board");
     // An unchanged poll redraws nothing: rebuilding hundreds of rows every few
     // seconds is what makes a phone stutter. Relative times still tick once a minute.
-    const sig = JSON.stringify([data.items, data.slots, data.places, data.views]);
+    const sig = JSON.stringify([data.items, data.slots, data.places, data.views, data.secretary]);
     // A search hit pushed into state.items locally still gets reconciled as before.
     const unchanged = sig === state.boardSig && state.items.length === data.items.length
       && Date.now() - state.renderedAt < STALE_RENDER_MS;
     state.boardSig = sig;
     state.lastSync = new Date();
+    // Canvas mode reads its widgets on every poll; it redraws itself only when they changed.
+    if (window.ConsoleCanvas.on()) window.ConsoleCanvas.onBoard();
     $("sync").className = "sync";
     $("sync").textContent = `${T.updated} ${state.lastSync.toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}`;
     if (unchanged) return;
@@ -231,9 +239,12 @@ async function refresh() {
     state.byId = new Map(data.items.map((i) => [i.id, i]));
     window.ConsoleSlots.onBoard(data.items);
     state.slots = data.slots || {};
+    state.restart = data.restart || { reserved: false };
     state.places = data.places || [];
     window.ConsoleViews.onBoard(data.views || []);
+    window.ConsolePages.onBoard(data.pages || []);
     window.ConsoleFocus.setGuide(data.guide || null);
+    window.ConsoleSecretary.onBoard(data.secretary || null);
     if (!state.defaultsLoaded) { state.defaultsLoaded = true; window.ConsoleBackend.loadDefaults(); }
     if (state.open && !state.byId.has(state.open)) state.open = null;
     // Whatever is on screen is being read.
@@ -320,11 +331,22 @@ function matches(item) {
   }
   return !state.filter || window.ConsoleQuery.test(item, state.filter);
 }
-// Pinned items ("working on now") open every view but Done, newest pin first, and leave
+// Pinned items ("working on now") open every view but Done and Recent, in the saved order, and leave
 // their usual place so nothing is listed twice — except in the tree, whose shape needs them.
 const isPinned = (i) => Boolean(i.pinned_at) && i.bucket !== "done";
 function visibleRows() {
-  return window.ConsoleFamily.groupRows(ungroupedRows());
+  if (state.view === window.ConsoleSecretary.VIEW) return window.ConsoleSecretary.rows();
+  const ungrouped = ungroupedRows();
+  // Recent is a timeline: family regrouping would pull an older parent above its child.
+  const rows = chronologicalView() ? ungrouped : window.ConsoleFamily.groupRows(ungrouped);
+  const pins = rows.filter(r => r.pinId);
+  pins.forEach((row, index) => {
+    row.pinFirst = index > 0 ? pins[0].pinId : null;
+    row.pinLast = index < pins.length - 1 ? pins.at(-1).pinId : null;
+    row.pinPrevious = pins[index - 1]?.pinId;
+    row.pinNext = pins[index + 1]?.pinId;
+  });
+  return rows;
 }
 // The status chips sit on top of every view and narrow it; they count the view as it is
 // before narrowing, so switching one on never hides the others it offers.
@@ -340,14 +362,21 @@ function ungroupedRows() {
   const bar = SF.bar(all);
   const rows = SF.active() ? pinnedFirst(SF.apply(items)) : all;
   const viewBar = window.ConsoleViews.bar();
-  return [viewBar && { node: viewBar }, wsBar && { node: wsBar }, bar && { node: bar }, ...rows].filter(Boolean);
+  // The next move is the anchor of Focus, above pins and list filters alike.
+  const guide = state.view === "focus" ? window.ConsoleFocus.card(items) : null;
+  return [guide && { node: guide }, viewBar && { node: viewBar }, wsBar && { node: wsBar },
+    bar && { node: bar }, ...rows].filter(Boolean);
 }
+const chronologicalView = () => state.view === "recent" && !window.ConsoleViews.active();
 function pinnedFirst(items) {
+  if (chronologicalView()) return viewRows(items);
   const pinned = state.view === "done" ? [] : items.filter(isPinned)
-    .sort((a, b) => (b.pinned_at || "").localeCompare(a.pinned_at || ""));
+    .sort((a, b) => (a.pin_position != null) - (b.pin_position != null) ||
+      (a.pin_position ?? 0) - (b.pin_position ?? 0) ||
+      (b.pinned_at || "").localeCompare(a.pinned_at || "") || a.id.localeCompare(b.id));
   if (!pinned.length) return viewRows(items);
   const rest = state.view === "tree" ? viewRows(items) : dropEmptyGroups(viewRows(items.filter((i) => !isPinned(i))));
-  return [{ group: T.pinned_group, cls: "group pinned-group" }, ...pinned.map((item) => ({ item, depth: 0 })), ...rest];
+  return [{ group: T.pinned_group, cls: "group pinned-group" }, ...pinned.map((item) => ({ item, depth: 0, pinId: item.id })), ...rest];
 }
 // A heading whose rows all moved to the pinned strip has nothing left under it.
 function dropEmptyGroups(rows) {
@@ -407,6 +436,25 @@ async function togglePin(id) {
   if (!item) return;
   await patch(id, { pinned: !item.pinned_at });
 }
+let pinMoving = false;
+async function movePin(id, target, placement, button) {
+  if (pinMoving || !target) return;
+  pinMoving = true;
+  try {
+    await api(`/items/${encodeURIComponent(id)}/pin-order`, {
+      method: "POST", body: { target_id: target, placement },
+    });
+    toast(T.saved);
+    const keepFocus = document.activeElement === button;
+    await refresh();
+    if (keepFocus && document.activeElement === document.body) {
+      const controls = [...document.querySelectorAll(".pin-order button")]
+        .filter(b => b.dataset.pinId === id && !b.disabled);
+      (controls.find(b => b.className === button.className) || controls[0])?.focus();
+    }
+  } catch (err) { toast(err.message); }
+  finally { pinMoving = false; }
+}
 function setHideDone(on) {
   state.hideDone = on;
   localStorage.setItem("hideDone", on ? "1" : "0");
@@ -432,6 +480,7 @@ function render() {
   renderList();
   renderDetail();
   window.ConsoleZen.paint();
+  window.ConsoleCanvas.paint();
 }
 
 function renderNav() {
@@ -440,7 +489,9 @@ function renderNav() {
   counts.tree = state.items.filter((i) => i.bucket !== "done").length;
   counts.focus = window.ConsoleFocus.count(state.items);
   const nav = $("nav-views");
-  nav.replaceChildren(
+  nav.replaceChildren(...[
+    window.ConsoleSecretary.switcher(),
+    window.ConsoleSecretary.nav(),
     ...VIEWS.map((v) => v.sep ? h("div", { class: "sep" }) : h("button", {
       class: state.view === v.key ? "active" : "",
       "aria-current": state.view === v.key ? "page" : null,
@@ -448,19 +499,25 @@ function renderNav() {
     }, h("span", { text: T[v.key] }), h("span", {
       class: "count" + (v.hot && counts[v.key] ? " hot" : ""), text: counts[v.key] || "",
     }))),
+    window.ConsoleViews.tagNav(),
     window.ConsoleViews.nav(),
+    window.ConsolePages.nav(),
     window.ConsoleSlots.nav(),
+    window.ConsoleSlots.restartBanner(),
     window.ConsoleWorkspace.nav(),
     window.ConsoleNoteSearch.nav(),
     window.ConsoleBackend.nav(),
     window.ConsoleBackend.childNav(),
+    window.ConsoleBackend.parentNav ? window.ConsoleBackend.parentNav() : null,
+    window.ConsoleAutomation ? window.ConsoleAutomation.nav() : null,
     window.ConsoleNotify ? h("button", { class: "nav-notify" + (window.ConsoleNotify.isOn() ? " on" : ""),
       onclick: () => window.ConsoleNotify.toggle() },
       h("span", { text: window.ConsoleNotify.isOn() ? T.notify_on : T.notify_off })) : null,
     h("button", { class: "nav-auth", onclick: () => window.ConsoleAuth.showDevices() },
       h("span", { text: `🔑 ${window.ConsoleAuth.label}` })),
-  );
-  $("view-title").textContent = window.ConsoleViews.title() || T[state.view];
+  ].filter(Boolean));
+  $("view-title").textContent = window.ConsoleViews.title() ||
+    (state.view === window.ConsoleSecretary.VIEW ? window.ConsoleSecretary.title() : T[state.view]);
   const hot = counts.me || 0;
   document.title = hot ? `(${hot}) Ebi AI Console` : "Ebi AI Console";
 }
@@ -468,6 +525,7 @@ function renderNav() {
 function renderList() {
   const rows = visibleRows();
   window.ConsoleBulk?.sync(rows);
+  document.querySelector(".list-pane").classList.toggle("secretary-view", state.view === window.ConsoleSecretary.VIEW);
   const list = $("list");
   const top = list.scrollTop;
   const edge = list.getBoundingClientRect().top;
@@ -489,17 +547,17 @@ function renderList() {
     if (row.family) {
       if (group?.id !== row.family.root.id) {
         const shown = rows.filter(r => r.family?.root.id === row.family.root.id && r.depth > 0).length;
-        const card = window.ConsoleFamily.listGroup(row.family, shown);
+        const card = window.ConsoleFamily.listGroup(row.family, shown, row.folded);
         nodes.push(card);
         group = {id:row.family.root.id, list:card.querySelector('.thread-group-rows')};
       }
       group.list.append(node);
     } else { group = null; nodes.push(node); }
   }
-  list.replaceChildren(...nodes);
+  window.ConsoleSecretary.replaceContent(list, ...nodes);
   window.ConsoleBulk?.toolbar();
   const empty = $("empty");
-  empty.hidden = rows.some((r) => r.item);
+  empty.hidden = rows.some((r) => r.item) || state.view === window.ConsoleSecretary.VIEW;
   empty.textContent = T.empty;
   const restored = anchor && [...list.querySelectorAll('.row')].find((row) => row.dataset.itemId === anchor.dataset.itemId && row.dataset.occurrence === anchor.dataset.occurrence);
   list.scrollTop = restored
@@ -513,7 +571,7 @@ function revealSelection() {
   if (sel) sel.scrollIntoView({ block: "nearest" });
 }
 
-function rowNode({ item, depth, children, rowKey, family }) {
+function rowNode({ item, depth, children, rowKey, family, pinId, pinPrevious, pinNext, pinFirst, pinLast }) {
   const meta = [];
   const wsTag = window.ConsoleWsBind.badge(item);
   if (wsTag) meta.push(wsTag);
@@ -545,6 +603,15 @@ function rowNode({ item, depth, children, rowKey, family }) {
     h("span", { class: `pri p${item.priority}` + (item.priority_by === "ai" ? " ai" : ""),
     title: item.priority_by === "ai" ? T.ai_set : null, text: `P${item.priority}` })];
   side.push(dueLabel(item));
+  if (pinId) side.push(h("span", { class: "pin-order" },
+    ...[["first", pinFirst, "before", T.pin_first, "⇈"], ["up", pinPrevious, "before", T.pin_up, "↑"],
+      ["down", pinNext, "after", T.pin_down, "↓"], ["last", pinLast, "after", T.pin_last, "⇊"]]
+      .map(([direction, target, placement, label, symbol]) => h("button", {
+        class: `btn pin-${direction}`, type: "button", title: label, "aria-label": label,
+        disabled: !target, "data-pin-id": pinId,
+        onkeydown: (event) => { if (["Enter", " "].includes(event.key)) event.stopPropagation(); },
+        onclick: (event) => { event.stopPropagation(); movePin(pinId, target, placement, event.currentTarget); },
+      }, symbol))));
   const twisty = children
     ? h("span", { class: "tw", onclick: (e) => { e.stopPropagation(); toggleCollapse(item.id); },
         text: state.collapsed.has(item.id) ? "▸" : "▾" })
@@ -605,8 +672,10 @@ function renderDetail() {
   window.ConsoleMobile.layout(item, !editing);
   window.ConsoleFamily.render(item);
   window.ConsoleWsPane.render(item);
+  window.ConsoleSituation.render(item);
   window.ConsoleThreadNotes.render(item);
   window.ConsoleZen.bar(pane);
+  window.ConsoleCanvas.bar(pane);
   placeToasts();
   const msgs = $("msgs");
   if (item.thread_id) fillMessages(msgs);
@@ -620,10 +689,7 @@ function buildDetail(pane, item, key) {
   const msgs = h("div", { class: "msgs", id: "msgs", onscroll: updateJump });
   const jump = h("button", { class: "jump", id: "jump", type: "button", hidden: true,
     onclick: () => { msgs.scrollTop = msgs.scrollHeight; updateJump(); } });
-  const nodes = [
-    h("div", { class: "d-head", id: "d-head" }),
-    h("div", { class: "d-drawer", id: "d-drawer", hidden: true }),
-    window.ConsoleBackend.controls(item),
+  const main = [
     h("section", { class: "family", id: "d-family", hidden: true, "aria-label": LANG === "ja" ? "親子スレッド" : "Thread family" }),
     h("section", { class: "ws-pane", id: "d-ws", hidden: true, "aria-label": "Ebi Workspace" }),
     h("section", { class: "tnotes", id: "d-notes", hidden: true }),
@@ -639,16 +705,32 @@ function buildDetail(pane, item, key) {
     const meta = h("div", { class: "reply-meta", hidden: true });
     const form = h("form", { class: "reply", onsubmit: (e) => { e.preventDefault(); sendReply(item.id, box); } },
       h("div", { class: "reply-main" }, meta, tray, box),
-      h("div", { class: "reply-side" }, window.ConsolePaste.button(item.id),
+      h("div", { class: "reply-side" }, window.ConsolePaste.button(item.id), window.ConsoleNight.button(box),
         h("button", { class: "btn primary", type: "submit", text: T.send })));
-    nodes.push(form);
+    main.push(form);
     box.value = state.drafts[item.id] || "";
     window.ConsolePaste.attach(box, item.id, tray);
     window.ConsoleSlash.attach(box, item.id, meta);
     window.ConsoleBoxSize.attach(form, box, grow);
     requestAnimationFrame(() => grow(box));
   }
+  // The panel beside a thread family sits in .d-side; see situation.js.
+  const body = h("div", { class: "d-body", id: "d-body" },
+    h("div", { class: "d-tabs", id: "d-tabs", hidden: true }),
+    h("div", { class: "d-main", id: "d-main" }, ...main),
+    h("aside", { class: "d-side", id: "d-side", hidden: true, "aria-label": LANG === "ja" ? "現在地" : "Where things stand" },
+      h("button", { class: "d-side-rail", id: "d-side-rail", type: "button", hidden: true }),
+      h("div", { class: "d-side-core", id: "d-side-core" }),
+      h("div", { class: "d-side-reply", id: "d-side-reply" })));
+  const nodes = [
+    h("div", { class: "d-head", id: "d-head" }),
+    h("div", { class: "d-drawer", id: "d-drawer", hidden: true }),
+    window.ConsoleBackend.controls(item),
+    body,
+  ];
   pane.replaceChildren(...nodes.filter(Boolean));
+  window.ConsoleSituation.attach(body);
+  window.ConsoleReadHold.attach(msgs);
 }
 
 function headParts(item) {
@@ -785,7 +867,7 @@ function messageNode(m) {
     const look = remote && P && P.kind(a.filename)
       ? h("button", { class: "btn file-look", type: "button", text: `👁 ${P.label}`,
           onclick: () => P.open(a.filename, () => P.fetchBlob(a.url),
-            () => window.open(a.url, "_blank", "noopener,noreferrer")) })
+            () => window.open(a.url, "_blank", "noopener,noreferrer"), { url: a.url, attachments: m.attachments || [] }) })
       : null;
     body.append(h("div", { class: "file" }, remote
       ? h("a", { href: a.url, target: "_blank", rel: "noopener noreferrer", text: `📎 ${a.filename}` })
@@ -834,6 +916,65 @@ function chatImage(a) {
   return btn;
 }
 
+// Unchanged messages keep their nodes, so a poll leaves a thumbnail, a file row or a text
+// selection inside them alone and nothing above the reader changes height. Rebuilding every
+// node dropped the thumbnails until they loaded again: the text jumped and came back.
+function messageKey(m, background) {
+  return JSON.stringify([m.kind, m.is_bot, m.author, m.model, m.created_at, m.content, m.truncated,
+    m.embeds, m.attachments, m.actions, background]);
+}
+function syncMessages(container, shown, background) {
+  const old = new Map();
+  for (const node of container.children) if (node.dataset.mid) old.set(node.dataset.mid, node);
+  const nodes = shown.map((m, i) => {
+    const mid = m.id != null ? String(m.id) : `#${i}`;
+    const key = messageKey(m, background.has(m.id));
+    const kept = old.get(mid);
+    if (kept && kept.dataset.key === key) return kept;
+    const node = background.has(m.id) ? window.ConsoleSituation.markBackground(messageNode(m)) : messageNode(m);
+    node.dataset.mid = mid;
+    node.dataset.key = key;
+    return node;
+  });
+  const wanted = new Set(nodes);
+  for (const node of [...container.children]) if (!wanted.has(node)) node.remove();
+  nodes.forEach((node, i) => {
+    if (container.children[i] !== node) container.insertBefore(node, container.children[i] || null);
+  });
+}
+
+// What the reader is looking at: the first message still showing at the top, and where.
+// Putting that message back where it was keeps the text still when something above it
+// changes height; a bare scrollTop does not. (Phones turn the browser's own anchoring off.)
+function readingAnchor(box) {
+  const edge = box.getBoundingClientRect().top;
+  for (const node of box.children) {
+    const rect = node.getBoundingClientRect();
+    if (rect.bottom > edge) return { node, mid: node.dataset.mid, offset: rect.top - edge };
+  }
+  return null;
+}
+function restoreAnchor(box, anchor, top) {
+  box.scrollTop = top;
+  if (!anchor) return;
+  const node = anchor.node.parentElement === box ? anchor.node
+    : anchor.mid && box.querySelector(`:scope > [data-mid="${CSS.escape(anchor.mid)}"]`);
+  if (node) box.scrollTop += node.getBoundingClientRect().top - box.getBoundingClientRect().top - anchor.offset;
+}
+// Runs a change to the conversation's content: a reader at the end stays at the end,
+// anyone else keeps reading the same line.
+function holdReading(change) {
+  const box = $("msgs");
+  if (!box) return change();
+  const pinned = nearBottom(box);
+  const anchor = pinned ? null : readingAnchor(box);
+  const top = box.scrollTop;
+  const result = change();
+  if (pinned) box.scrollTop = box.scrollHeight;
+  else restoreAnchor(box, anchor, top);
+  return result;
+}
+
 function fillMessages(container, { force = false, toBottom = false } = {}) {
   if (state.messagesFor !== state.open) {
     if (!container.dataset.sig) container.replaceChildren(h("div", { class: "empty", text: T.loading }));
@@ -848,14 +989,18 @@ function fillMessages(container, { force = false, toBottom = false } = {}) {
   const first = !container.dataset.sig || !container.dataset.sig.startsWith(`${state.open}|`);
   const follow = toBottom || first || nearBottom(container);
   const before = container.dataset.count ? Number(container.dataset.count) : shown.length;
+  const anchor = follow ? null : readingAnchor(container);
   const top = container.scrollTop;
   container.dataset.sig = sig;
   container.dataset.count = String(shown.length);
-  container.replaceChildren(...(shown.length ? shown.map(messageNode) : [h("div", { class: "empty", text: T.no_messages })]));
+  const background = window.ConsoleSituation.backgroundIds(state.messages);
+  if (shown.length) syncMessages(container, shown, background);
+  else container.replaceChildren(h("div", { class: "empty", text: T.no_messages }));
+  // File rows for new answers right away: added on the next live tick they would land above the reader.
+  window.ConsoleLive?.linkFiles();
   if (follow) container.scrollTop = container.scrollHeight;
   else {
-    // Replacing every child can reset the scroll position; put the reader back where they were.
-    container.scrollTop = top;
+    restoreAnchor(container, anchor, top);
     if (shown.length > before) state.unseen = (state.unseen || 0) + shown.length - before;
   }
   updateJump();
@@ -916,6 +1061,8 @@ function toggleCollapse(id) {
   renderList();
 }
 async function openItem(id) {
+  // Trial metric (secretary.js): a thread opened, counted once per opening.
+  if (state.open !== id) window.ConsoleSecretary.logOpen(id);
   if (state.open !== id) state.directReply = null;
   if (state.open !== id) state.unseen = 0;
   state.open = id;
@@ -943,6 +1090,8 @@ async function loadMessages(id) {
 function closeItem() {
   // Working through a queue, leaving a thread means "next one" (zen.js).
   if (window.ConsoleZen.onClose(state.open)) return;
+  // Canvas mode: leaving a thread goes back to the secretary (canvas.js).
+  if (window.ConsoleCanvas.onClose()) return;
   markSeen(state.open); state.open = null; render();
 }
 async function patch(id, changes) {
@@ -970,7 +1119,8 @@ async function sendReply(id, box) {
       if (!/^\/(backend|model|effort)\b/.test(text)) { await refresh(); setTimeout(() => loadMessages(id), 1500); }
       return;
     }
-    const body = await window.ConsolePaste.prepareText(text, files);
+    // Canvas mode's screen AI rides on what is sent from it (screenai.js); nothing is stored.
+    const body = { ...(await window.ConsolePaste.prepareText(text, files)), ...(window.ConsoleScreenAI?.body() || {}) };
     const sent = await api(`/items/${encodeURIComponent(id)}/reply`, { method: "POST", body });
     box.value = "";
     delete state.drafts[id];
@@ -1117,7 +1267,7 @@ function wire() {
     capture(text).then((ok) => { if (ok) { input.value = ""; grow(input); } });
   };
   window.ConsolePaste.attach($("capture-input"), CAPTURE, $("capture-tray"));
-  $("capture-attach").replaceWith(window.ConsolePaste.button(CAPTURE));
+  $("capture-attach").replaceWith(window.ConsolePaste.button(CAPTURE), window.ConsoleNight.shiftButton($("capture-input")));
   $("capture").addEventListener("submit", (e) => { e.preventDefault(); submitCapture(); });
   // Do not let a drop/paste add files to the pending submission's attachment tray.
   for (const type of ["drop", "paste"]) $("capture").addEventListener(type, (e) => {
@@ -1131,6 +1281,9 @@ function wire() {
   $("help").addEventListener("click", () => { if ($("help").dataset.mode !== "login") showHelp(false); });
 
   document.addEventListener("keydown", (e) => {
+    // An IME is composing (Japanese input): its Escape cancels the conversion, it is not ours.
+    // Blurring here threw the person out of the reply box mid-sentence (#1430).
+    if (e.isComposing || e.keyCode === 229) return;
     // A rich editor (contenteditable, possibly inside a shadow root) is typing too.
     const typing = e.target.matches("input, textarea, select, [contenteditable]")
       || e.composedPath().some((n) => n.isContentEditable);

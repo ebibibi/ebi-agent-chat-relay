@@ -122,13 +122,12 @@
   const fileName = (href) => decodeURIComponent(href.split("/").pop());
   const imageType = (href) => IMAGE_TYPES[(fileName(href).split(".").pop() || "").toLowerCase()];
 
-  // Anything added below the messages after they rendered (file rows, a thumbnail that
-  // finished loading) must not pull a reader who was following away from the end.
+  // Anything added to the messages after they rendered (file rows, a thumbnail that
+  // finished loading) must neither pull a reader who was following away from the end
+  // nor move the text someone further up is reading.
   function keepPinned(change) {
-    const msgs = document.getElementById("msgs");
-    const pinned = msgs && msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 80;
-    change();
-    if (pinned) msgs.scrollTop = msgs.scrollHeight;
+    // Anyone reading further up keeps the same line in view (holdReading in app.js).
+    holdReading(change);
   }
 
   function linkFiles() { keepPinned(addFileRows); }
@@ -147,7 +146,9 @@
         if (P && P.kind(fileName(href))) {
           const look = el("button", "btn", `👁 ${P.label} ${fileName(href)}`);
           look.type = "button";
-          look.addEventListener("click", () => P.open(fileName(href), () => fetchFile(href), () => download(href)));
+          const attachments = [...new Set(found)].map(url => ({ filename: fileName(url), url }));
+          look.addEventListener("click", () => P.open(fileName(href), () => fetchFile(href),
+            () => download(href), { url: href, attachments }));
           row.append(look, P.copyButton(() => fetchFile(href)));
         }
         const btn = el("button", "btn", `📎 ${L.download} ${fileName(href)}`);
@@ -265,4 +266,5 @@
   }
 
   setInterval(tick, TICK_MS);
+  window.ConsoleLive = { linkFiles };
 })();

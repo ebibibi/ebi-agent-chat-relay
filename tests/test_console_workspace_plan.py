@@ -303,3 +303,16 @@ def test_a_stale_project_already_shown_is_not_duplicated(notes, plugin):
     assert items[0]["path"] == "Old/Urgent" and items[0]["stale_days"] == 11
     assert [i["path"] for i in items].count("Old/Urgent") == 1
     assert sum(1 for i in items if i["stale_days"] is not None) == 1
+
+
+def test_a_project_row_names_the_milestone_that_set_its_deadline(notes, plugin):
+    plan = WorkspacePlan(Workspace(notes), plugin)
+    scan = plan._scan()
+    dated = {**_project("Work/Dated", 90, "active"), "nearest_deadline": "2026-10-17"}
+    dated["nearest_milestone"] = "Launch"
+    older = _project("Work/Older", 20, "active")  # a plugin without nearest_milestone
+    scan["projects"] = [dated, older]
+    scan["single_actions"] = []
+    rows = {r["path"]: r for r in plan.shape(scan)["items"]}
+    assert rows["Work/Dated"]["milestone"] == "Launch"
+    assert rows["Work/Older"]["milestone"] is None

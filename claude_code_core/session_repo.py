@@ -205,10 +205,10 @@ class SessionRepository:
     async def update_context_stats(
         self,
         thread_id: int,
-        context_window: int,
-        context_used: int,
+        context_window: int | None,
+        context_used: int | None,
     ) -> None:
-        """Persist context window stats for a session."""
+        """Persist context stats, or clear both values when no current measurement exists."""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
                 "UPDATE sessions SET context_window = ?, context_used = ? WHERE thread_id = ?",

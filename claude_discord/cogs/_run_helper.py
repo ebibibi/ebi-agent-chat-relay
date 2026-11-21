@@ -45,6 +45,8 @@ from .event_processor import EventProcessor, _backend_name_from_runner
 from .run_config import RunConfig
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from claude_code_core.types import AskQuestion, InjectedMessage
 
     from ..database.wait_repo import WaitRepository
@@ -150,6 +152,31 @@ def _truncate_result(content: str) -> str:
     return content[:TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
 
 
+def _auto_complete_hint() -> str:
+    """How to send evidence with /candidate, only while the operator has it enabled (#1477)."""
+    from ..auto_complete import MODE_OFF, AutoCompletePolicy
+
+    policy = AutoCompletePolicy.from_env()
+    if policy.mode == MODE_OFF:
+        return ""
+    verification = (
+        "required" if policy.require_verification else "optional, but list it when you have it"
+    )
+    return (
+        "Evidence: this deployment completes a candidate without the user when the evidence "
+        "shows the work is finished. Send it as the body of the same call:\n"
+        '  `-H "Content-Type: application/json" -d \'{"evidence": {"deliverables": '
+        '["<PR/commit/file URL>"], "verification": ["<check and its result>"], '
+        '"within_scope": true, "external_effects": []}}\'`\n'
+        f"Deliverables are required; verification is {verification}. Set within_scope "
+        "true only if you did nothing beyond what you were asked. List in external_effects "
+        "anything you sent, published, paid or deleted in production: those always need the "
+        "user, and listing one keeps the thread a candidate. ccdb itself checks waits, open "
+        "decision requests and child threads, and completes only after your turn ends; the "
+        "response's `auto_complete` says whether it will. Never invent evidence.\n"
+    )
+
+
 def _build_done_marker_section(config: RunConfig) -> str | None:
     """Tell the agent how to propose that this thread can be closed.
 
@@ -172,10 +199,20 @@ def _build_done_marker_section(config: RunConfig) -> str | None:
         "that this thread looks ready to close, and mark it as a completion candidate:\n"
         '  `curl -s -X POST "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/candidate"`\n'
         f"This prefixes the thread title with {marker}. It is only a proposal: the thread "
-        "stays listed until the user confirms it done, which only the user can do. Do NOT "
-        "mark it when you are asking "
+        "stays listed until the user confirms it done (the user decides; see the exception "
+        "below). Do NOT mark it when you are asking "
         "a question, waiting for a pipeline or a decision, or leaving work pending. "
         "If the user replies later, the marker is removed automatically.\n"
+        f"{_auto_complete_hint()}"
+        'Exception — the user explicitly asks you to close a thread ("mark the finished '
+        'child threads done"): then close it for them, this thread or one it spawned:\n'
+        '  `curl -s -X POST "$CCDB_API_URL/api/threads/<thread_id>/complete" '
+        '-H "Content-Type: application/json" -d \'{"from_thread": \'$DISCORD_THREAD_ID\', '
+        '"user_request": "<quote the request>"}\'`\n'
+        "Check each child first (its messages, open PRs, pending waits) and close only the "
+        "ones whose work is actually finished; report which you closed and which you left "
+        "open and why. Never use it on your own judgment — without an explicit request, "
+        "propose with /candidate.\n"
         "Customer replies: Preparing a draft is NOT sending it to the customer. "
         "Producing an answer, an attachment, or posting it in this AI conversation does not "
         "prove external delivery. Keep the thread in review while the user checks the draft, "
@@ -187,7 +224,9 @@ def _build_done_marker_section(config: RunConfig) -> str | None:
         "the final reply body or observing delivery; leave completion to the user's "
         "explicit completion action. This also applies on later turns in the same thread. "
         "Use review/action for pending human work. Keep status commentary outside the "
-        "customer-facing reply body." + _waiting_marker_hint()
+        "customer-facing reply body. If the request named a reply body file, overwrite it "
+        "whenever you revise the reply, on later turns too: the exporter copies that file, "
+        "not your message." + _waiting_marker_hint()
     )
 
 
@@ -235,11 +274,44 @@ def _waiting_marker_hint() -> str:
         return ""
     return (
         "\nWhen instead your turn ends because only the user can move the work forward, "
-        "say plainly what you need from them and mark the thread with the ONE that fits:\n"
+        "say plainly what you need from them and mark the thread with the ONE that fits, "
+        'sending your decision request as the call\'s JSON body (see "Asking the user"; a '
+        "bare call still marks, but the user then gets no card):\n"
         + "\n".join(lines)
         + "\nThe marker is removed when the user replies. Do not use any of these while "
         "you are the one who still has work to do."
     )
+
+
+async def _build_parent_mode_section(config: RunConfig) -> str | None:
+    """Parent mode instructions for this thread, or for a child of a parent-mode thread.
+
+    Needs the control-plane API (the agent spawns through it) and the settings
+    store. A settings failure leaves the section out: the thread then behaves as
+    it did before parent mode existed, which is the safe direction.
+    """
+    settings_owner = config.backend_settings
+    if settings_owner is None or getattr(config.runner, "api_port", None) is None:
+        return None
+    from ..database.lineage_repo import ThreadLineageRepository
+    from ..parent_mode import ParentModeSettings, build_child_section, build_parent_section
+
+    thread_id = config.surface.thread_key
+    try:
+        repo = settings_owner.repo
+        settings = ParentModeSettings(repo)
+        lineage = ThreadLineageRepository(repo.db_path)
+        parent_id = await lineage.parent_of(thread_id)
+        if (await settings.resolve(thread_id, is_child=parent_id is not None)).enabled:
+            return build_parent_section(thread_id, await settings.max_children())
+        if parent_id is None:
+            return None
+        grandparent_id = await lineage.parent_of(parent_id)
+        if (await settings.resolve(parent_id, is_child=grandparent_id is not None)).enabled:
+            return build_child_section(parent_id)
+    except Exception:
+        logger.warning("Parent mode lookup failed for thread %d", thread_id, exc_info=True)
+    return None
 
 
 async def _build_system_context(config: RunConfig) -> str | None:
@@ -334,7 +406,45 @@ async def _build_system_context(config: RunConfig) -> str | None:
         "The relay applies the user's saved child AI preferences (backend, model, effort) "
         "before the first turn. Do not switch the child to your own backend or model. "
         "These settings govern relay child threads, not a backend's native subagents. "
+        "Add notify_parent: true when this thread should see the child's result: the "
+        "relay then queues a short report here each time the child marks itself "
+        "finished or waiting on the user, so you can follow up with the child and give "
+        "the user one combined report instead of one per child. "
         "Creating a child thread still requires authorization to delegate."
+    )
+
+    parent_mode_section = await _build_parent_mode_section(config)
+    if parent_mode_section:
+        parts.append(parent_mode_section)
+
+    if getattr(config.runner, "api_port", None) is not None:
+        from ..decision_default import policy_from_env
+        from ..decision_request import agent_guide
+
+        policy = policy_from_env()
+        parts.append(agent_guide(policy.scopes if policy is not None else None))
+
+    parts.append(
+        "## Situation panel for thread families\n"
+        "Beside the conversation the Console shows a panel of where things stand: for any "
+        "thread with an open decision request (only the cards), and for a thread with child "
+        "threads (the whole family) so the user can see it while messages keep arriving. "
+        "It measures "
+        "by itself which threads are running or waiting; only you can say the rest. Keep it "
+        "current, and always update it before ending a turn that changed it, including a turn "
+        "started by a child's report:\n"
+        f'  `curl -s -X PUT "$CCDB_API_URL/api/threads/{config.surface.thread_key}/situation" '
+        '-H "Content-Type: application/json" '
+        '-d \'{"doing": [...], "decided": [...]}\'`\n'
+        "A field you send replaces that field, one you leave out stays, and GET on the same "
+        "URL returns the record. "
+        'Do not write questions into `asks`: the panel\'s "needed from you" lists the open '
+        "decision requests of the whole family by itself (yours and your children's, see "
+        '"Asking the user"), and a question written here as text would be a second copy that '
+        "outlives its answer. Send `asks` only as `[]` to clear what an older turn wrote. "
+        "`doing`: what is moving now, in a few words. "
+        "`decided`: decisions made and outcomes finished; keep them across updates. "
+        "No secrets, and no chat narrative. A thread without children need not use it."
     )
 
     done_section = _build_done_marker_section(config)
@@ -537,6 +647,23 @@ def _waits_repo_if_available(config: RunConfig) -> WaitRepository | None:
     return waits.watcher_repo() if _waits_available(config) else None
 
 
+class _WrapUp:
+    """The end-of-turn window a reserved restart waits for (``begin_finishing``)."""
+
+    def __init__(self) -> None:
+        self._end: Callable[[], None] | None = None
+
+    def begin(self, slots: SessionSlotScheduler, thread_key: int) -> None:
+        self.end()
+        self._end = slots.begin_finishing(thread_key)
+
+    def end(self) -> None:
+        """Stop counting this turn as finishing. Safe to call more than once."""
+        if self._end is not None:
+            self._end()
+            self._end = None
+
+
 async def run_claude_with_config(config: RunConfig) -> str | None:
     """Execute Claude Code CLI and stream results to a Discord thread.
 
@@ -545,6 +672,20 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
 
     Returns:
         The final session_id, or None if the run failed.
+    """
+    wrap_up = _WrapUp()
+    try:
+        return await _run_turn(config, wrap_up)
+    finally:
+        wrap_up.end()
+
+
+async def _run_turn(config: RunConfig, wrap_up: _WrapUp) -> str | None:
+    """One turn of :func:`run_claude_with_config`; *wrap_up* covers its end-of-turn work.
+
+    The wrap-up is ended before anything that waits for a new slot or for a
+    person (reruns, AskUserQuestion): a held queue or an unanswered question
+    must not keep a reserved restart waiting forever.
     """
     system_context = await _build_system_context(config)
     runner = (
@@ -629,6 +770,9 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
     finally:
         live_runs.unregister(config.surface.thread_key, live)
         if slots is not None and slot is not None:
+            # Finishing before the slot is free: no instant where a reserved
+            # restart sees this turn as neither running nor wrapping up.
+            wrap_up.begin(slots, config.surface.thread_key)
             slots.release(slot)
         await processor.finalize()
         if config.registry is not None:
@@ -645,6 +789,7 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
     # Paused to free the slot: queue the continuation as deferred so it
     # resumes on its own once the sessions it yielded to are through.
     if slot is not None and slot.pause_requested:
+        wrap_up.end()
         return await _requeue_paused(config, processor, unread)
 
     # After compact_boundary, rerun with a guardrail to prevent Claude from
@@ -657,6 +802,7 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
         guardrail_config = _carry_unread(
             replace(config, session_id=session_id, post_compact_rerun=True), unread
         )
+        wrap_up.end()
         return await run_claude_with_config(guardrail_config)
 
     # Honour a ScheduleWakeup tool call by registering a one-shot scheduled
@@ -677,6 +823,7 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
             await _report_undelivered(config, unread)
             await _emit_result_sink(config, processor.final_assistant_text, processor.final_error)
             return processor.session_id
+        wrap_up.end()  # waiting for a person, not wrapping up
         answer_prompt = await collect_ask_answers(
             config.thread,
             processor.pending_ask,
@@ -709,6 +856,7 @@ async def run_claude_with_config(config: RunConfig) -> str | None:
             session_id=session_id,
             pr_completion_gate_rerun=True,
         )
+        wrap_up.end()
         return await run_claude_with_config(completion_config)
 
     # Terminal path. The compact/ask reruns above delegate to a nested

@@ -51,7 +51,13 @@ def _parse(value: str | None) -> datetime | None:
 
 
 def _ranked(item: Mapping[str, Any]) -> bool:
-    return item.get("focus") is not None and item.get("actionable") is not False
+    return (
+        item.get("focus") is not None
+        and item.get("actionable") is True
+        and item.get("needs_human") is not False
+        and not item.get("running")
+        and not item.get("queued")
+    )
 
 
 def _order(item: Mapping[str, Any]) -> tuple[Any, ...]:
@@ -162,8 +168,10 @@ def build_guide(
     now = now or datetime.now(UTC)
     items = list(items)
     ranked = sorted((i for i in items if _ranked(i)), key=_order)
+    # Filter before the limit: delegated work must not crowd out the parent.
+    direct = [i for i in ranked if not i.get("parent_id")]
     counts = {
-        "me": len(ranked),
+        "me": len(direct),
         "running": sum(1 for i in items if i.get("status") == "running"),
         "waiting": sum(
             1 for i in items if i.get("focus") is not None and i.get("actionable") is False
@@ -172,9 +180,9 @@ def build_guide(
     }
     by_activity = sorted(items, key=lambda i: i.get("last_activity_at") or "", reverse=True)
     return {
-        "next": [_candidate(i, now=now) for i in ranked[:MAX_NEXT]],
+        "next": [_candidate(i, now=now) for i in direct[:MAX_NEXT]],
         "batches": _batches(items, ranked),
-        "calm": not ranked,
+        "calm": not direct,
         "counts": counts,
         "drift": None if records is None else _drift(by_activity, records, now=now),
     }

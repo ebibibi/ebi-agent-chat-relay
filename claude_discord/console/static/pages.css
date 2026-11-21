@@ -1,0 +1,14 @@
+/* Declarative pages (pages.js). The dialog frame is shared with the Workspace panel. */
+.nav-page { display:flex; justify-content:space-between; gap:8px; width:100%; text-align:left; }
+.page-shell { width:min(820px,100%); }
+.page-tabs { display:flex; gap:4px; padding:8px 16px; border-bottom:1px solid var(--line); }
+.page-tab { padding:6px 12px; border:0; border-radius:5px; background:transparent; color:inherit; cursor:pointer; }
+.page-tab.on { background:var(--raise); font-weight:600; }
+.page-items { list-style:none; margin:0; padding:0 16px; flex:1; min-height:0; overflow:auto; }
+.page-item { padding:14px 0; border-bottom:1px solid var(--line); }
+.page-item-title { font-weight:600; margin-bottom:4px; overflow-wrap:anywhere; }
+.page-item-body { white-space:pre-wrap; overflow-wrap:anywhere; }
+.page-item-meta { font-size:12px; margin-top:6px; overflow-wrap:anywhere; }
+.page-item-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; align-items:center; }
+.page-item-actions a.btn { text-decoration:none; }
+.page-empty { padding:24px 16px; }

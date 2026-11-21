@@ -23,14 +23,17 @@ if TYPE_CHECKING:
     from .backend_settings import BackendSettings
     from .database.ask_repo import PendingAskRepository
     from .database.claims_repo import ClaimRepository
+    from .database.decision_repo import DecisionRequestRepository
     from .database.frontend_thread_repo import FrontendThreadRepository
     from .database.ingest_repo import IngestResultRepository
     from .database.lineage_repo import ThreadLineageRepository
     from .database.lounge_repo import LoungeRepository
     from .database.notification_repo import NotificationRepository
+    from .database.pages_repo import PageRepository
     from .database.repository import SessionRepository, UsageStatsRepository
     from .database.resume_repo import PendingResumeRepository
     from .database.settings_repo import SettingsRepository
+    from .database.situation_repo import ThreadSituationRepository
     from .database.summary_repo import ThreadSummaryRepository
     from .database.task_repo import TaskRepository
     from .database.wait_repo import WaitRepository
@@ -65,6 +68,9 @@ class BridgeComponents:
     #: Which thread spawned which — read by /api/sessions so a manager session
     #: can see its own fan-out instead of inferring it from thread titles.
     lineage_repo: ThreadLineageRepository | None = None
+    situation_repo: ThreadSituationRepository | None = None
+    decision_repo: DecisionRequestRepository | None = None
+    page_repo: PageRepository | None = None
     resume_repo: PendingResumeRepository | None = None
     ingest_repo: IngestResultRepository | None = None
     summary_repo: ThreadSummaryRepository | None = None
@@ -107,6 +113,12 @@ class BridgeComponents:
             api_server.wait_repo = self.wait_repo
         if self.lineage_repo is not None:
             api_server.lineage_repo = self.lineage_repo
+        if self.situation_repo is not None:
+            api_server.situation_repo = self.situation_repo
+        if self.decision_repo is not None:
+            api_server.decision_repo = self.decision_repo
+        if self.page_repo is not None:
+            api_server.page_repo = self.page_repo
         if self.resume_repo is not None:
             api_server.resume_repo = self.resume_repo
         if self.ingest_repo is not None:
@@ -642,6 +654,9 @@ async def setup_bridge(
         claims_repo=claims_repo,
         wait_repo=stores.waits if enable_waits else None,
         lineage_repo=lineage_repo,
+        situation_repo=stores.situations,
+        decision_repo=stores.decisions,
+        page_repo=stores.pages,
         resume_repo=resume_repo,
         ingest_repo=ingest_repo,
         summary_repo=summary_repo,

@@ -310,6 +310,7 @@ def _item(
         "readiness": overlay.readiness if overlay else None,
         "readiness_at": overlay.readiness_at if overlay else None,
         "pinned_at": overlay.pinned_at if overlay else None,
+        "pin_position": overlay.pin_position if overlay else None,
         "paused_at": overlay.paused_at if overlay else None,
         "note": overlay.note if overlay else None,
         "parent_id": parent_id,

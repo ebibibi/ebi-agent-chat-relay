@@ -58,7 +58,7 @@ for(const [width,height] of [[320,700],[390,844],[844,390]])test(`mobile reading
  assert.equal(await page.locator('.team-child-ai').isVisible(),true);
  assert.equal(await page.locator('.d-finish').isVisible(),true);
  if(process.env.CONSOLE_SCREENSHOT_DIR)await page.screenshot({path:`${process.env.CONSOLE_SCREENSHOT_DIR}/tools-${width}.png`});
- const project=page.locator('#d-drawer input[type=text]');
+ const project=page.locator('#d-drawer input[type=text][size="14"]');
  await project.fill('Uncommitted edit');
  await page.evaluate(()=>refresh());
  assert.equal(await project.evaluate(n=>n===document.activeElement),true);

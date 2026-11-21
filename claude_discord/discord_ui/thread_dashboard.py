@@ -67,6 +67,23 @@ class _ThreadInfo:
     state_changed_at: float = field(default_factory=time.monotonic)
 
 
+def _finished(thread: discord.Thread | discord.TextChannel) -> bool:
+    """Whether the thread needs no reply: closed, or about to close itself (#1477).
+
+    A plain completion candidate still pings — a human confirms it.
+    """
+    from ..ext.auto_complete_api import auto_completion_pending
+    from ..thread_marker import OUTCOME_CANDIDATE, OUTCOME_DONE, thread_outcome
+
+    name = getattr(thread, "name", None)
+    if not isinstance(name, str):
+        return False
+    outcome = thread_outcome(name)
+    if outcome == OUTCOME_DONE:
+        return True
+    return outcome == OUTCOME_CANDIDATE and auto_completion_pending(thread.id)
+
+
 class ThreadStatusDashboard:
     """Maintains a live status embed in the bot's main channel.
 
@@ -151,6 +168,7 @@ class ThreadStatusDashboard:
                 and prev_state != ThreadState.WAITING_INPUT
                 and self._owner_id is not None
                 and thread is not None
+                and not _finished(thread)
             )
 
             await self._refresh_dashboard()

@@ -163,6 +163,11 @@ class AttentionConfig:
 
     enabled: bool = True
     params: AttentionParams = field(default_factory=AttentionParams)
+    #: The author id Ebi AI Console messages are charged to. Bursts are formed
+    #: per author, so when one person drives both a chat frontend and the
+    #: Console, naming their chat id here (e.g. ``DISCORD_OWNER_ID``) merges both
+    #: into one timeline. ``None`` keeps the Console sign-in identity.
+    console_author: str | None = None
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> AttentionConfig:
@@ -172,6 +177,7 @@ class AttentionConfig:
         lead = _float_env(env, "CCDB_ATTENTION_LEAD_IN_MINUTES", DEFAULT_LEAD_IN_MINUTES)
         attach = _float_env(env, "CCDB_ATTENTION_ATTACHMENT_WEIGHT", DEFAULT_ATTACHMENT_WEIGHT)
         tz_name = env.get("CCDB_ATTENTION_TIMEZONE", "").strip() or None
+        console_author = env.get("CCDB_ATTENTION_CONSOLE_AUTHOR", "").strip() or None
         try:
             params = AttentionParams(
                 idle_gap_minutes=idle,
@@ -181,7 +187,7 @@ class AttentionConfig:
             )
         except ValueError as exc:
             raise ValueError(f"invalid CCDB_ATTENTION_* setting: {exc}") from exc
-        return cls(enabled=enabled, params=params)
+        return cls(enabled=enabled, params=params, console_author=console_author)
 
 
 def _float_env(env: Mapping[str, str], name: str, default: float) -> float:
