@@ -1391,12 +1391,16 @@ class ConsoleServer:
             return _error(str(exc), 400)
         return web.json_response({"item": item.as_dict(), "workspace": workspace})
 
-    async def complete_item(self, item_id: str) -> tuple[WorkItem, dict[str, Any] | None]:
+    async def complete_item(
+        self, item_id: str, *, mirror_workspace: bool = True
+    ) -> tuple[WorkItem, dict[str, Any] | None]:
         """Mark *item_id* done the way the human's Done button does.
 
         Shared by the Console's own action and the control-plane
         ``/api/threads/{id}/complete`` an agent calls on the user's explicit
         request. Raises :class:`WorkItemError` for an item that cannot move.
+        An automatic close passes ``mirror_workspace=False``: it ends the
+        thread, not the Workspace task the thread served.
         """
         item = await self.work_repo.update(item_id, {"state": STATE_DONE, "snoozed_until": None})
         await self._close_finished_cards(item_id)
@@ -1408,7 +1412,7 @@ class ConsoleServer:
             if thread is not None:
                 # Same marker the agent would set, so the chat sidebar agrees.
                 request_thread_outcome(thread, OUTCOME_DONE)
-        workspace = await self._workspace_finish(item, done=True)
+        workspace = await self._workspace_finish(item, done=True) if mirror_workspace else None
         return item, workspace
 
     async def reopen(self, request: web.Request) -> web.Response:

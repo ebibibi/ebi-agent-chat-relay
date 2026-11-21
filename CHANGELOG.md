@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CCDB_AUTO_COMPLETE=on` a thread whose waits, decision requests and child threads are all settled
   completes itself after the turn ends. Off by default; `dry-run` reports the verdict only. See
   `docs/auto-complete.md`.
+- Auto-close for routine threads (#1490): with `CCDB_AUTO_CLOSE=on`, a finished auto-upgrade thread
+  closes itself, and a housekeeping job can close threads it reviewed via
+  `POST /api/threads/{id}/auto-close` (`CCDB_AUTO_CLOSE_KINDS=upgrade,sweep`). Every automatic close is
+  tagged `auto-closed` with its reason, last state and where any human next step went, and is listed
+  by `GET /api/auto-closures` for reopening. Off by default. See `docs/auto-close.md`.
 
 ### Fixed
 

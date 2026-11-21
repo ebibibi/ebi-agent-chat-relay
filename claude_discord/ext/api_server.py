@@ -373,6 +373,12 @@ class ApiServer:
         from .auto_complete_api import ApiCompletionHost, AutoCompleter
 
         self.auto_completer = AutoCompleter(ApiCompletionHost(self))
+        # Closing routine threads (upgrades, sweeps) with a rescue record (#1490); off by default.
+        from ..auto_close import set_system_closer
+        from .auto_close_api import AutoCloser
+
+        self.auto_closer = AutoCloser(self)
+        set_system_closer(self.auto_closer.close)
         self.attention_params: AttentionParams | None = None
         # Where Claude Code transcripts live, for /api/search?body=1. Falls back
         # to the standard ~/.claude/projects location so body search is
@@ -471,6 +477,9 @@ class ApiServer:
         self.app.router.add_post("/api/threads/{thread_id}/done", self.mark_thread_done)
         self.app.router.add_post("/api/threads/{thread_id}/candidate", self.mark_thread_done)
         self.app.router.add_post("/api/threads/{thread_id}/complete", self.complete_thread)
+        self.app.router.add_post("/api/threads/{thread_id}/auto-close", self.auto_close_thread)
+        self.app.router.add_get("/api/sweep/threads", self.list_sweep_threads)
+        self.app.router.add_get("/api/auto-closures", self.list_auto_closures)
         self.app.router.add_post("/api/threads/{thread_id}/waiting", self.mark_thread_waiting)
         self.app.router.add_post("/api/threads/{thread_id}/review", self.mark_thread_review)
         self.app.router.add_post("/api/threads/{thread_id}/action", self.mark_thread_action)
@@ -651,6 +660,9 @@ class ApiServer:
     async def stop(self) -> None:
         """Stop the API server."""
         self.auto_completer.cancel_all()
+        from ..auto_close import clear_system_closer
+
+        clear_system_closer(self.auto_closer.close)
         if self._runner:
             await self._runner.cleanup()
         if self._ext_runner:
@@ -1969,6 +1981,27 @@ class ApiServer:
             running_thread_ids=self._running_thread_ids,
             mark_without_console=mark_done,
         )
+
+    async def auto_close_thread(self, request: web.Request) -> web.Response:
+        """POST /api/threads/{thread_id}/auto-close — a housekeeping sweep closes a thread.
+
+        See :mod:`claude_discord.auto_close` for the rules; off unless configured.
+        """
+        from .auto_close_api import handle_auto_close
+
+        return await handle_auto_close(request, self.auto_closer)
+
+    async def list_sweep_threads(self, request: web.Request) -> web.Response:
+        """GET /api/sweep/threads — candidates and stalled threads for a sweep to review."""
+        from .auto_close_api import handle_sweep_threads
+
+        return await handle_sweep_threads(request, self)
+
+    async def list_auto_closures(self, request: web.Request) -> web.Response:
+        """GET /api/auto-closures — threads closed automatically, kept for rescue."""
+        from .auto_close_api import handle_list_auto_closures
+
+        return await handle_list_auto_closures(request, self, self.auto_closer.policy())
 
     async def list_pages(self, request: web.Request) -> web.Response:
         """GET /api/pages — the screens registered with the Console, with open counts."""
