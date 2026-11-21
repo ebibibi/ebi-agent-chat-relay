@@ -1235,43 +1235,49 @@ class ConsoleServer:
     # -- writes ------------------------------------------------------------
     async def stop_item(self, request: web.Request) -> web.Response:
         """Stop the item's running turn, like the chat Stop button."""
-        err = await self._halt(request.match_info["item_id"], request[IDENTITY])
+        err, transcript_persisted = await self._halt(
+            request.match_info["item_id"], request[IDENTITY]
+        )
         if err is not None:
             return err
         logger.info(
             "console: %s stopped %s", _q(request[IDENTITY]), _q(request.match_info["item_id"])
         )
-        return web.json_response({"status": "stopping"}, status=202)
+        result = {"status": "stopping"}
+        if not transcript_persisted:
+            result["warning"] = "stop_transcript_not_saved"
+        return web.json_response(result, status=202)
 
-    async def _halt(self, item_id: str, who: str) -> web.Response | None:
-        """Interrupt the item's running turn; an error response, or None when it stops.
+    async def _halt(self, item_id: str, who: str) -> tuple[web.Response | None, bool]:
+        """Interrupt the item's running turn and return any transcript persistence warning.
 
         A console conversation stops through its live view (which notes it in
         the transcript); a chat thread through the slot its run holds.
         """
         key = await self._conversation_key(item_id)
         if key is not None and self.sessions is not None:
-            if not await self.sessions.stop(key, who):
-                return _error("nothing is running", 409)
-            return None
+            result = await self.sessions.stop(key, who)
+            if not result.stopped:
+                return _error("nothing is running", 409), False
+            return None, result.transcript_persisted
         from ..session_slots import SlotActionError, get_session_slots
 
         thread_key, err = await self._slot_key(item_id)
         if err is not None:
-            return err
+            return err, False
         slots = get_session_slots()
         if slots is None:
-            return _error("nothing is running", 409)
+            return _error("nothing is running", 409), False
         try:
             await slots.stop(thread_key)
         except SlotActionError as exc:
-            return _error(str(exc), 409)
-        return None
+            return _error(str(exc), 409), False
+        return None, True
 
     async def pause_item(self, request: web.Request) -> web.Response:
         """Stop the running turn and mark the item paused, to resume later."""
         item_id = request.match_info["item_id"]
-        err = await self._halt(item_id, request[IDENTITY])
+        err, transcript_persisted = await self._halt(item_id, request[IDENTITY])
         if err is not None:
             return err
         try:
@@ -1279,7 +1285,10 @@ class ConsoleServer:
         except WorkItemError as exc:
             return _error(str(exc), 400)
         logger.info("console: %s paused %s", _q(request[IDENTITY]), _q(item_id))
-        return web.json_response({"status": "paused"}, status=202)
+        result = {"status": "paused"}
+        if not transcript_persisted:
+            result["warning"] = "stop_transcript_not_saved"
+        return web.json_response(result, status=202)
 
     async def resume_item(self, request: web.Request) -> web.Response:
         """Clear the pause mark and ask the agent to carry on where it stopped."""

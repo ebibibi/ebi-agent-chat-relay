@@ -16,6 +16,7 @@ import asyncio
 import logging
 import os
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -53,6 +54,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 ResultSink = Callable[[str | None, str | None], Awaitable[None]]
+
+
+@dataclass(frozen=True, slots=True)
+class StopResult:
+    """Whether Stop interrupted a live turn and its note reached the transcript."""
+
+    stopped: bool
+    transcript_persisted: bool
 
 
 class ConsoleSessionHost:
@@ -107,15 +116,25 @@ class ConsoleSessionHost:
     async def owns(self, thread_key: int) -> bool:
         return await self.frontend.owns(thread_key)
 
-    async def stop(self, thread_key: int, who: str) -> bool:
-        """Press Stop on the conversation's running turn. False if nothing runs."""
+    async def stop(self, thread_key: int, who: str) -> StopResult:
+        """Press Stop and report transcript persistence separately from interruption."""
         if not await self.frontend.live.stop(thread_key):
-            return False
-        # The CLI's own interruption output is a diagnostic; say plainly what happened.
-        await self.frontend.repo.append(
-            thread_key, author=who, is_bot=False, content=f"⏹ Stopped by {who}"
-        )
-        return True
+            return StopResult(stopped=False, transcript_persisted=False)
+        try:
+            # The CLI's own interruption output is a diagnostic; say plainly what happened.
+            await self.frontend.repo.append(
+                thread_key, author=who, is_bot=False, content=f"⏹ Stopped by {who}"
+            )
+        except Exception:
+            # Stop has already succeeded. Do not retry a non-idempotent audit append or
+            # turn the accepted interruption into an HTTP failure; preserve the failure
+            # in logs and let the API report that the note is missing.
+            logger.exception(
+                "console: stop succeeded but transcript persistence failed for %d",
+                thread_key,
+            )
+            return StopResult(stopped=True, transcript_persisted=False)
+        return StopResult(stopped=True, transcript_persisted=True)
 
     async def spawn(
         self,
