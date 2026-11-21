@@ -376,6 +376,21 @@ async def test_defer_and_restore_card_without_delivering_a_reply(env, tmp_path) 
     assert len(data["secretary"]["decide"]) == 2
 
 
+async def test_the_console_serves_the_night_template_and_settings(tmp_path) -> None:
+    """#1476: the 🌙 button's text, and quiet hours off unless the person set them."""
+    client = await _client(tmp_path)
+    headers = {"Authorization": f"Bearer {TOKEN}", "X-Console-Request": "1"}
+    try:
+        assert (await client.get("/console/api/night")).status == 401
+        data = await (await client.get("/console/api/night", headers=headers)).json()
+        assert "送信・公開・課金・本番変更" in data["template"]
+        assert data["settings"]["quiet_enabled"] is False
+        en = await (await client.get("/console/api/night?lang=en", headers=headers)).json()
+        assert en["template"].startswith("Goal:")
+    finally:
+        await client.close()
+
+
 async def test_done_closes_the_items_open_cards(env, tmp_path) -> None:
     """Finishing an item in the Console closes its cards, as 🏁/✅ do (#1478)."""
     decisions = DecisionRequestRepository(str(tmp_path / "sessions.db"))

@@ -6,6 +6,8 @@
 * ``/api/secretary/notes`` — the secretary's note per thread.
 * ``/api/secretary/deliver`` — hand the person's answer, given in the secretary's chat, to
   the thread that asked.
+* ``/api/secretary/morning`` — the morning brief: done / decide / continuing (#1476).
+* ``/api/secretary/night`` — the person's quiet hours and morning delivery choice (#1476).
 
 The routes resolve the Console at call time: the Console starts after the REST API, and a
 deployment without it answers 503.
@@ -29,6 +31,8 @@ from ..canvas_widget import (
     valid_key,
 )
 from ..console.canvas_repo import MAX_NOTE
+from ..console.morning import clamp_hours, render_markdown
+from ..console.night import NightSettingsError
 
 if TYPE_CHECKING:
     from ..console.canvas import CanvasSecretary
@@ -50,6 +54,21 @@ async def _body(request: web.Request) -> tuple[Any, web.Response | None]:
         return await request.json(), None
     except (json.JSONDecodeError, UnicodeDecodeError):
         return None, _error("Invalid JSON", 400)
+
+
+MAX_BASE_URL = 200
+
+
+def _base_url(raw: str | None) -> str | None:
+    """The Console's address for links in the brief: empty, or an http(s) URL."""
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    if len(text) > MAX_BASE_URL or not text.startswith(("https://", "http://")):
+        return None
+    if any(c.isspace() or c in '<>"()[]' for c in text):
+        return None
+    return text
 
 
 def _thread(raw: Any) -> int | None:
@@ -74,6 +93,9 @@ class CanvasApi:
         router.add_get("/api/secretary/notes", self.notes)
         router.add_put("/api/secretary/notes/{thread_id}", self.put_note)
         router.add_post("/api/secretary/deliver", self.deliver)
+        router.add_get("/api/secretary/morning", self.morning)
+        router.add_get("/api/secretary/night", self.night)
+        router.add_put("/api/secretary/night", self.put_night)
 
     def _canvas(self) -> CanvasSecretary | None:
         console = getattr(self._api, "_console", None)
@@ -241,3 +263,40 @@ class CanvasApi:
         if key is not None and not (isinstance(key, str) and 0 < len(key) <= 40):
             return _error("key must be the card's key (1-40 characters)", 400)
         return await console.deliver_from_secretary(thread_id, text, key)
+
+    async def morning(self, request: web.Request) -> web.Response:
+        """The morning brief. ``format=markdown`` answers one message ready to post."""
+        canvas = self._canvas()
+        if canvas is None:
+            return self._unavailable()
+        query = request.rel_url.query
+        base = _base_url(query.get("base"))
+        if base is None:
+            return _error("base must be an http(s) URL of at most 200 characters", 400)
+        brief = await canvas.morning(hours=clamp_hours(query.get("hours")), base_url=base)
+        lang = "en" if query.get("lang") == "en" else "ja"
+        if query.get("format") == "markdown":
+            return web.Response(text=render_markdown(brief, lang), content_type="text/markdown")
+        return web.json_response({**brief, "markdown": render_markdown(brief, lang)})
+
+    async def night(self, request: web.Request) -> web.Response:
+        canvas = self._canvas()
+        if canvas is None:
+            return self._unavailable()
+        return web.json_response((await canvas.night_settings()).as_dict())
+
+    async def put_night(self, request: web.Request) -> web.Response:
+        """Store the person's choice. A field left out keeps its value; null clears it."""
+        canvas = self._canvas()
+        if canvas is None:
+            return self._unavailable()
+        body, err = await _body(request)
+        if err:
+            return err
+        try:
+            settings = await canvas.set_night_settings(body)
+        except NightSettingsError as exc:
+            return web.json_response(
+                {"error": "settings refused", "problems": exc.problems}, status=400
+            )
+        return web.json_response(settings.as_dict())

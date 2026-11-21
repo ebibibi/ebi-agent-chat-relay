@@ -31,6 +31,14 @@ from typing import TYPE_CHECKING, Any
 from ..turn_ai import TurnAI
 from .canvas_charter import CHARTER_OPENING, charter, turn_brief, wake_message
 from .canvas_repo import CanvasRepository
+from .morning import build_morning_brief
+from .night import (
+    STATE_NIGHT,
+    NightSettings,
+    dump_night_settings,
+    load_night_settings,
+    parse_night_settings,
+)
 
 if TYPE_CHECKING:
     from .host import ConsoleSessionHost
@@ -559,6 +567,29 @@ class CanvasSecretary:
             if text
         ]
         return entry
+
+    # -- the night and the morning (#1476) -----------------------------------------
+    async def night_settings(self) -> NightSettings:
+        return load_night_settings(await self.repo.get_state(STATE_NIGHT))
+
+    async def set_night_settings(self, body: Any) -> NightSettings:
+        """Store what the person chose; raises NightSettingsError listing every problem."""
+        settings = parse_night_settings(body, await self.night_settings())
+        await self.repo.set_state(STATE_NIGHT, dump_night_settings(settings))
+        return settings
+
+    async def morning(self, *, hours: int, base_url: str = "") -> dict[str, Any]:
+        """The morning brief: done / decide / continuing. Reads only; moves no cursor."""
+        secretary = await self.item_id()
+        items = [i for i in await self._board() if i.get("id") != secretary]
+        return await build_morning_brief(
+            items,
+            await self._requests(),
+            situation=self._situation,
+            now=self._clock(),
+            hours=hours,
+            base_url=base_url,
+        )
 
     # -- what the Console shows ---------------------------------------------------
     async def status(self, items: Iterable[Mapping[str, Any]] | None = None) -> dict[str, Any]:
