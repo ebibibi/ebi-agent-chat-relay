@@ -338,3 +338,21 @@ async def test_pending_set_follows_the_scheduled_completion() -> None:
     host.running.clear()
     await _drain(completer)
     assert auto_completion_pending(THREAD) is False
+
+
+async def test_host_completion_tells_the_parent() -> None:
+    from claude_discord.ext.auto_complete_api import ApiCompletionHost
+
+    api = MagicMock()
+    api.console_conversations = None
+    api._console = MagicMock()
+    api._console.complete_item = AsyncMock()
+    api.notify_parent_of_outcome = AsyncMock(return_value="notified")
+    channel = MagicMock()
+    channel.name = CANDIDATE_TITLE
+    api.bot.get_channel.return_value = channel
+    await ApiCompletionHost(api).complete(THREAD)
+    api._console.complete_item.assert_awaited_once_with(f"t{THREAD}")
+    thread_id, outcome, name = api.notify_parent_of_outcome.await_args.args
+    assert (thread_id, outcome) == (THREAD, "done")
+    assert name.startswith("✅")

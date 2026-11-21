@@ -33,7 +33,12 @@ from ..auto_complete import (
     Verdict,
     evaluate,
 )
-from ..thread_marker import OUTCOME_CANDIDATE, OUTCOME_DONE, thread_outcome
+from ..thread_marker import (
+    OUTCOME_CANDIDATE,
+    OUTCOME_DONE,
+    set_outcome_thread_name,
+    thread_outcome,
+)
 
 __all__ = ["ApiCompletionHost", "AutoCompleter", "CompletionHost", "auto_completion_pending"]
 
@@ -312,8 +317,13 @@ class ApiCompletionHost:
             from ..console.work_repo import thread_item_id
 
             await console.complete_item(thread_item_id(thread_id))
-            return
-        await self._api._apply_thread_outcome(thread_id, OUTCOME_DONE)
+        else:
+            await self._api._apply_thread_outcome(thread_id, OUTCOME_DONE)
+        # This path bypasses _mark_thread_outcome, so tell an opted-in parent here (#820).
+        title = await self.thread_title(thread_id) or ""
+        await self._api.notify_parent_of_outcome(
+            thread_id, OUTCOME_DONE, set_outcome_thread_name(title, OUTCOME_DONE)
+        )
 
 
 async def handle_candidate(
