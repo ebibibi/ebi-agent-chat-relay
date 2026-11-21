@@ -148,6 +148,36 @@ MAX_HISTORY_SCAN = 500
 #: up to five REST pages per poll instead of one.
 HISTORY_OLDER_TTL_SECONDS = 60.0
 MAX_TRIAGE_MESSAGES = 20
+MAX_TRIAGE_EMBED_CHARS = 2000
+
+
+def _triage_embed_text(embeds: Any) -> str:
+    """Keep only bounded, human-readable embed text for the triage prompt."""
+    if not isinstance(embeds, (list, tuple)):
+        return ""
+    parts: list[str] = []
+    remaining = MAX_TRIAGE_EMBED_CHARS
+    for embed in embeds:
+        if not isinstance(embed, dict):
+            continue
+        title = str(embed.get("title") or "").strip()
+        description = str(embed.get("description") or "").strip()
+        text = " — ".join(part for part in (title, description) if part)
+        if not text:
+            continue
+        part = f"[Embed] {text}"
+        if parts:
+            part = "\n" + part
+        if len(part) > remaining:
+            part = part[:remaining]
+        if part:
+            parts.append(part)
+            remaining -= len(part)
+        if remaining <= 0:
+            break
+    return "".join(parts)
+
+
 #: How long the archived-thread listing is reused. Listing archives is a REST
 #: call per channel; the board is polled every few seconds.
 ARCHIVE_CACHE_SECONDS = 120.0
@@ -1104,11 +1134,17 @@ class ConsoleServer:
         """What the triage model reads for *item*: its human and agent messages."""
         if not item.get("thread_id"):
             return [("note", item.get("note") or "")]
-        return [
-            ("person" if m["kind"] == "human" else "agent", str(m.get("content") or ""))
-            for m in await self.decision_messages(item)
-            if m["kind"] != "activity"
-        ]
+        messages = []
+        for message in await self.decision_messages(item):
+            if message["kind"] == "activity":
+                continue
+            role = "person" if message["kind"] == "human" else "agent"
+            content = str(message.get("content") or "")
+            embed_text = _triage_embed_text(message.get("embeds"))
+            if embed_text:
+                content = f"{content}\n{embed_text}" if content else embed_text
+            messages.append((role, content))
+        return messages
 
     async def decision_messages(self, item: dict[str, Any]) -> list[dict[str, Any]]:
         """Timestamped conversation for card cleanup; machine activity is not a human answer."""
