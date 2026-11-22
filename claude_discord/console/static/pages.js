@@ -4,7 +4,8 @@
 //
 // A page doubles as a manual posting queue for any network (#1518): an item may name where it
 // goes (a free label), carry images or videos, and declare a character limit. Nothing here
-// knows a network by name.
+// knows a network by name. The link to share is kept apart from the text (#1530): some networks
+// limit posts with links, so the person copies it only when they choose to.
 "use strict";
 
 window.ConsolePages = (() => {
@@ -16,6 +17,7 @@ window.ConsolePages = (() => {
     all: "すべて", no_target: "投稿先なし", targets: "投稿先で絞り込む",
     over: (n) => `${n} 超過`, save: "保存", share: "共有", play: "再生", result_url: "投稿URL（任意）",
     bad_url: "投稿URLは http(s) で始まるリンクにしてください", attachments: "添付",
+    copy_link: "リンクをコピー", link: "共有リンク",
   } : {
     open: "Open", done: "Done", skip: "Skip", reopen: "Back to open", copy: "Copy text", copied: "Copied",
     close: "Close", tab_open: "Open", tab_done: "Done", tab_skipped: "Skipped", empty: "Nothing here",
@@ -23,6 +25,7 @@ window.ConsolePages = (() => {
     all: "All", no_target: "No target", targets: "Filter by target",
     over: (n) => `${n} over`, save: "Save", share: "Share", play: "Play", result_url: "Post URL (optional)",
     bad_url: "The post URL must start with http(s)", attachments: "Attachments",
+    copy_link: "Copy link", link: "Link to share",
   };
   const STORED = "/console/api/pages/";
 
@@ -108,8 +111,8 @@ window.ConsolePages = (() => {
     } catch (err) { toast(err.message); }
   }
 
-  async function copy(item) {
-    try { await navigator.clipboard.writeText(item.body || item.title); toast(L().copied); }
+  async function copy(text) {
+    try { await navigator.clipboard.writeText(text); toast(L().copied); }
     catch (err) { toast(err.message); }
   }
 
@@ -237,7 +240,8 @@ window.ConsolePages = (() => {
     posted.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); done(); } });
     const files = (item.attachments || []).some(stored);
     return [item.url ? link(labels.open, item.url, "btn primary page-open") : null,
-      item.body ? button(l.copy, () => copy(item)) : null,
+      item.body ? button(l.copy, () => copy(item.body), "btn page-copy") : null,
+      item.link ? button(`🔗 ${l.copy_link}`, () => copy(item.link), "btn page-copy-link") : null,
       canShare() && (item.body || files) ? button(`↗ ${l.share}`, () => share(item), "btn page-share") : null,
       posted,
       button(labels.done, done, "btn page-done"),
@@ -259,6 +263,8 @@ window.ConsolePages = (() => {
         item.target ? h("span", { class: "page-target", text: item.target }) : null,
         item.title ? h("span", { class: "page-item-title", text: item.title }) : null) : null,
       item.body ? h("div", { class: "page-item-body", text: item.body }) : null,
+      item.link ? h("div", { class: "page-item-link", "aria-label": l.link },
+        h("span", { class: "dim", text: `🔗 ${l.link}: ` }), link(item.link, item.link, "page-link")) : null,
       files.length ? h("div", { class: "page-files", "aria-label": l.attachments }, files.map(attachment)) : null,
       h("div", { class: "page-item-meta dim" },
         counter(item),

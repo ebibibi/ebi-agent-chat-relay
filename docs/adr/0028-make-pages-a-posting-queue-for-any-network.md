@@ -62,3 +62,16 @@ Extend the page item, not the page kind, and keep every network out of the code.
   files of items resolved long ago is the next step; it is not built before it is needed.
 - The weighted rule approximates networks that count by display width. The network's own composer
   remains the final word, which the docs say.
+
+## Addendum (2026-11-22): the link to share is a field of its own
+
+Some networks limit how many posts may carry a link, so whether to add the link is the person's
+call, post by post. With the link inside `body`, they had to delete it by hand every time.
+
+- An item may carry `link` (http/https, checked like `url`). The Console shows it and offers
+  "Copy link" beside "Copy text", one tap each, side by side on a phone.
+- `length` measures the body only. The link is not counted, because it may not be pasted.
+- The generator decides per target whether the link also goes into the body; nothing in the relay
+  names a network. Registering a key again refreshes `link` like the other fields, so an open item
+  can move its link out of the body without losing its state.
+- The share sheet still hands over the body only: the person adds the link there when they choose.

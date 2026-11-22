@@ -35,6 +35,7 @@ The slug in the path is 1-40 lowercase letters, digits and hyphens. A deployment
 | `key` | Required and stable, 1-128 of letters, digits, `_`, `.`, `:`, `-`. A hash of the text works well |
 | `title`, `body` | At least one. `body` keeps its line breaks and has a copy button |
 | `url` | Optional link the person opens. `http` or `https` only |
+| `link` | Optional link to share with the post, shown with its own copy button next to the body's. `http` or `https` only. Keep it out of `body` when the person should decide each time whether to add it (a network that limits posts with links) |
 | `source` | Optional note on where the item came from |
 | `created_at` | Optional ISO 8601 time with a timezone, for importing earlier items |
 | `target` | Optional free label for where the item goes, up to 60 characters (`Instagram · @shop`) |

@@ -162,6 +162,33 @@ async def test_registering_again_refreshes_the_posting_fields(repo) -> None:
     assert (created, item.state, item.target) == (False, "done", "Threads")
 
 
+async def test_an_item_keeps_its_link_apart_from_the_body(repo) -> None:
+    await repo.put_page("posts", {"title": "To post", "max_chars": 10, "count": "weighted"})
+    item, _ = await repo.add_item(
+        "posts", {"key": "a", "body": "hello", "link": "https://example.com/article"}
+    )
+    data = item.as_dict()
+    assert data["link"] == "https://example.com/article"
+    # The body is counted on its own: the link is pasted only if the person chooses to.
+    assert data["length"] == 5
+    plain, _ = await repo.add_item("posts", {"key": "b", "body": "x"})
+    assert plain.as_dict()["link"] == ""
+
+
+async def test_registering_again_moves_a_link_out_of_the_body(repo) -> None:
+    await repo.put_page("posts", {"title": "To post"})
+    await repo.add_item("posts", {"key": "a", "body": "read https://example.com/a"})
+    item, created = await repo.add_item(
+        "posts", {"key": "a", "body": "read", "link": "https://example.com/a"}
+    )
+    assert (created, item.state, item.body, item.link) == (
+        False,
+        "open",
+        "read",
+        "https://example.com/a",
+    )
+
+
 async def test_items_can_be_listed_for_one_target(repo) -> None:
     await repo.put_page("posts", {"title": "To post"})
     await repo.add_item("posts", {"key": "a", "body": "x", "target": "X"})
@@ -186,6 +213,9 @@ async def test_items_can_be_listed_for_one_target(repo) -> None:
         ({"max_chars": True}, "max_chars"),
         ({"count": "bytes"}, "count"),
         ({"count": ["chars"]}, "count"),
+        ({"link": "javascript:alert(1)"}, "link"),
+        ({"link": "/relative"}, "link"),
+        ({"link": 1}, "link"),
     ],
 )
 async def test_invalid_posting_fields_are_refused(repo, body: dict, message: str) -> None:
@@ -229,6 +259,7 @@ async def test_a_database_from_before_the_posting_fields_keeps_working(tmp_path)
     await pages.init_db()  # twice: the upgrade must be idempotent
     [item] = await pages.list_items("x-posts")
     assert (item.key, item.body, item.target, item.attachments) == ("old", "kept", "", [])
+    assert item.link == ""
 
 
 # -- stored attachments -----------------------------------------------------------------------
