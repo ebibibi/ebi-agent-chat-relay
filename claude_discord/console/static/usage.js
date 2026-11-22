@@ -130,7 +130,7 @@
     const token = localStorage.getItem("token");
     if (token) headers.Authorization = `Bearer ${token}`;
     try {
-      const res = await fetch("/console/api/usage", { headers, credentials: "same-origin" });
+      const res = await window.ConsoleNet.fetch("/console/api/usage", { headers, credentials: "same-origin" });
       if (!res.ok) return; // 401 is the board's sign-in to handle; try again next poll
       data = await res.json();
       if (typeof data.now === "number") skew = data.now - Date.now() / 1000;

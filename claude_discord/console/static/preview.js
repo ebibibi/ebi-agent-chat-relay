@@ -287,7 +287,7 @@ window.ConsolePreview = (() => {
     const headers = {};
     const token = own ? localStorage.getItem("token") : null;
     if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(url, own ? { headers, credentials: "same-origin" } : { credentials: "omit" });
+    const res = await (own ? window.ConsoleNet.fetch : fetch)(url, own ? { headers, credentials: "same-origin" } : { credentials: "omit" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.blob();
   }

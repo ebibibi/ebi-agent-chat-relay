@@ -230,7 +230,7 @@ window.ConsoleSecretary = (() => {
       const headers = {};
       const token = localStorage.getItem("token");
       if (token) headers.Authorization = `Bearer ${token}`;
-      const res = await fetch(url, { headers, credentials: "same-origin" });
+      const res = await window.ConsoleNet.fetch(url, { headers, credentials: "same-origin" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       previews.set(url, (await res.text()).slice(0, MAX_PREVIEW));
     } catch (err) {

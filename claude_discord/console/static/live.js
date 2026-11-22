@@ -164,7 +164,7 @@
     const headers = {};
     const token = localStorage.getItem("token");
     if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(href, { headers, credentials: "same-origin" });
+    const res = await window.ConsoleNet.fetch(href, { headers, credentials: "same-origin" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.blob();
   }
