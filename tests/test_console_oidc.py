@@ -263,7 +263,9 @@ async def test_a_tampered_flow_cookie_is_refused(key) -> None:
     client = make_client(provider)
     state, browser = await begin(client, provider)
     body, _, mac = browser.partition(".")
-    for forged in (f"{body}x.{mac}", f"{body}.{mac[:-2]}AA", "garbage", ""):
+    tampered_mac = ("A" if mac[0] != "A" else "B") + mac[1:]
+    assert tampered_mac != mac
+    for forged in (f"{body}x.{mac}", f"{body}.{tampered_mac}", "garbage", ""):
         with pytest.raises(OidcError):
             await client.finish(state=state, code="c", browser=forged)
 
@@ -425,3 +427,4 @@ async def test_sign_in_returns_to_the_origin_it_started_from(
         )
         assert done.status == 302 and done.headers["Location"] == "/"
         assert provider.last_form["redirect_uri"] == callback
+
