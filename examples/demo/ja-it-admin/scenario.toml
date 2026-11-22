@@ -34,6 +34,43 @@ title = "勉強会の告知を社内SNSに貼る"
 body = "AI が作った文面をコピーして貼るだけ。"
 source = "社内勉強会"
 
+# A posting queue for any network (docs/console-pages.md#a-posting-queue): filter by target,
+# check the character count against the limit, paste the post URL when marking it done.
+[[pages]]
+slug = "to-post"
+title = "📣 投稿待ち"
+open_label = "投稿画面を開く"
+done_label = "投稿した"
+max_chars = 140
+count = "weighted"
+
+[[pages.items]]
+key = "seminar-x"
+target = "X"
+body = "社内勉強会「Entra ID の条件付きアクセス入門」の資料を公開しました。来られなかった方もどうぞ。 https://example.com/slides/ca-101"
+url = "https://example.com/compose?text=seminar"
+source = "社内勉強会"
+
+[[pages.items]]
+key = "seminar-ig"
+target = "Instagram · @minato_tech"
+title = "勉強会のひとこま"
+body = "今日の勉強会は満員でした。次回は Intune の回です。"
+max_chars = 2200
+count = "chars"
+attachments = [{ url = "https://example.com/media/seminar.jpg", name = "seminar.jpg" }]
+source = "社内勉強会"
+
+[[pages.items]]
+key = "hiring-video"
+target = "動画サイト · 採用チャンネル"
+title = "採用動画（60秒）の説明文"
+body = "みなとテックの情シスの一日を60秒で。"
+max_chars = 5000
+count = "chars"
+attachments = [{ url = "https://example.com/media/a-day.mp4", name = "a-day.mp4" }]
+source = "採用"
+
 # Reorder two pins using their row buttons, then reload to verify persistence.
 [[items]]
 title = "ピン留めを好きな順番に並べる"

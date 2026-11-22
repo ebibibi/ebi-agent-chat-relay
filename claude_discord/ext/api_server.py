@@ -70,6 +70,7 @@ from .pages_api import (
     handle_list_pages,
     handle_put_page,
     handle_resolve_item,
+    handle_upload_file,
 )
 from .parent_notify import ParentNotifier
 from .parent_notify import default_enabled as notify_default_enabled
@@ -474,6 +475,7 @@ class ApiServer:
         self.app.router.add_get("/api/pages/{slug}/items", self.list_page_items)
         self.app.router.add_post("/api/pages/{slug}/items", self.add_page_item)
         self.app.router.add_patch("/api/pages/{slug}/items/{key}", self.resolve_page_item)
+        self.app.router.add_post("/api/pages/{slug}/files", self.upload_page_file)
         self.app.router.add_post("/api/threads/{thread_id}/done", self.mark_thread_done)
         self.app.router.add_post("/api/threads/{thread_id}/candidate", self.mark_thread_done)
         self.app.router.add_post("/api/threads/{thread_id}/complete", self.complete_thread)
@@ -2055,6 +2057,10 @@ class ApiServer:
     async def resolve_page_item(self, request: web.Request) -> web.Response:
         """PATCH /api/pages/{slug}/items/{key} — move an item to open, done or skipped."""
         return await handle_resolve_item(request, self.page_repo)
+
+    async def upload_page_file(self, request: web.Request) -> web.Response:
+        """POST /api/pages/{slug}/files — keep an image or video an item can attach."""
+        return await handle_upload_file(request, self.page_repo)
 
     async def get_situation(self, request: web.Request) -> web.Response:
         """GET /api/threads/{thread_id}/situation — what this parent last wrote for its panel."""

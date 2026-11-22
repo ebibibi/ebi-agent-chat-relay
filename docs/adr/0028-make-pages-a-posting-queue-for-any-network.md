@@ -1,0 +1,64 @@
+---
+type: adr
+id: ADR-0028
+title: Make Console pages a posting queue for any network
+decision: Page items gain a free-form target label, attachments (outside links or files uploaded to the page and kept by the relay) and a character limit with a named counting rule. No network is named in code, and nothing is posted by the relay.
+status: accepted
+date: 2026-11-22
+decided_by: ai
+deciders: [Claude]
+scope: repository
+extends: ADR-0018
+---
+
+# ADR-0028: Make Console pages a posting queue for any network
+
+## Context
+
+A page (ADR-0018) worked well as a queue of posts to send by hand for one network: copy the text,
+open the compose link, press "posted", and a job watching the network marks what it finds. Posts
+for other networks were still handed over one thread at a time, because an item could not say
+where it goes, carry an image or a video, or show whether its text fits.
+
+The pull was to build that for the networks in use today. Their APIs differ and cost money, and
+the list of networks a deployment posts to is its own business, not the relay's.
+
+## Decision
+
+Extend the page item, not the page kind, and keep every network out of the code.
+
+- **The target is a label, not an enum.** `target` is free text (up to 60 characters) such as
+  `Instagram · @shop`. The Console builds its filter from the labels it sees. A new network or a
+  second account needs no release.
+- **Attachments are kept by the relay, checked by their bytes.** A generator uploads a file to
+  `/api/pages/{slug}/files` and lists the returned URL; an outside `http(s)` URL is accepted too,
+  but shown only as a link and never fetched. Only image and video types are kept, recognised by
+  magic bytes, served with the type the bytes prove, `nosniff` and a sandboxing CSP, to a signed-in
+  person only. Considered and rejected: listing local file paths (the REST API would then read any
+  file on the host) and storing files in the conversation file store (it exists only when the
+  Console can run sessions, and pages do not need that).
+- **Files live with the page.** They sit under `page_files/<slug>/` next to the database, an item
+  may list only a file of its own page, and deleting the page deletes them. They are not deleted
+  when an item is resolved: the done tab keeps showing what was posted.
+- **A limit names its counting rule, not a network.** `max_chars` with `count: chars` (code points)
+  or `count: weighted` (wide characters 2, every link 23) covers networks that count either way.
+  The relay measures the body once and sends `length` and `limit`, so every client shows the same
+  number and the browser keeps no second implementation.
+- **The person may say what they posted.** The Console's "done" carries an optional post URL,
+  checked like every other link. Who resolved the item is still recorded by the route, never taken
+  from the browser.
+- **Same number of taps.** Copy, open, done and skip stay one tap each; the URL field is optional.
+- **Videos load on request.** A phone opening the list must not download every clip. The Console
+  plays a fetched video from a `blob:` URL, the one addition to its CSP (`media-src 'self' blob:`).
+
+## Consequences
+
+- Existing pages, items and REST callers are unchanged: the new columns are added on start with
+  defaults, and the new fields are optional in both directions.
+- Posting itself stays manual. A network's API can be added later as a job that lists a target's
+  open items (`?target=`), posts them and resolves them like any other observer, without changing
+  the page.
+- Stored videos take disk space until their page is deleted. If that becomes a problem, pruning
+  files of items resolved long ago is the next step; it is not built before it is needed.
+- The weighted rule approximates networks that count by display width. The network's own composer
+  remains the final word, which the docs say.

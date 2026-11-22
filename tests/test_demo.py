@@ -229,6 +229,21 @@ class TestSavedViews:
         paths = [path for path, _ in demo.seed_requests(demo.load_scenario(root), TODAY)]
         assert paths[-2:] == ["/console/api/pages/by-hand", "/console/api/pages/by-hand/items"]
 
+    def test_a_page_keeps_its_whole_definition(self, tmp_path: Path) -> None:
+        root = _scenario(tmp_path)
+        (root / "scenario.toml").write_text(
+            (root / "scenario.toml").read_text(encoding="utf-8")
+            + '\n[[pages]]\nslug = "to-post"\ntitle = "To post"\nmax_chars = 140\n'
+            + 'count = "weighted"\n[[pages.items]]\nkey = "a"\nbody = "text"\n',
+            encoding="utf-8",
+        )
+        requests = dict(demo.seed_requests(demo.load_scenario(root), TODAY))
+        assert requests["/console/api/pages/to-post"] == {
+            "title": "To post",
+            "max_chars": 140,
+            "count": "weighted",
+        }
+
     def test_views_are_seeded_after_the_items(self, tmp_path: Path) -> None:
         root = _scenario(tmp_path)
         toml = root / "scenario.toml"
