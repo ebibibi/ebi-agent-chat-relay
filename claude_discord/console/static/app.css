@@ -350,7 +350,15 @@ a.btn.primary { color: #0d1020; }
 .auth-or { text-align: center; color: var(--dim); margin: 0; font-size: 12px; }
 .reply-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .reply-main textarea { width: 100%; flex: none; }
-.paste-tray { display: flex; flex-wrap: wrap; gap: 6px; }
+.paste-tray { display: flex; gap: 6px; align-items: flex-start; flex: none; }
+/* Capped so many files never push Send off the screen; folded, the first few sit in one row. */
+.paste-chips { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; max-height: 150px; overflow-y: auto; }
+.paste-tray.folded .paste-chips { flex-wrap: nowrap; overflow-x: auto; }
+.paste-tray.folded .paste-file { flex-shrink: 1; min-width: 96px; }
+.paste-more { flex: none; min-width: 56px; height: 72px; padding: 0 10px; border: 1px dashed var(--line); border-radius: 6px;
+  background: var(--raise); color: var(--text); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
+.paste-more:hover { border-color: var(--accent); }
+.paste-more.busy { opacity: .55; }
 .paste-item { position: relative; width: 72px; height: 72px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--raise); }
 .paste-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .paste-item.busy img { opacity: .45; }

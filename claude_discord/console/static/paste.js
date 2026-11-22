@@ -12,6 +12,8 @@ window.ConsolePaste = (() => {
   const MAX_COUNT = 10;
   const pending = new Map(); // item id -> [{ url, name, size, preview }]
   const trays = new Map(); // item id -> its tray element
+  const SHOWN = 3; // past SHOWN + 1 files the tray folds the rest into a "+N" toggle
+  const open = new Set(); // item ids whose folded files are shown
 
   const list = (id) => pending.get(id) || [];
   const isImage = (file) => IMAGE_TYPES.includes(file.type);
@@ -66,8 +68,12 @@ window.ConsolePaste = (() => {
     const tray = trays.get(id);
     if (!tray) return;
     const items = list(id);
+    const fold = items.length > SHOWN + 1;
+    if (!fold) open.delete(id);
     tray.hidden = !items.length;
-    tray.replaceChildren(...items.map((entry) => {
+    tray.classList.toggle("folded", fold && !open.has(id));
+    const shown = fold && !open.has(id) ? items.slice(0, SHOWN) : items;
+    const chips = shown.map((entry) => {
       const remove = h("button", { class: "paste-x", type: "button", "aria-label": "remove", text: "✕",
         onclick: () => { pending.set(id, list(id).filter((e) => e !== entry)); draw(id); } });
       if (entry.preview) {
@@ -77,7 +83,16 @@ window.ConsolePaste = (() => {
       return h("div", { class: "paste-file" + (entry.url ? "" : " busy"), title: entry.name },
         h("span", { class: "paste-name", text: `📄 ${entry.name}` }),
         h("span", { class: "dim", text: sizeText(entry.size) }), remove);
-    }));
+    });
+    const box = h("div", { class: "paste-chips" }, ...chips);
+    if (!fold) { tray.replaceChildren(box); return; }
+    // Beside the chips, not among them, so scrolling them never hides it.
+    const hidden = items.slice(SHOWN);
+    const label = open.has(id) ? T.attach_less : T.attach_more(items.length);
+    tray.replaceChildren(box, h("button", { class: "paste-more" + (!open.has(id) && hidden.some((e) => !e.url) ? " busy" : ""),
+      type: "button", title: label, "aria-label": label, "aria-expanded": String(open.has(id)),
+      text: open.has(id) ? "−" : `+${hidden.length}`,
+      onclick: () => { if (!open.delete(id)) open.add(id); draw(id); } }));
   }
 
   const filesOf = (items) => [...(items || [])]
@@ -121,7 +136,7 @@ window.ConsolePaste = (() => {
     const items = list(id);
     return items.some((e) => !e.url) ? null : items.map((e) => e.url);
   }
-  function clear(id) { pending.delete(id); draw(id); }
+  function clear(id) { pending.delete(id); open.delete(id); draw(id); }
 
   // Upload before sending JSON: long Unicode messages can exceed its byte limit too.
   async function prepareText(text, files) {
