@@ -206,8 +206,13 @@ async def test_pages_come_with_the_board_and_a_person_resolves_items(console, re
         headers=WRITE,
     )
     item = (await res.json())["item"]
-    # Who resolved it comes from the route, never from what the browser sent.
-    assert (item["state"], item["resolved_by"], item["result_url"]) == ("skipped", "person", "")
+    # Who resolved it comes from the route, never from what the browser sent. The result link
+    # is the person's to give: they paste the post they just made (#1518).
+    assert (item["state"], item["resolved_by"], item["result_url"]) == (
+        "skipped",
+        "person",
+        "https://x.test",
+    )
 
 
 async def test_console_routes_are_authenticated_and_csrf_protected(console, repo) -> None:

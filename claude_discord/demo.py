@@ -150,7 +150,10 @@ def seed_requests(scenario: Scenario, today: date) -> list[tuple[str, dict[str, 
     requests.extend(("/console/api/views", dict(view)) for view in scenario.views)
     for page in scenario.pages:
         path = f"/console/api/pages/{page['slug']}"
-        requests.append((path, {"title": page["title"]}))
+        # Everything but the slug and the items is the page's definition (title, labels,
+        # max_chars, count, position), passed through like an /api/pages registration.
+        definition = {k: v for k, v in page.items() if k not in ("slug", "items")}
+        requests.append((path, definition))
         requests.extend((f"{path}/items", dict(item)) for item in page.get("items", []))
     return requests
 

@@ -172,6 +172,8 @@ _SECURITY_HEADERS = {
     "Content-Security-Policy": (
         # Markdown documents may embed HTTPS images; scripts and API connections stay restricted.
         "default-src 'self'; img-src 'self' data: https:; "
+        # A page's stored video plays from a blob the Console fetched with its credentials.
+        "media-src 'self' blob:; "
         "style-src 'self'; script-src 'self'; "
         # Discord's CDN is also readable (CORS "*") so a chat attachment can be previewed.
         "connect-src 'self' https://cdn.discordapp.com https://media.discordapp.net; "
@@ -432,6 +434,7 @@ class ConsoleServer:
         r.add_get(f"{API_PREFIX}/pages/{{slug}}/items", page_routes.items)
         r.add_post(f"{API_PREFIX}/pages/{{slug}}/items", page_routes.add)
         r.add_patch(f"{API_PREFIX}/pages/{{slug}}/items/{{key}}", page_routes.change)
+        r.add_get(f"{API_PREFIX}/pages/{{slug}}/files/{{token}}/{{name}}", page_routes.file)
         r.add_post(f"{API_PREFIX}/items", self.create_item)
         r.add_patch(f"{API_PREFIX}/items/{{item_id}}", self.patch_item)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/pin-order", self.move_pin)

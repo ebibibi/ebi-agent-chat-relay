@@ -36,3 +36,4 @@ earlier ADR instead of rewriting its history.
 - [ADR-0025: Let a resident secretary agent lay out the Console as a canvas of widgets](0025-let-a-resident-secretary-lay-out-the-console.md)
 - [ADR-0026: Restart the bot only when nobody is using it, and only when a change needs it](0026-restart-only-when-nobody-is-using-the-bot.md)
 - [ADR-0027: Keep the automation AI policy in the relay; the scheduler's file only seeds it](0027-keep-the-automation-ai-policy-in-the-relay.md)
+- [ADR-0028: Make Console pages a posting queue for any network](0028-make-pages-a-posting-queue-for-any-network.md) — Free target labels, byte-checked attachments, named counting rules (accepted, 2026-11-22).
