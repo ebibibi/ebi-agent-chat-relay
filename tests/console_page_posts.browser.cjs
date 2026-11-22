@@ -18,6 +18,7 @@ const fixtures = () => [
                  {url:`${FILES}/teaser.mp4`, name:'teaser.mp4', kind:'video'},
                  {url:'https://cdn.example.com/extra.jpg', name:hostile, kind:'image'}]}),
   item('x', {target:'X', body:'短い投稿', url:'https://example.com/compose?text=a', limit:280, length:8, count:'weighted'}),
+  item('fb', {target:'Facebook', body:'リンクなしの本文', link:'https://example.com/article?a=1&b=2'}),
   item('plain', {title:hostile, body:'投稿先なしの項目'}),
 ];
 const definition = (n) => [{slug:'posts', title:'📣 投稿待ち', open_label:'投稿画面を開く', done_label:'投稿した', skip_label:'',
@@ -67,10 +68,37 @@ const definition = (n) => [{slug:'posts', title:'📣 投稿待ち', open_label:
 
     // Every target in the list, with its count; text stays text.
     const chips = await page.locator('.page-chip').allTextContents();
-    assert.deepEqual(chips, ['すべて3', 'Instagram · @shop1', 'X1', '投稿先なし1']);
-    assert.equal(await page.locator('.page-item').count(), 3);
+    assert.deepEqual(chips, ['すべて4', 'Facebook1', 'Instagram · @shop1', 'X1', '投稿先なし1']);
+    assert.equal(await page.locator('.page-item').count(), 4);
     assert.equal(await page.evaluate(() => window.pwned), undefined);
     assert.equal(await page.locator('.page-item-title img, .page-file img[src="x"]').count(), 0);
+
+    // The link to share is shown and copied apart from the text; items without one get no button.
+    const fb = page.locator('.page-item[data-key="fb"]');
+    assert.equal(await fb.locator('.page-link').getAttribute('href'), 'https://example.com/article?a=1&b=2');
+    assert.equal(await fb.locator('.page-link').getAttribute('rel'), 'noopener noreferrer');
+    assert.equal(await page.locator('.page-copy-link').count(), 1);
+    await page.evaluate(() => {
+      window.copied = [];
+      Object.defineProperty(navigator, 'clipboard', {configurable:true,
+        value:{writeText:async (t) => { window.copied.push(t); }}});
+    });
+    await fb.locator('.page-copy').click();
+    await fb.locator('.page-copy-link').click();
+    assert.deepEqual(await page.evaluate(() => window.copied), ['リンクなしの本文', 'https://example.com/article?a=1&b=2']);
+    if (viewport.width < 640) {
+      for (const selector of ['.page-copy', '.page-copy-link']) {
+        const b = await fb.locator(selector).boundingBox();
+        assert.ok(b.x >= 0 && b.x + b.width <= viewport.width, `${selector} fits a phone`);
+        assert.ok(b.height >= 40, `${selector} is tappable`);
+      }
+      const [copyBox, linkBox] = [await fb.locator('.page-copy').boundingBox(), await fb.locator('.page-copy-link').boundingBox()];
+      assert.equal(Math.round(copyBox.y), Math.round(linkBox.y), 'the two copy buttons sit side by side');
+      if (process.env.CONSOLE_TEST_SHOT_LINK) {
+        await fb.scrollIntoViewIfNeeded();
+        await page.screenshot({path:process.env.CONSOLE_TEST_SHOT_LINK});
+      }
+    }
 
     // Over the limit is shown, under it is not.
     const counts = await page.locator('.page-count').allTextContents();
@@ -100,7 +128,7 @@ const definition = (n) => [{slug:'posts', title:'📣 投稿待ち', open_label:
       assert.equal(await page.locator('.page-item').count(), 1);
       assert.equal(await page.locator('.page-open').getAttribute('href'), 'https://example.com/compose?text=a');
       await page.locator('.page-chip', {hasText:'すべて'}).click();
-      assert.equal(await page.locator('.page-item').count(), 3);
+      assert.equal(await page.locator('.page-item').count(), 4);
       if (process.env.CONSOLE_TEST_SHOT) await page.screenshot({path:process.env.CONSOLE_TEST_SHOT});
       await page.locator('.page-chip', {hasText:'Instagram'}).click();
       await page.keyboard.press('Escape');
@@ -117,10 +145,10 @@ const definition = (n) => [{slug:'posts', title:'📣 投稿待ち', open_label:
       assert.deepEqual(patches, []);
       await first.locator('.page-result').fill('https://instagram.example/p/1');
       await first.locator('.page-done').click();
-      await page.waitForFunction(() => document.querySelectorAll('.page-item').length === 2);
+      await page.waitForFunction(() => document.querySelectorAll('.page-item').length === 3);
       // Marking done without a URL is still one tap.
       await page.locator('.page-item[data-key="x"] .page-done').click();
-      await page.waitForFunction(() => document.querySelectorAll('.page-item').length === 1);
+      await page.waitForFunction(() => document.querySelectorAll('.page-item').length === 2);
       assert.deepEqual(patches, [
         ['ig', {state:'done', result_url:'https://instagram.example/p/1'}],
         ['x', {state:'done'}],

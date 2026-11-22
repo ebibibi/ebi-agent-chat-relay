@@ -8,6 +8,7 @@
 .page-item { padding:14px 0; border-bottom:1px solid var(--line); }
 .page-item-title { font-weight:600; margin-bottom:4px; overflow-wrap:anywhere; }
 .page-item-body { white-space:pre-wrap; overflow-wrap:anywhere; }
+.page-item-link { margin-top:6px; font-size:13px; overflow-wrap:anywhere; }
 .page-item-meta { font-size:12px; margin-top:6px; overflow-wrap:anywhere; }
 .page-item-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; align-items:center; }
 .page-item-actions a.btn { display:inline-flex; align-items:center; justify-content:center; text-decoration:none; }

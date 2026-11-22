@@ -65,7 +65,7 @@ _LABELS = ("open_label", "done_label", "skip_label")
 _PAGE_FIELDS = frozenset({"title", "position", "max_chars", "count", *_LABELS})
 _ITEM_FIELDS = frozenset(
     {"key", "title", "body", "url", "source", "created_at"}
-    | {"target", "attachments", "max_chars", "count"}
+    | {"target", "attachments", "max_chars", "count", "link"}
 )
 _ATTACHMENT_FIELDS = frozenset({"url", "name"})
 _RESOLVE_FIELDS = frozenset({"state", "result_url", "resolved_by"})
@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS console_page_items (
     attachments TEXT NOT NULL DEFAULT '',
     max_chars INTEGER NOT NULL DEFAULT 0,
     count TEXT NOT NULL DEFAULT '',
+    link TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (page_slug, key)
 );
 CREATE INDEX IF NOT EXISTS idx_console_page_items_state
@@ -116,6 +117,8 @@ _ADDED_COLUMNS = {
         ("attachments", "TEXT NOT NULL DEFAULT ''"),
         ("max_chars", "INTEGER NOT NULL DEFAULT 0"),
         ("count", "TEXT NOT NULL DEFAULT ''"),
+        # The link to share, kept apart from the body so a person can leave it out (#1530).
+        ("link", "TEXT NOT NULL DEFAULT ''"),
     ),
 }
 
@@ -173,6 +176,9 @@ class PageItem:
     count: str = COUNT_CHARS
     #: The body measured by that rule, so every client shows the same number.
     length: int = 0
+    #: A link to share with the post, copied on its own: some networks limit posts with links,
+    #: so the person decides each time whether to paste it. Not counted in ``length``.
+    link: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -191,6 +197,7 @@ class PageItem:
             "limit": self.limit,
             "count": self.count,
             "length": self.length,
+            "link": self.link,
         }
 
 
@@ -310,13 +317,13 @@ def check_state(state: object) -> str:
 
 _ITEM_COLUMNS = (
     "key, title, body, url, source, state, resolved_by, result_url, created_at, resolved_at,"
-    " target, attachments, max_chars, count"
+    " target, attachments, max_chars, count, link"
 )
 _PAGE_COLUMNS = "p.slug, p.title, p.open_label, p.done_label, p.skip_label, p.position"
 
 
 def _item(row: tuple[Any, ...], page: Page) -> PageItem:
-    *base, target, attachments, max_chars, count = row
+    *base, target, attachments, max_chars, count, link = row
     rule = count or page.count
     limit = max_chars or page.max_chars
     return PageItem(
@@ -326,6 +333,7 @@ def _item(row: tuple[Any, ...], page: Page) -> PageItem:
         limit=limit,
         count=rule,
         length=count_chars(base[2], rule),
+        link=link,
     )
 
 
@@ -445,7 +453,7 @@ class PageRepository:
     async def add_item(self, slug: str, body: Any) -> tuple[PageItem, bool]:
         """Register an item. The second value is False when its key already existed.
 
-        Registering again refreshes the text, link, target and attachments but never the
+        Registering again refreshes the text, links, target and attachments but never the
         state: a generator that runs twice must not bring back what a person already finished.
         """
         fields = _object(body, _ITEM_FIELDS)
@@ -455,6 +463,7 @@ class PageRepository:
         if not title and not text:
             raise PageError("an item needs a title or a body")
         url = _link(fields, "url")
+        link = _link(fields, "link")
         source = _text(fields, "source", MAX_SOURCE_CHARS)
         target = _text(fields, "target", MAX_TARGET_CHARS)
         max_chars = _limit(fields)
@@ -462,14 +471,14 @@ class PageRepository:
         created_at = _timestamp(fields) or _now()
         await self._require_page(slug)
         attachments = json.dumps(self._attachments(slug, fields.get("attachments")))
-        values = (title, text, url, source, target, attachments, max_chars, rule)
+        values = (title, text, url, source, target, attachments, max_chars, rule, link)
         async with aiosqlite.connect(self._db_path) as db:
             cursor = await db.execute(
                 """
                 INSERT INTO console_page_items
                     (page_slug, key, title, body, url, source, target, attachments, max_chars,
-                     count, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     count, link, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(page_slug, key) DO NOTHING
                 """,
                 (slug, key, *values, created_at),
@@ -478,7 +487,7 @@ class PageRepository:
             if not created:
                 await db.execute(
                     "UPDATE console_page_items SET title = ?, body = ?, url = ?, source = ?,"
-                    " target = ?, attachments = ?, max_chars = ?, count = ?"
+                    " target = ?, attachments = ?, max_chars = ?, count = ?, link = ?"
                     " WHERE page_slug = ? AND key = ?",
                     (*values, slug, key),
                 )
