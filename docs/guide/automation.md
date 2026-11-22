@@ -213,7 +213,7 @@ uv sync --extra api
 | GET | `/api/tasks` | List registered tasks |
 | DELETE | `/api/tasks/{id}` | Remove a task |
 | PATCH | `/api/tasks/{id}` | Update a task (enable/disable, change schedule, pin backend/model) |
-| POST | `/api/spawn` | Create a new Discord thread and start a Claude Code session (non-blocking); pass `auto_start: false` to defer Claude until the first user reply, or `user_id` to add the requester to the thread |
+| POST | `/api/spawn` | Create a new Discord thread and start a Claude Code session (non-blocking); pass `auto_start: false` to defer Claude until the first user reply, `user_id` to add the requester to the thread, or `ai` (`{backend, model, effort, connection}`) to pin the thread's AI for all its turns (see [backends](../backends.md#choosing-the-ai-per-spawn)) |
 | POST | `/api/ingest` | Authenticated external spawn (browser extension / webhook) with base64 attachments; returns a `result_id` when result retrieval is configured |
 | GET | `/api/ingest/{result_id}` | Poll the spawned session's final reply (`status`/`result`/`error`/`thread_id`) |
 | GET | `/api/ingest/summary` | Read the running summary + `marker` for a long ingest thread by `key` (ingest-token gated) so the client can export only the diff |
@@ -221,6 +221,8 @@ uv sync --extra api
 | DELETE | `/api/ingest/summary` | Clear the stored summary for `key`, forcing a full re-summary on the next ingest |
 | POST | `/api/teams/sync/plan` | Ask what an upstream thread's mirror is missing — send ids + hashes, get back `want_messages`/`want_attachments`/`newest_have_mid` (ingest-token gated) |
 | POST | `/api/teams/sync/push` | Store the wanted messages as one file each under the vault, with attachments and an append-only `chain.jsonl` |
+| POST | `/api/teams/sync/ignore` | Stop (`ignore: true`) or resume (`ignore: false`) tracking attachment gaps of a thread. Ignored files leave `pending`/`unavailable`, are no longer requested, and stay listed under `ignored` and in the README |
+| POST | `/api/teams/reply/status` | Read-only, ingest-token gated. Where a thread's latest reply stands, given the messages on screen: `none`, `generating`, `ready`, `unverified`, `stale`, `posted` or `failed`, with the body and what changed |
 | POST | `/api/mark-resume` | Mark a thread for automatic resume on next bot startup |
 | GET | `/api/lounge` | Read recent AI Lounge messages |
 | POST | `/api/lounge` | Post a message to the AI Lounge (with optional `label`); returns a `hint` field when the message exceeds 200 characters |
@@ -241,6 +243,7 @@ uv sync --extra api
 | POST | `/api/threads/{thread_id}/message` | Relay a message from one session to another (`text`, `from_thread`, `mode`, `hop`) |
 | POST | `/api/threads/{thread_id}/candidate` | Propose closing a thread: a completion candidate (prefixes the title with `🏁`; idempotent). Only a human marks it done |
 | POST | `/api/threads/{thread_id}/done` | Same as `/candidate`, kept for existing prompts |
+| POST | `/api/threads/{thread_id}/complete` | Close a thread **only on the user's explicit request** — same effect as the Console's Done. Body `{"from_thread": <caller>, "user_request": "<the user's words>"}`; the caller may close itself or a thread it spawned (any depth). 400 without `user_request`, 403 outside the caller's family, 409 while the target still runs |
 | POST | `/api/threads/{thread_id}/waiting` | Mark a thread as waiting on the human (prefixes the title with `❓`, replacing `✅`/`⚠️`; removed on the next human reply; idempotent) |
 | POST | `/api/threads/{thread_id}/review` | Mark a thread as having a deliverable for the human to review (prefixes the title with `👀`, replacing any other outcome marker; removed on the next human reply; idempotent) |
 | POST | `/api/threads/{thread_id}/action` | Mark a thread as waiting on a task the human must do outside the chat — a todo (prefixes the title with `📋`, replacing any other outcome marker; removed on the next human reply; idempotent) |

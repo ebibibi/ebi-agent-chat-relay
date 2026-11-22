@@ -28,7 +28,7 @@ window.ConsolePaste = (() => {
     if (file.name && !(isImage(file) && /^image\.\w+$/.test(file.name))) headers["X-Filename"] = encodeURIComponent(file.name);
     const token = localStorage.getItem("token");
     if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch("/console/api/uploads", { method: "POST", headers, body: file, credentials: "same-origin" });
+    const res = await window.ConsoleNet.fetch("/console/api/uploads", { method: "POST", headers, body: file, credentials: "same-origin" });
     let data = null;
     try { data = await res.json(); } catch { /* empty body */ }
     if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);

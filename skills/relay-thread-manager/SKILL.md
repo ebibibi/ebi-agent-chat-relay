@@ -50,6 +50,11 @@ curl -s -X POST "$CCDB_API_URL/api/spawn" \
   children the same family code in their titles (`🌳K2` on you, `🤖K2` on each child),
   so the human can see the tree in the channel list.
 - **Keep the returned `thread_id`.** It is the only handle you have on the worker.
+- **Add `"notify_parent": true` to hear back without polling.** Each time the worker
+  marks itself finished (`candidate`/`done`) or waiting on the human
+  (`waiting`/`review`/`action`), the relay queues a short report into your thread, which
+  wakes you if you are idle. Verify the result, send follow-ups, and report to the human
+  once for the whole family — do not forward each worker's report separately.
 - Optional: `"user_id": <discord user id>` adds the human to the thread so it shows up
   in their joined list; `"channel_id"` targets a different channel;
   `"auto_start": false` posts the brief without starting the agent (use it for
@@ -122,9 +127,15 @@ curl -s -X POST "$CCDB_API_URL/api/threads/<worker_thread_id>/message" \
   only for "stop now, you are about to do damage".
 - The message is posted visibly in the worker's thread, marked as coming from you,
   not from the human.
-- **Limits** (refusals return 429 with the reason): max 2 hops per chain, 60 s
-  cooldown per thread pair, 5 relays per sender per 10 minutes, no self-sends, 4000
-  characters. Start each new topic at `hop: 0`.
+- **Limits**: max 2 hops per chain, no self-sends, 4000 characters. A distinct
+  follow-up can be sent immediately. Identical whitespace-normalized text to the
+  same recipient is blocked for 60 seconds; sending it to other workers is allowed.
+  A pair shares 20 messages per rolling minute across both directions; a sender
+  has an emergency ceiling of 120 messages per minute across recipients. Queue
+  and interrupt share the limits. A 429 includes a stable `reason`; temporary
+  refusals include `retry_after_seconds` and `Retry-After`. Respect them instead
+  of retrying in a loop. Start genuinely new topics at `hop: 0`; do not reset hop
+  to continue a chain that reached its limit.
 
 ### Relay pitfalls
 
@@ -150,7 +161,29 @@ curl -s -X POST "$CCDB_API_URL/api/threads/<worker_thread_id>/message" \
   lounge and in both threads. Treat that alert as your scheduling mistake to fix —
   move one of the items to a later round instead of letting both continue.
 
-## 5. Decide what you can decide, escalate the rest
+## 5. Keep the situation panel current
+
+The Console shows a panel beside your conversation so the human can see where things stand while
+reports keep arriving. It measures who is running and who is waiting; what you need from them and what
+has been settled is yours to write. Update it before ending any turn that changed it, including a turn a
+worker's report started:
+
+```bash
+curl -s -X PUT "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/situation" \
+  -H "Content-Type: application/json" \
+  -d '{"asks": ["Move on 11/9 or 11/16? I recommend 11/16: testing ends on the 13th."],
+       "doing": ["Payments and E2E tests in two workers"],
+       "decided": ["Payments stay on one provider"]}'
+```
+
+- A field you send replaces that field; one you leave out stays. `GET` returns the current record.
+- **`asks` is the human's to-do list from you.** Gather workers' questions here, each understandable on
+  its own and with your recommendation, so they can answer you alone. Remove an entry once it is answered.
+- **`decided` is what must not get lost.** Keep entries across updates; project-level facts still go in
+  the project's own records, issues or PRs.
+- A worker's report that changes nothing for the human needs no message to them: update the panel instead.
+
+## 6. Decide what you can decide, escalate the rest
 
 You may decide: how work is split, ordering, which worker owns what, resolving
 overlaps between workers, re-briefing a stuck worker.
@@ -167,7 +200,7 @@ decide — then mark your own thread as waiting:
 curl -s -X POST "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/waiting"
 ```
 
-## 6. Collect and close
+## 7. Collect and close
 
 When every worker has reported and you have verified the artifacts:
 

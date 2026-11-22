@@ -63,6 +63,22 @@ button { cursor: pointer; }
 .nav .nav-backend { background: none; border: 1px solid var(--line); border-radius: 8px; color: var(--dim);
   font-size: 12px; text-align: left; padding: 5px 10px; margin: 6px 0 0; cursor: pointer; }
 .nav .nav-backend:hover { color: var(--text); border-color: var(--accent); }
+.nav .nav-automation { background: none; border: 1px solid var(--line); border-radius: 8px; color: var(--dim);
+  font-size: 12px; text-align: left; padding: 5px 10px; margin: 6px 0 0; cursor: pointer; }
+.nav .nav-automation:hover { color: var(--text); border-color: var(--accent); }
+.card.automation { display: grid; gap: 8px; width: min(860px, 94vw); max-height: 88vh; }
+.card.automation h2 { margin: 0; font-size: 17px; }
+.card.automation p { margin: 0; }
+.auto-head { display: flex; justify-content: space-between; align-items: center; }
+.auto-warn { color: var(--warn, #c80); font-size: 13px; }
+.auto-scroll { overflow: auto; min-height: 120px; border-top: 1px solid var(--line); }
+.auto-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.auto-table th { text-align: left; color: var(--dim); font-weight: normal; padding: 4px 6px; position: sticky; top: 0; background: var(--panel); }
+.auto-table td { padding: 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.auto-table .dim, .card.automation .dim { color: var(--dim); font-size: 12px; }
+.auto-picker { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.auto-picker select, .auto-picker input, .auto-filter { background: var(--raise); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 6px; color: inherit; }
 .backend-picker { position: fixed; z-index: 25; width: min(420px, 94vw); background: var(--panel);
   border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; box-shadow: 0 8px 28px rgb(0 0 0 / .45);
   display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
@@ -233,7 +249,8 @@ button.slash-now:hover { border-color: var(--accent); }
 a.btn { text-decoration: none; display: inline-block; }
 .icon-btn { background: none; border: 0; font-size: 18px; padding: 2px 6px; }
 
-.msgs { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+.msgs { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px;
+  overflow-anchor: none; }
 .msg { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; flex-shrink: 0; }
 .msg.human { border-color: color-mix(in srgb, var(--me) 45%, var(--line)); }
 /* Relay activity is a log, one compact line per entry, not a message card. */
@@ -402,6 +419,9 @@ button.family-link:hover { color: var(--accent); border-color: var(--accent); }
 
 .team-settings { display:flex; flex-wrap:wrap; gap:6px; padding:6px 12px; border-bottom:1px solid var(--line); }
 .team-settings .btn { white-space:normal; overflow-wrap:anywhere; font-size:12px; }
+.team-parent { display:inline-flex; align-items:center; gap:4px; font-size:12px; }
+.team-parent.on span { font-weight:600; }
+.team-parent select { font-size:12px; }
 
 /* A shared boundary and connector identify a family without borrowing selection blue. */
 .thread-group { list-style: none; margin: 9px 8px 13px; border: 1px solid #646c81;
@@ -410,6 +430,12 @@ button.family-link:hover { color: var(--accent); border-color: var(--accent); }
   padding: 7px 10px; background: #292d3b; border-bottom: 1px solid #646c81; font-size: 11px; }
 .thread-group-label { font-weight: 700; color: #e2dbf7; }
 .thread-group-count { color: #c0c3ce; }
+.thread-group-foot { border-top: 1px solid var(--line); }
+.thread-group-toggle { display: block; width: 100%; padding: 4px 12px 5px 38px; border: 0; background: none;
+  color: var(--dim); font-size: 11px; text-align: left; cursor: pointer; }
+.thread-group-toggle:hover { color: var(--fg, #e6e6e6); }
+.thread-group.folded { border-color: var(--line); }
+.thread-group.folded .family-root { border-bottom: 0; }
 .thread-group-rows { list-style: none; padding: 0; margin: 0; }
 .thread-group .row { padding: 9px 9px; }
 .thread-group .row .title { white-space: normal; overflow-wrap: anywhere; display: -webkit-box;
@@ -451,3 +477,32 @@ button.family-link:hover { color: var(--accent); border-color: var(--accent); }
 .view-bar .view-rule { font-size: 12px; padding: 1px 6px; border-radius: 4px; background: var(--raise);
   overflow-wrap: anywhere; }
 .view-bar .view-unknown { color: var(--p1); font-size: 12px; }
+
+.compact-status { color: var(--ai); font-size: 12px; padding-top: 4px; }
+
+/* Always visible touch/keyboard controls; do not rely on hover or dragging. */
+/* One row (#1348): a 2x2 grid made every pinned row taller than the rest. */
+.pin-order { display: flex; gap: 3px; }
+.pin-order .btn { min-width: 26px; height: 24px; padding: 0 5px; line-height: 1; }
+.pin-order .btn:focus-visible { outline: 2px solid var(--p1); outline-offset: 2px; }
+@media (pointer: coarse) { .pin-order .btn { min-width: 38px; height: 44px; } }
+
+/* A restart waiting for a quiet moment (slots.js restartBanner). */
+.nav .restart-banner { margin: 6px 10px 2px; padding: 8px 10px; border: 1px solid var(--line, #444);
+  border-radius: 6px; font-size: 12px; display: flex; flex-direction: column; gap: 6px; }
+.nav .restart-title { font-weight: 600; }
+.nav .restart-detail { color: var(--dim); }
+.nav .restart-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.nav .restart-btn { padding: 2px 8px; font-size: 12px; }
+
+/* The night shift's answer under the capture box (#1511). */
+.night-panel { margin: 6px 0; padding: 8px 10px; border: 1px solid var(--line, #ccc); border-radius: 8px; }
+.night-panel .night-head { display: flex; justify-content: space-between; align-items: center; }
+.night-panel .night-list { margin: 6px 0; padding-left: 18px; }
+.night-panel .night-item.cancelled, .night-panel .night-item.skipped { opacity: .55; }
+.night-panel .night-foot { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+
+/* net.js: the line shown while an authenticating proxy wants a new sign-in. */
+.net-banner { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 8px); left: 50%; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 12px; max-width: min(640px, calc(100vw - 24px)); padding: 8px 10px 8px 14px; background: var(--raise); border: 1px solid var(--warn, #d29922); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.35); overflow-wrap: anywhere; }
+.net-banner-btn { flex: none; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; font: inherit; }
+.net-banner-btn:hover { border-color: var(--me); }

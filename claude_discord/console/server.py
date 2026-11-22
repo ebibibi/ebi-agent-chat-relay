@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -29,15 +30,25 @@ import discord
 from aiohttp import web
 
 from claude_code_core.account_pool import HOME_ENV_VAR
+from claude_code_core.attention_repo import AttentionRecorder
 
 from ..account_turns import session_home
+from ..automation_routes import ConsoleRoutes as AutomationConsoleRoutes
+from ..database.pages_repo import PageRepository
+from ..decision_default import policy_from_env
+from ..human_activity import note_human_activity
 from ..message_actions import message_actions
 from ..teams_exporter import source_tags
 from ..thread_marker import OUTCOME_DONE, thread_outcome
 from ..thread_status import request_thread_outcome, schedule_thread_outcome
+from ..turn_ai import TurnAI, TurnAIError, parse_turn_ai
+from .attention import console_activity
 from .auth import ConsoleAuthConfig, ConsoleAuthenticator, ConsoleAuthError
 from .auth_routes import AUTH_PREFIX, AuthRoutes
 from .board import SessionInfo, ThreadSnapshot, build_board
+from .canvas import CanvasSecretary
+from .canvas_repo import CanvasRepository
+from .canvas_routes import CanvasRoutes
 from .cli_login import CliLogin, login_commands
 from .cli_login_routes import CliLoginRoutes
 from .codex_compact import CompactError, compact_codex_session
@@ -52,17 +63,25 @@ from .commands import (
     skill_prompt,
 )
 from .conversations import ConversationRepository
+from .decision_cleanup import DecisionReviewer
+from .decision_defaults import DecisionDefaulter
 from .files import resolve_file
 from .guide import build_guide
 from .logsafe import q as _q
 from .messages import KIND_ACTIVITY, serialize_message, with_kind
+from .night_shift import NightShift
 from .oidc import OidcClient, OidcConfig, provider_name
+from .pages import PageRoutes
+from .parent_mode_routes import ParentModeRoutes
 from .passkey_store import PasskeyStore
 from .passkeys import PasskeyService
 from .places import PlaceError, PlaceRepository
 from .places import clean_name as clean_place
 from .ratelimit import RateLimiter
+from .request_files import DISCORD_CACHE_SECONDS, DISCORD_SCAN, attachment_files, files_for
+from .restart_routes import RestartRoutes, restart_state
 from .search import SearchRoutes
+from .secretary import SecretaryEventRepository, SecretaryRoutes, apply_deferrals, build_secretary
 from .surface import apply_outcome
 from .triage import INTERVAL_SECONDS as TRIAGE_INTERVAL_SECONDS
 from .triage import (
@@ -151,9 +170,11 @@ _STATIC_TYPES = {
 }
 _SECURITY_HEADERS = {
     "Content-Security-Policy": (
-        # Discord's CDN is allowed for images only: attachments in chat threads preview inline.
-        "default-src 'self'; img-src 'self' data: https://cdn.discordapp.com "
-        "https://media.discordapp.net; style-src 'self'; script-src 'self'; "
+        # Markdown documents may embed HTTPS images; scripts and API connections stay restricted.
+        "default-src 'self'; img-src 'self' data: https:; "
+        # A page's stored video plays from a blob the Console fetched with its credentials.
+        "media-src 'self' blob:; "
+        "style-src 'self'; script-src 'self'; "
         # Discord's CDN is also readable (CORS "*") so a chat attachment can be previewed.
         "connect-src 'self' https://cdn.discordapp.com https://media.discordapp.net; "
         "frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
@@ -222,6 +243,16 @@ def _iso(value: Any) -> str | None:
     return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _thread_of(item_id: str) -> int | None:
+    """The thread behind ``t<id>``; a written-down item (``c<hex>``) has none."""
+    if not item_id.startswith("t"):
+        return None
+    try:
+        return int(item_id[1:])
+    except ValueError:
+        return None
+
+
 class ConsoleServer:
     """Owns the console listener. Reads ccdb state through ``api_server``."""
 
@@ -246,8 +277,12 @@ class ConsoleServer:
         account_router: AccountRouter | None = None,
         cli_login: CliLogin | None = None,
         views: SavedViewRepository | None = None,
+        secretary_events: SecretaryEventRepository | None = None,
+        canvas_repo: CanvasRepository | None = None,
     ) -> None:
         self.api = api_server
+        #: Secretary mode's trial metrics; None turns recording off.
+        self.secretary_events = secretary_events
         #: Named rules over the board; None leaves the list empty.
         self.views = views
         #: Signs the agent CLIs in from the browser; None hides the screen.
@@ -269,6 +304,7 @@ class ConsoleServer:
         #: Item id → the activity whose drifted records the board already wrote back.
         self._written_back: dict[str, str] = {}
         self._records_task: asyncio.Task[None] | None = None
+        self._defaulter: DecisionDefaulter | None = None
         self._vault: Vault | None = None
         self._note_index: NoteIndex | None = None
         self._workspace_index_cache: tuple[float, list[tuple[str, str]]] | None = None
@@ -302,6 +338,22 @@ class ConsoleServer:
         self._start_locks: dict[str, asyncio.Lock] = {}
         # Strong references: the loop keeps only weak ones to running tasks.
         self._tasks: set[asyncio.Task[Any]] = set()
+        #: Request id -> (expiry, files): a chat thread's attachments, read once (#1374).
+        self._request_files_cache: dict[int, tuple[float, list[dict[str, str]]]] = {}
+        #: Canvas mode's resident secretary (ADR-0025); None turns the mode off.
+        self.canvas = self._build_canvas(canvas_repo)
+        #: The 🌙 night shift (#1511): hands the agents' own next moves over for the night.
+        self.night_shift = self._build_night_shift(canvas_repo)
+        if self.canvas is not None:
+            self.canvas.night_shift = self.night_shift
+        if self.canvas is not None and self.sessions is not None:
+            # Every secretary turn starts a fresh session with a compact brief, in an empty
+            # directory without the user's CLAUDE.md and skills.
+            self.sessions.fresh_turn = self.canvas.fresh_turn
+            if self.conversations is not None:
+                self.sessions.fresh_workdir = str(
+                    Path(self.conversations.db_path).parent / "canvas_secretary"
+                )
         self.app = self._build_app()
 
     def _background(self, coro: Any) -> None:
@@ -353,15 +405,42 @@ class ConsoleServer:
         r.add_post(f"{API_PREFIX}/places", self.place_add)
         r.add_patch(f"{API_PREFIX}/places", self.place_rename)
         r.add_delete(f"{API_PREFIX}/places", self.place_delete)
+        AutomationConsoleRoutes(self._backend_settings, lambda req: req[IDENTITY]).register(
+            r, API_PREFIX
+        )
+        ParentModeRoutes(
+            self._backend_settings,
+            lambda item_id: self._command_key(item_id),
+            lambda thread_id: self._parent_of(thread_id),
+            lambda req: req[IDENTITY],
+        ).register(r, API_PREFIX)
         view_routes = ViewRoutes(self, self.views)
         r.add_get(f"{API_PREFIX}/views", view_routes.read)
         r.add_post(f"{API_PREFIX}/views", view_routes.add)
         r.add_patch(f"{API_PREFIX}/views/{{view_id}}", view_routes.patch)
         r.add_delete(f"{API_PREFIX}/views/{{view_id}}", view_routes.delete)
+        page_routes = PageRoutes(self.api)
+        secretary_routes = SecretaryRoutes(self, self.secretary_events)
+        r.add_post(f"{API_PREFIX}/secretary/events", secretary_routes.record)
+        r.add_delete(
+            f"{API_PREFIX}/items/{{item_id}}/decisions/{{request_id}}", self.dismiss_request
+        )
+        r.add_post(
+            f"{API_PREFIX}/items/{{item_id}}/decisions/{{request_id}}/defer", self.defer_request
+        )
+        CanvasRoutes(self, self.canvas, IDENTITY).register(r, API_PREFIX)
+        r.add_get(f"{API_PREFIX}/secretary/stats", secretary_routes.stats)
+        r.add_post(f"{API_PREFIX}/pages/{{slug}}", page_routes.define)
+        r.add_get(f"{API_PREFIX}/pages/{{slug}}/items", page_routes.items)
+        r.add_post(f"{API_PREFIX}/pages/{{slug}}/items", page_routes.add)
+        r.add_patch(f"{API_PREFIX}/pages/{{slug}}/items/{{key}}", page_routes.change)
+        r.add_get(f"{API_PREFIX}/pages/{{slug}}/files/{{token}}/{{name}}", page_routes.file)
         r.add_post(f"{API_PREFIX}/items", self.create_item)
         r.add_patch(f"{API_PREFIX}/items/{{item_id}}", self.patch_item)
+        r.add_post(f"{API_PREFIX}/items/{{item_id}}/pin-order", self.move_pin)
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/messages", self.messages)
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/notes", workspace_routes.thread_notes)
+        r.add_get(f"{API_PREFIX}/items/{{item_id}}/situation", self.situation)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/reply", self.reply)
         r.add_post(
             f"{API_PREFIX}/items/{{item_id}}/messages/{{message_id}}/actions/{{action_id}}",
@@ -379,6 +458,7 @@ class ConsoleServer:
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/resume", self.resume_item)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/queue", self.queue_item)
         r.add_post(f"{API_PREFIX}/slots", self.set_slots)
+        RestartRoutes(lambda request: request[IDENTITY]).register(r, API_PREFIX)
         r.add_get(f"{API_PREFIX}/files/{{key}}/{{token}}/{{name}}", self.file)
         if self.auth_routes is not None:
             self.auth_routes.register(r, API_PREFIX)
@@ -417,6 +497,10 @@ class ConsoleServer:
                 return _error(f"{CSRF_HEADER}: 1 is required", 403)
             if not self._limiter.allow(who):
                 return _error("too many changes, slow down", 429)
+            # A change made by a person: a reserved restart waits for them to go quiet.
+            # Answering the restart banner itself is not "using" the bot.
+            if not request.path.startswith(f"{API_PREFIX}/restart"):
+                note_human_activity("console")
         request[IDENTITY] = who
         return await handler(request)
 
@@ -428,12 +512,40 @@ class ConsoleServer:
         logger.info("Ebi AI Console started: http://%s:%d", self.host, self.port)
         if self.workspace.root is not None and self._records_task is None:
             self._records_task = asyncio.ensure_future(self._records_loop())
+        self._start_decision_defaults()
+        if self.canvas is not None:
+            self.canvas.start()
+        if self.night_shift is not None:
+            self.night_shift.start()
+
+    def _start_decision_defaults(self) -> None:
+        """Proceed with due cards inside the owner's approved scopes (#1478).
+
+        Always running and cheap: without ``CCDB_DECISION_DEFAULTS_FILE`` each pass returns at
+        once, and the file is re-read every pass so the owner's list applies without a restart.
+        """
+        repo = getattr(self.api, "decision_repo", None)
+        if repo is None or self._defaulter is not None:
+            return
+
+        async def deliver(item_id: str, text: str) -> bool:
+            response = await self._deliver(item_id, text, "automatic default", metered=False)
+            return response.status < 300
+
+        self._defaulter = DecisionDefaulter(repo, policy=policy_from_env, deliver=deliver)
+        self._defaulter.start(self._board_items)
 
     def start_triage(self, ask: Callable[[str], Awaitable[str | None]], *, model: str) -> None:
         """Triage open items in the background with *ask* (one model call per item)."""
         if self.triage is None or self._triager is not None:
             return
         places = self.places
+        decisions = getattr(self.api, "decision_repo", None)
+        reviewer = (
+            DecisionReviewer(decisions, ask=ask, read_messages=self.decision_messages)
+            if decisions is not None
+            else None
+        )
         self._triager = Triager(
             self.triage,
             ask=ask,
@@ -442,11 +554,106 @@ class ConsoleServer:
             registered_places=places.names if places is not None else None,
             workspace_index=self.workspace_index if self.workspace.root is not None else None,
             on_workspace=self._bind_inferred,
+            review_requests=reviewer.run_once if reviewer is not None else None,
         )
         self._triager.start(self._board_items, TRIAGE_INTERVAL_SECONDS)
         logger.info("Ebi AI Console: automatic triage on (%s)", model)
 
+    def _build_canvas(self, repo: CanvasRepository | None) -> CanvasSecretary | None:
+        if repo is None:
+            return None
+        return CanvasSecretary(
+            repo,
+            board=self._board_items,
+            requests=self._open_requests,
+            messages=self.triage_messages,
+            situation=self._situation_dict,
+            host=self.sessions,
+            history=self._canvas_history,
+        )
+
+    def _build_night_shift(self, repo: CanvasRepository | None) -> NightShift | None:
+        if repo is None or self.canvas is None:
+            return None
+        canvas = self.canvas
+
+        async def deliver(item_id: str, text: str) -> bool:
+            response = await self._deliver(item_id, text, "night shift", metered=False)
+            return response.status < 300
+
+        async def waiting() -> set[int]:
+            waits = getattr(self.api, "wait_repo", None)
+            return set(await waits.active_thread_ids()) if waits is not None else set()
+
+        def scopes() -> list[str]:
+            policy = policy_from_env()
+            return list(policy.scopes.values()) if policy is not None else []
+
+        async def limit() -> int:
+            return (await canvas.night_settings()).shift_limit
+
+        return NightShift(
+            repo,
+            board=self._board_items,
+            requests=self._open_requests,
+            deliver=deliver,
+            waiting=waiting,
+            scopes=scopes,
+            limit=limit,
+            exclude=canvas.item_id,
+        )
+
+    async def _canvas_history(self, thread_key: int, limit: int) -> list[tuple[str, bool, str]]:
+        if self.conversations is None:
+            return []
+        return [
+            (m.author, bool(m.is_bot), m.content)
+            for m in await self.conversations.history(thread_key, limit)
+        ]
+
+    async def _situation_dict(self, thread_id: int) -> dict[str, Any] | None:
+        repo = self.api.situation_repo
+        if repo is None:
+            return None
+        written = await repo.get(thread_id)
+        return written.as_dict() if written else None
+
+    async def deliver_from_secretary(
+        self, thread_id: int, text: str, key: str | None = None
+    ) -> web.Response:
+        """The person's answer, given in the canvas secretary's chat, to the thread that asked.
+
+        It is marked as relayed, so the receiving agent knows the words passed through the
+        secretary, and it closes the thread's open requests as a Console reply does.
+        """
+        item_id = f"t{int(thread_id)}"
+        relayed = f"🗂 The person's answer, relayed by their secretary (canvas mode):\n\n{text}"
+        repo = getattr(self.api, "decision_repo", None)
+        card = None
+        if key and repo is not None:
+            try:
+                card = await repo.get_open(int(thread_id), key)
+            except Exception:
+                logger.exception("console: card %r of %s unreadable", key, thread_id)
+        response = await self._deliver(item_id, relayed, "secretary", metered=False)
+        if response.status < 300 and card is not None:
+            await self._answer_covered(item_id, card.id, text)
+        if response.status < 300 and key and repo is not None:
+            # Only the card this answer settles; the thread's other cards stay (#1438).
+            try:
+                await repo.close(int(thread_id), reason="answered", key=key)
+            except Exception:
+                logger.exception("console: card %r of %s not closed", key, thread_id)
+        return response
+
     async def stop(self) -> None:
+        if self.canvas is not None:
+            await self.canvas.stop()
+        if self.night_shift is not None:
+            await self.night_shift.stop()
+        if self._defaulter is not None:
+            await self._defaulter.stop()
+            self._defaulter = None
         if self._records_task is not None:
             self._records_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -570,6 +777,30 @@ class ConsoleServer:
     async def me(self, request: web.Request) -> web.Response:
         return web.json_response({"identity": request[IDENTITY]})
 
+    async def situation(self, request: web.Request) -> web.Response:
+        """The panel beside a family: what its parent wrote, and which waits are active.
+
+        Waits are not per item: the client knows the family, the server has one list.
+        """
+        thread_id = _thread_of(request.match_info["item_id"])
+        repo = self.api.situation_repo
+        written = await repo.get(thread_id) if repo is not None and thread_id else None
+        waits = []
+        if self.api.wait_repo is not None:
+            waits = [
+                {"thread_id": str(wait.thread_id), "label": wait.label}
+                for wait in await self.api.wait_repo.list_active()
+            ]
+        return web.json_response(
+            {"situation": written.as_dict() if written else None, "waits": waits}
+        )
+
+    async def _parent_of(self, thread_id: int) -> int | None:
+        """The thread that spawned *thread_id*, or None (also when lineage is unavailable)."""
+        if self.api.lineage_repo is None:
+            return None
+        return await self.api.lineage_repo.parent_of(thread_id)
+
     async def _lineage(self) -> dict[int, int]:
         if self.api.lineage_repo is None:
             return {}
@@ -602,11 +833,135 @@ class ConsoleServer:
                 "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "items": items,
                 "guide": build_guide(items, records=records),
+                "secretary": build_secretary(items, await self._open_requests()),
                 "slots": self._slots(),
+                "restart": restart_state(),
                 "places": await self._place_list(items),
                 "views": await self._view_list(),
+                "pages": await self._page_list(),
             }
         )
+
+    async def _open_requests(self) -> list[dict[str, Any]]:
+        """The decision requests agents sent and nobody has answered (ADR-0024)."""
+        repo = getattr(self.api, "decision_repo", None)
+        if repo is None:
+            return []
+        try:
+            requests = [r.as_dict() for r in await repo.list_open()]
+        except Exception:
+            # The board still answers; the secretary home then lists the items as unexplained.
+            logger.exception("console: could not read decision requests")
+            return []
+        for request in requests:
+            # A card that asks the person to look at something shows the files it delivered.
+            try:
+                request["files"] = await self._request_files(request)
+            except Exception:
+                logger.exception("console: files of request %s unreadable", request.get("id"))
+                request["files"] = []
+        return requests
+
+    async def _request_files(self, request: dict[str, Any]) -> list[dict[str, str]]:
+        """Files the asking thread delivered: console files, or a chat thread's attachments.
+
+        A chat thread is read through the Discord API once per request and cached, so the
+        board's poll does not call Discord every few seconds.
+        """
+        thread_key = int(request["thread_id"])
+        files = await files_for(self.conversations, thread_key)
+        if files or (self.conversations and await self.conversations.get(thread_key)):
+            return files
+        cached = self._request_files_cache.get(int(request["id"]))
+        if cached is not None and cached[0] > time.monotonic():
+            return cached[1]
+        thread, err = await self._thread_for(f"t{thread_key}")
+        files = []
+        if err is None and thread is not None:
+            history = [m async for m in thread.history(limit=DISCORD_SCAN)]
+            me = getattr(getattr(self.api.bot, "user", None), "id", None)
+            files = attachment_files(history, bot_id=me if isinstance(me, int) else None)
+        self._request_files_cache[int(request["id"])] = (
+            time.monotonic() + DISCORD_CACHE_SECONDS,
+            files,
+        )
+        return files
+
+    async def defer_request(self, request: web.Request) -> web.Response:
+        """Persist a per-card Later/Restore action without sending a reply."""
+        body, err = await self._json(request)
+        if err:
+            return err
+        if type(body.get("deferred")) is not bool:
+            return _error("deferred must be a boolean", 400)
+        item_id = request.match_info["item_id"]
+        thread = _thread_of(item_id)
+        try:
+            rid = int(request.match_info["request_id"])
+        except ValueError:
+            return _error("Invalid request_id", 400)
+        if not 0 < rid <= 2**63 - 1:
+            return _error("Invalid request_id", 400)
+        if thread is None or not any(i["id"] == item_id for i in await self._board_items()):
+            return _error("Item not found", 404)
+        repo = getattr(self.api, "decision_repo", None)
+        if repo is None:
+            return _error("Decision requests unavailable", 503)
+        changed = await repo.defer(thread, rid, deferred=body["deferred"])
+        return web.json_response({"changed": changed})
+
+    async def dismiss_request(self, request: web.Request) -> web.Response:
+        """Dismiss this exact card without replying or changing the thread's state."""
+        item_id = request.match_info["item_id"]
+        thread = _thread_of(item_id)
+        try:
+            rid = int(request.match_info["request_id"])
+        except ValueError:
+            return _error("Invalid request_id", 400)
+        if not 0 < rid <= 2**63 - 1:
+            return _error("Invalid request_id", 400)
+        if thread is None or not any(i["id"] == item_id for i in await self._board_items()):
+            return _error("Item not found", 404)
+        repo = getattr(self.api, "decision_repo", None)
+        if repo is None:
+            return _error("Decision requests unavailable", 503)
+        closed = await repo.close(thread, reason="dismissed", request_id=rid)
+        return web.json_response({"closed": closed})
+
+    async def _close_finished_cards(self, item_id: str) -> None:
+        """Done closes the item's open cards, as the 🏁/✅ markers do (#1478).
+
+        Without this, a card outlived the thread the person finished and came back the moment
+        anything touched that thread again.
+        """
+        repo = getattr(self.api, "decision_repo", None)
+        thread_id = _thread_of(item_id)
+        if repo is None or thread_id is None:
+            return
+        try:
+            await repo.close(thread_id, reason="finished")
+        except Exception:
+            # The item is done; a card left open is hidden while it stays done.
+            logger.exception("console: could not close the cards of %s", item_id)
+
+    async def _close_requests(self, item_id: str, request_id: Any) -> None:
+        """A person answered a card: that one request is settled.
+
+        A reply typed in the thread closes nothing (#1438): a thread may hold several cards,
+        and a word about something else must not take them all away. The agent closes a card
+        its chat settled (``DELETE /api/threads/{id}/decisions/{key}``).
+        """
+        repo = getattr(self.api, "decision_repo", None)
+        thread_id = _thread_of(item_id)
+        if repo is None or thread_id is None:
+            return
+        if not isinstance(request_id, int) or isinstance(request_id, bool):
+            return
+        try:
+            await repo.close(thread_id, reason="answered", request_id=request_id)
+        except Exception:
+            # The reply has gone through; the card disappears anyway once the thread runs.
+            logger.exception("console: could not close the requests of %s", item_id)
 
     async def _view_list(self) -> list[dict[str, Any]]:
         """The saved views, sent with every board so all devices show the same list."""
@@ -616,6 +971,17 @@ class ConsoleServer:
             return [v.as_dict() for v in await self.views.list()]
         except Exception:
             logger.exception("console: could not read saved views")
+            return []
+
+    async def _page_list(self) -> list[dict[str, Any]]:
+        """Pages added over ``/api/pages``, sent with every board so the menu stays current."""
+        repo = getattr(self.api, "page_repo", None)
+        if not isinstance(repo, PageRepository):
+            return []
+        try:
+            return [p.as_dict() for p in await repo.list_pages()]
+        except Exception:
+            logger.exception("console: could not read pages")
             return []
 
     def _bind_workspace(
@@ -724,29 +1090,40 @@ class ConsoleServer:
             sessions=sessions,
         )
         queued = self._queued_thread_ids()
+        secretary = await self.canvas.item_id() if self.canvas is not None else None
         for item in items:
             item["queued"] = item["thread_id"] in queued
+            # The canvas secretary is a standing service, not work: no chime per turn.
+            item["canvas_secretary"] = item["id"] == secretary
+        repo = getattr(self.api, "decision_repo", None)
+        if repo is not None:
+            try:
+                items = apply_deferrals(items, [r.as_dict() for r in await repo.list_open()])
+            except Exception:
+                logger.exception("console: could not read deferred requests")
         return items
 
     async def triage_messages(self, item: dict[str, Any]) -> list[tuple[str, str]]:
         """What the triage model reads for *item*: its human and agent messages."""
         if not item.get("thread_id"):
             return [("note", item.get("note") or "")]
+        return [
+            ("person" if m["kind"] == "human" else "agent", str(m.get("content") or ""))
+            for m in await self.decision_messages(item)
+            if m["kind"] != "activity"
+        ]
+
+    async def decision_messages(self, item: dict[str, Any]) -> list[dict[str, Any]]:
+        """Timestamped conversation for card cleanup; machine activity is not a human answer."""
         limit = MAX_TRIAGE_MESSAGES
         key = await self._conversation_key(item["id"])
         if key is not None and self.conversations is not None:
-            raw = [with_kind(m.as_dict()) for m in await self.conversations.history(key, limit)]
-        else:
-            thread, err = await self._thread_for(item["id"])
-            if err:
-                return []
-            history = [m async for m in thread.history(limit=limit)]
-            raw = [serialize_message(m) for m in reversed(history)]
-        return [
-            ("person" if m["kind"] == "human" else "agent", str(m.get("content") or ""))
-            for m in raw
-            if m["kind"] != "activity"
-        ]
+            return [with_kind(m.as_dict()) for m in await self.conversations.history(key, limit)]
+        thread, err = await self._thread_for(item["id"])
+        if err:
+            return []
+        history = [m async for m in thread.history(limit=limit)]
+        return [serialize_message(m) for m in reversed(history)]
 
     async def usage_read(self, request: web.Request) -> web.Response:
         if self.usage is None:
@@ -910,7 +1287,8 @@ class ConsoleServer:
     async def resume_item(self, request: web.Request) -> web.Response:
         """Clear the pause mark and ask the agent to carry on where it stopped."""
         item_id = request.match_info["item_id"]
-        delivered = await self._deliver(item_id, RESUME_PROMPT, request[IDENTITY])
+        # A canned prompt the button sends: the person pressed it, but typed nothing.
+        delivered = await self._deliver(item_id, RESUME_PROMPT, request[IDENTITY], metered=False)
         if delivered.status >= 400:
             return delivered
         try:
@@ -1056,14 +1434,40 @@ class ConsoleServer:
             )
         return web.json_response({"item": item.as_dict()})
 
-    async def done(self, request: web.Request) -> web.Response:
-        item_id = request.match_info["item_id"]
+    async def move_pin(self, request: web.Request) -> web.Response:
+        body, err = await self._json(request)
+        if err:
+            return err
+        target_id = body.get("target_id")
+        placement = body.get("placement")
+        if not isinstance(target_id, str) or not isinstance(placement, str):
+            return _error("target_id and placement are required strings", 400)
         try:
-            item = await self.work_repo.update(
-                item_id, {"state": STATE_DONE, "snoozed_until": None}
-            )
+            await self.work_repo.move_pin(request.match_info["item_id"], target_id, placement)
         except WorkItemError as exc:
             return _error(str(exc), 400)
+        return web.json_response({"ok": True})
+
+    async def done(self, request: web.Request) -> web.Response:
+        try:
+            item, workspace = await self.complete_item(request.match_info["item_id"])
+        except WorkItemError as exc:
+            return _error(str(exc), 400)
+        return web.json_response({"item": item.as_dict(), "workspace": workspace})
+
+    async def complete_item(
+        self, item_id: str, *, mirror_workspace: bool = True
+    ) -> tuple[WorkItem, dict[str, Any] | None]:
+        """Mark *item_id* done the way the human's Done button does.
+
+        Shared by the Console's own action and the control-plane
+        ``/api/threads/{id}/complete`` an agent calls on the user's explicit
+        request. Raises :class:`WorkItemError` for an item that cannot move.
+        An automatic close passes ``mirror_workspace=False``: it ends the
+        thread, not the Workspace task the thread served.
+        """
+        item = await self.work_repo.update(item_id, {"state": STATE_DONE, "snoozed_until": None})
+        await self._close_finished_cards(item_id)
         key = await self._conversation_key(item_id)
         if key is not None and self.conversations is not None:
             await apply_outcome(self.conversations, key, OUTCOME_DONE)
@@ -1072,8 +1476,8 @@ class ConsoleServer:
             if thread is not None:
                 # Same marker the agent would set, so the chat sidebar agrees.
                 request_thread_outcome(thread, OUTCOME_DONE)
-        workspace = await self._workspace_finish(item, done=True)
-        return web.json_response({"item": item.as_dict(), "workspace": workspace})
+        workspace = await self._workspace_finish(item, done=True) if mirror_workspace else None
+        return item, workspace
 
     async def reopen(self, request: web.Request) -> web.Response:
         item_id = request.match_info["item_id"]
@@ -1117,10 +1521,59 @@ class ConsoleServer:
         if err:
             return err
         text = with_attachments(text, files)
-        return await self._deliver(request.match_info["item_id"], text, request[IDENTITY])
+        try:
+            ai = parse_turn_ai(body.get("ai"))
+        except TurnAIError as exc:
+            return _error(str(exc), 400)
+        item_id = request.match_info["item_id"]
+        response = await self._deliver(item_id, text, request[IDENTITY], metered=True, ai=ai)
+        if response.status < 300:
+            await self._close_requests(item_id, body.get("request_id"))
+            await self._answer_covered(item_id, body.get("request_id"), text)
+        return response
 
-    async def _deliver(self, item_id: str, text: str, who: str) -> web.Response:
-        """Queue *text* as the human's next message in the item's conversation."""
+    async def _answer_covered(self, item_id: str, request_id: Any, text: str) -> None:
+        """Give the answer to a combined card to every child question it covers (#1493).
+
+        Best-effort per child: the person's answer reached the card's own thread, and a
+        delivery that fails here is logged rather than turned into an error for the reply.
+        """
+        repo = getattr(self.api, "decision_repo", None)
+        parent = _thread_of(item_id)
+        if repo is None or parent is None:
+            return
+        if not isinstance(request_id, int) or isinstance(request_id, bool):
+            return
+        try:
+            covered = await repo.covered_by(request_id)
+        except Exception:
+            logger.exception("console: questions covered by card %s unreadable", request_id)
+            return
+        for question in covered:
+            relayed = (
+                "🗂 The person answered your question on a combined card in your manager "
+                f'thread {parent} (your card: "{question.title}"). Their answer:\n\n{text}'
+            )
+            try:
+                result = await self._deliver(
+                    f"t{question.thread_id}", relayed, "combined card", metered=False
+                )
+            except Exception:
+                logger.exception("console: answer not relayed to %s", question.thread_id)
+                continue
+            if result.status >= 300:
+                logger.warning(
+                    "console: answer not relayed to %s (HTTP %s)", question.thread_id, result.status
+                )
+
+    async def _deliver(
+        self, item_id: str, text: str, who: str, *, metered: bool, ai: TurnAI | None = None
+    ) -> web.Response:
+        """Queue *text* as the human's next message in the item's conversation.
+
+        *metered*: a person typed *text*, so it counts toward their attention
+        (docs/attention.md). Canned prompts a button sends pass ``False``.
+        """
         try:
             brief = await self._workspace_brief(item_id)
         except WorkspaceError as exc:
@@ -1131,7 +1584,7 @@ class ConsoleServer:
             return (
                 busy
                 if key in self._compacting
-                else await self._reply_in_console(item_id, key, text, who, brief)
+                else await self._reply_in_console(item_id, key, text, who, brief, metered, ai)
             )
         thread, err = await self._thread_for(item_id)
         if err:
@@ -1147,9 +1600,12 @@ class ConsoleServer:
             return _error(str(exc), 400)
         schedule_thread_outcome(thread, None)
         prompt = f"{text}\n\n-# 🖥️ via Ebi AI Console ({who})"
+        if metered:
+            # Posted by the bot, so the chat frontend's own metering skips it.
+            await self._meter_chat_reply(thread, text, who)
         self._background(
             cog.deliver_relayed_message(
-                thread, prompt, interrupt=False, into_running_turn=True, brief=brief
+                thread, prompt, interrupt=False, into_running_turn=True, brief=brief, ai=ai
             )
         )
         logger.info("console: %s replied in thread %s", _q(who), thread.id)
@@ -1290,7 +1746,8 @@ class ConsoleServer:
         if name not in {s["name"] for s in self._skill_loader()(backend)}:
             return _error(f"Unknown command `/{name}` for `{backend}`.", 400)
         logger.info("console: %s ran skill /%s on %s", _q(who), _q(name), _q(item_id))
-        return await self._deliver(item_id, skill_prompt(backend, name, arg), who)
+        # The person picked the skill and typed its argument.
+        return await self._deliver(item_id, skill_prompt(backend, name, arg), who, metered=True)
 
     async def _compact_codex(self, key: int, item_id: str, who: str) -> web.Response:
         """``/compact`` on a Codex conversation, through ``codex app-server``."""
@@ -1298,7 +1755,7 @@ class ConsoleServer:
             return _error("wait until the current turn finishes, then compact", 409)
         repo = self.api.session_repo
         record = await repo.get(key) if repo is not None else None
-        if record is None or record.backend != "codex":
+        if repo is None or record is None or record.backend != "codex":
             return _error("this conversation has no Codex session to compact yet", 409)
         factory = vars(getattr(self.api, "components", None) or object()).get("backend_factory")
         command = getattr(factory, "codex_command", None) or "codex"
@@ -1314,9 +1771,12 @@ class ConsoleServer:
             return _error(str(exc), 502)
         finally:
             self._compacting.discard(key)
+        # The previous turn's measurement describes the history before compaction.
+        # Do not invent a new occupancy: the next Codex turn will measure it.
+        await repo.update_context_stats(key, context_window=None, context_used=None)
         logger.info("console: %s compacted Codex session of %s", _q(who), _q(item_id))
         return web.json_response(
-            {"message": "Conversation compacted. The next reply continues from the summary."}
+            {"message": "Conversation compacted. Context usage will be measured on the next reply."}
         )
 
     def _files_dir(self) -> Path | None:
@@ -1429,6 +1889,8 @@ class ConsoleServer:
                 prompt=prompt,
                 author=who,
                 brief=brief,
+                # The title, note and extra prompt are what the person wrote.
+                metered=True,
             )
         except Exception:
             logger.exception("console: start of %s failed", _q(item_id))
@@ -1451,8 +1913,35 @@ class ConsoleServer:
             return _error("the conversation started, but the item could not be linked to it", 500)
         return web.json_response({"item": overlay.as_dict()}, status=201)
 
+    async def _meter_chat_reply(self, thread: Any, text: str, who: str) -> None:
+        """Record a Console reply into a chat thread under that thread's own key."""
+        recorder = _attention_recorder(self.api)
+        if recorder is None or not recorder.enabled:
+            return
+        try:
+            activity = console_activity(
+                thread_key=int(thread.id),
+                message_id=f"console-{uuid.uuid4().hex}",
+                author_id=recorder.config.console_author or who,
+                content=text,
+                occurred_at=datetime.now(UTC),
+                title=getattr(thread, "name", None),
+                frontend="discord",
+            )
+        except Exception:
+            logger.exception("console: could not describe a reply for metering")
+            return
+        await recorder.record(activity)
+
     async def _reply_in_console(
-        self, item_id: str, thread_key: int, text: str, who: str, brief: str | None
+        self,
+        item_id: str,
+        thread_key: int,
+        text: str,
+        who: str,
+        brief: str | None,
+        metered: bool,
+        ai: TurnAI | None = None,
     ) -> web.Response:
         if self.sessions is None:
             return _error("the console cannot run agents in this deployment", 503)
@@ -1462,7 +1951,7 @@ class ConsoleServer:
             return _error(str(exc), 400)
         try:
             injected = await self.sessions.reply(
-                thread_key, text, who, into_running_turn=True, brief=brief
+                thread_key, text, who, into_running_turn=True, brief=brief, metered=metered, ai=ai
             )
         except LookupError:
             return _error("unknown conversation", 404)
@@ -1802,6 +2291,10 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
     await places.init_db()
     views = SavedViewRepository(api_server.session_repo.db_path)
     await views.init_db()
+    secretary_events = SecretaryEventRepository(api_server.session_repo.db_path)
+    await secretary_events.init_db()
+    canvas_repo = CanvasRepository(api_server.session_repo.db_path)
+    await canvas_repo.init_db()
     if triage is not None:
         await triage.init_db()
     console = ConsoleServer(
@@ -1820,6 +2313,8 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
         triage=triage,
         places=places,
         views=views,
+        secretary_events=secretary_events,
+        canvas_repo=canvas_repo,
         cli_login=CliLogin(login_commands()),
     )
     await console.start()
@@ -1829,6 +2324,12 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
     if passkeys is not None:
         await passkeys.open_enrollment(force=os.getenv("CCDB_CONSOLE_ENROLL") == "1")
     return console
+
+
+def _attention_recorder(api_server: Any) -> AttentionRecorder | None:
+    """The deployment's attention recorder, when metering is wired in."""
+    recorder = getattr(getattr(api_server, "components", None), "attention_recorder", None)
+    return recorder if isinstance(recorder, AttentionRecorder) else None
 
 
 async def _build_session_host(
@@ -1879,6 +2380,7 @@ async def _build_session_host(
         registry=getattr(bot, "session_registry", None),
         worktree_manager=getattr(bot, "worktree_manager", None),
         account_router=getattr(bot, "account_router", None),
+        attention_recorder=_attention_recorder(api_server),
     )
     # The wait watcher resumes a conversation after CI; it finds this one here.
     bot.console_sessions = host  # type: ignore[attr-defined]

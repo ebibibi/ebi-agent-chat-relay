@@ -52,7 +52,7 @@ CONCURRENCY = 3
 RETRY_SECONDS = 30 * 60
 MAX_MESSAGES = 16
 MAX_MESSAGE_CHARS = 700
-MAX_PROMPT_CHARS = 9000
+MAX_PROMPT_CHARS = 8000
 MAX_NOTE_CHARS = 120
 MAX_PLACE_CHARS = 40
 #: Place labels offered to the model, so it reuses "home" instead of inventing "house".
@@ -90,9 +90,10 @@ _ADDED_COLUMNS = (
     ("place", "TEXT"),
     ("pinned_place", "INTEGER NOT NULL DEFAULT 0"),
     ("minutes", "INTEGER"),
+    ("needs_human", "INTEGER"),
 )
 #: Part of every basis: a new prompt re-triages everything once.
-PROMPT_VERSION = "4"
+PROMPT_VERSION = "5"
 #: The longest estimate kept; anything beyond a working day is "deep" either way.
 MAX_MINUTES = 480
 #: Effort buckets by the human's minutes before the turn goes back to the agent:
@@ -101,7 +102,8 @@ QUICK_MINUTES = 3
 SHORT_MINUTES = 20
 
 _PROMPT = """\
-You triage a person's work queue. Read one item and judge four separate things:
+You triage a person's work queue. Read one item and judge these separate things:
+whether a concrete outstanding action is actually assigned to the person,
 how important it is, whether the person can act on it right now or must wait,
 whether it can only be done in one place or on one device, and how long the person's
 part takes.
@@ -116,13 +118,20 @@ Conversation, oldest first (the person and their AI agent):
 Answer with one JSON object and nothing else:
 {{"priority": 0-3, "due": "YYYY-MM-DD" | "YYYY-MM-DDTHH:MM" | null, "reason": "…", "next": "…",
  "ready": true | false, "ready_at": "YYYY-MM-DDTHH:MM" | null, "waiting_for": "…",
- "place": "…" | null, "minutes": 1-480}}
+ "place": "…" | null, "minutes": 1-480, "needs_human": true | false}}
 
 priority: 0 = must happen today, blocks others, a customer or a hard deadline is waiting;
 1 = this week, or someone is waiting; 2 = normal; 3 = low, someday, or just information.
 due: only a deadline the conversation states or clearly implies, in local time; otherwise null.
 reason: why this priority, at most 60 characters.
-next: the single next thing the person (not the agent) should do, at most 60 characters.
+needs_human: true ONLY when the latest conversation leaves a concrete, outstanding action
+for this person. A discussion ending with acknowledgment/thanks, an answered question,
+background advice, optional future follow-ups, agent work, or merely open project tasks are
+not outstanding human actions. Do not invent a task to fill the queue. Recency and an open
+thread do not imply work. A real unanswered decision or explicitly requested review is work.
+next: the specific outstanding human action, at most 60 characters. When needs_human is
+false, next is "", ready is false, ready_at is null and waiting_for is "".
+Read the latest exchange as the current state; earlier asks may already be settled.
 ready: true only if the person can do "next" right now, at their desk, without waiting.
 false if "next" has to wait: for a time or date ("tomorrow at 20:00", "after the meeting"),
 for another person's reply or work, for an agent or a job to finish, or for an event.
@@ -178,6 +187,7 @@ class TriageResult:
     #: The Ebi Workspace entry the model thinks this belongs to, and how sure it is.
     workspace_path: str | None = None
     workspace_confidence: float = 0.0
+    needs_human: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -199,6 +209,7 @@ class Triage:
     place: str | None = None
     pinned_place: bool = False
     minutes: int | None = None
+    needs_human: bool | None = None
 
 
 class TriageRepository:
@@ -226,13 +237,14 @@ class TriageRepository:
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(
                 "INSERT INTO ai_triage (item_id, priority, due_at, reason, next_step, ready,"
-                " ready_at, waiting_for, place, minutes, basis, model, updated_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " ready_at, waiting_for, place, minutes, needs_human, basis, model, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 " ON CONFLICT(item_id) DO UPDATE SET priority = excluded.priority,"
                 " due_at = excluded.due_at, reason = excluded.reason,"
                 " next_step = excluded.next_step, ready = excluded.ready,"
                 " ready_at = excluded.ready_at, waiting_for = excluded.waiting_for,"
                 " place = excluded.place, minutes = excluded.minutes,"
+                " needs_human = excluded.needs_human,"
                 " basis = excluded.basis, model = excluded.model, updated_at = excluded.updated_at",
                 (
                     item_id,
@@ -245,6 +257,7 @@ class TriageRepository:
                     result.waiting_for,
                     result.place,
                     result.minutes,
+                    None if result.needs_human is None else int(result.needs_human),
                     basis,
                     model,
                     _now(),
@@ -287,6 +300,7 @@ def _to_triage(row: aiosqlite.Row) -> Triage:
         place=row["place"],
         pinned_place=bool(row["pinned_place"]),
         minutes=row["minutes"],
+        needs_human=None if row["needs_human"] is None else bool(row["needs_human"]),
     )
 
 
@@ -373,14 +387,17 @@ def parse_reply(raw: str, *, now: datetime) -> TriageResult | None:
         priority=max(0, min(3, int(priority))),
         due_at=_parse_due(data.get("due"), now),
         reason=_short(data.get("reason")),
-        next_step=_short(data.get("next")),
-        ready=data.get("ready") is not False,
-        ready_at=_parse_due(data.get("ready_at"), now),
+        next_step="" if data.get("needs_human") is False else _short(data.get("next")),
+        ready=data.get("ready") is not False and data.get("needs_human") is not False,
+        ready_at=None
+        if data.get("needs_human") is False
+        else _parse_due(data.get("ready_at"), now),
         waiting_for=_short(data.get("waiting_for"))[:60],
         place=_short(data.get("place"))[:MAX_PLACE_CHARS] or None,
         minutes=_minutes(data.get("minutes")),
         workspace_path=_workspace_answer(data.get("workspace")),
         workspace_confidence=_confidence(data.get("workspace_confidence")),
+        needs_human=data.get("needs_human") if type(data.get("needs_human")) is bool else None,
     )
 
 
@@ -507,6 +524,7 @@ def apply_triage(
                 "place": row.place,
                 "minutes": row.minutes,
                 "updated_at": row.updated_at,
+                "needs_human": row.needs_human,
             }
             new["effort"] = effort(row.minutes)
             human_priority = row.pinned_priority or item.get("priority") != DEFAULT_PRIORITY
@@ -523,8 +541,24 @@ def apply_triage(
                 new["overdue"] = (
                     due is not None and due < now and item.get("status") not in _SKIP_STATUSES
                 )
-        new["focus"] = focus_score(new, now=now)
         human = human_readiness(item)
+        current = row is not None and row.basis == _basis(item)
+        # Continuing conversations are not tasks. Unknown/stale guesses cannot invent one;
+        # a person's explicit current readiness or a captured task remains authoritative.
+        needs_human = (
+            not item.get("thread_id")
+            or human is not None
+            or bool(
+                current
+                and row is not None
+                and row.needs_human is True
+                and row.next_step
+                and row.next_step.strip()
+            )
+        )
+        new["triage_current"] = current
+        new["needs_human"] = needs_human
+        new["focus"] = focus_score(new, now=now) if needs_human else None
         # A stale override is dropped from the output too, so the client draws the guess.
         new["readiness"] = None if human is None else item["readiness"]
         if human is None:
@@ -621,7 +655,13 @@ def focus_score(item: dict[str, Any], *, now: datetime) -> int | None:
     Work an agent is doing, finished or parked work, and snoozed items are out.
     Whether it can be done now is a separate axis: see ``actionable``.
     """
-    if item.get("bucket") in ("done", "snoozed", "ai") or item.get("status") in _SKIP_STATUSES:
+    if (
+        item.get("decision_deferred")
+        or item.get("running")
+        or item.get("queued")
+        or item.get("bucket") in ("done", "snoozed", "ai")
+        or item.get("status") in _SKIP_STATUSES
+    ):
         return None
     score = (3 - int(item.get("priority", DEFAULT_PRIORITY))) * 100
     due = _parse_ts(item.get("due_at"))
@@ -674,6 +714,7 @@ class Triager:
         registered_places: Callable[[], Awaitable[list[str]]] | None = None,
         workspace_index: Callable[[], Awaitable[list[tuple[str, str]]]] | None = None,
         on_workspace: Callable[[dict[str, Any], str], Awaitable[None]] | None = None,
+        review_requests: Callable[[Sequence[dict[str, Any]]], Awaitable[int]] | None = None,
     ) -> None:
         self.repo = repo
         self._ask = ask
@@ -684,6 +725,7 @@ class Triager:
         self._registered = registered_places
         self._workspace_index = workspace_index
         self._on_workspace = on_workspace
+        self._review_requests = review_requests
         self._failed: dict[str, tuple[str, float]] = {}
         self._task: asyncio.Task[None] | None = None
 
@@ -724,6 +766,11 @@ class Triager:
                 return await self._triage(item, places, workspace)
 
         results = await asyncio.gather(*(one(i) for i in batch))
+        if self._review_requests is not None:
+            try:
+                await self._review_requests(items)
+            except Exception:
+                logger.exception("console: request cleanup failed")
         return sum(results)
 
     async def _triage(

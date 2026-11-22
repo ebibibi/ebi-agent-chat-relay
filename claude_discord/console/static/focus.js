@@ -100,13 +100,20 @@ window.ConsoleFocus = (() => {
     onclick: () => openItem(id), text: label });
 
   function nextMove(g, byId) {
-    const pick = g.next.find((n) => !elsewhere(byId.get(n.id) || n));
+    // Re-check the latest board: a candidate may have acquired a parent.
+    const direct = g.next.filter((n) => {
+      const item = byId.get(n.id);
+      return item && !item.parent_id && item.actionable === true && item.focus != null &&
+        item.needs_human !== false && !item.running && !item.queued;
+    });
+    const calm = g.calm || !direct.length;
+    const pick = direct.find((n) => !elsewhere(byId.get(n.id) || n));
     if (!pick) {
       const counts = T.guide_counts(g.counts);
       return [
-        h("div", { class: "guide-calm", text: g.calm ? T.guide_calm : T.guide_elsewhere(g.next.length) }),
+        h("div", { class: "guide-calm", text: calm ? T.guide_calm : T.guide_elsewhere(direct.length) }),
         counts ? h("div", { class: "dim", text: counts }) : null,
-        g.calm && (g.counts.running || g.counts.waiting) ? h("div", { class: "dim", text: T.guide_calm_more }) : null,
+        calm && (g.counts.running || g.counts.waiting) ? h("div", { class: "dim", text: T.guide_calm_more }) : null,
       ];
     }
     const reasons = pick.reasons.map((r) => T.guide_reasons[r]).filter(Boolean);
@@ -146,8 +153,6 @@ window.ConsoleFocus = (() => {
     const later = live.filter((i) => i.actionable === false)
       .sort((a, b) => readyAt(a).localeCompare(readyAt(b)) || byImportance(a, b));
     const out = [];
-    const guideCard = card(items);
-    if (guideCard) out.push({ node: guideCard });
     out.push({ node: placeBar() });
     out.push({ node: effortBar(items) });
     // Ebi Workspace (focusws.js): today's plan, its ranked next actions after the AI work
@@ -231,6 +236,6 @@ window.ConsoleFocus = (() => {
         onclick: () => setReadiness(item, null), text: `🤖 ${T.ready_back_ai}` }) : null);
   }
 
-  return { rows, count, note, drawerLine, placeTag, setGuide, readyToggle,
+  return { rows, card, count, note, drawerLine, placeTag, setGuide, readyToggle,
     elsewhere, byImportance, effortOk, effortChosen, effortLabel, effortTag };
 })();

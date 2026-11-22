@@ -18,17 +18,21 @@ import os
 from dataclasses import dataclass
 
 from claude_code_core.attention_repo import HumanActivityRepository
+from claude_code_core.human_activity import note_human_activity
 
 from .database.ask_repo import PendingAskRepository
 from .database.claims_repo import ClaimRepository
+from .database.decision_repo import DecisionRequestRepository
 from .database.frontend_thread_repo import FrontendThreadRepository
 from .database.ingest_repo import IngestResultRepository
 from .database.lineage_repo import ThreadLineageRepository
 from .database.lounge_repo import LoungeRepository
 from .database.models import init_db
+from .database.pages_repo import PageRepository
 from .database.repository import SessionRepository, UsageStatsRepository
 from .database.resume_repo import PendingResumeRepository
 from .database.settings_repo import SettingsRepository
+from .database.situation_repo import ThreadSituationRepository
 from .database.summary_repo import ThreadSummaryRepository
 from .database.wait_repo import WaitRepository
 
@@ -53,10 +57,15 @@ class SessionStores:
     summaries: ThreadSummaryRepository
     frontend_threads: FrontendThreadRepository
     lineage: ThreadLineageRepository
+    #: What a parent thread says about where its work stands (the Console's family panel).
+    situations: ThreadSituationRepository
+    decisions: DecisionRequestRepository
     #: Human messages that reached a session — the input of the attention estimate.
     attention: HumanActivityRepository
     #: Waits a session registered before ending its turn (``/api/waits``).
     waits: WaitRepository
+    #: Screens automation adds to the Console by registering data (``/api/pages``).
+    pages: PageRepository
 
 
 async def build_session_stores(session_db_path: str) -> SessionStores:
@@ -78,6 +87,9 @@ async def build_session_stores(session_db_path: str) -> SessionStores:
     await summaries.init_db()
     attention = HumanActivityRepository(session_db_path)
     await attention.init_db()
+    await _seed_human_activity(attention)
+    pages = PageRepository(session_db_path)
+    await pages.init_db()
 
     # Adopt every thread this deployment already has, so the ledger answers for
     # all of its conversations rather than only the ones opened from now on.
@@ -99,6 +111,20 @@ async def build_session_stores(session_db_path: str) -> SessionStores:
         summaries=summaries,
         frontend_threads=frontend_threads,
         lineage=ThreadLineageRepository(session_db_path),
+        situations=ThreadSituationRepository(session_db_path),
+        decisions=DecisionRequestRepository(session_db_path),
         attention=attention,
         waits=WaitRepository(session_db_path),
+        pages=pages,
     )
+
+
+async def _seed_human_activity(attention: HumanActivityRepository) -> None:
+    """Start the restart quiet rule's clock from the latest recorded human message."""
+    try:
+        latest = await attention.latest_live_at()
+    except Exception:
+        logger.warning("Could not read the latest human activity", exc_info=True)
+        return
+    if latest is not None:
+        note_human_activity("history", at=latest.timestamp())

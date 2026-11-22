@@ -65,6 +65,8 @@ class Scenario:
     items: list[dict[str, Any]] = field(default_factory=list)
     #: Saved views: ``{"name": ..., "query": ...}`` in the Console's filter language.
     views: list[dict[str, str]] = field(default_factory=list)
+    #: Declarative pages: ``{"slug", "title", "items": [...]}``, as ``/api/pages`` registers them.
+    pages: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def vault(self) -> Path:
@@ -113,6 +115,10 @@ def load_scenario(root: Path) -> Scenario:
     for index, view in enumerate(views):
         if not isinstance(view, dict) or not view.get("name") or not view.get("query"):
             raise DemoError(f"view {index + 1} needs a name and a query")
+    pages = raw.get("pages", [])
+    for index, page in enumerate(pages):
+        if not isinstance(page, dict) or not page.get("slug") or not page.get("title"):
+            raise DemoError(f"page {index + 1} needs a slug and a title")
     return Scenario(
         root=root,
         name=str(raw.get("name") or root.name),
@@ -120,6 +126,7 @@ def load_scenario(root: Path) -> Scenario:
         places=[str(p) for p in raw.get("places", [])],
         items=items,
         views=[{"name": str(v["name"]), "query": str(v["query"])} for v in views],
+        pages=pages,
     )
 
 
@@ -136,8 +143,18 @@ def seed_requests(scenario: Scenario, today: date) -> list[tuple[str, dict[str, 
         }
         if "due" in item:
             body["due_at"] = resolve_due(item["due"], today, scenario.timezone)
+        if "parent" in item:
+            # The parent's title; seed() swaps it for the id the Console gives that item.
+            body["parent"] = render_text(item["parent"], today)
         requests.append(("/console/api/items", body))
     requests.extend(("/console/api/views", dict(view)) for view in scenario.views)
+    for page in scenario.pages:
+        path = f"/console/api/pages/{page['slug']}"
+        # Everything but the slug and the items is the page's definition (title, labels,
+        # max_chars, count, position), passed through like an /api/pages registration.
+        definition = {k: v for k, v in page.items() if k not in ("slug", "items")}
+        requests.append((path, definition))
+        requests.extend((f"{path}/items", dict(item)) for item in page.get("items", []))
     return requests
 
 
@@ -203,7 +220,7 @@ def wipe_data(root: Path) -> None:
             shutil.rmtree(child)
 
 
-def _post(url: str, token: str, body: dict[str, Any]) -> None:
+def _post(url: str, token: str, body: dict[str, Any]) -> dict[str, Any]:
     request = urllib.request.Request(
         url,
         data=json.dumps(body).encode(),
@@ -216,7 +233,8 @@ def _post(url: str, token: str, body: dict[str, Any]) -> None:
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=30) as response:
-        response.read()
+        raw = response.read()
+    return json.loads(raw) if raw else {}
 
 
 def wait_for_console(base_url: str, token: str, timeout: float = 120.0) -> None:
@@ -237,9 +255,18 @@ def wait_for_console(base_url: str, token: str, timeout: float = 120.0) -> None:
 def seed(scenario: Scenario, base_url: str, token: str, today: date) -> int:
     wait_for_console(base_url, token)
     requests = seed_requests(scenario, today)
-    for path, body in requests:
+    ids: dict[str, str] = {}
+    for path, seeded in requests:
+        body = dict(seeded)
+        parent = body.pop("parent", None)
+        if parent is not None:
+            if parent not in ids:
+                raise DemoError(f"{body.get('title')}: parent {parent!r} is not an earlier item")
+            body["parent_id"] = ids[parent]
         try:
-            _post(base_url + path, token, body)
+            created = _post(base_url + path, token, body)
+            if path == "/console/api/items":
+                ids[body["title"]] = created["item"]["id"]
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode(errors="replace")[:200]
             # A place that survived from an earlier seed is not an error.

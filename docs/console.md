@@ -26,6 +26,13 @@ completion, AI settings, links, pinning and task details. Child-task summaries a
 start collapsed on mobile; tap their headings to expand them. Replying directly to a child
 still requires the explicit child-reply action.
 
+Swipes stand in for the header buttons. In a conversation or a note, swipe right to go back
+(the same layers Escape closes, one at a time). On the list, swipe a row right to finish it
+(with the usual Undo toast) or left to pin or unpin it: the row follows the finger over a green
+or orange band naming the action, and acts only when let go past a third of its width; short
+of that it springs back. Swipe right outside the rows to open Menu and left to close it. Text
+fields, the note editor and sideways-scrolling code blocks keep their own drags.
+
 Changing lists from Menu returns to the list. Drafts and pending uploads survive returning to
 a conversation and rotating the screen. Bulk completion controls appear after selecting a row.
 Desktop controls retain their existing layout.
@@ -48,6 +55,16 @@ The status chips above every list narrow it to the statuses you pick — ❓ you
 review, 📋 your task, 🏁 completion candidates, and so on; several at once match with OR, "All"
 clears them. Each chip counts what the current list holds, and the choice is remembered per browser.
 
+For Codex, type **/compact** and press **Enter** to run native compaction. A partial name
+still completes with Enter or Tab; Shift+Enter still inserts a newline. The progress message
+stays beside the reply box until the operation finishes or reports an error, and a failed
+command remains available for retry. Compaction is refused while a turn is running.
+
+After a successful manual compaction, the old context badge is cleared until the next reply
+measures the new history. An unknown measurement is not shown as zero. App-server turns
+report the model's actual context window and count cached input once in context occupancy;
+these measurements are separate from billing/usage counters.
+
 Each thread also shows how full its context window was after its last turn — 🧠 and a percentage
 on the row (amber from 70%, red from 90%), used / window tokens in the detail header — so a
 thread close to compaction is visible before it happens.
@@ -59,7 +76,10 @@ Two modes hide everything but the conversation — the navigation, the list and 
 - **🎯 Focus** (the button in a thread's header, or `z`) shows the open thread full screen.
   Esc, ✕ Exit or leaving the thread returns to the full console.
 - **🔁 Work through** (the button in the Focus view's time bar) runs a queue: the threads you can
-  act on here and now, in Focus order, narrowed to the time bucket chosen in that bar. Each one
+  act on here and now, in Focus order, narrowed to the time bucket chosen in that bar.
+  Only parent and standalone conversations enter the queue; children and grandchildren stay
+  with their parent, even when that parent is absent from the board. If a queued thread
+  becomes a child, it leaves the queue on the next refresh. Each one
   opens full screen with the reply box focused; the strip at the top shows where you are
   (`2 / 7`), how many are left, the AI's estimate and the next step. Sending a reply, finishing
   the thread or ⏭ Skip (`n`) opens the next one — nothing is picked from a list. A thread that
@@ -96,6 +116,221 @@ model call, so it costs nothing per poll and gives the same answer twice
 
 Everything except the last part works without a Workspace; without one the board sends
 `guide.drift: null` and the card leaves that section out.
+
+The next move also considers only parent and standalone conversations, so delegated children
+cannot fill its candidate slots. Family decisions still link to the parent under **Decide
+together**. Open the parent to inspect a child explicitly.
+
+## Secretary mode
+
+The classic lists are built around agent threads. Someone running dozens of them ends up
+opening every thread that waits on them and re-reading it to learn what is being asked.
+Secretary mode is a second display mode built around **decisions** instead
+([ADR-0024](adr/0024-add-a-secretary-mode-built-around-decisions.md)). The switch sits at the
+top of the menu: **Display mode: Classic / Secretary**. It is remembered per browser, and
+the classic mode keeps its look and behavior. With secretary mode on, the menu gains
+**🗂 Secretary**. That screen becomes the home whenever the Console opens without a view
+in the address.
+
+The cards are **decision requests** written by the agent that asks, not summaries
+(v1 summarised each thread's last message with the triage model, and its cards could not be
+answered; see the ADR). A card has at most six lines and is meant to be answerable by someone
+who has forgotten the whole matter:
+
+```
+🔴 Delete hccjp now, or export its data first?
+About: the HCCJP environment of GA v2 is deleted on 11/17; that cannot be undone.
+A Delete as is [recommended]: no extra work; it holds mostly automated tests.
+B Export first: 30-60 minutes of work; storage costs cents a month.
+Deadline: before the deletion on 11/17
+[A Delete as is] [B Export first] [✏️ Another answer]   More ▾
+```
+
+- **🔴 Decide now** — cards for questions (❓) and steps only you can do (📋), ranked like
+  Focus with your own threads before delegated ones; the first three show, the rest are one
+  click away. A button sends the choice to the thread that asked, restating the question
+  (`「<title>」への回答: <label> — <effect>`), through the same reply endpoint as the detail pane.
+  **✏️ Another answer** sends words of your own the same way. **More ▾** unfolds the full
+  request: what it is about, what is happening and why now, what to decide, the choices and
+  their results, the recommendation and why, the material to decide with (the draft, the
+  diff, the numbers, rendered as Markdown), and the deadline.
+- **👀 To review** — the same cards for deliverables (👀).
+- **Proceeding unanswered** — off by default. The owner may list kinds of reversible work
+  for which a card proceeds with its recommendation once its time passes; see
+  [decision-defaults.md](decision-defaults.md).
+- **📭 Waiting without a request** — threads that wait on you (❓/👀/📋/⚠️) but whose agent
+  wrote no request, by title only. Nothing is summarised for them; open the thread.
+- **🤖 Agents at work** (one line each, no progress text) and **✅ Finished today**, where a
+  🏁 candidate can be confirmed with the usual ✅ writeback.
+- Each card names its thread (**↗ title**), one click away.
+
+**Where the requests come from.** An agent sends its request as the JSON body of the marker
+call (`POST /api/threads/{id}/waiting`, `/review` or `/action`). That store is the only place a
+request lives: the secretary home lists the requests of every family, and a family's
+[situation panel](#where-things-stand) shows the same cards for its own threads under
+**🙋 Needed from you**. A parent never copies a child's question. Agents are given the format
+and the bar in their run context. The Console checks the format with
+deterministic rules (`claude_discord/decision_request.py`; no model): the card's four parts,
+one line each, at most three choices (two or more for a question, exactly one recommended), at
+most 300 characters, and all seven parts of the detail. A request that fails is refused with
+400 and every problem listed (`problems`), plus the format (`format`), so the agent rewrites
+it in the same turn. A bare marker call still marks the thread as before; it shows no card.
+
+**When a card goes away** (#1438). A request is stored in `decision_requests`, one open request
+per thread and `key`; a newer one with the same key replaces it. A request closes when the person
+answers it on its card, when its agent closes it (`DELETE /api/threads/{id}/decisions/{key}`,
+`_` for the card sent without a key, `?reason=` optional) because the matter was settled in the
+chat, or when its thread is marked 🏁/✅. A reply typed in the thread and a bare marker do not directly close
+cards, because a thread may ask several things at once. A card shows while its request is open,
+until the thread is finished. It keeps showing while the thread is running: answering one of
+several cards starts a turn, and the questions not yet answered still stand (#1503).
+
+Each card also has **Dismiss** (消す), in both the situation panel and secretary home. It closes
+only that request, preserves its history, sends no answer and does not complete the thread.
+`DELETE /console/api/items/{item_id}/decisions/{request_id}` provides the same authenticated action.
+
+When automatic triage is enabled, its existing backend also checks cards after new conversation
+activity, in the background after the thread stops running. A card closes automatically only when
+the model identifies a specific later human answer, withdrawal or completion report and supplies
+an exact quote found in that later message. Old messages, agent drafts, unrelated chat and elapsed
+deadlines alone do not close cards. An uncertain or failed check leaves the card for the person or
+agent to dismiss. Checks are cached until the conversation or open requests change; board polling
+does not make model calls.
+
+**Trial metrics.** To compare the modes over a week, the Console records which threads you
+open (in either mode) and which answers came from a card, with how long the question had
+waited. It records metadata only, never text. The table is `console_secretary_events`,
+and rows older than 180 days are dropped. `GET /console/api/secretary/stats?days=7` returns
+per-day threads opened, opened per mode, card answers and the median wait before a card
+answer.
+
+## Canvas mode: the secretary lays out the screen
+
+Canvas mode is a third display mode (**Display mode: … / Canvas**, labelled 画面秘書 in
+Japanese; [ADR-0025](adr/0025-let-a-resident-secretary-lay-out-the-console.md)). The thread
+list goes away. The left of the screen belongs to one resident **secretary agent**, which
+places widgets there; the right is your conversation with it. **↩ Classic screen** goes back.
+
+- **Start it once.** The first time, the canvas offers **Start the secretary**. That opens an
+  ordinary Console conversation (same runner, transcript, `/model`, Stop) whose first message
+  is the secretary's charter (`claude_discord/console/canvas_charter.py`). Until someone starts
+  it, nothing is read and nothing is spent. **🔄 Restart** opens a fresh conversation (for a
+  full context); the notes and widgets stay.
+- **It keeps every thread in mind through notes.** The secretary writes one short note per
+  thread (`PUT /api/secretary/notes/{thread_id}`); the relay keeps them. On a wake it reads
+  `GET /api/secretary/digest`: only the threads whose status, activity or decision request
+  changed since its cursor, each with its note, its open request, its family's doing/decided
+  and its last four messages. `?all=1` lists every open thread without messages; `?peek=1`
+  leaves the cursor where it is.
+- **It is woken by changes, not by a timer.** Every 30 seconds a watcher compares the board
+  (status, the activity of idle threads, open requests; no model). A wake is one short
+  message into the secretary's conversation, sent only when something changed, the secretary
+  is idle, `CCDB_CANVAS_MIN_INTERVAL` seconds (600) have passed since the last wake and the
+  day's wakes are under `CCDB_CANVAS_MAX_WAKES_PER_DAY` (24). **⏸ Pause** stops the wakes;
+  what you type always goes through.
+- **Usage is on screen**: wakes today against the cap, turns, the secretary's context, and an
+  estimate of the input it read today (the context size after each turn, summed; cached input
+  is billed below it).
+- **Every turn is a fresh session.** The secretary's agent never resumes its conversation: each
+  turn gets a brief (its instructions, the last six messages, counts of notes, unread changes and
+  widgets, then the message) and runs in an empty directory without CLAUDE.md, skills or user
+  settings. The transcript you see stays one conversation. Measured: about 31k tokens per API
+  call, about 94k for a wake (ADR-0025, revision of 2026-11-15).
+- **Limits change live.** **⚙ 8/day · 10 min apart** in the canvas header sets the daily cap
+  (0 stops automatic wakes) and the interval; they apply from the next look, no restart. The
+  environment variables only set the defaults (8 a day since 2026-11-15).
+- **Model.** `claude` with `sonnet` unless `CCDB_CANVAS_SECRETARY_BACKEND`,
+  `CCDB_CANVAS_SECRETARY_MODEL` or `CCDB_CANVAS_SECRETARY_EFFORT` say otherwise.
+
+**Only the secretary writes.** Starting or restarting it issues a random key, given only in its
+charter. Widget, order, note and deliver calls must carry it as `X-Canvas-Token` and are refused
+with 403 otherwise; a digest read without it never moves the cursor. Reads are open.
+
+**⚡ This screen's AI** (#1401). The top of the canvas and of the focus session shows which AI
+what you send from there will run on. By default that is each thread's own setting. Pick a
+backend (and a connection, model, effort) and the bar turns orange: every reply, card answer and
+widget button sent from these screens carries it as `ai`, and the turn it starts runs on it. The
+secretary's own wakes use it while the screen is open (the screen re-sends it every poll; the
+relay keeps it in memory for 90 seconds). Nothing is stored — not in the browser, not in any
+setting — so each thread's saved choice, the global default, scheduled tasks, child threads and
+an automatic resume after a wait keep their own AI, and leaving the screen or closing the tab
+clears it. A turn already running is not changed: a reply with a screen AI waits for its own
+turn. The transcript names the model that actually answered. Values that are not offered
+(an unknown backend, effort or connection, a model id that is not a plain id) are refused with
+400.
+
+**Widgets are data, drawn by the Console.** The secretary sends
+`PUT /api/canvas/widgets/{key}` with a `kind`, a one-line `title`, `data`, and optionally
+`size` (`s`, `m`, `l`), `position`, a one-line `note` and up to four `actions`
+(`{"label", "say"}` — a button that sends `say` to the secretary as your message). Each kind
+has a fixed renderer; text is set as text and Markdown goes through the sanitising renderer, so
+no HTML or script from a model reaches the page. A malformed widget is refused with 400 and
+every problem listed (`claude_discord/canvas_widget.py`).
+
+| Kind | `data` | Drawn as |
+|---|---|---|
+| `decision` | `{"thread_id"}` | The thread's open decision request, as the secretary-mode card; its buttons answer the asking thread |
+| `diff` | `{"diff"}` (unified) or `{"before", "after"}` | Coloured lines, or the two texts side by side |
+| `table` | `{"columns": [...], "rows": [[...]]}` | A table (8 columns, 40 rows at most) |
+| `markdown` | `{"text"}` | Sanitised Markdown |
+| `timeline` | `{"entries": [{"time", "label", "state", "minutes"?, "thread_id"?}]}` | An ordered plan; `state` is `todo`, `now`, `done` or `wait` |
+| `agents` | `{"thread_ids": [...]}` | Those threads' status, or every running thread when empty |
+| `metric` | `{"value", "label", "sub"?, "percent"?}` | A number with an optional bar |
+
+`DELETE /api/canvas/widgets/{key}` removes one, `POST /api/canvas/order` with `{"keys": [...]}`
+reorders, `GET /api/canvas` lists them. A canvas holds at most 30. Each widget shows when it was
+last updated, and **✕** removes it from the screen.
+
+**Answers.** A decision card's buttons answer the asking thread directly, as in secretary mode.
+When you answer in the chat instead, the secretary delivers it with
+`POST /api/secretary/deliver` (`{"thread_id", "text"}`): the thread receives it marked as your
+answer relayed by the secretary, and its open request closes.
+
+On a phone the canvas comes first; **💬 Secretary** opens the conversation over it.
+
+**Always a way to the source, and back** (#1374). Everything that comes from a thread links to
+it: decision cards (**↗ title**), a widget's top-level `thread_id` (**↗ Open the thread** in its
+header), a `table`'s `row_threads` (aligned with `rows`; the first cell becomes the link),
+`timeline` entries and `schedule` blocks with a `thread_id`, and `/#focus/t<id>` links the
+secretary writes in Markdown and in its messages. A thread opened from the canvas shows
+**← Back to the secretary** at its top (on a phone it returns to the canvas). Opening a thread
+from a focus session suspends the session; **🎯 Back to the focus session** resumes it at the
+same decision.
+
+**A review card carries what to review.** A card that asks the person to look at something
+shows the files its thread delivered (the console conversation's `📎 Files` links, that thread's
+own only), with the first text files (`.md`, `.txt`, `.csv`, `.json`, `.yaml`, `.diff`, …) shown
+inline. Whether a card has anything to look at is decided by rules, not a model
+(`material_state` in `claude_discord/decision_request.py`): files delivered, a link to the thing,
+or materials of at least 160 characters or with a code block, diff or table. A review (or a card
+whose title asks to check something) with none of those does not ask for a review: it says
+there is nothing attached and offers only **↗ Open the thread to check**. A new 👀 request whose
+materials only point at an attachment is refused (400). Widget buttons stay marked
+**✓ Told the secretary** until the secretary updates the widget, and ending a focus session says
+what was sent.
+
+**Today's timetable** is a `schedule` widget: `{"lanes": {"you": [...], "ai": [...],
+"external": [...]}}`, each block `{"start": "HH:MM", "end"?: "HH:MM", "label", "sub"?,
+"thread_id"?}`. The Console draws the three lanes on one time axis with a red line at now; a
+block with a thread opens it. The secretary puts the decisions into your free time, beside the
+agents' expected finish and what waits on others. ccdb has no calendar of its own: the secretary
+adds events when its own tools can read your calendar. Any widget opens full screen with **⛶**
+(Esc closes it).
+
+**Focus session.** When decisions pile up, or you tell the secretary you have a few minutes, it
+prepares a session with `PUT /api/canvas/session` (key required):
+`{"title"?, "minutes"?: 1-240, "items": [{"thread_id", "group"?, "why"?, "materials"?: up to
+three of table / timeline / diff / markdown}]}`, ordered so similar contexts come together.
+The canvas then offers it at the top; **🎯 Focus session (n)** in the header opens one at any
+time, with the open decision requests in order when nothing was prepared. The session fills the
+screen with one decision at a time: the card large, its material drawn beside it, the full
+request folded below, and on the right what comes next, what agents are doing and what this
+session settled. The whole request is shown open (all seven parts) with a large button
+that opens the source thread to do the work; the session waits. Keys: **1 2 3** answer (sent to the asking thread like a card button, closing
+its request), **C** answer in your own words, **S** later, **→** next, **Esc** end. At the end
+the secretary receives one message listing what was decided and what was left for later
+(`POST /console/api/canvas/session/finish`), and the prepared plan is cleared.
+`DELETE /api/canvas/session` withdraws a plan.
 
 ## Automatic triage
 
@@ -228,7 +463,11 @@ restart there is nothing to press — exactly as nothing is waiting any more.
 A strip across the top of every screen shows how much each backend has left: per rate-limit
 window (5-hour, weekly, …) a bar, the percentage used and the time until it resets. Colours turn
 amber at 70% and red at 90%. A backend that is at its limit shows **⛔ back HH:MM** with the time
-remaining. On a phone the strip wraps, so every backend stays visible.
+remaining. On a phone the strip folds to the default backend (the one new conversations start
+with): a **+N ▾** button on the same row shows the others, **▴** folds them again. Sign-in chips
+stay visible while folded, and so does any other backend that is nearly used up (a window at
+90% or more) or at its limit: it stays out with a ⚠ and a red outline until it recovers, and the
+**+N** counts only the backends still folded away. Every page load starts folded.
 
 - **Claude**: the windows the CLI reports after every turn. A window whose reset time has passed
   reads as reset until the next turn refreshes it.
@@ -312,14 +551,33 @@ Each thread carries one-click controls for its state, on its row and in the deta
 | Paused | ▶ Resume — ask the agent to carry on from where it stopped, and clear the mark |
 | Waiting for a slot | ⏫ First — start before the others waiting; ⏬ Later — let them go first |
 
+When a merged change needs a restart, a "🔄 Update waiting" box appears under the running count.
+It says when the restart will happen (once nobody has used the bot for a while; see
+[session-queue.md](session-queue.md#reserved-restart)) and offers two buttons: **Restart now**
+(as soon as the running turns finish) and **In 1 hour** (postpone). `GET /console/api/restart`
+returns the reservation with its recent events (reserved, joined, held, released because someone
+was using the bot, postponed, restarting); `POST /console/api/restart/now` and
+`POST /console/api/restart/later` (`minutes`, default 60) answer it. Pressing them does not count
+as using the bot. The board carries the same state as `restart`.
+
 Stop and Pause work for chat threads and console conversations alike: every run registers an
 interrupt with the slot it holds (`POST /console/api/items/{id}/stop`, `/pause`, `/resume`,
 `/queue` with `action: first|later`). The pause mark is stored on the item (`paused_at`).
 
 📌 in the detail header (or `p`) pins a thread as what you are working on now. Pinned threads
-open every list but Done under a highlighted "📌 Working on now" strip, newest pin first, and
-bring their family with them rather than duplicating it in the tree. The pin is stored with the item
+open every list but Done and Recent under a highlighted "📌 Working on now" strip, and
+bring their family with them rather than duplicating it in the tree. In Focus, the "Next move"
+guide stays above the pinned strip, so the recommended next action is always first. The pin is stored with the item
 (`PATCH /console/api/items/{id}` with `pinned: true|false`), so every device sees it.
+Use ↑ / ↓ to move a pin one place, or ⇈ / ⇊ to move straight to the top / bottom of the
+visible pinned list (touch and keyboard work too).
+Order is saved on the server and survives reloads, polling and switching devices. A family
+moves together. Filtered moves use the visible neighbor without removing hidden pins; a new
+or re-pinned item appears first. Moving a pin does not change its activity time or priority.
+`POST /console/api/items/{id}/pin-order` accepts `target_id` and `placement: before|after`;
+both items must still be pinned. The move is atomic and uses the current server order.
+Recent ignores pin positions and family regrouping: matching items appear strictly by
+activity time, with day headings. Pins keep their visual mark but have no reorder controls there.
 Ticking "📌 Pin" next to the capture box pins the request you are writing as it is added
 (`POST /console/api/items` with `pinned: true`); the tick applies to that one request only, and the
 pin stays when the request is handed to an agent.
@@ -332,6 +590,27 @@ choice is remembered per browser.
 tomorrow 09:00, `c` write down work (the first line is the title, further lines become a note; `Ctrl+Enter` adds it — in every text box `Enter` is a newline and `Ctrl+Enter` sends), `r` reply, `/` filter, `h` hide/show done, `p` pin, `g` then `f`/`i`/`c`/`a`/`u`/`t`/`w`/`d` switches
 view, `?` help. URLs carry the view and the open item (`/#me/t1234`), so a link can point at a
 single item.
+
+## Automation AI
+
+**⚙️ Automation AI** in the nav lists the jobs of an external scheduler and lets you choose,
+per job, the AI it runs on — separately from the default you chat with (ADR-0027):
+
+- **Use the default** — the row "Jobs without their own choice" decides.
+- **Follow the master** — whatever the global default is when the job runs.
+- **Codex / Claude**, with an optional model (empty: that backend's default) and effort.
+
+Each row also shows the AI the job's last spawn actually ran on. **Save** replaces the whole
+policy; an invalid row refuses the save and is named in the error. Until the first save the
+dialog says so: the scheduler then keeps using its own fallback file.
+
+The job list comes from `CCDB_AUTOMATION_JOBS_URL` — a JSON array (or `{"jobs": [...]}`) of
+`{id|job_id, name, group, enabled, schedules|active_schedules, ai_routes, last_ai,
+last_run_at}`. `last_ai` is shown when the relay has no record of the job's last spawn. A job whose
+`ai_routes` are all `direct` is flagged: its script calls an AI itself, so the choice has no
+effect yet. Without it, or
+when the scheduler is down, the dialog shows only the jobs already named in the policy. See
+[backends](backends.md#automation-ai-policy) for the API.
 
 ## Enable it
 
@@ -369,6 +648,7 @@ so open `http://localhost:8100`, not `http://127.0.0.1:8100`. A passkey belongs 
 | `CCDB_CONSOLE_ORIGIN` | *(from the request)* | Comma-separated origins the console may be used from, e.g. `https://console.example.com`. Set it when a proxy rewrites `Host` |
 | `CCDB_CONSOLE_SESSION_DAYS` | `30` | How long a sign-in lasts |
 | `CCDB_CONSOLE_ENROLL` | — | `1` logs a new setup code on start, even when passkeys exist |
+| `CCDB_CONSOLE_OIDC_ADDS_PASSKEYS` | — | `1` lets an OIDC session invite new passkey devices (not remove them) |
 
 Sessions are `HttpOnly`, `SameSite=Strict` cookies, and only their hash is stored. Removing a
 passkey signs out every session it opened. Only a passkey session (or the token) can add, list or remove
@@ -407,6 +687,11 @@ The console can send you to your identity provider and back, with no Cloudflare 
 Register a **web** client with the provider and use this redirect URI:
 `<your origin>/console/api/auth/oidc/callback`.
 
+When `CCDB_CONSOLE_ORIGIN` lists several origins (say a tailnet name and a public proxy), the
+browser comes back to the origin it started the sign-in from, so register the callback of
+**every** listed origin. A request whose `Host` is not listed (a proxy that rewrites it) uses the
+first origin, as before.
+
 ```dotenv
 CCDB_CONSOLE_ORIGIN=https://console.example.com      # required: the redirect URI is built from it
 CCDB_CONSOLE_OIDC_ISSUER=https://accounts.google.com
@@ -439,7 +724,13 @@ Entra ID, where your admins control every address, you can waive it with
 their own email.
 
 Taking an email off the allowlist, or switching to another issuer, ends its sessions at once.
-A Google or Entra ID session cannot add or remove passkeys; sign in with a passkey for that. Whether you are asked for a second
+A Google or Entra ID session cannot add or remove passkeys; sign in with a passkey for that.
+If your provider will not admit a device (for example, Entra ID Conditional Access requires a
+device enrolled in Intune) and you have no passkey session at hand, set
+`CCDB_CONSOLE_OIDC_ADDS_PASSKEYS=1`: an OIDC session can then **add** a device under
+**🔑 Passkeys → Add a device** and list passkeys, but still not remove them. A passkey added
+this way keeps working after its email leaves the allowlist, so remove it from a passkey session
+when that person's access ends. Whether you are asked for a second
 factor is the provider's policy: turn on 2-step verification or passkeys for the accounts on the
 allowlist.
 
@@ -461,6 +752,45 @@ Access policy already restricts who gets in: if someone edits the policy by mist
 still stays closed. Multi-factor sign-in then depends on the identity provider (turn on 2-step
 verification or passkeys on that account).
 
+### Behind an authenticating reverse proxy: expired sign-ins recover by themselves
+
+An identity-aware reverse proxy in front of the Console (Cloudflare Access, Entra application
+proxy with pre-authentication, oauth2-proxy, …) keeps its own session cookie, and that cookie
+expires on the proxy's schedule — for Entra application proxy when the access token expires,
+about an hour by default. From then on the proxy answers every request with a redirect to the
+identity provider on another origin. `fetch()` follows it, the provider sends no CORS headers,
+and the request fails in the browser as `TypeError: Failed to fetch` before it reaches ccdb.
+Only a full page load can follow the redirect (the provider's own session usually signs the
+browser back in without a prompt), which is why pressing F5 used to fix it.
+
+The Console now tells that apart from a lost network (`static/net.js`, which every request
+goes through): after a failed request it sends one same-origin probe with
+`redirect: "manual"`. A proxy redirects the probe again (`opaqueredirect`); a dead network
+fails it again. A followed redirect that ends in HTML for an API call counts as a sign-in too,
+for proxies whose sign-in page is on the same origin. Nothing here is specific to one proxy.
+
+When the proxy wants a new sign-in:
+
+- A one-line banner says so, with a **Reconnect** button.
+- As soon as nobody has typed for 10 seconds, the page reloads by itself. Before it does, it
+  saves what was typed (every text box that was edited, and the unsent reply of every item)
+  and the open view (`#…`) to `sessionStorage`, and puts them back after the page loads again,
+  even when the provider asked for an interactive sign-in in between.
+- While a module holds unsaved work a reload would lose (an open note with unsaved changes),
+  it never reloads by itself. **Reconnect** signs in again in a small window instead; the
+  proxy sends that window back to `static/reauth.html`, which tells the Console tab and
+  closes. The page stays exactly as it was. If popups are blocked, Reconnect saves and reloads.
+- At most 3 automatic reloads in 10 minutes, at least 30 seconds apart. After that the banner
+  says automatic reconnect stopped and only the button remains, so a sign-in that keeps
+  failing cannot loop.
+
+A real network failure shows "Can't reach the Console — check the network connection" (in
+Japanese when the Console is) instead of `Failed to fetch`, and the next poll retries by itself.
+The Console has no WebSocket or EventSource connection; everything is polled through the same
+path. Module code calls `window.ConsoleNet.fetch` instead of `fetch`; state outside a text box
+is kept across the reload with `ConsoleNet.keep(key, save, restore)`, and unsaved work that
+must block an automatic reload is reported with `ConsoleNet.busy(check)`.
+
 ### Optional: a bearer token for scripts
 
 ```dotenv
@@ -473,19 +803,42 @@ also offers **Use a token instead**.
 
 ## Run without Discord
 
-The console can be the only frontend. With `CCDB_FRONTENDS` set and `discord` left out, ccdb
-never logs in to Discord and does not need `DISCORD_BOT_TOKEN` or `DISCORD_CHANNEL_ID`:
+Choose Console-only operation explicitly:
 
-```dotenv
-CCDB_FRONTENDS=console          # or console,teams
-API_PORT=8099                   # the console starts beside the control plane
-CCDB_CONSOLE_PORT=8100
-CCDB_CONSOLE_TOKEN=...          # or the Cloudflare Access settings above
+```sh
+ccdb start --mode console
 ```
 
-The scheduler, waits and the control-plane API keep running. New conversations, scheduled tasks
-included, open in the console. Startup refuses a configuration without Discord that nobody could
-reach (no console ports and no Teams).
+This needs no Discord account, bot token, channel ID or `.env` file. It defaults to
+control-plane port `8099` and Console port `8100`; configured ports take precedence.
+Open `http://localhost:8100` and use the normal passkey setup. The choice overrides
+`CCDB_FRONTENDS` in the environment or `.env` for this invocation. It never logs in
+to Discord, creates Discord threads or mirrors lounge messages to Discord, even
+when old Discord credentials and channel settings remain in the environment.
+
+For a service, persist the choice in its environment (and keep the port settings):
+
+```dotenv
+CCDB_FRONTENDS=console          # or console,teams to also enable Teams
+API_PORT=8099
+CCDB_CONSOLE_PORT=8100
+```
+
+The scheduler, waits and the control-plane API keep running. `/api/spawn` and
+`/api/ingest` create native Console conversations; `channel_id` is unnecessary and
+ignored. Ingest still requires its dedicated bearer token. Spawned children inherit
+the saved child AI preferences, and their parent link is stored before the first
+turn starts. Attachments and seed messages remain in the conversation even with
+`auto_start=false`. Native history is available through
+`GET /api/threads/{thread_id}/messages`, and relays use the native session host.
+Pending Console turns resume after restart without waiting for a Discord ready event.
+
+Existing Discord histories are not migrated. Unknown Discord IDs fail without a
+Discord fetch, and old pending Discord resumes are left untouched until expiry.
+Switch back with `ccdb start --mode discord` and valid Discord credentials; leaving
+both the flag and `CCDB_FRONTENDS` unset preserves the original Discord default.
+Startup refuses a configuration without Discord that nobody could reach (no Console
+ports and no Teams). Authentication and loopback binding remain unchanged.
 
 ## API
 
@@ -507,7 +860,7 @@ Endpoints need authentication unless marked *(no sign-in)*. Every method except 
 | GET | `/console/api/passkeys` | Registered passkeys (names and dates, never key material) |
 | POST | `/console/api/passkeys/invite` | A single-use code for adding another device |
 | DELETE | `/console/api/passkeys/{id}` | Remove a passkey and its sessions |
-| GET | `/console/api/board` | Every item, sorted for triage, plus slot usage and the Focus `guide` |
+| GET | `/console/api/board` | Every item, sorted for triage, plus slot usage, the Focus `guide` and the [secretary](#secretary-mode) summary |
 | GET | `/console/api/usage` | Per backend (or pool profile): `available`, `unavailable_until`, and `windows[]` of `{type, utilization, resets_at, status, reset}` |
 | GET | `/console/api/cli-login` | Per CLI: `logged_in` (`null` when unknown), `method`, and the sign-in in progress (`flow`: `state`, `url`, `user_code`, `needs_code`, `message`, `expires_at`) — never a credential |
 | POST | `/console/api/cli-login/{backend}` | `{action: "start" \| "cancel"}` or `{action: "code", code}` (Claude's pasted code) for `claude` / `codex`; 409 when the attempt cannot take it |
@@ -517,11 +870,18 @@ Endpoints need authentication unless marked *(no sign-in)*. Every method except 
 | POST | `/console/api/items/{id}/reply` | `{text}` — continues the session, queued behind a running turn |
 | POST | `/console/api/items/{id}/done` | Mark done (also sets the ✅ marker on the thread) |
 | POST | `/console/api/items/{id}/reopen` | Clear the done/someday verdict |
+| POST | `/console/api/secretary/events` | `{kind: "open" \| "answer", item_id, mode?: "classic" \| "secretary", waited_seconds?}` — a [secretary-mode](#secretary-mode) trial record (204) |
+| GET | `/console/api/secretary/stats?days=7` | Per local day: `opened_threads`, `by_mode`, `card_answers`, `answer_wait_seconds_median` |
 | GET / POST | `/console/api/views` | The saved views (also in every board as `views`); save one with `{name, query}` — see [Saved views](#saved-views-and-the-filter-language) |
 | PATCH / DELETE | `/console/api/views/{id}` | Change (`name`, `query`, `position`) or delete a saved view |
+| POST | `/console/api/pages/{slug}` | Define a [page](console-pages.md) (also in every board as `pages`) |
+| GET / POST | `/console/api/pages/{slug}/items` | One page's items in one state (`?state=open`); register an item |
+| PATCH | `/console/api/pages/{slug}/items/{key}` | A person moves an item to `open`, `done` or `skipped`, optionally with the `result_url` of the post |
+| GET | `/console/api/pages/{slug}/files/{token}/{name}` | A file uploaded to a page, inline (`?download=1` to save) |
 | GET / POST / PATCH / DELETE | `/console/api/places` | The managed list of places with open-item counts; add `{name}`, rename `{from, name}` (every item follows), delete `{name}` (items become doable anywhere) |
 | GET | `/console/api/items/{id}/live` | A console conversation's running turn: status, tool activity, the answer so far, whether it can be stopped |
 | POST | `/console/api/items/{id}/messages/{message_id}/actions/{action_id}` | Press a button listed in a message's `actions` (404 once it is answered) |
+| GET | `/console/api/items/{id}/situation` | What the thread's parent wrote for [the family panel](#where-things-stand) (`situation`, or `null`), and every active wait (`waits`) |
 | POST | `/console/api/items/{id}/stop` | Stop the running turn of a console conversation (409 when nothing runs) |
 | GET | `/console/api/files/{key}/{token}/{name}` | A file an agent delivered in a console conversation |
 | POST | `/console/api/items/{id}/start` | Hand a written-down item to an agent in a console conversation (no chat thread) |
@@ -584,6 +944,69 @@ The button shows the full completion count. A failed descendant leaves its ances
 The immediate Undo reopens only the items completed by that action. This is the web client's
 family action; the individual `/items/{id}/done` API still changes only that item.
 
+### Where things stand
+
+**Any thread with an open decision request shows it here** (#1396), whether or not it has a
+parent or children. A thread on its own with nothing written shows only **🙋 Needed from you**
+with the cards, no empty sections and no second reply box; on a phone the panel is the
+**📍 Where things stand (n)** tab beside the conversation.
+
+A thread family's conversation has a **📍 Where things stand** panel beside it, so a child's report cannot
+push what you are being asked out of view. It does not scroll with the conversation, and it follows
+the parent while you stay on a child.
+
+| Heading | Measured, no agent needed | Written by the parent |
+|---|---|---|
+| 🙋 Needed from you | Every family member marked ❓ 👀 📋 ⚠️, with its latest report and **↩ Reply** | `asks`, each with **↩ Answer** |
+| ⚙️ Running | Active waits | `doing` |
+| 👥 Each thread | Every other open member: status, how long ago, its latest report, **↩ Reply** | — |
+| ✅ Decided and done | 🏁 completion candidates, finished children (folded) | `decided` |
+
+The panel can be read and answered on its own. At its bottom is a reply box with a **To** selector
+listing the parent and every open child. **↩ Answer** quotes the parent's question into that box
+addressed to the parent; **↩ Reply** on a thread addresses the box to that thread. Sending posts the
+same way as the conversation's own reply box, so you never have to open a child to answer it.
+
+The panel replaces the parent's list of child threads, and a bound Workspace entry (with its
+`status.md`) moves into it, which gives the conversation back the height. A child keeps its family
+block (the way back to the parent and **Reply directly to this child**) in the conversation column.
+
+**›** folds the panel to a rail that shows how many things are asked of you; the rail opens it again.
+The choice is remembered in the browser. Folded, the parent's list of child threads returns above the
+conversation. Below 640 px of pane width, a phone included, the panel is a tab next to the conversation
+that counts what is asked of you; on that tab the panel's reply box is the only one shown, and folded,
+a single button brings the tab back.
+
+The panel names how old the parent's record is, and flags one more than 15 minutes older than the family's
+latest activity. A thread with no children shows no panel unless its agent wrote a record.
+
+The parent keeps its part with the control-plane API. Agents are told how in their run context:
+
+```bash
+curl -s -X PUT "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/situation" \
+  -H "Content-Type: application/json" \
+  -d '{"doing": ["Payments and E2E tests in two children"],
+       "decided": ["Payments stay on one provider"]}'
+```
+
+Each field is an array of up to 40 strings of up to 600 characters. A field you send replaces that
+field and one you leave out stays.
+
+**🙋 Needed from you** is not written by the parent any more. It shows the family's open
+[decision requests](#secretary-mode) as the same cards as the secretary home (same buttons, an answer
+goes to the thread that asked), then the threads that wait on the person without a request, and any
+text an older turn left in `asks`; those two are tagged **no request**. Agents are told not to write
+questions into `asks`; plain strings are still accepted for compatibility, and an object entry is
+refused with a pointer to the markers. `doing` and `decided` keep their role. An unknown field is refused. `GET` on the same URL returns the record,
+and the Console reads it from `GET /console/api/items/{id}/situation` along with the active waits. The record is
+stored per thread (`thread_situation`), not in `status.md`:
+one project can have several families at once and a family can exist with no project, see
+[ADR-0017](adr/0017-keep-a-family-situation-beside-the-conversation.md).
+
+In the conversation itself, prompts the relay started a turn with (relays from other sessions, finished waits,
+restart resumes) are activity, shown only with **⚙ Activity**. The agent's answers in such a turn stay visible,
+slightly dimmed, under "↪ Handling a report or a finished wait".
+
 ### Selecting and completing multiple threads
 
 Use a row's checkbox (or Ctrl/Cmd-click) to toggle an individual selection. Click a row and
@@ -633,6 +1056,13 @@ thread (`POST /api/ingest` with `"tags"`). Some come from the thread's origin an
 thread started by the Teams Channel Exporter carries `teams-exporter`, including threads from before
 tags existed (it is derived from the start of the first prompt). Rows show tags as `#tag`.
 
+The sidebar automatically lists every tag present on the board under **＃ Tags**, with its open
+item count. Clicking a tag opens matching items across lists, using the same filtering and
+finished-item policy as saved views. No saved rule or setup is needed. These views update with
+each board refresh and survive reloads via `/#tag:<URL-encoded tag>`. They cannot be renamed or
+deleted as saved views; editing the items' tags updates the menu. If an active tag disappears
+from the board entirely, navigation returns to Focus.
+
 API: `GET /console/api/views` → `{"views": [{id, name, query, position}]}`; `POST` with
 `{name, query}`, `PATCH /console/api/views/{id}` with any of `name`, `query`, `position`, and
 `DELETE /console/api/views/{id}` each answer with the new list. Names are up to 40 characters,
@@ -666,6 +1096,23 @@ Selected rows have a blue outline and a **Selected** marker. Unread rows use a g
 bold title. Pinning keeps its pin symbol while selection keeps its own outline. Background
 refreshes preserve the visible row and its offset, including a thread repeated in a tree and
 its pinned section; only deliberate navigation reveals the selected row.
+
+## Reading file previews
+
+Markdown attachment previews render standard inline and reference images. A relative image
+name resolves to a uniquely named image attached in the same delivery/message, keeping the
+original signed URL for Discord attachments. Otherwise it resolves relative to the document
+URL. Native Console file images are fetched with the same authentication as the document;
+HTTPS web images receive no Console token and send no referrer. Include referenced local
+images with the Markdown file: the preview cannot read arbitrary paths on the agent's disk.
+Ambiguous, blocked or missing images show their alt text and an unavailable message while
+the document remains readable. Raw HTML in Markdown is displayed as text.
+
+Use **Fullscreen** in the preview toolbar to fill the window on desktop or a phone, and
+**Restore size** to return without replacing the document. Escape first restores the size;
+a second Escape closes the preview. Source, copy and download remain available in either size.
+External HTTPS images are permitted by the image policy; scripts, forms, API connections and
+the sandbox for HTML previews retain their existing restrictions.
 
 ## Copying file contents
 
@@ -900,3 +1347,37 @@ Agents receive the link format and the existing `/api/search?q=…&body=1` looku
 in their run context, with instructions to use verified IDs only. That search
 can find stored session summaries and local Claude transcripts; it does not make
 all external message histories searchable.
+
+
+### When a conversation is a next-move candidate
+
+An open or recently active conversation is not automatically work for the person. Automatic
+triage separates `needs_human` (a concrete outstanding human action) from `ready` (whether it
+can be done now). Acknowledgments, settled questions, background advice and optional future
+follow-ups do not create tasks. Continuing conversations remain accessible in other lists.
+
+A thread enters Focus only with a current triage result that explicitly confirms such an action
+and names it, or a current human readiness override. Old results and untriaged threads stay out
+until re-evaluated. Captured tasks still work without a model. Running and queued work cannot
+be recommended. The guide also rechecks the latest board before displaying a candidate.
+The prompt version changes once to re-evaluate older guesses; no tasks are completed or archived
+as part of this change, and pin choices are preserved.
+
+
+### Putting a decision off until later
+
+**Later** (後回し) on a decision card moves only that request out of Decide now / To review
+into the secretary home's folded **Later** section. It stays unanswered; no reply is sent and
+the conversation is not finished or snoozed as a whole. Open Later and press **Restore** (戻す)
+to return it to its original decision/review list. Deferral has no automatic expiry and is
+stored on the server, so it survives reloads and is shared across devices.
+
+Other requests in the same thread stay active. A thread whose open requests are all deferred
+is not recommended as the next move or listed as waiting without an explanation. Restore
+reactivates its request; the normal readiness and eligibility checks still apply. A newly
+submitted request is active even if it replaces a deferred request with the same key.
+
+`POST /console/api/items/{item_id}/decisions/{request_id}/defer` accepts
+`{"deferred": true}` or `{"deferred": false}` and returns `{"changed": n}`. The same Console
+authentication, CSRF protection, visible-thread scope and exact request ID checks apply as for
+Dismiss. History and the request's open state are preserved.

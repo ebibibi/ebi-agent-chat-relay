@@ -42,6 +42,19 @@ _PING = re.compile(r"^\S{1,2} <@!?\d+> ")
 _FOOTER = re.compile(r"^```\n(?:\U0001f517 API:|[^\n]*\U0001f9e0)[\s\S]*```$")
 # Message types that are a message, not a system notice (rename, pin, …).
 _CONVERSATION_TYPES = frozenset({"default", "reply"})
+#: Names the relay starts console turns under (wait watcher, restart resume).
+MACHINE_AUTHORS = frozenset({"wait", "restart"})
+#: A relay from another session (``POST /api/threads/<id>/message``).
+_RELAY_AUTHOR = re.compile(r"^thread \d+$")
+
+
+def is_machine_author(author: str) -> bool:
+    """Whether a stored console message was written by the relay, not by a person.
+
+    The author decides, not the text: a person may well start a message with ``[URGENT]``.
+    """
+    author = (author or "").strip()
+    return author in MACHINE_AUTHORS or bool(_RELAY_AUTHOR.match(author))
 
 
 def _message_type(message: Any) -> str:
@@ -157,13 +170,18 @@ def serialize_message(
 def with_kind(message: dict[str, Any]) -> dict[str, object]:
     """Add ``kind`` (and empty embeds/attachments) to a stored console message.
 
-    Console conversations keep plain text only, so the text rules decide.
+    Console conversations keep plain text only, so the text rules decide. A prompt the
+    relay itself started a turn with is stored without the bot flag, because the agent has
+    to receive it as a prompt; to the reader it is bookkeeping, not the person speaking.
     """
+    kind = (
+        KIND_ACTIVITY
+        if not message.get("is_bot") and is_machine_author(str(message.get("author") or ""))
+        else classify(is_bot=bool(message.get("is_bot")), content=str(message.get("content") or ""))
+    )
     return {
         **message,
-        "kind": classify(
-            is_bot=bool(message.get("is_bot")), content=str(message.get("content") or "")
-        ),
+        "kind": kind,
         "embeds": [],
         "attachments": [],
         "actions": [],

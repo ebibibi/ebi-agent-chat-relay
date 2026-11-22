@@ -26,6 +26,12 @@ STRIPPED_ENV_KEYS = frozenset(
         "CCDB_INGEST_TOKEN",
         "CCDB_TEAMS_APP_PASSWORD",
         "CCDB_TEAMS_QUEUE_URL",
+        # Write access to the same queue, kept beside it by deployments that
+        # provision the queue; the relay itself never reads it.
+        "CCDB_TEAMS_QUEUE_URL_ADD",
+        # The console's sign-in secret: it authenticates people to the relay
+        # and lets an agent mint console sessions if it leaks into one.
+        "CCDB_CONSOLE_OIDC_CLIENT_SECRET",
         "CCDB_API_URL",
         "CCDB_API_SECRET",
     }

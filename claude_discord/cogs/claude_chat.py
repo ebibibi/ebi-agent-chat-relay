@@ -43,8 +43,10 @@ from ..claude.rewind import find_session_jsonl, parse_user_turns
 from ..claude.types import ImageData
 from ..concurrency import SessionRegistry
 from ..connection_choice import apply_connection
+from ..crash_recovery import InflightTracker, crash_notice_text
 from ..cross_backend_handoff import ConversationHistoryReader, carry_history_across_backends
 from ..database.ask_repo import PendingAskRepository
+from ..database.inflight_repo import InflightTurnRepository
 from ..database.lounge_repo import LoungeRepository
 from ..database.repository import SessionRecord, SessionRepository
 from ..database.resume_repo import PendingResumeRepository
@@ -59,6 +61,7 @@ from ..discord_ui.thread_renamer import suggest_retitle, suggest_title
 from ..discord_ui.thread_retitle import RetitleTracker
 from ..discord_ui.views import RewindSelectView, StopView
 from ..execution_settings import apply_thread_execution_mode, thread_execution_mode
+from ..human_activity import note_human_activity
 from ..restart_reservation import QUEUED_RESTART_REASON, persist_queued_runs
 from ..session_slots import get_session_slots
 from ..thread_marker import (
@@ -71,6 +74,7 @@ from ..thread_marker import (
 )
 from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES, initial_thread_name
 from ..thread_status import schedule_thread_outcome
+from ..turn_ai import TurnAI
 from ._run_helper import run_claude_with_config
 from .prompt_builder import build_prompt_and_images, wants_file_attachment
 from .run_config import RunConfig
@@ -238,6 +242,15 @@ class ClaudeChatCog(commands.Cog):
         self._lounge_repo = lounge_repo or getattr(bot, "lounge_repo", None)
         # Pending resume repo (optional — startup resume disabled when None)
         self._resume_repo = resume_repo or getattr(bot, "resume_repo", None)
+        self._inflight_heartbeat_started = False
+        # Turns running right now, persisted so a SIGKILL/OOM does not lose them.
+        # Lives in the resume repo's database; off whenever resumes are off.
+        resume_db = getattr(self._resume_repo, "db_path", None)
+        self._inflight: InflightTracker | None = (
+            InflightTracker(InflightTurnRepository(resume_db))
+            if isinstance(resume_db, str)
+            else None
+        )
         # Settings repo for dynamic model lookup (optional — falls back to runner.model)
         self._settings_repo = settings_repo or getattr(bot, "settings_repo", None)
         # When True, rename the thread after creation using a claude -p title suggestion
@@ -316,6 +329,9 @@ class ClaudeChatCog(commands.Cog):
         if self._allowed_user_ids is not None and message.author.id not in self._allowed_user_ids:
             return
 
+        # A person is using the bot: a reserved restart waits for them to go quiet.
+        note_human_activity("discord")
+
         # Inside a no-mention channel (or a thread under it) everything is for
         # Claude, and the session model applies: a channel message opens a
         # thread, a thread message continues that thread's session.
@@ -387,6 +403,7 @@ class ClaudeChatCog(commands.Cog):
         fork_session: bool,
         working_dir_override: str | None,
         effort_override: str | None,
+        ai: TurnAI | None = None,
     ) -> SessionBackend:
         """Build a runner for a session, honouring per-thread backend/model overrides.
 
@@ -410,7 +427,12 @@ class ClaudeChatCog(commands.Cog):
                 effort=effort_override if effort_override is not None else _UNSET,
             )
 
-        backend = await self._backend_settings.current_backend(thread_id)
+        # A screen AI (Console canvas mode) decides this one turn; nothing is stored.
+        backend = (
+            ai.backend
+            if ai is not None
+            else await self._backend_settings.current_backend(thread_id)
+        )
 
         # Model resolution order:
         # 1. Explicit /model command value for THIS backend (thread > global).
@@ -425,7 +447,9 @@ class ClaudeChatCog(commands.Cog):
         #    so factory.build() picks the right one.
         explicit_model = await self._backend_settings.explicit_model(backend, thread_id)
         model: str | None
-        if explicit_model:
+        if ai is not None and ai.model:
+            model = ai.model
+        elif explicit_model:
             model = explicit_model
         elif model_override and backend == "claude":
             model = model_override
@@ -454,7 +478,11 @@ class ClaudeChatCog(commands.Cog):
         #   2. Legacy ``claude_effort`` setting value (``effort_override``),
         #      left over from the removed /effort-set command — Claude only;
         #      Codex effort levels differ ("max" is not a Codex level).
-        effective_effort = await self._backend_settings.current_effort(backend, thread_id)
+        effective_effort = (
+            ai.effort
+            if ai is not None and ai.effort
+            else await self._backend_settings.current_effort(backend, thread_id)
+        )
         if effective_effort is None and backend == "claude":
             effective_effort = effort_override
         if effective_effort is not None and hasattr(runner, "effort"):
@@ -465,7 +493,13 @@ class ClaudeChatCog(commands.Cog):
 
         # Per-thread execution environment (/sandbox), bounded by the allowlist.
         await apply_thread_execution_mode(runner, self._backend_settings.repo, thread_id)
-        await apply_connection(runner, self._backend_settings, backend, thread_id)
+        await apply_connection(
+            runner,
+            self._backend_settings,
+            backend,
+            thread_id,
+            chosen=ai.connection if ai is not None else None,
+        )
 
         return runner
 
@@ -1015,6 +1049,7 @@ class ClaudeChatCog(commands.Cog):
         invite_user_id: int | None = None,
         agent_spawned: bool = False,
         parent_thread_id: int | None = None,
+        ai: TurnAI | None = None,
     ) -> discord.Thread:
         """Create a new thread and optionally start a Claude Code session.
 
@@ -1065,20 +1100,23 @@ class ClaudeChatCog(commands.Cog):
                         markers into readable trees. Best-effort in every
                         respect: an unreachable or unrenameable parent costs the
                         cross-link, never the spawn.
+            ai: The AI this thread runs on, stored as the thread's own settings before
+                        its first turn so every later turn keeps it. Wins over the
+                        parent's child preferences. ``None``: unchanged behaviour.
 
         Returns:
             The newly created :class:`discord.Thread`.
         """
         # Resolve before creating the thread and persist before scheduling its first turn.
         # A manager's own backend is independent from its child preferences.
-        child_ai = None
-        if parent_thread_id is not None and self._backend_settings is not None:
+        child_ai = ai
+        if child_ai is None and parent_thread_id is not None and self._backend_settings:
             settings = self._backend_settings.for_children()
             backend = await settings.current_backend(parent_thread_id)
-            child_ai = (
-                backend,
-                await settings.current_model(backend, parent_thread_id),
-                await settings.current_effort(backend, parent_thread_id),
+            child_ai = TurnAI(
+                backend=backend,
+                model=await settings.current_model(backend, parent_thread_id),
+                effort=await settings.current_effort(backend, parent_thread_id),
             )
         raw_name = thread_name or prompt
         name = (
@@ -1092,12 +1130,9 @@ class ClaudeChatCog(commands.Cog):
             auto_archive_duration=THREAD_AUTO_ARCHIVE_MINUTES,
         )
         if child_ai is not None and self._backend_settings is not None:
-            backend, model, effort = child_ai
-            await self._backend_settings.set_backend(backend, thread_id=thread.id)
-            if model:
-                await self._backend_settings.set_model(backend, model, thread_id=thread.id)
-            if effort:
-                await self._backend_settings.set_effort(backend, effort, thread_id=thread.id)
+            await self._backend_settings.pin_thread(
+                thread.id, child_ai.backend, child_ai.model, child_ai.effort, child_ai.connection
+            )
         # Added before the seed message so the requester sees the thread from its
         # first line, not after Claude has already been talking to itself.
         if invite_user_id:
@@ -1142,6 +1177,7 @@ class ClaudeChatCog(commands.Cog):
         interrupt: bool,
         into_running_turn: bool = False,
         brief: str | None = None,
+        ai: TurnAI | None = None,
     ) -> None:
         """Feed a message from another session into this thread's Claude session.
 
@@ -1166,6 +1202,8 @@ class ClaudeChatCog(commands.Cog):
             brief: Instructions for the agent only (Ebi Workspace context). Posted
                 as a message of its own after *text*, which the Console files under
                 activity, and appended to what the agent receives.
+            ai: The AI chosen on the Console screen that sent it, for this turn only.
+                Never stored; a turn already running keeps its own AI.
         """
         try:
             if len(text) > DISCORD_MAX_CHARS:
@@ -1193,7 +1231,11 @@ class ClaudeChatCog(commands.Cog):
             with contextlib.suppress(discord.HTTPException):
                 await thread.send(brief[:DISCORD_MAX_CHARS])
 
-        if into_running_turn and await self._inject_into_running_turn(thread.id, text):
+        if (
+            into_running_turn
+            and ai is None
+            and await self._inject_into_running_turn(thread.id, text)
+        ):
             with contextlib.suppress(discord.HTTPException):
                 await seed_message.add_reaction(INJECTED_REACTION)
             return
@@ -1217,6 +1259,7 @@ class ClaudeChatCog(commands.Cog):
             chat_only=chat_only,
             interrupt_existing=interrupt,
             interrupt_notice="-# ⚡ Interrupted by another session's message...",
+            ai=ai,
         )
 
     async def cog_unload(self) -> None:
@@ -1299,6 +1342,7 @@ class ClaudeChatCog(commands.Cog):
         if self._resume_repo is None:
             return
 
+        await self._recover_crashed_turns()
         pending = await self._resume_repo.get_pending()
         if not pending:
             return
@@ -1306,6 +1350,11 @@ class ClaudeChatCog(commands.Cog):
         logger.info("Found %d pending session resume(s) on startup", len(pending))
 
         for entry in pending:
+            if getattr(self.bot, "headless", False) is True:
+                console = getattr(self.bot, "console_sessions", None)
+                if console is None or not await console.owns(entry.thread_id):
+                    # Retain old Discord resumes without contacting Discord.
+                    continue
             # Delete FIRST — prevents double-resume even if spawn fails
             await self._resume_repo.delete(entry.id)
 
@@ -1360,6 +1409,38 @@ class ClaudeChatCog(commands.Cog):
             except Exception:
                 logger.error("Failed to resume session in thread %d", thread_id, exc_info=True)
 
+    async def _recover_crashed_turns(self) -> None:
+        """Queue (or report) turns a killed process left behind; first ``on_ready`` only.
+
+        A crashed turn becomes a ``pending_resumes`` row, so the loop in
+        ``on_ready`` resumes it exactly like one saved at a clean shutdown.
+        See ``crash_recovery.py`` for the TTL and the consecutive-crash limit.
+        """
+        if self._inflight is None or self._resume_repo is None:
+            return
+        first = not self._inflight_heartbeat_started
+        plan = await self._inflight.recover_once(
+            resumes=self._resume_repo,
+            sessions=self.repo,
+            ttl_seconds=self._resume_repo.ttl_minutes * 60.0,
+        )
+        if first:
+            self._inflight_heartbeat_started = True
+            self._spawn_background(self._inflight.heartbeat_forever())
+        if getattr(self.bot, "headless", False) is True:
+            return
+        for notice in plan.notices:
+            try:
+                raw = self.bot.get_channel(notice.thread_id) or await self.bot.fetch_channel(
+                    notice.thread_id
+                )
+                if isinstance(raw, discord.Thread):
+                    await raw.send(crash_notice_text(notice))
+            except Exception:
+                logger.warning(
+                    "Crash notice: thread %d not reachable", notice.thread_id, exc_info=True
+                )
+
     async def _resume_in_console(self, thread_id: int, prompt: str) -> bool:
         """Resume a Ebi AI Console conversation, which has no Discord thread to fetch.
 
@@ -1396,6 +1477,8 @@ class ClaudeChatCog(commands.Cog):
         try:
             if console is not None and await console.owns(thread_id):
                 await console.resume_queued(thread_id, prompt)
+                return
+            if getattr(self.bot, "headless", False) is True:
                 return
             raw = self.bot.get_channel(thread_id) or await self.bot.fetch_channel(thread_id)
         except Exception:
@@ -1727,6 +1810,7 @@ class ClaudeChatCog(commands.Cog):
         interrupt_existing: bool = False,
         interrupt_notice: str = "-# ⚡ Interrupted. Starting with new instruction...",
         _account_retry: bool = False,
+        ai: TurnAI | None = None,
     ) -> None:
         """Execute Claude Code CLI and stream results to the thread.
 
@@ -1779,7 +1863,9 @@ class ClaudeChatCog(commands.Cog):
                     )
 
                 model_override = await self._get_current_model()
-                effective_model = model_override or self.runner.model
+                effective_model = (ai.model if ai and ai.model else None) or (
+                    model_override or self.runner.model
+                )
 
                 async def _notify_stall() -> None:
                     threshold = status._stall_hard
@@ -1806,7 +1892,9 @@ class ClaudeChatCog(commands.Cog):
                     try:
                         account_plan, session_id, prompt = await plan_account_turn(
                             self._account_router,
-                            backend=await self._current_backend_name(thread.id),
+                            backend=ai.backend
+                            if ai is not None
+                            else await self._current_backend_name(thread.id),
                             thread_id=thread.id,
                             session_id=session_id,
                             prompt=prompt,
@@ -1823,6 +1911,7 @@ class ClaudeChatCog(commands.Cog):
                     fork_session=fork,
                     working_dir_override=working_dir_override,
                     effort_override=effort_override,
+                    ai=ai,
                 )
                 account_turn: AccountTurn | None = None
                 if account_plan is not None and hasattr(runner, "account"):
@@ -1850,6 +1939,8 @@ class ClaudeChatCog(commands.Cog):
                 self._active_runners[thread.id] = runner
                 if current_task is not None:
                     self._active_tasks[thread.id] = current_task
+                if self._inflight is not None:
+                    await self._inflight.begin(thread.id, session_id=session_id, prompt=user_prompt)
 
                 # In chat_only mode, skip the "Session running" message and stop button.
                 stop_view: StopView | None = None
@@ -1905,6 +1996,8 @@ class ClaudeChatCog(commands.Cog):
             # still holding the old object.
             if self._active_runners.get(thread.id) is runner:
                 self._active_runners.pop(thread.id, None)
+                if self._inflight is not None:
+                    await self._inflight.end(thread.id)
             if self._active_tasks.get(thread.id) is current_task:
                 self._active_tasks.pop(thread.id, None)
 
@@ -1935,4 +2028,5 @@ class ClaudeChatCog(commands.Cog):
                 chat_only=chat_only,
                 result_sink=result_sink,
                 _account_retry=True,
+                ai=ai,
             )

@@ -54,6 +54,26 @@ class ThreadLineageRepository:
             )
             await db.commit()
 
+    async def parent_of(self, thread_id: int) -> int | None:
+        """Return the thread that spawned *thread_id*, or None for a root thread."""
+        async with aiosqlite.connect(self._db_path) as db:
+            rows = await db.execute_fetchall(
+                "SELECT parent_thread_id FROM thread_lineage WHERE thread_id = ?",
+                (int(thread_id),),
+            )
+        rows = list(rows)
+        return int(rows[0][0]) if rows else None
+
+    async def children_of(self, thread_id: int) -> list[int]:
+        """Return the threads *thread_id* spawned directly, oldest first."""
+        async with aiosqlite.connect(self._db_path) as db:
+            rows = await db.execute_fetchall(
+                "SELECT thread_id FROM thread_lineage WHERE parent_thread_id = ?"
+                " ORDER BY created_at, thread_id",
+                (int(thread_id),),
+            )
+        return [int(row[0]) for row in rows]
+
     async def list_all(self, limit: int = 500) -> list[Lineage]:
         """Return the most recent links, newest first."""
         async with aiosqlite.connect(self._db_path) as db:
@@ -71,3 +91,56 @@ class ThreadLineageRepository:
             )
             for row in rows
         ]
+
+    async def set_notify_parent(self, thread_id: int, enabled: bool) -> bool:
+        """Turn child→parent reports on or off for one spawned thread.
+
+        Returns False when the relay recorded no parent for *thread_id*: the
+        opt-in only ever follows a link the relay wrote itself.
+        """
+        async with aiosqlite.connect(self._db_path) as db:
+            cursor = await db.execute(
+                "UPDATE thread_lineage SET notify_parent = ? WHERE thread_id = ?",
+                (1 if enabled else 0, int(thread_id)),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def notify_target(self, thread_id: int) -> NotifyTarget | None:
+        """Return where a report about *thread_id* goes, or None when it is not opted in."""
+        async with aiosqlite.connect(self._db_path) as db:
+            rows = await db.execute_fetchall(
+                "SELECT parent_thread_id, notified_outcome, notified_at, notified_count "
+                "FROM thread_lineage WHERE thread_id = ? AND notify_parent = 1",
+                (int(thread_id),),
+            )
+        rows = list(rows)
+        if not rows:
+            return None
+        parent, outcome, at, count = rows[0]
+        return NotifyTarget(
+            parent_thread_id=int(parent),
+            last_outcome=outcome,
+            last_at=float(at) if at is not None else None,
+            count=int(count or 0),
+        )
+
+    async def record_notified(self, thread_id: int, outcome: str, at: float) -> None:
+        """Remember that the parent was told *thread_id* reached *outcome*."""
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                "UPDATE thread_lineage SET notified_outcome = ?, notified_at = ?, "
+                "notified_count = notified_count + 1 WHERE thread_id = ?",
+                (outcome, float(at), int(thread_id)),
+            )
+            await db.commit()
+
+
+@dataclass(frozen=True)
+class NotifyTarget:
+    """An opted-in child's parent and what it was last told."""
+
+    parent_thread_id: int
+    last_outcome: str | None
+    last_at: float | None
+    count: int

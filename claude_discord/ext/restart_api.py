@@ -1,11 +1,13 @@
 """``/api/restart`` — reserve, inspect and cancel a restart (see :mod:`..restart_reservation`).
 
-- ``POST /api/restart``: holds the slot queue and restarts once nothing is
-  running. Optional body fields: ``reason``, ``requested_by``,
-  ``resume_thread_id`` + ``resume_prompt`` (continue that thread after the
-  restart) and ``max_wait_seconds`` (give up when the running sessions take
-  longer). 202 when reserved, 200 with the pending reservation when one already
-  exists, 400 bad body, 503 when no session limit is configured.
+- ``POST /api/restart``: waits until nobody has used the bot for the quiet
+  period (``CCDB_RESTART_QUIET_SECONDS``, default 15 min), then holds the slot
+  queue and restarts once nothing is running. Optional body fields: ``reason``,
+  ``requested_by``, ``resume_thread_id`` + ``resume_prompt`` (continue that
+  thread after the restart), ``max_wait_seconds`` (give up after that long) and
+  ``urgent`` (skip the quiet wait: security fixes and a broken bot only).
+  202 when reserved, 200 when the request joined the pending reservation,
+  400 bad body, 503 when no session limit is configured.
 - ``GET /api/restart``: the reservation's state and the running/waiting counts.
 - ``DELETE /api/restart``: cancel; the queue resumes. 200, 404 when nothing is
   reserved, 409 when the restart is already under way.
@@ -18,29 +20,12 @@ from typing import Any
 
 from aiohttp import web
 
-from ..restart_reservation import (
-    RestartReservation,
-    build_restart_action,
-    get_restart_reservation,
-    set_restart_reservation,
-)
+from ..restart_reservation import ensure_restart_reservation, get_restart_reservation
 from ..session_slots import get_session_slots
 
 __all__ = ["handle_cancel_restart", "handle_get_restart", "handle_reserve_restart"]
 
 _MAX_TEXT = 500
-
-
-def _reservation_for(bot: Any, resume_repo: Any) -> RestartReservation | None:
-    reservation = get_restart_reservation()
-    if reservation is not None:
-        return reservation
-    slots = get_session_slots()
-    if slots is None:
-        return None
-    reservation = RestartReservation(slots, build_restart_action(bot), resume_repo=resume_repo)
-    set_restart_reservation(reservation)
-    return reservation
 
 
 def _no_limit() -> web.Response:
@@ -78,7 +63,11 @@ async def handle_reserve_restart(request: web.Request, bot: Any, resume_repo: An
                 {"error": "max_wait_seconds must be a positive number"}, status=400
             )
 
-    reservation = _reservation_for(bot, resume_repo)
+    urgent = body.get("urgent", False)
+    if not isinstance(urgent, bool):
+        return web.json_response({"error": "urgent must be true or false"}, status=400)
+
+    reservation = ensure_restart_reservation(bot, resume_repo)
     if reservation is None:
         return _no_limit()
     created = reservation.reserve(
@@ -87,6 +76,7 @@ async def handle_reserve_restart(request: web.Request, bot: Any, resume_repo: An
         resume_thread_id=resume_thread_id,
         resume_prompt=resume_prompt,
         max_wait_seconds=max_wait,
+        urgent=urgent,
     )
     return web.json_response(
         {"status": "reserved" if created else "already_reserved", **reservation.status()},

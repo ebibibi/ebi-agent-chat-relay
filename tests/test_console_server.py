@@ -45,9 +45,11 @@ async def test_the_shell_is_served_with_security_headers(client) -> None:
     assert "Ebi AI Console" in await response.text()
     csp = response.headers["Content-Security-Policy"]
     assert "frame-ancestors 'none'" in csp
-    # Images attached in Discord threads load from Discord's CDN; nothing else does.
+    # Markdown may embed HTTPS images; API connections stay limited to self and the CDN.
     img_src = next(d for d in csp.split(";") if d.strip().startswith("img-src")).split()
-    assert {"https://cdn.discordapp.com", "https://media.discordapp.net"} <= set(img_src)
+    assert "https:" in img_src and "*" not in img_src
+    connect_src = next(d for d in csp.split(";") if d.strip().startswith("connect-src")).split()
+    assert "https:" not in connect_src and "*" not in connect_src
     assert "default-src 'self'" in csp and "connect-src 'self'" in csp
     assert (await client.get("/static/app.js")).status == 200
     assert (await client.get("/static/markdown.js")).status == 200
@@ -261,3 +263,27 @@ def test_log_values_cannot_forge_lines() -> None:
 
     assert q("t1\nINFO forged\r\x1b[2J") == "t1 INFO forged  [2J"
     assert len(q("x" * 500)) == 200
+
+
+async def test_pin_order_endpoint_and_write_guards(client) -> None:
+    ids = []
+    for title in ["A", "B", "C"]:
+        r = await client.post(
+            "/console/api/items", json={"title": title, "pinned": True}, headers=WRITE
+        )
+        ids.append((await r.json())["item"]["id"])
+    url = f"/console/api/items/{ids[0]}/pin-order"
+    body = {"target_id": ids[2], "placement": "before"}
+    assert (await client.post(url, json=body)).status == 401
+    assert (await client.post(url, json=body, headers=AUTH)).status == 403
+    assert (await client.post(url, json=body, headers=WRITE)).status == 200
+    r = await client.get("/console/api/board", headers=AUTH)
+    items = {i["id"]: i for i in (await r.json())["items"]}
+    assert [items[i]["pin_position"] for i in [ids[0], ids[2], ids[1]]] == [0, 1, 2]
+    for bad in [
+        {},
+        {"target_id": []},
+        {"target_id": "missing", "placement": "before"},
+        {"target_id": ids[1], "placement": "bad"},
+    ]:
+        assert (await client.post(url, json=bad, headers=WRITE)).status == 400

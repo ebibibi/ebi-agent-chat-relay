@@ -1,0 +1,42 @@
+/* Declarative pages (pages.js). The dialog frame is shared with the Workspace panel. */
+.nav-page { display:flex; justify-content:space-between; gap:8px; width:100%; text-align:left; }
+.page-shell { width:min(820px,100%); }
+.page-tabs { display:flex; gap:4px; padding:8px 16px; border-bottom:1px solid var(--line); }
+.page-tab { padding:6px 12px; border:0; border-radius:5px; background:transparent; color:inherit; cursor:pointer; }
+.page-tab.on { background:var(--raise); font-weight:600; }
+.page-items { list-style:none; margin:0; padding:0 16px; flex:1; min-height:0; overflow:auto; }
+.page-item { padding:14px 0; border-bottom:1px solid var(--line); }
+.page-item-title { font-weight:600; margin-bottom:4px; overflow-wrap:anywhere; }
+.page-item-body { white-space:pre-wrap; overflow-wrap:anywhere; }
+.page-item-meta { font-size:12px; margin-top:6px; overflow-wrap:anywhere; }
+.page-item-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; align-items:center; }
+.page-item-actions a.btn { display:inline-flex; align-items:center; justify-content:center; text-decoration:none; }
+.page-empty { padding:24px 16px; }
+/* The posting queue (#1518): target labels and filter, attachments, the character count. */
+.page-item-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 8px; margin-bottom:4px; }
+.page-item-head .page-item-title { margin-bottom:0; }
+.page-target { padding:1px 8px; border:1px solid var(--line); border-radius:999px; background:var(--raise); font-size:12px; overflow-wrap:anywhere; }
+.page-targets { display:flex; flex-wrap:wrap; gap:6px; padding:8px 16px; border-bottom:1px solid var(--line); }
+.page-chip { display:inline-flex; gap:6px; align-items:center; min-height:32px; padding:4px 10px; border:1px solid var(--line); border-radius:999px; background:transparent; color:inherit; cursor:pointer; }
+.page-chip.on { background:var(--raise); border-color:var(--accent); font-weight:600; }
+.page-chip .count { color:var(--dim); font-variant-numeric:tabular-nums; }
+.page-files { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
+.page-file { display:flex; flex-direction:column; gap:6px; align-items:flex-start; max-width:100%; }
+.page-thumb { display:grid; place-items:center; gap:4px; min-width:120px; min-height:80px; padding:0; border:1px solid var(--line); border-radius:var(--radius); background:var(--raise); color:inherit; cursor:zoom-in; overflow:hidden; }
+.page-thumb img { display:block; max-width:min(100%, 240px); max-height:180px; object-fit:contain; }
+.page-thumb-wait { font-size:22px; }
+.page-video { padding:8px 12px; cursor:pointer; max-width:240px; }
+.page-thumb-name { font-size:12px; color:var(--dim); overflow-wrap:anywhere; }
+.page-player { display:block; max-width:min(100%, 360px); max-height:320px; border-radius:var(--radius); background:#000; }
+.page-file-link { overflow-wrap:anywhere; }
+.page-item-meta { display:flex; flex-wrap:wrap; gap:4px 10px; align-items:baseline; }
+.page-count { font-variant-numeric:tabular-nums; }
+.page-count.over { color:var(--err); font-weight:700; }
+.page-result { flex:1 1 180px; min-width:0; min-height:32px; padding:4px 8px; border:1px solid var(--line); border-radius:5px; background:var(--bg); color:inherit; font:inherit; }
+@media (max-width: 640px) {
+  .page-item-actions > * { flex:1 1 auto; min-height:40px; }
+  .page-chip, .page-save { min-height:40px; }
+  .page-result { flex-basis:100%; order:10; }
+  .page-item-actions .page-done { order:11; }
+  .page-item-actions .page-done ~ .btn { order:12; }
+}

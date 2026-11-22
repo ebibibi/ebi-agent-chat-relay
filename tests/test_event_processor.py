@@ -1755,3 +1755,28 @@ class TestRejectedResumeIsNotPersisted:
         await p.process(_make_result_event(session_id="s2"))
 
         repo.save.assert_called_once()
+
+
+async def test_codex_explicit_context_usage_does_not_double_count_cached_input(
+    thread, runner, tmp_path
+):
+    from claude_discord.database.models import init_db
+    from claude_discord.database.repository import SessionRepository
+
+    db = str(tmp_path / "codex-context.db")
+    await init_db(db)
+    repo = SessionRepository(db)
+    await repo.save(thread_id=thread.id, session_id="s-context")
+    processor = EventProcessor(_make_config(thread, runner, repo=repo))
+    await processor.process(
+        _make_result_event(
+            session_id="s-context",
+            input_tokens=100000,
+            cache_read_tokens=90000,
+            context_window=475000,
+            context_used=100000,
+        )
+    )
+    record = await repo.get(thread.id)
+    assert record.context_window == 475000
+    assert record.context_used == 100000

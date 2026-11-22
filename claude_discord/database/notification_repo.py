@@ -7,6 +7,7 @@ Used by the REST API extension for push notifications to Discord.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import aiosqlite
 
@@ -39,7 +40,8 @@ class NotificationRepository:
         self.db_path = db_path
 
     async def init_db(self) -> None:
-        """Initialize the notification schema."""
+        """Initialize the notification schema, including a fresh deployment directory."""
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         async with aiosqlite.connect(self.db_path) as db:
             await db.executescript(NOTIFICATION_SCHEMA)
             await db.commit()

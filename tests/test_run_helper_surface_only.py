@@ -126,3 +126,36 @@ async def test_delegation_guidance_preserves_preselected_child_ai() -> None:
     assert "parent_thread_id" in context
     assert "child AI preferences" in context
     assert "native subagents" in context
+
+
+async def test_a_parent_is_told_how_to_keep_its_situation_panel_current() -> None:
+    surface = MemorySurface()
+    config = RunConfig(surface=surface, runner=_runner(), prompt="coordinate the children")
+    context = await _build_system_context(config)
+    assert f"/api/threads/{surface.thread_key}/situation" in context
+    assert '"doing"' in context
+    assert '"decided"' in context
+
+
+async def test_agents_are_told_to_ask_the_user_with_a_decision_request() -> None:
+    surface = MemorySurface()
+    config = RunConfig(surface=surface, runner=_runner(), prompt="anything")
+    context = await _build_system_context(config) or ""
+    # The format and the bar, in one place, for the markers and the situation panel alike.
+    assert "## Asking the user: decision requests" in context
+    assert "forgotten this whole matter" in context
+    for field in ('"title"', '"context"', '"options"', '"deadline"', '"detail"'):
+        assert field in context
+    assert '"recommended": true' in context
+    assert "never copies a child's question" in context
+    assert "Do not write questions into `asks`" in context
+    # v1 told parents to write asks as short strings; that produced shorthand nobody could answer.
+    assert "array of short strings" not in context
+
+
+async def test_without_the_control_plane_there_is_no_request_format() -> None:
+    runner = _runner()
+    runner.api_port = None
+    config = RunConfig(surface=MemorySurface(), runner=runner, prompt="anything")
+    context = await _build_system_context(config) or ""
+    assert "## Asking the user" not in context

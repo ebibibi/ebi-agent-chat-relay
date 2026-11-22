@@ -2,6 +2,7 @@
 // turn finishes, the row lights up, a toast offers to open it, a chime plays and, while
 // the tab is in the background, the title and a desktop notification say so.
 // Loaded before app.js; app.js calls ConsoleNotify.onBoard() after every board refresh.
+// Inside the person's quiet hours (night.js) only their urgent conditions announce.
 "use strict";
 
 window.ConsoleNotify = (() => {
@@ -50,6 +51,8 @@ window.ConsoleNotify = (() => {
   function events(items) {
     const out = [];
     for (const item of items) {
+      // The canvas secretary (canvas.js) runs on every change; its turns are not news.
+      if (item.canvas_secretary) continue;
       const prev = seen.get(item.id);
       const toInbox = item.bucket === INBOX &&
         (!prev || prev.bucket !== INBOX || prev.status !== item.status);
@@ -95,8 +98,15 @@ window.ConsoleNotify = (() => {
     if (missed) titleFlag(); // renderNav rewrote the title
     const next = new Map(items.map((i) => [i.id, { bucket: i.bucket, status: i.status, running: Boolean(i.running) }]));
     // The first board is the starting point, not news.
-    const fresh = seen && enabled ? events(items) : [];
+    let fresh = seen && enabled ? events(items) : [];
     seen = next;
+    // Quiet hours (#1476, off unless the person set them): only their urgent conditions ring;
+    // everything else waits for the morning brief and still shows on the board.
+    const night = window.ConsoleNight;
+    if (night) {
+      night.load();
+      if (night.quietNow()) fresh = fresh.filter((item) => night.urgent(item));
+    }
     if (fresh.length) announce(fresh);
   }
 

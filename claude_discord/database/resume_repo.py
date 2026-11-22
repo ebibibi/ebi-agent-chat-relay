@@ -47,6 +47,16 @@ class PendingResumeRepository:
         self._db_path = db_path
         self._ttl_minutes = ttl_minutes
 
+    @property
+    def db_path(self) -> str:
+        """The SQLite file this repository (and the in-flight turn table) live in."""
+        return self._db_path
+
+    @property
+    def ttl_minutes(self) -> int:
+        """How long a pending resume stays eligible after it was written."""
+        return self._ttl_minutes
+
     async def mark(
         self,
         thread_id: int,

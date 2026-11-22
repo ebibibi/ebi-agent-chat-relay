@@ -179,6 +179,10 @@ class OidcClient:
             raise OidcError("this sign-in expired or was started in another browser")
         return flow
 
+    def redirect_uri_of(self, flow: dict[str, Any]) -> str:
+        """The redirect URI a sealed *flow* was started with (older flows: the default)."""
+        return str(flow.get("r") or self.config.redirect_uri)
+
     def _remember_used(self, state: str) -> None:
         now = self._clock()
         self._used = {k: v for k, v in self._used.items() if v > now}
@@ -186,21 +190,29 @@ class OidcClient:
             del self._used[next(iter(self._used))]
         self._used[state] = now + FLOW_TTL
 
-    async def start(self) -> tuple[str, str]:
-        """Begin a sign-in: ``(authorization URL, signed flow cookie value)``."""
+    async def start(self, redirect_uri: str | None = None) -> tuple[str, str]:
+        """Begin a sign-in: ``(authorization URL, signed flow cookie value)``.
+
+        *redirect_uri* is where the provider sends the browser back: the
+        callback on the origin the sign-in started from, when the console is
+        listed under several. The caller must have checked it against the
+        configured origins. It is sealed into the flow so the code is exchanged
+        with exactly the URI it was issued for, and cannot be swapped on the way.
+        """
+        redirect = redirect_uri or self.config.redirect_uri
         meta = await self._metadata()
         state = secrets.token_urlsafe(24)
         nonce = secrets.token_urlsafe(24)
         verifier = secrets.token_urlsafe(48)
         sealed = self._seal(
-            {"s": state, "n": nonce, "v": verifier, "exp": self._clock() + FLOW_TTL}
+            {"s": state, "n": nonce, "v": verifier, "r": redirect, "exp": self._clock() + FLOW_TTL}
         )
         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
         query = urlencode(
             {
                 "response_type": "code",
                 "client_id": self.config.client_id,
-                "redirect_uri": self.config.redirect_uri,
+                "redirect_uri": redirect,
                 "scope": self.config.scopes,
                 "state": state,
                 "nonce": nonce,
@@ -228,7 +240,7 @@ class OidcClient:
         form = {
             "grant_type": "authorization_code",
             "code": code,
-            "redirect_uri": self.config.redirect_uri,
+            "redirect_uri": self.redirect_uri_of(flow),
             "client_id": self.config.client_id,
             "code_verifier": str(flow["v"]),
         }

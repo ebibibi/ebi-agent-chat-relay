@@ -157,6 +157,41 @@ async def test_restarts_only_after_running_sessions_finish_and_saves_queue_first
     assert not late.done()
 
 
+async def test_waits_for_a_turn_that_is_still_wrapping_up() -> None:
+    """Issue #1400: a released slot is not a finished turn."""
+    slots = SessionSlotScheduler(2)
+    running = await slots.acquire(1)
+    restarted: list[str] = []
+
+    async def restart() -> None:
+        restarted.append("restart")
+
+    reservation = RestartReservation(slots, restart, poll_interval=0.005)
+    assert reservation.reserve(requested_by="tester", reason="deploy")
+    end = slots.begin_finishing(1)
+    slots.release(running)
+    await asyncio.sleep(0.03)
+    assert restarted == []
+    assert reservation.status()["phase"] == "draining"
+
+    end()
+    await _until(lambda: restarted == ["restart"])
+
+
+def test_finishing_is_counted_per_turn_and_ends_once() -> None:
+    slots = SessionSlotScheduler(2)
+    first = slots.begin_finishing(1)
+    second = slots.begin_finishing(1)
+    other = slots.begin_finishing(2)
+    assert slots.finishing_count == 3
+    first()
+    first()  # a second call does not end someone else's wrap-up
+    assert slots.finishing_count == 2
+    second()
+    other()
+    assert slots.finishing_count == 0
+
+
 async def test_the_requesting_thread_is_resumed_unless_it_has_a_queued_message() -> None:
     slots = SessionSlotScheduler(1)
     slots.hold()

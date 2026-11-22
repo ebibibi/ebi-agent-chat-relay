@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#14161a">
 <title>Ebi AI Console</title>
 <link rel="manifest" href="/static/manifest.webmanifest">
@@ -14,6 +14,10 @@
 <link rel="stylesheet" href="/static/workspace.css">
 <link rel="stylesheet" href="/static/notes.css">
 <link rel="stylesheet" href="/static/search.css">
+<link rel="stylesheet" href="/static/situation.css">
+<link rel="stylesheet" href="/static/pages.css">
+<link rel="stylesheet" href="/static/secretary.css">
+<link rel="stylesheet" href="/static/canvas.css">
 <link rel="stylesheet" href="/static/zen.css">
 <link rel="stylesheet" href="/static/mobile.css">
 </head>
@@ -54,12 +58,15 @@
     <ul id="list" class="list" role="listbox"></ul>
     <p id="empty" class="empty" hidden></p>
   </main>
+  <section id="canvas" class="canvas" hidden aria-label="Canvas"></section>
   <section id="detail" class="detail" hidden aria-label="Detail"></section>
 </div>
 <div id="help" class="help" hidden></div>
+<script src="/static/net.js"></script>
 <script src="/static/links.js"></script>
 <script src="/static/markdown.js"></script>
 <script src="/static/auth.js"></script>
+<script src="/static/night.js"></script>
 <script src="/static/notify.js"></script>
 <script src="/static/paste.js"></script>
 <script src="/static/slash.js"></script>
@@ -68,10 +75,15 @@
 <script src="/static/preview.js"></script>
 <script src="/static/recent.js"></script>
 <script src="/static/backend.js"></script>
+<script src="/static/automation.js"></script>
 <script src="/static/slots.js"></script>
 <script src="/static/places.js"></script>
 <script src="/static/focusws.js"></script>
 <script src="/static/focus.js"></script>
+<script src="/static/secretary.js"></script>
+<script src="/static/screenai.js"></script>
+<script src="/static/canvas.js"></script>
+<script src="/static/session.js"></script>
 <script src="/static/zen.js"></script>
 <script src="/static/query.js"></script>
 <script src="/static/views.js"></script>
@@ -81,6 +93,9 @@
 <script src="/static/workspace.js"></script>
 <script src="/static/wsbind.js"></script>
 <script src="/static/wspane.js"></script>
+<script src="/static/situation_reply.js"></script>
+<script src="/static/situation.js"></script>
+<script src="/static/pages.js"></script>
 <script src="/static/notes.js"></script>
 <script src="/static/notesearch.js"></script>
 <script src="/static/noteedit.js"></script>
@@ -88,6 +103,7 @@
 <script src="/static/search.js"></script>
 <script src="/static/mobile.js"></script>
 <script src="/static/boxsize.js"></script>
+<script src="/static/readhold.js"></script>
 <script src="/static/app.js"></script>
 <script src="/static/resize.js"></script>
 <script src="/static/clilogin.js"></script>

@@ -21,6 +21,9 @@ body > .app { flex: 1 1 0; min-height: 0; height: auto; }
 .u-win.warn .u-pct { color: var(--me); }
 .u-win.hot .u-pct { color: var(--err); }
 .u-out { color: var(--err); font-weight: 700; }
+/* Phone, folded: a non-default backend that is nearly used up stays out and stands out. */
+.u-be.alert { border-width: 2px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--err) 35%, transparent); }
+.u-be.alert .u-name::before { content: "⚠"; color: var(--err); }
 
 /* CLI sign-in (clilogin.js): a chip per CLI that is not signed in, and its dialog. */
 .cl-btn { font: inherit; font-size: 12px; padding: 1px 8px; border-radius: 5px; border: 1px solid var(--line);
@@ -49,4 +52,10 @@ body > .app { flex: 1 1 0; min-height: 0; height: auto; }
   .usage { flex-wrap: wrap; gap: 4px 6px; padding: 4px 8px; }
   .u-be { gap: 2px 6px; padding: 1px 7px; flex-wrap: wrap; max-width: 100%; }
   .u-bar { width: 28px; }
+  .u-toggle { font: inherit; font-size: 12px; padding: 1px 8px; border-radius: 5px; border: 1px solid var(--line);
+    background: var(--raise); color: var(--dim); cursor: pointer; margin-left: auto; }
+  /* Folded: the toggle sits beside the default backend instead of taking a row of its own. */
+  .usage.folded { flex-wrap: nowrap; align-items: flex-start; }
+  .usage.folded .u-be { flex: 1 1 auto; min-width: 0; }
+  .usage.folded .u-toggle { flex: none; }
 }

@@ -9,6 +9,7 @@ window.ConsoleBackend = (() => {
   const LABELS = { claude: "Claude", codex: "Codex", local: "Local", agui: "AG-UI", pi: "pi", antigravity: "Antigravity" };
   let panel = null;
   let defaults = null; // the default catalog, for the nav line
+  let parentDefaults = null; // parent mode default and cap, for the nav line (#1489)
 
   function close() {
     if (!panel) return;
@@ -126,6 +127,89 @@ window.ConsoleBackend = (() => {
       apply: (name, arg) => api(path, {method: "POST", body: {name, arg}}), onChange };
   }
 
+  // ------------------------------------------------------------ parent mode (#1489)
+  // A thread in parent mode splits its work into child threads and reports once; the human
+  // talks only to it. Per thread: on / off / follow the default. Children never follow the
+  // default: they stay workers.
+  const parentText = () => document.documentElement.lang === "ja" ? {
+    label: "👪 親子モード", on: "オン", off: "オフ", follow: (on) => `既定に従う（${on ? "オン" : "オフ"}）`,
+    child: "子スレッドなので既定ではオフ",
+    title: "オンにすると、このスレッドが親として作業を子スレッドに分け、子の進捗・CI・失敗を追い、まとめて1回報告します",
+    nav: (on, n) => `👪 親子モード既定: ${on ? "オン" : "オフ"}（子は最大${n}）`,
+    navTitle: "新しく話しかけるスレッドの既定。オンにすると、言わなくても親として子スレッドに仕事を分けます",
+    max: "未完了の子の上限", saved: "親子モードを変更しました",
+  } : {
+    label: "👪 Parent mode", on: "On", off: "Off", follow: (on) => `Default (${on ? "on" : "off"})`,
+    child: "A child thread: off unless set",
+    title: "On: this thread splits work into child threads, follows their progress, CI and failures, and reports once",
+    nav: (on, n) => `👪 Parent mode default: ${on ? "on" : "off"} (max ${n} children)`,
+    navTitle: "The default for threads you talk to. On: they delegate to child threads without being told",
+    max: "Max unfinished children", saved: "Parent mode updated",
+  };
+
+  function parentModeControl(item) {
+    const path = `/items/${encodeURIComponent(item.id)}/parent-mode`;
+    const t = parentText();
+    const select = h("select", { class: "team-parent-mode", "aria-label": t.label, title: t.title, disabled: true });
+    const draw = (s) => {
+      select.replaceChildren(
+        h("option", { value: "default", text: s.is_child ? t.child : t.follow(s.default_enabled) }),
+        h("option", { value: "on", text: t.on }),
+        h("option", { value: "off", text: t.off }));
+      select.value = s.mode;
+      select.disabled = false;
+      wrap.classList.toggle("on", Boolean(s.enabled));
+    };
+    select.onchange = async () => {
+      try { draw(await api(path, { method: "POST", body: { mode: select.value } })); toast(`✅ ${t.saved}`); }
+      catch (err) { toast(err.message); api(path).then(draw).catch(() => {}); }
+    };
+    const wrap = h("label", { class: "team-parent", title: t.title }, h("span", { text: t.label }), select);
+    api(path).then(draw).catch(() => { wrap.hidden = true; });
+    return wrap;
+  }
+
+  function parentNav() {
+    const t = parentText();
+    if (!parentDefaults) return null;
+    let s = parentDefaults;
+    const btn = h("button", { class: "nav-parent-mode" + (s.enabled ? " on" : ""), type: "button", title: t.navTitle,
+      text: t.nav(s.enabled, s.max_children) });
+    const save = async (body) => {
+      try {
+        s = parentDefaults = await api("/defaults/parent-mode", { method: "POST", body });
+        btn.textContent = t.nav(s.enabled, s.max_children);
+        btn.classList.toggle("on", s.enabled);
+        toast(`✅ ${t.saved}`);
+      } catch (err) { toast(err.message); }
+    };
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      if (!s) return;
+      close();
+      panel = h("div", { class: "backend-picker", role: "dialog", "aria-label": t.label });
+      const max = h("input", { type: "number", min: 1, max: s.max_children_limit || 50, value: s.max_children, class: "bp-custom", size: 4,
+        onchange: (ev) => { const n = Number(ev.target.value); if (Number.isInteger(n) && n !== s.max_children) save({ max_children: n }); } });
+      const chip = (on) => h("button", { type: "button", class: "chip" + (s.enabled === on ? " on" : ""), "aria-pressed": s.enabled === on ? "true" : "false",
+        text: on ? t.on : t.off, onclick: async () => { await save({ enabled: on }); close(); } });
+      panel.append(
+        h("div", { class: "bp-head" }, h("strong", { text: t.label }),
+          h("button", { class: "icon-btn", type: "button", "aria-label": "close", onclick: close, text: "×" })),
+        h("p", { class: "dim bp-note", text: t.navTitle }),
+        h("div", { class: "chips" }, chip(true), chip(false)),
+        h("div", { class: "bp-label", text: t.max }), max);
+      document.body.append(panel);
+      const r = btn.getBoundingClientRect();
+      panel.style.top = `${Math.max(8, Math.min(r.bottom + 6, window.innerHeight - panel.offsetHeight - 8))}px`;
+      panel.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - panel.offsetWidth - 8))}px`;
+      setTimeout(() => {
+        document.addEventListener("keydown", onKey, true);
+        document.addEventListener("click", onOutside, true);
+      }, 0);
+    };
+    return btn;
+  }
+
   function controls(item) {
     if (!item.thread_id) return null;
     const make = (cls, label, scope) => {
@@ -137,7 +221,8 @@ window.ConsoleBackend = (() => {
     };
     return h("div", {class: "team-settings"},
       make("team-manager-ai", teamText().manager, forItem(item.id)),
-      make("team-child-ai", teamText().child, childScope(item.id)));
+      make("team-child-ai", teamText().child, childScope(item.id)),
+      parentModeControl(item));
   }
 
   function childNav() {
@@ -152,13 +237,19 @@ window.ConsoleBackend = (() => {
     get note() { return T.bp_note_default; },
     load: async () => (defaults = await api("/defaults")),
     apply: (name, arg) => api("/defaults", { method: "POST", body: { name, arg } }),
-    onChange: (c) => { defaults = c; renderNav(); },
+    onChange: (c) => { defaults = c; renderNav(); defaultsChanged(); },
   };
 
   async function loadDefaults() {
     try { defaults = await api("/defaults"); } catch { defaults = null; }
+    // A deployment without the settings store has no parent mode: the nav simply omits it.
+    try { parentDefaults = await api("/defaults/parent-mode"); } catch { parentDefaults = null; }
     renderNav();
+    defaultsChanged();
   }
+  // usage.js shows only the default backend's usage on a phone until expanded.
+  const defaultsChanged = () => window.dispatchEvent(new Event("console-defaults-change"));
+  const defaultBackend = () => defaults && defaults.backend;
 
   // The nav line: "🤖 Default: Claude · opus" — click to change.
   function nav() {
@@ -169,5 +260,5 @@ window.ConsoleBackend = (() => {
     return btn;
   }
 
-  return { open, forItem, nav, childNav, controls, loadDefaults, summary };
+  return { open, forItem, nav, childNav, parentNav, controls, loadDefaults, summary, defaultBackend };
 })();

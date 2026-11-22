@@ -27,9 +27,10 @@ import time
 import uuid
 import zipfile
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlsplit
 
 from aiohttp import web
@@ -37,6 +38,8 @@ from aiohttp import web
 from claude_code_core.thread_search import run_thread_search
 from claude_code_core.transcript_search import default_transcripts_root
 
+from ..automation_ai import AutomationAIPolicy, entry_ai, valid_job_id
+from ..automation_routes import ControlPlaneRoutes
 from ..backend_settings import ALL_BACKENDS
 from ..discord_ui.file_sender import send_file_blobs
 from ..lounge import length_hint
@@ -47,6 +50,7 @@ from ..thread_marker import (
     MAX_THREAD_NAME_LENGTH,
     OUTCOME_ACTION,
     OUTCOME_CANDIDATE,
+    OUTCOME_DONE,
     OUTCOME_REVIEW,
     OUTCOME_WAITING,
     family_code,
@@ -54,10 +58,25 @@ from ..thread_marker import (
 )
 from ..thread_policy import THREAD_AUTO_ARCHIVE_MINUTES
 from ..thread_status import request_thread_outcome
-from . import ingest_manifest, teams_sync
+from ..turn_ai import TurnAI, TurnAIError, parse_turn_ai
+from . import ingest_manifest, teams_reply, teams_sync
 from .attention_api import handle_attention
+from .decision_api import read_mark_request, remember_mark
 from .entra_auth import EntraTokenVerifier, looks_like_jwt
+from .pages_api import (
+    handle_add_item,
+    handle_delete_page,
+    handle_list_items,
+    handle_list_pages,
+    handle_put_page,
+    handle_resolve_item,
+    handle_upload_file,
+)
+from .parent_notify import ParentNotifier
+from .parent_notify import default_enabled as notify_default_enabled
+from .parent_notify import parse_opt_in as parse_notify_opt_in
 from .restart_api import handle_cancel_restart, handle_get_restart, handle_reserve_restart
+from .situation_api import handle_get_situation, handle_put_situation
 from .teams_store import MAX_ATTACHMENT_BYTES as TEAMS_MAX_ATTACHMENT_BYTES
 from .teams_store import TeamsVaultStore
 from .teams_sync import ThreadRef
@@ -71,12 +90,15 @@ if TYPE_CHECKING:
     from claude_code_core.attention_repo import HumanActivityRepository
 
     from ..database.claims_repo import ClaimRepository
+    from ..database.decision_repo import DecisionRequestRepository
     from ..database.ingest_repo import IngestResultRepository
     from ..database.lineage_repo import ThreadLineageRepository
     from ..database.lounge_repo import LoungeRepository
     from ..database.notification_repo import NotificationRepository
+    from ..database.pages_repo import PageRepository
     from ..database.repository import SessionRepository
     from ..database.resume_repo import PendingResumeRepository
+    from ..database.situation_repo import ThreadSituationRepository
     from ..database.summary_repo import ThreadSummaryRepository
     from ..database.task_repo import TaskRepository
     from ..database.wait_repo import WaitRepository
@@ -246,6 +268,16 @@ def _normalize_thread_name(value: object) -> str | None:
     return name[:_MAX_DISCORD_THREAD_NAME_LENGTH]
 
 
+@dataclass(frozen=True)
+class _ReplyLink:
+    """How one ingest run was tied to the Teams thread it answers."""
+
+    thread_key: str | None = None
+    base_mid: str | None = None
+    draft_path: Path | None = None
+    reason: str = ""
+
+
 class ApiServer:
     """Embedded REST API server for Discord bot notifications.
 
@@ -285,6 +317,9 @@ class ApiServer:
         summary_repo: ThreadSummaryRepository | None = None,
         claims_repo: ClaimRepository | None = None,
         lineage_repo: ThreadLineageRepository | None = None,
+        situation_repo: ThreadSituationRepository | None = None,
+        decision_repo: DecisionRequestRepository | None = None,
+        page_repo: PageRepository | None = None,
         transcripts_path: str | None = None,
         ingest_require_complete: bool | None = None,
         teams_vault_root: str | None = None,
@@ -318,6 +353,10 @@ class ApiServer:
         self.summary_repo = summary_repo
         self.claims_repo = claims_repo
         self.lineage_repo = lineage_repo
+        self.situation_repo = situation_repo
+        # Decision requests (ADR-0024): what agents asked the person, until answered.
+        self.decision_repo = decision_repo
+        self.page_repo = page_repo
         # Human-activity metering (GET /api/attention). Wired by
         # BridgeComponents.apply_to_api_server; 503 until then.
         self.attention_repo: HumanActivityRepository | None = None
@@ -331,6 +370,16 @@ class ApiServer:
         # An agent running in one marks its outcome through the same
         # /api/threads/{id}/done|waiting|review|action as a chat thread.
         self.console_conversations: Any = None
+        # Evidence-based completion of /candidate marks (#1477); off unless configured.
+        from .auto_complete_api import ApiCompletionHost, AutoCompleter
+
+        self.auto_completer = AutoCompleter(ApiCompletionHost(self))
+        # Closing routine threads (upgrades, sweeps) with a rescue record (#1490); off by default.
+        from ..auto_close import set_system_closer
+        from .auto_close_api import AutoCloser
+
+        self.auto_closer = AutoCloser(self)
+        set_system_closer(self.auto_closer.close)
         self.attention_params: AttentionParams | None = None
         # Where Claude Code transcripts live, for /api/search?body=1. Falls back
         # to the standard ~/.claude/projects location so body search is
@@ -418,13 +467,34 @@ class ApiServer:
         self.app.router.add_get("/api/search", self.search_sessions)
         self.app.router.add_get("/api/threads/{thread_id}/messages", self.get_thread_messages)
         self.app.router.add_post("/api/threads/{thread_id}/message", self.relay_thread_message)
+        self.app.router.add_get("/api/threads/{thread_id}/situation", self.get_situation)
+        self.app.router.add_put("/api/threads/{thread_id}/situation", self.put_situation)
+        self.app.router.add_get("/api/pages", self.list_pages)
+        self.app.router.add_put("/api/pages/{slug}", self.put_page)
+        self.app.router.add_delete("/api/pages/{slug}", self.delete_page)
+        self.app.router.add_get("/api/pages/{slug}/items", self.list_page_items)
+        self.app.router.add_post("/api/pages/{slug}/items", self.add_page_item)
+        self.app.router.add_patch("/api/pages/{slug}/items/{key}", self.resolve_page_item)
+        self.app.router.add_post("/api/pages/{slug}/files", self.upload_page_file)
         self.app.router.add_post("/api/threads/{thread_id}/done", self.mark_thread_done)
         self.app.router.add_post("/api/threads/{thread_id}/candidate", self.mark_thread_done)
+        self.app.router.add_post("/api/threads/{thread_id}/complete", self.complete_thread)
+        self.app.router.add_post("/api/threads/{thread_id}/auto-close", self.auto_close_thread)
+        self.app.router.add_get("/api/sweep/threads", self.list_sweep_threads)
+        self.app.router.add_get("/api/auto-closures", self.list_auto_closures)
         self.app.router.add_post("/api/threads/{thread_id}/waiting", self.mark_thread_waiting)
         self.app.router.add_post("/api/threads/{thread_id}/review", self.mark_thread_review)
         self.app.router.add_post("/api/threads/{thread_id}/action", self.mark_thread_action)
+        self.app.router.add_delete(
+            "/api/threads/{thread_id}/decisions/{key}", self.close_thread_decision
+        )
+        self.app.router.add_get("/api/threads/{thread_id}/decisions", self.list_thread_decisions)
+        self.app.router.add_post(
+            "/api/threads/{thread_id}/decisions/{key}/covers", self.cover_thread_decisions
+        )
         # Session spawn route
         self.app.router.add_post("/api/spawn", self.spawn)
+        ControlPlaneRoutes(self._backend_settings).register(self.app.router)
         # Authenticated external ingest route (browser extension / webhooks)
         self.app.router.add_post("/api/ingest", self.ingest)
         # Running per-thread summaries. GET (external, token) reads the stored
@@ -440,8 +510,14 @@ class ApiServer:
         # vault as one file per message; the client keeps no state of its own.
         self.app.router.add_post("/api/teams/sync/plan", self.teams_sync_plan)
         self.app.router.add_post("/api/teams/sync/push", self.teams_sync_push)
+        self.app.router.add_post("/api/teams/sync/ignore", self.teams_sync_ignore)
+        self.app.router.add_post("/api/teams/reply/status", self.teams_reply_status)
         # Startup resume routes
         self.app.router.add_post("/api/mark-resume", self.mark_resume)
+        # Canvas mode: the resident secretary's widgets, notes and digest (ADR-0025)
+        from .canvas_api import CanvasApi
+
+        CanvasApi(self).register(self.app.router)
 
     def _build_external_app(self) -> web.Application:
         """Build the app served on the externally reachable listener.
@@ -467,6 +543,9 @@ class ApiServer:
         # root, never spawning anything.
         app.router.add_post("/api/teams/sync/plan", self.teams_sync_plan)
         app.router.add_post("/api/teams/sync/push", self.teams_sync_push)
+        app.router.add_post("/api/teams/sync/ignore", self.teams_sync_ignore)
+        # Read-only, and the extension's way back to the reply it asked for.
+        app.router.add_post("/api/teams/reply/status", self.teams_reply_status)
         return app
 
     @web.middleware
@@ -586,6 +665,10 @@ class ApiServer:
 
     async def stop(self) -> None:
         """Stop the API server."""
+        self.auto_completer.cancel_all()
+        from ..auto_close import clear_system_closer
+
+        clear_system_closer(self.auto_closer.close)
         if self._runner:
             await self._runner.cleanup()
         if self._ext_runner:
@@ -1167,7 +1250,7 @@ class ApiServer:
                 ``hop + 1``; the guard refuses beyond MAX_HOP.
 
         Returns 202 when delivered (Claude runs in the background), 429 when
-        the relay guard refuses (loop/cooldown/rate), 404 for unknown threads.
+        the relay guard refuses (hop/duplicate/pair burst/sender burst), 404 for unknown threads.
         """
         try:
             thread_id = int(request.match_info["thread_id"])
@@ -1205,14 +1288,46 @@ class ApiServer:
             return web.json_response({"error": "hop must be an integer"}, status=400)
 
         now = time.monotonic()
-        refusal = self.relay_guard.check(
-            from_thread=from_thread, to_thread=thread_id, hop=hop, now=now
+        refusal = self.relay_guard.evaluate(
+            from_thread=from_thread, to_thread=thread_id, hop=hop, now=now, text=text
         )
         if refusal is not None:
             logger.info("Relay refused (%s → %s): %s", from_thread, thread_id, refusal)
-            return web.json_response({"error": refusal}, status=429)
+            body: dict[str, Any] = {"error": refusal.message, "reason": refusal.reason}
+            headers = {}
+            if refusal.retry_after_seconds is not None:
+                body["retry_after_seconds"] = refusal.retry_after_seconds
+                headers["Retry-After"] = str(refusal.retry_after_seconds)
+            return web.json_response(body, status=429, headers=headers)
 
-        prompt = build_relay_prompt(text=text, from_thread=from_thread, hop=hop)
+        # No await between checking and reserving: concurrent requests must see
+        # in-flight deliveries, not only completed ones.
+        reservation = self.relay_guard.record(
+            from_thread=from_thread, to_thread=thread_id, now=now, text=text
+        )
+        accepted = False
+        try:
+            response = await self._dispatch_relay(
+                thread_id, text=text, from_thread=from_thread, mode=mode, hop=hop
+            )
+            accepted = response.status == 202
+            return response
+        finally:
+            if not accepted:
+                self.relay_guard.release(reservation)
+
+    async def _dispatch_relay(
+        self,
+        thread_id: int,
+        *,
+        text: str,
+        from_thread: int,
+        mode: str,
+        hop: int,
+        prompt: str | None = None,
+    ) -> web.Response:
+        if prompt is None:
+            prompt = build_relay_prompt(text=text, from_thread=from_thread, hop=hop)
 
         # An Ebi AI Console conversation shares the thread-key space but has no
         # Discord channel behind it: looking one up would fail with "Unknown Channel".
@@ -1221,8 +1336,11 @@ class ApiServer:
         console = getattr(self.bot, "console_sessions", None)
         if isinstance(console, ConsoleSessionHost) and await console.owns(thread_id):
             return await self._relay_to_console(
-                console, thread_id, prompt, from_thread=from_thread, mode=mode, hop=hop, now=now
+                console, thread_id, prompt, from_thread=from_thread, mode=mode, hop=hop
             )
+
+        if getattr(self.bot, "headless", False) is True:
+            return web.json_response({"error": "Console conversation not found"}, status=404)
 
         from ..cogs.claude_chat import ClaudeChatCog
 
@@ -1246,8 +1364,6 @@ class ApiServer:
                 )
         if not isinstance(thread, _discord.Thread):
             return web.json_response({"error": "Target must be a thread"}, status=400)
-
-        self.relay_guard.record(from_thread=from_thread, to_thread=thread_id, now=now)
 
         # Run in the background so the sender is not blocked for the length of
         # the receiver's turn.
@@ -1281,7 +1397,6 @@ class ApiServer:
         from_thread: int,
         mode: str,
         hop: int,
-        now: float,
     ) -> web.Response:
         """Deliver a relay into a Console conversation and report what actually happened.
 
@@ -1306,7 +1421,6 @@ class ApiServer:
                 {"error": f"Message not delivered to console conversation {thread_id}: {exc}"},
                 status=500,
             )
-        self.relay_guard.record(from_thread=from_thread, to_thread=thread_id, now=now)
         logger.info(
             "Relayed message: thread %s → console conversation %s (mode=%s, hop=%s)",
             from_thread,
@@ -1738,6 +1852,42 @@ class ApiServer:
                 names[thread_id] = name
         return names
 
+    async def close_thread_decision(self, request: web.Request) -> web.Response:
+        """Close one decision request by key (#1438); see :func:`.decision_api.close_decision`."""
+        from .decision_api import close_decision
+
+        return await close_decision(
+            self.decision_repo,
+            request.match_info["thread_id"],
+            request.match_info["key"],
+            request.rel_url.query.get("reason"),
+        )
+
+    async def list_thread_decisions(self, request: web.Request) -> web.Response:
+        """Open requests of a thread, or its family with ``?family=1`` (#1493)."""
+        from .decision_bundle_api import family_requests
+
+        family = request.rel_url.query.get("family", "") in ("1", "true", "yes")
+        return await family_requests(
+            self.decision_repo, self.lineage_repo, request.match_info["thread_id"], family
+        )
+
+    async def cover_thread_decisions(self, request: web.Request) -> web.Response:
+        """A parent's card covers the same question from its descendants (#1493)."""
+        from .decision_bundle_api import covers
+
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            return web.json_response({"error": "Invalid JSON"}, status=400)
+        return await covers(
+            self.decision_repo,
+            self.lineage_repo,
+            request.match_info["thread_id"],
+            request.match_info["key"],
+            body,
+        )
+
     async def get_thread_messages(self, request: web.Request) -> web.Response:
         """GET /api/threads/{thread_id}/messages — read another thread's conversation.
 
@@ -1761,6 +1911,26 @@ class ApiServer:
             limit = max(1, min(_MAX_THREAD_MESSAGE_LIMIT, int(raw_limit)))
         except ValueError:
             return web.json_response({"error": "limit must be an integer"}, status=400)
+
+        if self.console_conversations is not None:
+            conversation = await self.console_conversations.get(thread_id)
+            if conversation is not None:
+                entries = await self.console_conversations.history(thread_id, limit=limit)
+                payload = []
+                for entry in entries:
+                    message = entry.as_dict()
+                    message["content"] = entry.content[:_MAX_THREAD_MESSAGE_CHARS]
+                    message["truncated"] = len(entry.content) > _MAX_THREAD_MESSAGE_CHARS
+                    payload.append(message)
+                return web.json_response(
+                    {
+                        "thread_id": thread_id,
+                        "thread_name": conversation.name,
+                        "messages": payload,
+                    }
+                )
+        if getattr(self.bot, "headless", False) is True:
+            return web.json_response({"error": "Console conversation not found"}, status=404)
 
         channel = self.bot.get_channel(thread_id)
         if channel is None:
@@ -1804,6 +1974,11 @@ class ApiServer:
         keeps its name for the prompts that already call it. The chat cog
         removes the marker again when a human replies in the thread.
 
+        An optional ``evidence`` object lets the thread complete itself after
+        the turn when ``CCDB_AUTO_COMPLETE=on`` and every check passes; see
+        :mod:`claude_discord.auto_complete`. The verdict is returned as
+        ``auto_complete``.
+
         Idempotent: an already-marked thread is not renamed, because Discord
         allows a thread only two renames per ten minutes.
 
@@ -1812,7 +1987,88 @@ class ApiServer:
         Discord's rate limit and will land on its own; 404 for an unknown
         channel, 400 when it is not a thread, 502 when the rename fails.
         """
-        return await self._mark_thread_outcome(request, OUTCOME_CANDIDATE)
+        from .auto_complete_api import handle_candidate
+
+        return await handle_candidate(
+            request,
+            self.auto_completer,
+            lambda: self._mark_thread_outcome(request, OUTCOME_CANDIDATE),
+        )
+
+    async def complete_thread(self, request: web.Request) -> web.Response:
+        """POST /api/threads/{thread_id}/complete — close it on the user's explicit request.
+
+        See :mod:`claude_discord.ext.thread_complete_api` for the rules.
+        """
+        from .thread_complete_api import handle_complete_thread
+
+        async def mark_done(req: web.Request) -> web.Response:
+            return await self._mark_thread_outcome(req, OUTCOME_DONE)
+
+        return await handle_complete_thread(
+            request,
+            console=self._console,
+            lineage=self.lineage_repo,
+            running_thread_ids=self._running_thread_ids,
+            mark_without_console=mark_done,
+        )
+
+    async def auto_close_thread(self, request: web.Request) -> web.Response:
+        """POST /api/threads/{thread_id}/auto-close — a housekeeping sweep closes a thread.
+
+        See :mod:`claude_discord.auto_close` for the rules; off unless configured.
+        """
+        from .auto_close_api import handle_auto_close
+
+        return await handle_auto_close(request, self.auto_closer)
+
+    async def list_sweep_threads(self, request: web.Request) -> web.Response:
+        """GET /api/sweep/threads — candidates and stalled threads for a sweep to review."""
+        from .auto_close_api import handle_sweep_threads
+
+        return await handle_sweep_threads(request, self)
+
+    async def list_auto_closures(self, request: web.Request) -> web.Response:
+        """GET /api/auto-closures — threads closed automatically, kept for rescue."""
+        from .auto_close_api import handle_list_auto_closures
+
+        return await handle_list_auto_closures(request, self, self.auto_closer.policy())
+
+    async def list_pages(self, request: web.Request) -> web.Response:
+        """GET /api/pages — the screens registered with the Console, with open counts."""
+        return await handle_list_pages(request, self.page_repo)
+
+    async def put_page(self, request: web.Request) -> web.Response:
+        """PUT /api/pages/{slug} — add a screen to the Console or change its definition."""
+        return await handle_put_page(request, self.page_repo)
+
+    async def delete_page(self, request: web.Request) -> web.Response:
+        """DELETE /api/pages/{slug} — remove a screen and its items."""
+        return await handle_delete_page(request, self.page_repo)
+
+    async def list_page_items(self, request: web.Request) -> web.Response:
+        """GET /api/pages/{slug}/items?state=open — one page's items in one state."""
+        return await handle_list_items(request, self.page_repo)
+
+    async def add_page_item(self, request: web.Request) -> web.Response:
+        """POST /api/pages/{slug}/items — register an item; an existing key keeps its state."""
+        return await handle_add_item(request, self.page_repo)
+
+    async def resolve_page_item(self, request: web.Request) -> web.Response:
+        """PATCH /api/pages/{slug}/items/{key} — move an item to open, done or skipped."""
+        return await handle_resolve_item(request, self.page_repo)
+
+    async def upload_page_file(self, request: web.Request) -> web.Response:
+        """POST /api/pages/{slug}/files — keep an image or video an item can attach."""
+        return await handle_upload_file(request, self.page_repo)
+
+    async def get_situation(self, request: web.Request) -> web.Response:
+        """GET /api/threads/{thread_id}/situation — what this parent last wrote for its panel."""
+        return await handle_get_situation(request, self.situation_repo)
+
+    async def put_situation(self, request: web.Request) -> web.Response:
+        """PUT /api/threads/{thread_id}/situation — replace the fields the body names."""
+        return await handle_put_situation(request, self.situation_repo)
 
     async def mark_thread_waiting(self, request: web.Request) -> web.Response:
         """POST /api/threads/{thread_id}/waiting — the next move is the human's.
@@ -1843,7 +2099,58 @@ class ApiServer:
             thread_id = int(request.match_info["thread_id"])
         except (ValueError, KeyError):
             return web.json_response({"error": "Invalid thread_id"}, status=400)
+        # Checked before the mark: a refused request must not leave a bare marker behind.
+        spec, refused = await read_mark_request(request, outcome)
+        if refused is not None:
+            return refused
+        response = await self._apply_thread_outcome(thread_id, outcome)
+        if response.status in (200, 202):
+            await self._report_to_parent(thread_id, outcome, response)
+            stored = await remember_mark(self.decision_repo, thread_id, outcome, spec)
+            if stored is not None:
+                body = json.loads(cast(bytes, response.body))
+                body["request_id"] = stored.id
+                return web.json_response(body, status=response.status)
+        return response
 
+    def _parent_notifier(self) -> ParentNotifier | None:
+        if self.lineage_repo is None:
+            return None
+
+        async def dispatch(parent: int, prompt: str, child: int) -> bool:
+            response = await self._dispatch_relay(
+                parent, text=prompt, from_thread=child, mode=MODE_QUEUE, hop=0, prompt=prompt
+            )
+            return response.status == 202
+
+        return ParentNotifier(self.lineage_repo, self.relay_guard, dispatch)
+
+    async def _report_to_parent(self, thread_id: int, outcome: str, response: web.Response) -> None:
+        """Queue a report to the parent of an opted-in child (Issue #820)."""
+        body = json.loads(cast(bytes, response.body))
+        await self.notify_parent_of_outcome(
+            thread_id,
+            outcome,
+            str(body.get("thread_name") or ""),
+            changed=body.get("status") != "unchanged",
+        )
+
+    async def notify_parent_of_outcome(
+        self, thread_id: int, outcome: str, thread_name: str, *, changed: bool = True
+    ) -> str:
+        """Report a child's new outcome to its parent if it opted in (Issue #820).
+
+        The entry point for any path that marks a thread outside
+        ``_mark_thread_outcome`` (e.g. automatic completion). Never raises.
+        """
+        notifier = self._parent_notifier()
+        if notifier is None:
+            return "no_lineage"
+        return await notifier.on_outcome(
+            thread_id, outcome, thread_name=thread_name, changed=changed
+        )
+
+    async def _apply_thread_outcome(self, thread_id: int, outcome: str) -> web.Response:
         conversations = self.console_conversations
         if conversations is not None and await conversations.get(thread_id) is not None:
             from ..console.surface import apply_outcome
@@ -1883,7 +2190,7 @@ class ApiServer:
         return web.json_response({"status": "marked", "thread_name": marked})
 
     async def spawn(self, request: web.Request) -> web.Response:
-        """POST /api/spawn — create a new Discord thread and optionally start Claude Code.
+        """POST /api/spawn — create native or Discord work and optionally start an agent.
 
         Unlike posting a message to the channel directly, this endpoint
         bypasses the ``on_message`` bot-author guard and works even when
@@ -1891,18 +2198,34 @@ class ApiServer:
 
         Body (JSON):
             prompt: The instruction to send to Claude (required).
-            channel_id: Parent channel ID (optional; defaults to the
-                ``default_channel_id`` configured at startup).
+            channel_id: Parent Discord channel ID (optional; defaults to the
+                ``default_channel_id`` configured at startup; ignored in Console-only mode).
             thread_name: Custom thread title (optional; defaults to the
                 first 100 characters of *prompt*).
             auto_start: Whether to immediately start a Claude Code session
                 (optional; defaults to ``true``).  When ``false``, only the
                 thread and seed message are created — a Claude session will
                 start when a user replies in the thread.
+            ai: The AI the new thread runs on (optional):
+                ``{"backend": ..., "model": str|null, "effort": str|null,
+                "connection": str|null}``. Stored as the thread's own settings, so
+                later turns keep it; wins over the parent's child preferences.
+                A value the relay does not offer is refused with 400.
+            job_id: The automation job this spawn runs (optional). With no ``ai``, the
+                stored automation AI policy picks the AI for the job; the AI it ran on is
+                recorded for the Console either way.
             parent_thread_id: The calling thread (optional). Both titles then
                 carry that thread's family code — ``🤖K2`` on the child,
                 ``🌳K2`` on the parent — and the link is recorded so
                 ``GET /api/sessions`` can report it without parsing titles.
+            notify_parent: Queue a short report into the parent thread each time
+                the child marks itself candidate/done/waiting/review/action
+                (optional boolean; needs ``parent_thread_id``). Absent → true when
+                the parent runs in parent mode, else the deployment default
+                ``CCDB_NOTIFY_PARENT_DEFAULT`` (off). See
+                :mod:`claude_discord.ext.parent_notify`. A parent in parent mode
+                with ``max_children`` unfinished children is refused with 429
+                (:mod:`claude_discord.ext.parent_mode_api`).
             user_id: Discord user to add to the new thread (optional), so the
                 thread appears in their joined list instead of having to be
                 found in the channel. Mirrors what ``/api/ingest`` does for the
@@ -1919,6 +2242,97 @@ class ApiServer:
         prompt = (data.get("prompt") or "").strip()
         if not prompt:
             return web.json_response({"error": "prompt is required"}, status=400)
+
+        thread_name: str | None = data.get("thread_name") or None
+        auto_start: bool = data.get("auto_start", True)
+
+        # Validated here rather than swallowed downstream: a typo'd user_id is a
+        # caller bug and should say so, while a Discord-side failure to add the
+        # member is only a visibility miss and must never fail the spawn.
+        raw_parent_id = data.get("parent_thread_id")
+        parent_thread_id: int | None = None
+        if raw_parent_id is not None:
+            try:
+                parent_thread_id = int(raw_parent_id)
+            except (TypeError, ValueError):
+                return web.json_response(
+                    {"error": "parent_thread_id must be an integer"}, status=400
+                )
+            if parent_thread_id <= 0:
+                return web.json_response({"error": "parent_thread_id must be positive"}, status=400)
+        try:
+            notify_opt_in = parse_notify_opt_in(data.get("notify_parent"))
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        notify_parent = notify_opt_in if notify_opt_in is not None else notify_default_enabled()
+        if notify_opt_in and parent_thread_id is None:
+            return web.json_response({"error": "notify_parent needs parent_thread_id"}, status=400)
+        if parent_thread_id is not None:
+            gate = await self._parent_mode_gate(parent_thread_id)
+            if gate is not None and gate.refusal is not None:
+                return web.json_response(
+                    {
+                        "error": gate.refusal,
+                        "unfinished_children": gate.unfinished,
+                        "max_children": gate.max_children,
+                    },
+                    status=429,
+                )
+            if gate is not None and gate.parent_mode and notify_opt_in is None:
+                notify_parent = True
+
+        raw_user_id = data.get("user_id")
+        invite_user_id: int | None = None
+        if raw_user_id is not None:
+            try:
+                invite_user_id = int(raw_user_id)
+            except (TypeError, ValueError):
+                return web.json_response({"error": "user_id must be an integer"}, status=400)
+            if invite_user_id <= 0:
+                return web.json_response({"error": "user_id must be positive"}, status=400)
+
+        # Optional attachments to post into the new thread (e.g. files attached
+        # to a Forgejo Issue forwarded by a watcher). Decoded here; posting is
+        # handled inside spawn_session right after the seed prompt.
+        decoded_attachments, att_err = _decode_spawn_attachments(data.get("attachments"))
+        if att_err is not None:
+            return att_err
+
+        # Checked against what the relay offers, so a caller cannot put an arbitrary string
+        # on a CLI command line; stored as the new thread's settings, not just its first turn.
+        try:
+            ai = parse_turn_ai(data.get("ai"))
+        except TurnAIError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
+        # An automation job names itself; with no explicit ai, its stored policy decides.
+        raw_job_id = data.get("job_id")
+        if raw_job_id is not None and not valid_job_id(raw_job_id):
+            return web.json_response({"error": "job_id must be a job id"}, status=400)
+        job_id: str = raw_job_id or ""
+        policy = self._automation_policy() if job_id else None
+        if policy is not None and ai is None:
+            entry = await policy.entry_for(job_id)
+            ai = entry_ai(entry) if entry is not None else None
+
+        if getattr(self.bot, "headless", False) is True:
+            response = await self._spawn_console(
+                prompt=prompt,
+                title=thread_name or prompt[:100],
+                auto_start=auto_start,
+                attachments=decoded_attachments,
+                parent_thread_id=parent_thread_id,
+                ai=ai,
+            )
+            if response.status == 201 and parent_thread_id is not None:
+                body = json.loads(response.text or "{}")
+                response = await self._apply_notify_opt_in(
+                    response, int(body["thread_id"]), notify_parent
+                )
+            if policy is not None and response.status == 201:
+                body = json.loads(response.text or "{}")
+                await self._record_job_run(policy, job_id, int(body["thread_id"]), ai)
+            return response
 
         raw_channel_id = data.get("channel_id") or self.default_channel_id
         if not raw_channel_id:
@@ -1954,41 +2368,6 @@ class ApiServer:
                 status=400,
             )
 
-        thread_name: str | None = data.get("thread_name") or None
-        auto_start: bool = data.get("auto_start", True)
-
-        # Validated here rather than swallowed downstream: a typo'd user_id is a
-        # caller bug and should say so, while a Discord-side failure to add the
-        # member is only a visibility miss and must never fail the spawn.
-        raw_parent_id = data.get("parent_thread_id")
-        parent_thread_id: int | None = None
-        if raw_parent_id is not None:
-            try:
-                parent_thread_id = int(raw_parent_id)
-            except (TypeError, ValueError):
-                return web.json_response(
-                    {"error": "parent_thread_id must be an integer"}, status=400
-                )
-            if parent_thread_id <= 0:
-                return web.json_response({"error": "parent_thread_id must be positive"}, status=400)
-
-        raw_user_id = data.get("user_id")
-        invite_user_id: int | None = None
-        if raw_user_id is not None:
-            try:
-                invite_user_id = int(raw_user_id)
-            except (TypeError, ValueError):
-                return web.json_response({"error": "user_id must be an integer"}, status=400)
-            if invite_user_id <= 0:
-                return web.json_response({"error": "user_id must be positive"}, status=400)
-
-        # Optional attachments to post into the new thread (e.g. files attached
-        # to a Forgejo Issue forwarded by a watcher). Decoded here; posting is
-        # handled inside spawn_session right after the seed prompt.
-        decoded_attachments, att_err = _decode_spawn_attachments(data.get("attachments"))
-        if att_err is not None:
-            return att_err
-
         try:
             thread = await cog.spawn_session(
                 raw,
@@ -1999,6 +2378,7 @@ class ApiServer:
                 invite_user_id=invite_user_id,
                 agent_spawned=True,
                 parent_thread_id=parent_thread_id,
+                ai=ai,
             )
         except Exception as exc:
             logger.error("spawn_session failed: %s", exc, exc_info=True)
@@ -2015,6 +2395,8 @@ class ApiServer:
             except Exception:
                 logger.exception("Could not record spawn lineage for thread %s", thread.id)
 
+        if policy is not None:
+            await self._record_job_run(policy, job_id, thread.id, ai)
         logger.info("Spawned new Claude session in thread %s (%s)", thread.id, thread.name)
         body: dict[str, str] = {
             "status": "spawned",
@@ -2024,7 +2406,68 @@ class ApiServer:
         if parent_thread_id is not None:
             body["parent_thread_id"] = str(parent_thread_id)
             body["family"] = family_code(parent_thread_id)
+            return await self._apply_notify_opt_in(
+                web.json_response(body, status=201), thread.id, notify_parent
+            )
         return web.json_response(body, status=201)
+
+    async def _apply_notify_opt_in(
+        self, response: web.Response, thread_id: int, enabled: bool
+    ) -> web.Response:
+        """Store the child→parent report opt-in and echo what was stored.
+
+        Bookkeeping after the thread exists: a failed write never fails the
+        spawn, it only reports ``notify_parent: false``.
+        """
+        stored = False
+        if enabled and self.lineage_repo is not None:
+            try:
+                stored = await self.lineage_repo.set_notify_parent(thread_id, True)
+            except Exception:
+                logger.exception("Could not store notify_parent for thread %s", thread_id)
+        body = json.loads(cast(bytes, response.body))
+        body["notify_parent"] = stored
+        return web.json_response(body, status=response.status)
+
+    def _backend_settings(self) -> Any:
+        return getattr(self.components, "backend_settings", None)
+
+    async def _parent_mode_gate(self, parent_thread_id: int) -> Any:
+        """Parent mode's verdict on a spawn from *parent_thread_id* (#1489).
+
+        None when the deployment has no settings store. A lookup failure is logged
+        and treated as "not in parent mode", so a broken setting never blocks a spawn
+        that worked before parent mode existed.
+        """
+        settings_owner = self._backend_settings()
+        if settings_owner is None:
+            return None
+        from ..parent_mode import ParentModeSettings
+        from .auto_complete_api import ApiCompletionHost
+        from .parent_mode_api import check_spawn
+
+        try:
+            return await check_spawn(
+                ParentModeSettings(settings_owner.repo), ApiCompletionHost(self), parent_thread_id
+            )
+        except Exception:
+            logger.warning(
+                "Parent mode check failed for thread %s", parent_thread_id, exc_info=True
+            )
+            return None
+
+    def _automation_policy(self) -> AutomationAIPolicy | None:
+        settings = self._backend_settings()
+        return AutomationAIPolicy(settings) if settings is not None else None
+
+    async def _record_job_run(
+        self, policy: AutomationAIPolicy, job_id: str, thread_id: int, ai: TurnAI | None
+    ) -> None:
+        # Bookkeeping only: the thread already exists, so a failed write must not fail it.
+        try:
+            await policy.record_run(job_id, thread_id, pinned=ai is not None)
+        except Exception:
+            logger.exception("Could not record the AI of automation job %s", _sanitize_log(job_id))
 
     # ------------------------------------------------------------------
     # Authenticated external ingest endpoint (/api/ingest)
@@ -2294,6 +2737,7 @@ class ApiServer:
         stored_summary: str,
         result_id: str | None,
         reconciliation: ingest_manifest.Reconciliation | None = None,
+        reply_draft_path: Path | None = None,
     ) -> str:
         """Assemble the session prompt: caller content + attachments + summary.
 
@@ -2350,7 +2794,51 @@ class ApiServer:
                 "次のアクションを簡潔に含めてください（冗長にせず、文脈復元に必要な密度で）。"
             )
 
+        if reply_draft_path is not None:
+            parts.append(teams_reply.render_draft_contract(str(reply_draft_path)))
+
         return "\n\n".join(parts)
+
+    async def _spawn_console(
+        self,
+        *,
+        prompt: str,
+        title: str,
+        auto_start: bool,
+        attachments: list[tuple[str, bytes]],
+        parent_thread_id: int | None,
+        ai: TurnAI | None = None,
+    ) -> web.Response:
+        from ..console.host import ConsoleSessionHost
+
+        console = getattr(self.bot, "console_sessions", None)
+        if not isinstance(console, ConsoleSessionHost):
+            return web.json_response({"error": "Console session host is not available"}, status=503)
+        try:
+            key = await console.spawn(
+                prompt=prompt,
+                title=title,
+                auto_start=auto_start,
+                attachments=attachments,
+                parent_thread_id=parent_thread_id,
+                lineage_repo=self.lineage_repo,
+                ai=ai,
+            )
+            conversation = await console.frontend.repo.get(key)
+        except Exception:
+            logger.exception("Console spawn failed")
+            return web.json_response({"error": "Could not create Console conversation"}, status=500)
+        body = {
+            "status": "spawned",
+            "thread_id": str(key),
+            "thread_name": conversation.name if conversation else title,
+            "frontend": "console",
+        }
+        if parent_thread_id is not None:
+            body.update(
+                parent_thread_id=str(parent_thread_id), family=family_code(parent_thread_id)
+            )
+        return web.json_response(body, status=201)
 
     async def ingest(self, request: web.Request) -> web.Response:
         """POST /api/ingest — authenticated spawn for untrusted external clients.
@@ -2393,7 +2881,8 @@ class ApiServer:
             return web.json_response({"error": "content is required"}, status=400)
 
         raw_channel_id = data.get("channel_id") or self.default_channel_id
-        if not raw_channel_id:
+        headless = getattr(self.bot, "headless", False) is True
+        if not headless and not raw_channel_id:
             return web.json_response({"error": "No channel specified"}, status=400)
 
         attachments = data.get("attachments") or []
@@ -2427,31 +2916,50 @@ class ApiServer:
         raw_marker = data.get("latest_marker")
         latest_marker = str(raw_marker) if raw_marker not in (None, "") else None
 
-        from ..cogs.claude_chat import ClaudeChatCog  # avoid circular import
-
-        cog: ClaudeChatCog | None = self.bot.cogs.get("ClaudeChatCog")  # type: ignore[assignment]
-        if cog is None:
-            return web.json_response({"error": "ClaudeChatCog is not loaded"}, status=503)
-
-        try:
-            channel_id = int(raw_channel_id)
-        except (TypeError, ValueError):
-            return web.json_response({"error": "channel_id must be an integer"}, status=400)
-
-        import discord as _discord
-
-        raw = self.bot.get_channel(channel_id)
-        if raw is None:
+        # Optional: the Teams thread this run answers, so the extension can ask
+        # for its reply later. Same strict validation as a sync request, because
+        # team and root_mid locate a folder.
+        reply_target: ThreadRef | None = None
+        raw_reply_target = data.get("reply_target")
+        if raw_reply_target is not None:
+            if not isinstance(raw_reply_target, dict):
+                return web.json_response({"error": "reply_target must be an object"}, status=400)
             try:
-                raw = await self.bot.fetch_channel(channel_id)
-            except Exception as exc:
-                return web.json_response({"error": str(exc)}, status=500)
+                reply_target = teams_sync.parse_thread_ref(raw_reply_target.get("thread"))
+            except teams_sync.ValidationError as exc:
+                return web.json_response({"error": str(exc)}, status=400)
 
-        if not isinstance(raw, _discord.TextChannel):
-            return web.json_response(
-                {"error": "Channel must be a text channel that supports threads"},
-                status=400,
-            )
+        from ..console.host import ConsoleSessionHost
+
+        console = getattr(self.bot, "console_sessions", None)
+        if headless and not isinstance(console, ConsoleSessionHost):
+            return web.json_response({"error": "Console session host is not available"}, status=503)
+        if not headless:
+            from ..cogs.claude_chat import ClaudeChatCog  # avoid circular import
+
+            cog: ClaudeChatCog | None = self.bot.cogs.get("ClaudeChatCog")  # type: ignore[assignment]
+            if cog is None:
+                return web.json_response({"error": "ClaudeChatCog is not loaded"}, status=503)
+
+            try:
+                channel_id = int(raw_channel_id or 0)
+            except (TypeError, ValueError):
+                return web.json_response({"error": "channel_id must be an integer"}, status=400)
+
+            import discord as _discord
+
+            raw = self.bot.get_channel(channel_id)
+            if raw is None:
+                try:
+                    raw = await self.bot.fetch_channel(channel_id)
+                except Exception as exc:
+                    return web.json_response({"error": str(exc)}, status=500)
+
+            if not isinstance(raw, _discord.TextChannel):
+                return web.json_response(
+                    {"error": "Channel must be a text channel that supports threads"},
+                    status=400,
+                )
 
         # Save attachments under a stable per-request id reused for the dir name.
         request_id = uuid.uuid4().hex
@@ -2509,6 +3017,8 @@ class ApiServer:
             if existing is not None:
                 stored_summary = existing["summary"] or ""
 
+        reply_link = self._link_reply_target(reply_target, result_id)
+
         prompt = self._build_ingest_prompt(
             content=content,
             saved_paths=saved_paths,
@@ -2516,6 +3026,7 @@ class ApiServer:
             stored_summary=stored_summary,
             result_id=result_id,
             reconciliation=reconciliation,
+            reply_draft_path=reply_link.draft_path,
         )
 
         # When result retrieval is available, register a result row up front and
@@ -2533,6 +3044,8 @@ class ApiServer:
                 result_id=result_id,
                 summary_key=summary_key,
                 pending_marker=latest_marker,
+                teams_thread_key=reply_link.thread_key,
+                teams_base_mid=reply_link.base_mid,
             )
             ingest_repo = self.ingest_repo
             captured_id = result_id
@@ -2559,37 +3072,48 @@ class ApiServer:
             result_sink = _capture_result
 
         try:
-            thread = await cog.spawn_session(
-                raw,
-                prompt,
-                thread_name=thread_name,
-                auto_start=auto_start,
-                result_sink=result_sink,
-            )
+            if headless and isinstance(console, ConsoleSessionHost):
+                thread_id = await console.spawn(
+                    prompt=prompt,
+                    title=thread_name or content[:80],
+                    auto_start=auto_start,
+                    result_sink=result_sink,
+                )
+                conversation = await console.frontend.repo.get(thread_id)
+                created_name = conversation.name if conversation else (thread_name or content[:80])
+            else:
+                thread = await cog.spawn_session(
+                    raw,
+                    prompt,
+                    thread_name=thread_name,
+                    auto_start=auto_start,
+                    result_sink=result_sink,
+                )
+                thread_id, created_name = thread.id, thread.name
         except Exception as exc:
             logger.error("ingest spawn_session failed: %s", exc, exc_info=True)
             if result_id is not None and self.ingest_repo is not None:
                 await self.ingest_repo.set_error(result_id, str(exc))
             return web.json_response({"error": str(exc)}, status=500)
 
-        if result_sink is not None:
+        if result_sink is not None and not headless:
             spawned_thread.append(thread)
 
         # Attach thread info for traceability. The completion sink already has
         # the thread reference above, before this await can yield to the session
         # task.
         if result_id is not None and self.ingest_repo is not None:
-            await self.ingest_repo.set_thread(result_id, str(thread.id), thread.name)
+            await self.ingest_repo.set_thread(result_id, str(thread_id), created_name)
 
         reply_draft = is_reply_draft_request(content)
         if reply_draft:
             ingest_tags.append(TEAMS_EXPORTER_TAG)
-        await self._label_ingest_thread(thread.id, ingest_tags, reply_draft=reply_draft)
+        await self._label_ingest_thread(thread_id, ingest_tags, reply_draft=reply_draft)
 
         # Pull the owner into the thread and ping them on start, so the
         # unattended session is visible and they're notified again on completion
         # (via the result sink). Only when a session actually started.
-        if result_sink is not None:
+        if result_sink is not None and not headless:
             await self._ingest_add_owner(thread)
             await self._ingest_notify_owner(
                 thread,
@@ -2598,14 +3122,14 @@ class ApiServer:
 
         logger.info(
             "Ingested external session in thread %s (%s), %d attachment(s)",
-            thread.id,
-            _sanitize_log(thread.name),
+            thread_id,
+            _sanitize_log(created_name),
             len(saved_paths),
         )
         response: dict[str, object] = {
             "status": "spawned",
-            "thread_id": str(thread.id),
-            "thread_name": thread.name,
+            "thread_id": str(thread_id),
+            "thread_name": created_name,
             "attachments_saved": len(saved_paths),
             # The sender is the only party that can re-send a lost attachment,
             # so it gets the verdict rather than a bare count it cannot check.
@@ -2614,7 +3138,44 @@ class ApiServer:
         if result_id is not None:
             # Poll GET /api/ingest/{result_id} to retrieve the final reply.
             response["result_id"] = result_id
+        if reply_target is not None:
+            # The client asked for a linked reply, so a link that did not happen
+            # is its to report: the copy button will not find this run.
+            response["reply_link"] = {
+                "linked": reply_link.thread_key is not None,
+                "reason": reply_link.reason,
+            }
         return web.json_response(response, status=201)
+
+    def _link_reply_target(self, ref: ThreadRef | None, result_id: str | None) -> _ReplyLink:
+        """Tie a run to the Teams thread it answers, and fix what it is based on.
+
+        Failing to link costs the copy button, not the reply, so it never stops
+        the session: the reason goes back in the response instead. The base comes
+        from the vault rather than from the client, because the vault is what the
+        session will actually read.
+        """
+        if ref is None:
+            return _ReplyLink()
+        if result_id is None:
+            return _ReplyLink(reason="result retrieval is not available on this server")
+        store = self._teams_store()
+        thread_dir = store.find_thread_dir(ref)
+        if thread_dir is None:
+            return _ReplyLink(reason="the thread has not been synced")
+        try:
+            draft_path = store.prepare_reply_draft(thread_dir, result_id)
+        except OSError as exc:
+            logger.error("Could not prepare a reply draft folder: %s", exc)
+            draft_path = None
+        if draft_path is None:
+            return _ReplyLink(reason="could not prepare the reply body file")
+        stored = store.load_stored(thread_dir)
+        return _ReplyLink(
+            thread_key=teams_reply.thread_key(ref),
+            base_mid=max(stored, key=int) if stored else None,
+            draft_path=draft_path,
+        )
 
     async def _label_ingest_thread(
         self, thread_id: int, tags: list[str], *, reply_draft: bool
@@ -2822,6 +3383,7 @@ class ApiServer:
             stored,
             pending=meta.get("pending_attachments") or [],
             unavailable=meta.get("unavailable_attachments") or [],
+            ignored=meta.get("ignored_attachments") or [],
         )
         return web.json_response(
             {
@@ -2837,6 +3399,7 @@ class ApiServer:
                 "newest_have_mid": plan.newest_have_mid,
                 "pending": meta.get("pending_attachments") or [],
                 "unavailable": meta.get("unavailable_attachments") or [],
+                "ignored": meta.get("ignored_attachments") or [],
                 "attachment_summary": meta.get("attachment_summary")
                 or {
                     "detected": 0,
@@ -2851,7 +3414,7 @@ class ApiServer:
                 # needs before it may upload a partially-scrolled chat: against
                 # a server without it, each partial scan reports a different
                 # root mid and lands in its own folder.
-                "capabilities": {"conversation_scope": True},
+                "capabilities": {"conversation_scope": True, "attachment_ignore": True},
             }
         )
 
@@ -2936,10 +3499,111 @@ class ApiServer:
                 # listed here, in thread.json and in the folder's README.
                 "pending": pending,
                 "unavailable": unavailable,
+                "ignored": meta.get("ignored_attachments") or [],
                 "attachment_summary": meta["attachment_summary"],
                 "message_count": meta["message_count"],
             }
         )
+
+    async def teams_sync_ignore(self, request: web.Request) -> web.Response:
+        """POST /api/teams/sync/ignore — stop (or resume) tracking attachment gaps.
+
+        A file deleted at the source can never arrive, and treating it as an open
+        gap forever stops every later reply. The decision is stored with the thread
+        so that it holds on every PC, and the file stays listed as ignored because
+        its contents are still unknown to whoever reads the folder.
+        """
+        if err := await self._check_ingest_token(request):
+            return err
+        try:
+            data = await request.json()
+        except json.JSONDecodeError:
+            return web.json_response({"error": "Invalid JSON"}, status=400)
+        if not isinstance(data, dict):
+            return web.json_response({"error": "body must be an object"}, status=400)
+        try:
+            ref = teams_sync.parse_thread_ref(data.get("thread"))
+            items = teams_sync.parse_gap_items(data.get("items"))
+        except teams_sync.ValidationError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
+        store = self._teams_store()
+        thread_dir = store.find_thread_dir(ref)
+        if thread_dir is None:
+            return web.json_response({"error": "Thread has not been synced"}, status=404)
+        try:
+            meta, unmatched = store.set_ignored(
+                thread_dir, ref, items, ignore=data.get("ignore", True) is not False
+            )
+        except OSError as exc:
+            logger.error("Teams sync could not update ignored attachments: %s", exc)
+            return web.json_response({"error": "Could not update the thread"}, status=500)
+        return web.json_response(
+            {
+                "folder": str(thread_dir),
+                "pending": meta["pending_attachments"],
+                "unavailable": meta["unavailable_attachments"],
+                "ignored": meta["ignored_attachments"],
+                "not_found": [{"mid": mid, "name": name} for mid, name in unmatched],
+            }
+        )
+
+    async def teams_reply_status(self, request: web.Request) -> web.Response:
+        """POST /api/teams/reply/status — where this thread's latest reply stands.
+
+        Read-only. The client sends the messages it can see right now (the same
+        shape as /plan, with their text) and gets back whether the reply can be
+        copied or has to be regenerated. It keeps no state of its own, so a popup
+        reopened on any thread gets the right answer.
+        """
+        parsed, err = await self._read_teams_request(request, require_body=False)
+        if err is not None:
+            return err
+        if err := self._require_ingest_repo():
+            return err
+        ref, visible, _coverage = parsed  # type: ignore[misc]
+
+        run = await self.ingest_repo.latest_for_teams_thread(  # type: ignore[union-attr]
+            teams_reply.thread_key(ref)
+        )
+        store = self._teams_store()
+        thread_dir = store.find_thread_dir(ref)
+        file_draft = None
+        if run is not None and thread_dir is not None:
+            file_draft = store.read_reply_draft(thread_dir, run["result_id"])
+        status = teams_reply.evaluate(
+            run=run,
+            running=self._run_is_active(run),
+            file_draft=file_draft,
+            visible=visible,
+            stored=store.load_stored(thread_dir) if thread_dir else {},
+            chain=store.latest_chain(thread_dir) if thread_dir else {},
+            now=datetime.now(),
+        )
+        draft = status.draft
+        return web.json_response(
+            {
+                "state": status.state,
+                "reason": status.reason,
+                "thread_id": run["thread_id"] if run else None,
+                "thread_name": run["thread_name"] if run else None,
+                "base_mid": run["teams_base_mid"] if run else None,
+                "draft": (
+                    {"text": draft.text, "source": draft.source, "updated_at": draft.updated_at}
+                    if draft is not None
+                    else None
+                ),
+                "changes": [
+                    {"mid": c.mid, "kind": c.kind, "author": c.author, "excerpt": c.excerpt}
+                    for c in status.changes
+                ],
+            }
+        )
+
+    def _run_is_active(self, run: dict | None) -> bool:
+        """Whether a turn is in flight in the thread this run started."""
+        thread_id = str((run or {}).get("thread_id") or "")
+        return thread_id.isdigit() and int(thread_id) in self._running_thread_ids()
 
     @staticmethod
     def _valid_summary_key(value: object) -> str | None:
@@ -3149,7 +3813,11 @@ class ApiServer:
         """
         import discord
 
-        if self._lounge_mirror_disabled or not self.lounge_channel_id:
+        if (
+            getattr(self.bot, "headless", False) is True
+            or self._lounge_mirror_disabled
+            or not self.lounge_channel_id
+        ):
             return
         try:
             channel = self.bot.get_channel(self.lounge_channel_id)
