@@ -10,6 +10,8 @@ const context = {
     return { ok: true, json: async () => ({ url: '/console/api/files/0/token/message.txt' }) };
   },
 };
+// paste.js sends through net.js (ConsoleNet.fetch); route it to the stub this test swaps.
+context.window.ConsoleNet = { fetch: (url, options) => context.fetch(url, options) };
 vm.createContext(context);
 vm.runInContext(fs.readFileSync('claude_discord/console/static/paste.js', 'utf8'), context);
 (async () => {

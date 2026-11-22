@@ -229,6 +229,8 @@ window.ConsoleNoteEdit = (() => {
 
     const guard = (e) => { if (dirty()) { e.preventDefault(); e.returnValue = ""; } };
     window.addEventListener("beforeunload", guard);
+    // An expired proxy sign-in must not reload the page over unsaved note text (net.js).
+    window.ConsoleNet.busy(() => host.isConnected && dirty());
     area.addEventListener("keydown", (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); save(); }
     });

@@ -41,7 +41,7 @@
       Object.assign(headers, { "X-Console-Request": "1", "Content-Type": "application/json" });
       Object.assign(init, { method: "POST", body: JSON.stringify(body) });
     }
-    const res = await fetch(`/console/api/cli-login${path}`, init);
+    const res = await window.ConsoleNet.fetch(`/console/api/cli-login${path}`, init);
     let data = null;
     try { data = await res.json(); } catch { /* empty */ }
     if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);

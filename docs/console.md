@@ -752,6 +752,45 @@ Access policy already restricts who gets in: if someone edits the policy by mist
 still stays closed. Multi-factor sign-in then depends on the identity provider (turn on 2-step
 verification or passkeys on that account).
 
+### Behind an authenticating reverse proxy: expired sign-ins recover by themselves
+
+An identity-aware reverse proxy in front of the Console (Cloudflare Access, Entra application
+proxy with pre-authentication, oauth2-proxy, …) keeps its own session cookie, and that cookie
+expires on the proxy's schedule — for Entra application proxy when the access token expires,
+about an hour by default. From then on the proxy answers every request with a redirect to the
+identity provider on another origin. `fetch()` follows it, the provider sends no CORS headers,
+and the request fails in the browser as `TypeError: Failed to fetch` before it reaches ccdb.
+Only a full page load can follow the redirect (the provider's own session usually signs the
+browser back in without a prompt), which is why pressing F5 used to fix it.
+
+The Console now tells that apart from a lost network (`static/net.js`, which every request
+goes through): after a failed request it sends one same-origin probe with
+`redirect: "manual"`. A proxy redirects the probe again (`opaqueredirect`); a dead network
+fails it again. A followed redirect that ends in HTML for an API call counts as a sign-in too,
+for proxies whose sign-in page is on the same origin. Nothing here is specific to one proxy.
+
+When the proxy wants a new sign-in:
+
+- A one-line banner says so, with a **Reconnect** button.
+- As soon as nobody has typed for 10 seconds, the page reloads by itself. Before it does, it
+  saves what was typed (every text box that was edited, and the unsent reply of every item)
+  and the open view (`#…`) to `sessionStorage`, and puts them back after the page loads again,
+  even when the provider asked for an interactive sign-in in between.
+- While a module holds unsaved work a reload would lose (an open note with unsaved changes),
+  it never reloads by itself. **Reconnect** signs in again in a small window instead; the
+  proxy sends that window back to `static/reauth.html`, which tells the Console tab and
+  closes. The page stays exactly as it was. If popups are blocked, Reconnect saves and reloads.
+- At most 3 automatic reloads in 10 minutes, at least 30 seconds apart. After that the banner
+  says automatic reconnect stopped and only the button remains, so a sign-in that keeps
+  failing cannot loop.
+
+A real network failure shows "Can't reach the Console — check the network connection" (in
+Japanese when the Console is) instead of `Failed to fetch`, and the next poll retries by itself.
+The Console has no WebSocket or EventSource connection; everything is polled through the same
+path. Module code calls `window.ConsoleNet.fetch` instead of `fetch`; state outside a text box
+is kept across the reload with `ConsoleNet.keep(key, save, restore)`, and unsaved work that
+must block an automatic reload is reported with `ConsoleNet.busy(check)`.
+
 ### Optional: a bearer token for scripts
 
 ```dotenv

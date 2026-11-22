@@ -203,7 +203,7 @@ async function api(path, { method = "GET", body } = {}) {
   const token = localStorage.getItem("token");
   if (token) headers.Authorization = `Bearer ${token}`;
   if (method !== "GET") { headers["X-Console-Request"] = "1"; headers["Content-Type"] = "application/json"; }
-  const res = await fetch(API + path, { method, headers, credentials: "same-origin",
+  const res = await window.ConsoleNet.fetch(API + path, { method, headers, credentials: "same-origin",
     body: body === undefined ? undefined : JSON.stringify(body) });
   let data = null;
   try { data = await res.json(); } catch { /* empty body */ }
@@ -257,7 +257,8 @@ async function refresh() {
     if (open && open.thread_id && (open.running || open.queued)) loadMessages(open.id);
   } catch (err) {
     $("sync").className = "sync bad";
-    $("sync").textContent = `${T.offline}: ${err.message}`;
+    // net.js already words a lost network or an expired proxy sign-in; anything else is a server answer.
+    $("sync").textContent = err.kind ? err.message : `${T.offline}: ${err.message}`;
   }
 }
 
@@ -1330,6 +1331,10 @@ function wire() {
   });
 }
 
+// Unsent replies of every item, not only the open one, survive a sign-in reload (net.js).
+window.ConsoleNet.keep("reply-drafts", () => (Object.keys(state.drafts).length ? state.drafts : null),
+  (saved) => { for (const [k, v] of Object.entries(saved || {})) if (typeof v === "string" && !state.drafts[k]) state.drafts[k] = v; });
+window.addEventListener("console:reconnected", () => { state.boardSig = ""; refresh(); });
 readHash();
 wire();
 window.ConsoleLinks.wire();

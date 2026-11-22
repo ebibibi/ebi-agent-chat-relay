@@ -501,3 +501,8 @@ button.family-link:hover { color: var(--accent); border-color: var(--accent); }
 .night-panel .night-list { margin: 6px 0; padding-left: 18px; }
 .night-panel .night-item.cancelled, .night-panel .night-item.skipped { opacity: .55; }
 .night-panel .night-foot { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+
+/* net.js: the line shown while an authenticating proxy wants a new sign-in. */
+.net-banner { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 8px); left: 50%; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 12px; max-width: min(640px, calc(100vw - 24px)); padding: 8px 10px 8px 14px; background: var(--raise); border: 1px solid var(--warn, #d29922); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.35); overflow-wrap: anywhere; }
+.net-banner-btn { flex: none; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; font: inherit; }
+.net-banner-btn:hover { border-color: var(--me); }

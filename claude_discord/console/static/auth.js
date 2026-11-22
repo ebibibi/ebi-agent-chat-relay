@@ -63,7 +63,7 @@
     // A token sign-in has no session cookie; the token may manage passkeys too.
     const token = localStorage.getItem("token");
     if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(path, { method, headers, credentials: "same-origin",
+    const res = await window.ConsoleNet.fetch(path, { method, headers, credentials: "same-origin",
       body: method === "GET" ? undefined : JSON.stringify(body || {}) });
     let data = null;
     try { data = await res.json(); } catch { /* empty */ }
