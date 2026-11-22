@@ -427,4 +427,3 @@ async def test_sign_in_returns_to_the_origin_it_started_from(
         )
         assert done.status == 302 and done.headers["Location"] == "/"
         assert provider.last_form["redirect_uri"] == callback
-
