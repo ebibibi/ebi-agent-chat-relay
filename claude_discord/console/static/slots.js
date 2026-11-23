@@ -27,7 +27,8 @@ window.ConsoleSlots = (() => {
     stopRequests.add(itemId);
     syncStopButtons();
     try {
-      await api(`/items/${encodeURIComponent(itemId)}/stop`, { method: "POST", body: {} });
+      const result = await api(`/items/${encodeURIComponent(itemId)}/stop`, { method: "POST", body: {} });
+      if (result.warning === "stop_transcript_not_saved") toast(T.stop_transcript_not_saved);
     } catch (err) {
       stopping.delete(itemId);
       toast(err.message);
