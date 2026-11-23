@@ -3,7 +3,8 @@ type: adr
 id: ADR-0025
 title: Let a resident secretary agent lay out the Console as a canvas of widgets
 decision: Add a third display mode, canvas. One long-lived Console conversation acts as the secretary; it keeps a note per thread, is woken only when the board changed, within a daily cap, and places structured widgets that the Console draws deterministically. Classic and secretary modes are unchanged.
-status: accepted
+status: rejected
+retired: 2026-11-23
 date: 2026-11-14
 decided_by: human+ai
 deciders: [Masahiko Ebisuda, Claude]
@@ -11,6 +12,9 @@ scope: repository
 ---
 
 # ADR-0025: Let a resident secretary agent lay out the Console as a canvas of widgets
+
+> **Status: rejected and retired (2026-11-23, owner's decision after trial: not adopted).**
+> Canvas mode has been removed from the code (#1552). See the retirement note at the end.
 
 ## Context
 
@@ -138,3 +142,30 @@ tokens. Each wake resumed one growing conversation, so every turn re-read all ea
   secretary, and a widget button shows the words it will send before it is pressed.
 - If the trial fails, the mode is removed with its tables; classic and secretary modes do not
   depend on it.
+
+## Retirement (2026-11-23, #1552)
+
+**Decision.** The owner tried canvas mode and rejected it ("not adopted; remove the feature").
+It is removed, not hidden behind a switch.
+
+**Removed.** The canvas screen, its widgets and renderers, the focus session, the "this screen's
+AI" bar, the change watcher and its wakes, the fresh-session brief for the secretary's turns,
+the write key, and the routes `/api/canvas/*`, `/api/secretary/{digest,notes,deliver}` and
+`/console/api/canvas/*`. A browser that still has canvas mode saved opens in secretary mode.
+
+**Kept, because other features use them.**
+- The night settings, the 🌙 night shift and the morning brief (#1476, #1511) had been wired
+  through the canvas objects. They now have their own modules (`console/night_desk.py`,
+  `console/night_routes.py`, `ext/night_api.py`) and keep reading and writing their values in
+  the `canvas_state` table, so nothing the person chose is lost. `/api/secretary/morning` and
+  `/api/secretary/night` keep their paths.
+- The per-turn AI (`turn_ai.py`) is used by automation entries and stays. The Console reply's
+  `ai` field stays as a generic per-turn override.
+- Secretary mode and decision cards (ADR-0024) never depended on canvas mode.
+
+**Data.** Contrary to the last consequence above, the tables are **not** dropped: deleting
+production data needs the owner's approval, and an unread table costs nothing.
+`canvas_widgets`, `canvas_notes`, `canvas_changes` and `canvas_turns` stay in the database and
+are no longer read or written; `canvas_state` stays in use for the night values, and its
+canvas-only rows (the secretary's thread, cursor, key, limits) are simply ignored. The
+secretary's conversation remains an ordinary Console conversation; nothing wakes it any more.

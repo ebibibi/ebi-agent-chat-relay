@@ -9,8 +9,8 @@ Two small pieces of the "work through the night" flow live here; the morning bri
   replaces the built-in text with its own file (``CCDB_NIGHT_TEMPLATE_FILE``).
 * :class:`NightSettings` — the person's quiet hours: a window in which the Console does not
   chime or raise desktop notifications, except for the urgent conditions they chose. Stored in
-  the canvas state table, so every browser reads the same choice. **Off by default**: an unset
-  window changes nothing.
+  the Console state table (:mod:`.console_state`), so every browser reads the same choice.
+  **Off by default**: an unset window changes nothing.
 
 Nothing here approves anything. The template asks agents to keep sending, publishing, paying
 and production changes for the morning; quiet hours only change when the Console rings.
@@ -30,7 +30,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-#: The canvas state key the settings are stored under (JSON).
+#: The Console state key the settings are stored under (JSON).
 STATE_NIGHT = "night"
 TEMPLATE_ENV = "CCDB_NIGHT_TEMPLATE_FILE"
 MAX_TEMPLATE_CHARS = 4000

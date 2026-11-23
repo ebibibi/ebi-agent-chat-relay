@@ -46,9 +46,6 @@ from .attention import console_activity
 from .auth import ConsoleAuthConfig, ConsoleAuthenticator, ConsoleAuthError
 from .auth_routes import AUTH_PREFIX, AuthRoutes
 from .board import SessionInfo, ThreadSnapshot, build_board
-from .canvas import CanvasSecretary
-from .canvas_repo import CanvasRepository
-from .canvas_routes import CanvasRoutes
 from .cli_login import CliLogin, login_commands
 from .cli_login_routes import CliLoginRoutes
 from .codex_compact import CompactError, compact_codex_session
@@ -62,6 +59,7 @@ from .commands import (
     run_command,
     skill_prompt,
 )
+from .console_state import ConsoleStateRepository
 from .conversations import ConversationRepository
 from .decision_cleanup import DecisionReviewer
 from .decision_defaults import DecisionDefaulter
@@ -70,6 +68,8 @@ from .files import resolve_file
 from .guide import build_guide
 from .logsafe import q as _q
 from .messages import KIND_ACTIVITY, serialize_message, with_kind
+from .night_desk import NightDesk
+from .night_routes import NightRoutes
 from .night_shift import NightShift
 from .oidc import OidcClient, OidcConfig, provider_name
 from .pages import PageRoutes
@@ -279,7 +279,7 @@ class ConsoleServer:
         cli_login: CliLogin | None = None,
         views: SavedViewRepository | None = None,
         secretary_events: SecretaryEventRepository | None = None,
-        canvas_repo: CanvasRepository | None = None,
+        state_repo: ConsoleStateRepository | None = None,
     ) -> None:
         self.api = api_server
         #: Secretary mode's trial metrics; None turns recording off.
@@ -349,20 +349,12 @@ class ConsoleServer:
             bot_id=self._bot_id,
             records=self._family_records,
         )
-        #: Canvas mode's resident secretary (ADR-0025); None turns the mode off.
-        self.canvas = self._build_canvas(canvas_repo)
+        #: Night settings and the morning brief (#1476); None without a state table.
+        self.night_desk = self._build_night_desk(state_repo)
         #: The 🌙 night shift (#1511): hands the agents' own next moves over for the night.
-        self.night_shift = self._build_night_shift(canvas_repo)
-        if self.canvas is not None:
-            self.canvas.night_shift = self.night_shift
-        if self.canvas is not None and self.sessions is not None:
-            # Every secretary turn starts a fresh session with a compact brief, in an empty
-            # directory without the user's CLAUDE.md and skills.
-            self.sessions.fresh_turn = self.canvas.fresh_turn
-            if self.conversations is not None:
-                self.sessions.fresh_workdir = str(
-                    Path(self.conversations.db_path).parent / "canvas_secretary"
-                )
+        self.night_shift = self._build_night_shift(state_repo)
+        if self.night_desk is not None:
+            self.night_desk.night_shift = self.night_shift
         self.app = self._build_app()
 
     def _background(self, coro: Any) -> None:
@@ -437,7 +429,7 @@ class ConsoleServer:
         r.add_post(
             f"{API_PREFIX}/items/{{item_id}}/decisions/{{request_id}}/defer", self.defer_request
         )
-        CanvasRoutes(self, self.canvas, IDENTITY).register(r, API_PREFIX)
+        NightRoutes(self, IDENTITY).register(r, API_PREFIX)
         r.add_get(f"{API_PREFIX}/secretary/stats", secretary_routes.stats)
         r.add_post(f"{API_PREFIX}/pages/{{slug}}", page_routes.define)
         r.add_get(f"{API_PREFIX}/pages/{{slug}}/items", page_routes.items)
@@ -523,8 +515,6 @@ class ConsoleServer:
         if self.workspace.root is not None and self._records_task is None:
             self._records_task = asyncio.ensure_future(self._records_loop())
         self._start_decision_defaults()
-        if self.canvas is not None:
-            self.canvas.start()
         if self.night_shift is not None:
             self.night_shift.start()
 
@@ -569,23 +559,20 @@ class ConsoleServer:
         self._triager.start(self._board_items, TRIAGE_INTERVAL_SECONDS)
         logger.info("Ebi AI Console: automatic triage on (%s)", model)
 
-    def _build_canvas(self, repo: CanvasRepository | None) -> CanvasSecretary | None:
+    def _build_night_desk(self, repo: ConsoleStateRepository | None) -> NightDesk | None:
         if repo is None:
             return None
-        return CanvasSecretary(
+        return NightDesk(
             repo,
             board=self._board_items,
             requests=self._open_requests,
-            messages=self.triage_messages,
             situation=self._situation_dict,
-            host=self.sessions,
-            history=self._canvas_history,
         )
 
-    def _build_night_shift(self, repo: CanvasRepository | None) -> NightShift | None:
-        if repo is None or self.canvas is None:
+    def _build_night_shift(self, repo: ConsoleStateRepository | None) -> NightShift | None:
+        if repo is None or self.night_desk is None:
             return None
-        canvas = self.canvas
+        desk = self.night_desk
 
         async def deliver(item_id: str, text: str) -> bool:
             response = await self._deliver(item_id, text, "night shift", metered=False)
@@ -600,7 +587,7 @@ class ConsoleServer:
             return list(policy.scopes.values()) if policy is not None else []
 
         async def limit() -> int:
-            return (await canvas.night_settings()).shift_limit
+            return (await desk.night_settings()).shift_limit
 
         return NightShift(
             repo,
@@ -610,16 +597,7 @@ class ConsoleServer:
             waiting=waiting,
             scopes=scopes,
             limit=limit,
-            exclude=canvas.item_id,
         )
-
-    async def _canvas_history(self, thread_key: int, limit: int) -> list[tuple[str, bool, str]]:
-        if self.conversations is None:
-            return []
-        return [
-            (m.author, bool(m.is_bot), m.content)
-            for m in await self.conversations.history(thread_key, limit)
-        ]
 
     async def _situation_dict(self, thread_id: int) -> dict[str, Any] | None:
         repo = self.api.situation_repo
@@ -628,37 +606,7 @@ class ConsoleServer:
         written = await repo.get(thread_id)
         return written.as_dict() if written else None
 
-    async def deliver_from_secretary(
-        self, thread_id: int, text: str, key: str | None = None
-    ) -> web.Response:
-        """The person's answer, given in the canvas secretary's chat, to the thread that asked.
-
-        It is marked as relayed, so the receiving agent knows the words passed through the
-        secretary, and it closes the thread's open requests as a Console reply does.
-        """
-        item_id = f"t{int(thread_id)}"
-        relayed = f"🗂 The person's answer, relayed by their secretary (canvas mode):\n\n{text}"
-        repo = getattr(self.api, "decision_repo", None)
-        card = None
-        if key and repo is not None:
-            try:
-                card = await repo.get_open(int(thread_id), key)
-            except Exception:
-                logger.exception("console: card %r of %s unreadable", key, thread_id)
-        response = await self._deliver(item_id, relayed, "secretary", metered=False)
-        if response.status < 300 and card is not None:
-            await self._answer_covered(item_id, card.id, text)
-        if response.status < 300 and key and repo is not None:
-            # Only the card this answer settles; the thread's other cards stay (#1438).
-            try:
-                await repo.close(int(thread_id), reason="answered", key=key)
-            except Exception:
-                logger.exception("console: card %r of %s not closed", key, thread_id)
-        return response
-
     async def stop(self) -> None:
-        if self.canvas is not None:
-            await self.canvas.stop()
         if self.night_shift is not None:
             await self.night_shift.stop()
         if self._defaulter is not None:
@@ -1120,11 +1068,8 @@ class ConsoleServer:
             sessions=sessions,
         )
         queued = self._queued_thread_ids()
-        secretary = await self.canvas.item_id() if self.canvas is not None else None
         for item in items:
             item["queued"] = item["thread_id"] in queued
-            # The canvas secretary is a standing service, not work: no chime per turn.
-            item["canvas_secretary"] = item["id"] == secretary
         repo = getattr(self.api, "decision_repo", None)
         if repo is not None:
             try:
@@ -2323,8 +2268,8 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
     await views.init_db()
     secretary_events = SecretaryEventRepository(api_server.session_repo.db_path)
     await secretary_events.init_db()
-    canvas_repo = CanvasRepository(api_server.session_repo.db_path)
-    await canvas_repo.init_db()
+    state_repo = ConsoleStateRepository(api_server.session_repo.db_path)
+    await state_repo.init_db()
     if triage is not None:
         await triage.init_db()
     console = ConsoleServer(
@@ -2344,7 +2289,7 @@ async def _start_console(api_server: ApiServer, raw_port: str) -> ConsoleServer 
         places=places,
         views=views,
         secretary_events=secretary_events,
-        canvas_repo=canvas_repo,
+        state_repo=state_repo,
         cli_login=CliLogin(login_commands()),
     )
     await console.start()

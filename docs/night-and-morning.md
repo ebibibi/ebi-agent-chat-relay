@@ -12,7 +12,7 @@ instruction. Whatever the capture box holds goes along as the **top-priority lin
 Picked: status `idle` (the agent stopped without saying whose move it is), no open decision
 request (those wait for the person and show under *decide* in the morning brief), not running,
 queued, snoozed, archived or finished, no active wait (the wait resumes it), active within 30
-days, not handed over in the last 12 hours, never the canvas secretary. At most `shift_limit`
+days, not handed over in the last 12 hours. At most `shift_limit`
 threads (default 8, 1–20), pinned and focused first. Everything is re-checked when sending.
 
 The instruction says it is automatic and not the person's answer. Its scope is the labels of the

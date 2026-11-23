@@ -51,8 +51,6 @@ window.ConsoleNotify = (() => {
   function events(items) {
     const out = [];
     for (const item of items) {
-      // The canvas secretary (canvas.js) runs on every change; its turns are not news.
-      if (item.canvas_secretary) continue;
       const prev = seen.get(item.id);
       const toInbox = item.bucket === INBOX &&
         (!prev || prev.bucket !== INBOX || prev.status !== item.status);

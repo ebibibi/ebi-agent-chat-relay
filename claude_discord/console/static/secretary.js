@@ -16,6 +16,9 @@
 window.ConsoleSecretary = (() => {
   const KEY = "consoleMode";
   const VIEW = "secretary";
+  // Canvas mode (ADR-0025) was retired on 2026-11-23: a browser that still has it saved
+  // opens in secretary mode, the closest of the remaining two.
+  if (localStorage.getItem(KEY) === "canvas") localStorage.setItem(KEY, VIEW);
   const STRINGS = {
     en: {
       title: "🗂 Secretary", mode: "Display mode", classic: "Classic", secretary: "Secretary",
@@ -109,11 +112,8 @@ window.ConsoleSecretary = (() => {
     const s = S();
     const chip = (key, label) => h("button", { type: "button", class: "chip" + ((on() ? VIEW : "classic") === key ? " on" : ""),
       "aria-pressed": (on() ? VIEW : "classic") === key ? "true" : "false", onclick: () => setMode(key), text: label });
-    // Canvas mode (canvas.js) takes the whole screen, so its chip only enters it.
-    const canvas = window.ConsoleCanvas ? h("button", { type: "button", class: "chip",
-      onclick: () => window.ConsoleCanvas.enter(), text: window.ConsoleCanvas.label() }) : null;
     return h("div", { class: "mode-switch", role: "group", "aria-label": s.mode },
-      h("span", { class: "dim", text: s.mode }), chip("classic", s.classic), chip(VIEW, s.secretary), canvas);
+      h("span", { class: "dim", text: s.mode }), chip("classic", s.classic), chip(VIEW, s.secretary));
   }
 
   // The secretary home as a menu entry, only in secretary mode.
@@ -173,7 +173,7 @@ window.ConsoleSecretary = (() => {
     if (button) button.disabled = true;
     try {
       await api(`/items/${encodeURIComponent(card.id)}/reply`, { method: "POST",
-        body: { text: answerText(card, text), request_id: card.request_id, ...(window.ConsoleScreenAI?.body() || {}) } });
+        body: { text: answerText(card, text), request_id: card.request_id } });
       sent.set(card.request_id, label || text);
       delete drafts[card.request_id];
       const waited = card.since ? Math.max(0, Math.round((Date.now() - Date.parse(card.since)) / 1000)) : null;

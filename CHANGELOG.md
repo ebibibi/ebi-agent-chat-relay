@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- Canvas mode (画面秘書, ADR-0025) was rejected after trial and is removed (#1552): its screen,
+  widgets, focus session, screen AI bar, resident secretary wakes and the `/api/canvas/*`,
+  `/api/secretary/{digest,notes,deliver}` and `/console/api/canvas/*` routes. A saved canvas mode
+  opens in secretary mode. The night settings, night shift and morning brief are unchanged; no
+  table or stored row is deleted.
+
 ### Added
 
 - Evidence-based auto-completion (#1477): `/candidate` accepts an `evidence` body; with

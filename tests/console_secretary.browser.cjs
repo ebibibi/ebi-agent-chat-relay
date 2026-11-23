@@ -83,6 +83,17 @@ test('classic mode keeps its home and gains only the switch', {timeout: 30000}, 
   assert.deepEqual(errors, []);
 });
 
+test('a saved canvas mode, now retired, opens in secretary mode with only two chips', {timeout: 30000}, async (t) => {
+  const {page, errors} = await open(t, {consoleMode: 'canvas'});
+  assert.equal(await page.evaluate(() => localStorage.getItem('consoleMode')), 'secretary');
+  assert.equal(await page.evaluate(() => state.view), 'secretary');
+  assert.equal(await page.locator('#canvas').count(), 0);
+  assert.equal(await page.locator('.mode-switch button').count(), 2);
+  assert.doesNotMatch(await page.locator('.mode-switch').innerText(), /画面秘書/);
+  assert.equal(await page.evaluate(() => typeof window.ConsoleCanvas), 'undefined');
+  assert.deepEqual(errors, []);
+});
+
 test('the secretary home answers from a card and records the trial', {timeout: 30000}, async (t) => {
   const {page, posted, errors} = await open(t);
   await page.locator('.mode-switch').getByRole('button', {name: '秘書', exact: true}).click();

@@ -1,9 +1,9 @@
-"""The AI for one turn, chosen on a Console screen and never stored (canvas mode, ADR-0025).
+"""The AI for one turn, chosen by the caller and never stored.
 
-The secretary canvas and the focus session let the person pick an AI for what they send from
-that screen: backend, connection, model and effort. It applies to the turns those sends start
-and to nothing else. The global default, each thread's saved choice, scheduled tasks, a wait's
-automatic resume and child threads keep their own settings, because nothing here is written to
+A Console reply (``ai`` in its body) or an automation entry may pick backend, connection,
+model and effort for one turn. It applies to the turns those sends start and to nothing else.
+The global default, each thread's saved choice, scheduled tasks, a wait's automatic resume and
+child threads keep their own settings, because nothing here is written to
 :class:`~.backend_settings.BackendSettings`. The choice travels with the turn instead.
 
 Every field is checked against what the relay offers; a value that is not offered is refused,

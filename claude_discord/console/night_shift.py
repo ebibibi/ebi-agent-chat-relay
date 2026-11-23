@@ -33,7 +33,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from .canvas_repo import CanvasRepository
+from .console_state import ConsoleStateRepository
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +86,7 @@ def eligible(
         return False
     if item.get("running") or item.get("queued") or item.get("archived"):
         return False
-    if item.get("snoozed") or item.get("bucket") == "snoozed" or item.get("canvas_secretary"):
+    if item.get("snoozed") or item.get("bucket") == "snoozed":
         return False
     if str(thread) in asking or str(thread) in waiting:
         return False
@@ -182,7 +182,7 @@ class NightShift:
 
     def __init__(
         self,
-        repo: CanvasRepository,
+        repo: ConsoleStateRepository,
         *,
         board: Callable[[], Awaitable[list[dict[str, Any]]]],
         requests: Callable[[], Awaitable[list[dict[str, Any]]]],
@@ -190,7 +190,6 @@ class NightShift:
         waiting: Callable[[], Awaitable[set[int]]] | None = None,
         scopes: Callable[[], Iterable[str]] = lambda: (),
         limit: Callable[[], Awaitable[int]] | None = None,
-        exclude: Callable[[], Awaitable[str | None]] | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self.repo = repo
@@ -200,8 +199,6 @@ class NightShift:
         self._waiting = waiting
         self._scopes = scopes
         self._limit = limit
-        #: The canvas secretary's own item: a standing service, never handed work.
-        self._exclude = exclude
         self._clock = clock
         self._lock = asyncio.Lock()
         self._task: asyncio.Task[None] | None = None
@@ -249,8 +246,6 @@ class NightShift:
                 and now - at < timedelta(hours=REPEAT_HOURS)
             }
             limit = await self._limit() if self._limit is not None else 8
-            if self._exclude is not None and (own := await self._exclude()):
-                recent.add(own)
             chosen = pick(
                 await self._board(),
                 await self._requests(),

@@ -1,4 +1,4 @@
-"""The screen AI (canvas mode): one turn's backend/model/effort/connection, never stored."""
+"""The per-turn AI: one turn's backend/model/effort/connection, never stored."""
 
 from __future__ import annotations
 

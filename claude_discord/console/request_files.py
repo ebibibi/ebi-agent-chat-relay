@@ -2,7 +2,7 @@
 
 A console conversation keeps a delivered file as a message ``📎 Files:`` followed by
 Markdown links into :data:`~.surface.FILES_ROUTE`. A card that says "review the draft" is only
-answerable when the draft is on it, so the secretary home and canvas mode show those files on
+answerable when the draft is on it, so the secretary home shows those files on
 the card (#1374). Only links into the thread's own file area are taken: a message cannot point a
 card at another thread's files or at an outside address.
 """
