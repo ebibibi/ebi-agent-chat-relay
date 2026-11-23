@@ -75,3 +75,32 @@ call, post by post. With the link inside `body`, they had to delete it by hand e
   names a network. Registering a key again refreshes `link` like the other fields, so an open item
   can move its link out of the body without losing its state.
 - The share sheet still hands over the body only: the person adds the link there when they choose.
+
+## Addendum (2026-11-23): long videos (#1538)
+
+Some networks take the same long video as YouTube (20 minutes at 1080p, about 1.2 GB). At the
+200 MB limit such a video had to be re-encoded near 1.1 Mbps, which blurs the slide text the video
+exists to show.
+
+- **The video limit is a setting, 4 GB by default.** `CCDB_PAGE_VIDEO_MAX_MB`; images stay at
+  10 MB. A default that fits the long video means nothing has to be configured to post it.
+- **The disk decides before the network does.** Uploads were already streamed to disk; now an
+  upload that would leave less than `CCDB_PAGE_FILES_MIN_FREE_MB` (1 GB) free is refused with
+  `507`, before the first byte when the length is declared and periodically when it is not. A
+  full disk under the database is worse than one refused upload.
+- **Ranges, not blobs.** The file route already answered `Range` (aiohttp's `FileResponse`); the
+  Console did not use it, loading every video whole into a `blob:` first. With a session cookie
+  it now points `<video>` and "Save" at the file URL, so the browser streams, seeks and resumes,
+  and an authenticating proxy that cuts long responses cuts only one range. A bearer token cannot
+  ride on those requests, so token sign-in keeps the blob path. A short-lived signed URL would
+  remove that gap but adds a second way to authorise a read; not built until token sign-in is
+  used for long videos.
+- **Resolved videos are cleared, automatically.** This replaces "not built before it is needed"
+  above: at one 1.2 GB video a day the disk fills within weeks. Each upload first deletes videos
+  whose items were all resolved over `CCDB_PAGE_VIDEO_RETAIN_DAYS` (30) ago. Clearing on upload,
+  not on a timer, needs no scheduler and runs exactly when space is about to be used. A video an
+  open or recently resolved item lists is kept, images are kept, and `0` turns it off. A cleared
+  item keeps its text and post URL. Orphaned uploads (never listed) are left alone: telling an
+  orphan from a file whose item is about to be registered would need a grace period for little
+  gain.
+

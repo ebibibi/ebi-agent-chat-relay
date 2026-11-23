@@ -5,17 +5,22 @@ are kept, each recognised by its bytes rather than by what the uploader says, so
 Console serves is the type the file really is. Every part of a file URL is untrusted: the slug
 is the page's, the token the hex minted here, the name a bare filename, and the resolved path
 must stay under the page's directory.
+
+Videos may be long: a 20-minute 1080p screen recording is about 1.2 GB. The video limit, the disk
+space kept free, and how long a resolved item's videos are kept are read from the environment
+(see ``docs/console-pages.md``); every one has a working default.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import shutil
 import unicodedata
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote, unquote
@@ -23,8 +28,18 @@ from urllib.parse import quote, unquote
 #: Where the Console serves a page's files. The slug and token follow; see :func:`file_url`.
 FILES_PREFIX = "/console/api/pages"
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
-#: A short video for a social network. Large enough for a minute of phone footage.
-MAX_VIDEO_BYTES = 200 * 1024 * 1024
+_MB = 1024 * 1024
+#: The default video limit: a long talk recorded at 1080p with room to spare.
+DEFAULT_MAX_VIDEO_BYTES = 4096 * _MB
+#: Disk space an upload must leave free, so a large video never fills the disk the database is on.
+DEFAULT_MIN_FREE_BYTES = 1024 * _MB
+#: Days a resolved item's videos are kept before an upload clears them; 0 keeps them.
+DEFAULT_VIDEO_RETAIN_DAYS = 30
+ENV_MAX_VIDEO_MB = "CCDB_PAGE_VIDEO_MAX_MB"
+ENV_MIN_FREE_MB = "CCDB_PAGE_FILES_MIN_FREE_MB"
+ENV_VIDEO_RETAIN_DAYS = "CCDB_PAGE_VIDEO_RETAIN_DAYS"
+#: How often a streaming upload looks at the free space again.
+_SPACE_CHECK_BYTES = 256 * _MB
 MAX_NAME_CHARS = 120
 MAX_NAME_BYTES = 200
 _HEAD_BYTES = 16
@@ -32,6 +47,8 @@ _HEAD_BYTES = 16
 _TOKEN = re.compile(r"[0-9a-f]{32}")
 _SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
 _UNSAFE = re.compile(r'[\\/:*?"<>|\x00-\x1f\x7f]')
+
+logger = logging.getLogger(__name__)
 
 #: MIME type -> (kind, extension). The only types a page keeps.
 TYPES: dict[str, tuple[str, str]] = {
@@ -113,8 +130,30 @@ def declared_type(content_type: str) -> str:
     return mime
 
 
-def size_limit(mime: str) -> int:
-    return MAX_IMAGE_BYTES if TYPES[mime][0] == "image" else MAX_VIDEO_BYTES
+def _env_number(name: str, default: int, *, minimum: int) -> int:
+    """A whole number from the environment; a missing or unusable value gives *default*."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        value = minimum - 1
+    if value < minimum:
+        logger.warning("%s=%r is not a whole number >= %d; using %d", name, raw, minimum, default)
+        return default
+    return value
+
+
+def human_size(size: int) -> str:
+    """``"4 GB"``, ``"200 MB"``: how a limit reads in an error message."""
+    if size >= 1024 * _MB and size % (1024 * _MB) == 0:
+        return f"{size // (1024 * _MB)} GB"
+    return f"{size // _MB} MB"
+
+
+def too_large(limit: int) -> PageFileError:
+    return PageFileError(f"the file is larger than {human_size(limit)}", 413)
 
 
 def safe_name(raw: str | None, ext: str) -> str:
@@ -153,10 +192,49 @@ def parse_url(url: str) -> tuple[str, str, str] | None:
 
 
 class PageFiles:
-    """The files of every page, under ``root/<slug>/<token>/<name>``."""
+    """The files of every page, under ``root/<slug>/<token>/<name>``.
 
-    def __init__(self, root: Path) -> None:
+    Arguments left out are read from the environment, then fall back to the defaults above.
+    *disk_free* reports the free bytes of the file system holding a path (a seam for tests).
+    """
+
+    def __init__(
+        self,
+        root: Path,
+        *,
+        max_video_bytes: int | None = None,
+        min_free_bytes: int | None = None,
+        video_retain_days: int | None = None,
+        disk_free: Callable[[Path], int] | None = None,
+    ) -> None:
         self.root = root
+        self.max_video_bytes = max_video_bytes or (
+            _env_number(ENV_MAX_VIDEO_MB, DEFAULT_MAX_VIDEO_BYTES // _MB, minimum=1) * _MB
+        )
+        self.min_free_bytes = (
+            min_free_bytes
+            if min_free_bytes is not None
+            else _env_number(ENV_MIN_FREE_MB, DEFAULT_MIN_FREE_BYTES // _MB, minimum=0) * _MB
+        )
+        self.video_retain_days = (
+            video_retain_days
+            if video_retain_days is not None
+            else _env_number(ENV_VIDEO_RETAIN_DAYS, DEFAULT_VIDEO_RETAIN_DAYS, minimum=0)
+        )
+        self._disk_free = disk_free or _disk_free
+
+    def size_limit(self, mime: str) -> int:
+        return MAX_IMAGE_BYTES if TYPES[mime][0] == "image" else self.max_video_bytes
+
+    def ensure_space(self, incoming: int) -> None:
+        """Refuse (507) when *incoming* more bytes would leave less than the reserve free."""
+        free = self._disk_free(self.root)
+        if free - incoming < self.min_free_bytes:
+            raise PageFileError(
+                f"not enough disk space: {human_size(max(free, 0))} free, "
+                f"{human_size(self.min_free_bytes)} must stay free",
+                507,
+            )
 
     def resolve(self, slug: str, token: str, name: str) -> Path | None:
         """The stored file, or None for anything that is not one."""
@@ -184,24 +262,38 @@ class PageFiles:
         )
 
     async def save(
-        self, slug: str, chunks: AsyncIterator[bytes], content_type: str, filename: str | None
+        self,
+        slug: str,
+        chunks: AsyncIterator[bytes],
+        content_type: str,
+        filename: str | None,
+        expected_size: int | None = None,
     ) -> StoredFile:
-        """Stream an upload to disk, then keep it only if its bytes are the type it claims."""
+        """Stream an upload to disk, then keep it only if its bytes are the type it claims.
+
+        Never held in memory. The free space is checked before the first byte (against
+        *expected_size*, the declared length, when known) and again as the file grows.
+        """
         claimed = declared_type(content_type)
-        limit = size_limit(claimed)
+        limit = self.size_limit(claimed)
+        if expected_size and expected_size > limit:
+            raise too_large(limit)
+        await asyncio.to_thread(self.ensure_space, expected_size or 0)
         token = uuid.uuid4().hex
         staging = self.root / slug / f".upload-{token}"
         staging.parent.mkdir(parents=True, exist_ok=True)
         try:
             size = 0
+            checked = 0
             head = b""
             with staging.open("wb") as handle:
                 async for chunk in chunks:
                     size += len(chunk)
                     if size > limit:
-                        raise PageFileError(
-                            f"the file is larger than {limit // (1024 * 1024)} MB", 413
-                        )
+                        raise too_large(limit)
+                    if not expected_size and size - checked >= _SPACE_CHECK_BYTES:
+                        checked = size
+                        await asyncio.to_thread(self.ensure_space, 0)
                     if len(head) < _HEAD_BYTES:
                         head += chunk[: _HEAD_BYTES - len(head)]
                     await asyncio.to_thread(handle.write, chunk)
@@ -227,3 +319,20 @@ class PageFiles:
     def remove_page(self, slug: str) -> None:
         if _SLUG.fullmatch(slug):
             shutil.rmtree(self.root / slug, ignore_errors=True)
+
+    def remove(self, slug: str, token: str) -> int:
+        """Delete one uploaded file (its token directory); answer the bytes it freed."""
+        if not _SLUG.fullmatch(slug) or not _TOKEN.fullmatch(token):
+            return 0
+        folder = self.root / slug / token
+        freed = sum(p.stat().st_size for p in folder.glob("*") if p.is_file())
+        shutil.rmtree(folder, ignore_errors=True)
+        return freed
+
+
+def _disk_free(path: Path) -> int:
+    """Free bytes on the file system that holds *path* (or its nearest existing parent)."""
+    existing = path
+    while not existing.exists() and existing != existing.parent:
+        existing = existing.parent
+    return shutil.disk_usage(existing).free
