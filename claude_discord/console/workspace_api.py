@@ -224,6 +224,7 @@ class WorkspaceRoutes:
                     body.get("due"),
                     line=body.get("line"),
                     milestone_line=body.get("milestone_line"),
+                    follow_up_line=body.get("follow_up_line"),
                 )
             else:
                 await asyncio.to_thread(
@@ -237,6 +238,8 @@ class WorkspaceRoutes:
             self.server.workspace_plan.invalidate()
             return web.json_response(await asyncio.to_thread(self.server.workspace.entry, path))
         except WorkspaceConflictError as exc:
+            # The browser's revision came from a cached plan; the next read must be fresh.
+            self.server.workspace_plan.invalidate()
             return web.json_response({"error": str(exc)}, status=409)
         except WorkspaceError as exc:
             return web.json_response({"error": str(exc)}, status=400)

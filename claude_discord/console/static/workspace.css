@@ -42,7 +42,11 @@
 .ws-focus-text { overflow-wrap:anywhere; }
 .ws-focus-meta, .ws-focus-actions { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:4px; font-size:12px; }
 .ws-focus-path { overflow-wrap:anywhere; }
-.ws-focus-status, .ws-focus-milestone { font-size:12px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ws-focus-status { font-size:12px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ws-focus-milestone { display:flex; gap:6px; align-items:center; font-size:12px; margin-top:2px; min-width:0; }
+.ws-focus-milestone-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.ws-focus-milestone .btn { padding:1px 6px; font-size:12px; flex:none; }
+.ws-focus-milestone .tag { flex:none; }
 .ws-focus-actions .btn { padding:3px 8px; font-size:12px; }
 .ws-focus-date[hidden] { display:none; }
 .ws-focus-lapsed { padding:6px 14px; font-size:12px; }

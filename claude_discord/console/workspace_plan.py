@@ -229,28 +229,34 @@ class WorkspacePlan:
                 return {"due": None, "days": None}
             return {"due": value, "days": (date.fromisoformat(value) - today).days}
 
-        def project_due(p: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
-            """Where the row's deadline comes from, so 📅 edits the date it shows.
+        def milestone(p: dict[str, Any]) -> dict[str, Any]:
+            """The milestone that sets the project's deadline, with its own date and line.
 
-            goodmorning reads a project's deadline from its open マイルストーン rows only;
-            with none, the next action's own 📅 (if any) is what the row shows instead.
+            goodmorning ranks a project by its nearest open マイルストーン row. That date is
+            the milestone's, not the next action's, so it is shown (and edited) on the 🎯
+            line; moving it can bring the next milestone forward, which then shows there.
             """
-            found = entry(p["rel_path"])
-            if p["nearest_deadline"]:
-                rows = [
-                    m
-                    for m in (found or {}).get("milestones", [])
-                    if m["date"] == p["nearest_deadline"]
-                ]
-                named = [m for m in rows if m["name"] == p.get("nearest_milestone")]
-                pick = (named or rows or [None])[0]
+            if not p["nearest_deadline"]:
                 return {
-                    **due(p["nearest_deadline"]),
-                    "due_source": "milestone",
-                    "due_line": pick["line"] if pick else None,
+                    "milestone": None,
+                    "milestone_due": None,
+                    "milestone_days": None,
+                    "milestone_line": None,
                 }
-            own = due_on(task["raw"], today) if task.get("raw") else None
-            return {**due(own.isoformat() if own else None), "due_source": "task", "due_line": None}
+            found = entry(p["rel_path"])
+            rows = [
+                m for m in (found or {}).get("milestones", []) if m["date"] == p["nearest_deadline"]
+            ]
+            named = [m for m in rows if m["name"] == p.get("nearest_milestone")]
+            pick = (named or rows or [None])[0]
+            at = due(p["nearest_deadline"])
+            return {
+                "milestone": p.get("nearest_milestone") or (pick["name"] if pick else None),
+                "milestone_due": at["due"],
+                "milestone_days": at["days"],
+                "milestone_line": pick["line"] if pick else None,
+                "milestone_revision": found["revision"] if found and pick else None,
+            }
 
         def project_row(p: dict[str, Any]) -> dict[str, Any]:
             stale = p["category"] == "stale"
@@ -263,10 +269,32 @@ class WorkspacePlan:
                 more=len(p["next_actions"]) - 1,
                 status=_first_line(p["current_status"]),
                 stale_days=p["staleness_days"] if stale else None,
-                # Why a project ranks high is often a milestone, not its next action.
-                milestone=p.get("nearest_milestone") or None,
+                **milestone(p),
             )
-            return {**project, **project_due(p, project)}
+            # The row's own date is the next action's own deadline, if it has one.
+            own = due_on(project["raw"], today) if project["raw"] else None
+            return {
+                **project,
+                **due(own.isoformat() if own else None),
+                "due_source": "task" if project["line"] is not None else None,
+                "due_line": None,
+            }
+
+        def follow_up_row(p: dict[str, Any], w: dict[str, Any], score: int) -> dict[str, Any]:
+            found = entry(p["rel_path"])
+            same = [x for x in (found or {}).get("waiting", []) if x["text"] == w["text"].strip()]
+            line = same[0]["line"] if len(same) == 1 else None
+            return row(
+                "follow_up",
+                p["rel_path"],
+                f"{w['who']} / {w['what']}" if w["who"] else w["text"],
+                score,
+                priority=p["priority"] or None,
+                due_source="follow_up" if line is not None else None,
+                due_line=line,
+                follow_up_revision=found["revision"] if found and line is not None else None,
+                **due(w["follow_up"]),
+            )
 
         lapsed = int(scan.get("lapsed_days", 14))
         rows: list[dict[str, Any]] = []
@@ -296,21 +324,13 @@ class WorkspacePlan:
                         "priority": p["priority"] or None,
                         "status": _first_line(p["current_status"]),
                         "stale_days": p["staleness_days"] if p["category"] == "stale" else None,
-                        **due(p["nearest_deadline"]),
+                        **due(None),
+                        **milestone(p),
                     }
                 )
             scores = p.get("follow_up_scores") or []
             for w, score in zip(p["due_follow_ups"], scores, strict=False):
-                follow_ups.append(
-                    row(
-                        "follow_up",
-                        path,
-                        f"{w['who']} / {w['what']}" if w["who"] else w["text"],
-                        score,
-                        priority=p["priority"] or None,
-                        **due(w["follow_up"]),
-                    )
-                )
+                follow_ups.append(follow_up_row(p, w, score))
             for w in p["waiting"]:
                 waiting.append(
                     {

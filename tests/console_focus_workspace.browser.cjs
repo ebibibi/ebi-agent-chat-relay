@@ -12,10 +12,11 @@ function planFixture() {
     today_plan:'### オススメ着手順\n1. Ship the website',
     items:[
       {kind:'project',path:'Work/Website',text:'**Ship** the [[Docs/guide|guide]]',score:80,line:3,
-        raw:'**Ship** the [[Docs/guide|guide]] 🔁毎週',revision:'v1',priority:'P1',more:1,status:'Ready',due:'2026-10-14',days:-2,milestone:'Launch',
-        due_source:'milestone',due_line:9},
+        raw:'**Ship** the [[Docs/guide|guide]] 🔁毎週',revision:'v1',priority:'P1',more:1,status:'Ready',due:null,days:null,
+        due_source:'task',due_line:null,milestone:'Launch',milestone_due:'2026-10-14',milestone_days:-2,
+        milestone_line:9,milestone_revision:'v1'},
       {kind:'follow_up',path:'Work/Website',text:'Client / Feedback',score:70,line:null,raw:null,revision:null,
-        priority:'P1',due:'2026-10-16',days:0},
+        priority:'P1',due:'2026-10-16',days:0,due_source:'follow_up',due_line:12,follow_up_revision:'v1'},
       {kind:'single',path:'Work',text:'Call back',score:40,line:2,raw:'[P2] Call back 📅2026-10-17',
         revision:'v2',priority:'P2',due:'2026-10-17',days:1,due_source:'task',due_line:null},
     ],
@@ -86,12 +87,16 @@ for (const mode of ['available','plugin-missing']) {
     const rows = page.locator('.ws-focus:not(.ws-focus-waiting):not(.ws-focus-stalled) .ws-focus-item');
     assert.equal(await rows.count(), 3);
     assert.equal(await rows.nth(0).locator('.ws-focus-text').innerText(), 'Ship the guide');
-    assert.match(await rows.nth(0).innerText(), /期限2日超過/);
     assert.match(await rows.nth(0).innerText(), /ほか 1 件/);
     // The milestone that set the deadline, so the reason for the rank is visible.
-    assert.equal(await rows.nth(0).locator('.ws-focus-milestone').innerText(), '🎯 Launch');
+    // The milestone shows its own date; the row's tag is the next action's own date (none here).
+    assert.equal(await rows.nth(0).locator('.ws-focus-milestone-name').innerText(), '🎯 Launch');
+    assert.match(await rows.nth(0).locator('.ws-focus-milestone').innerText(), /期限2日超過/);
+    assert.doesNotMatch(await rows.nth(0).locator('.ws-focus-meta').innerText(), /期限/);
     assert.equal(await rows.nth(1).locator('.ws-focus-milestone').count(), 0);
     assert.equal(await rows.nth(1).getByRole('button', {name:'✅ 完了'}).count(), 0);
+    // A follow-up row offers only its follow-up date.
+    assert.equal(await rows.nth(1).getByRole('button', {name:'📅 催促日'}).count(), 1);
     assert.match(await page.locator('.ws-focus-lapsed').innerText(), /2 件/);
     // Stalled card: first five open with a stall tag, the rest folded; no next action says so.
     const stalled = page.locator('.ws-focus-stalled > .ws-focus-list > .ws-focus-item');
@@ -108,10 +113,10 @@ for (const mode of ['available','plugin-missing']) {
     assert.match(await waiting.innerText(), /Vendor \/ Quote/);
     // A project's deadline is its milestone's target date: 📅 says so and edits that row,
     // not the next action (the server rewrites the Markdown; the browser sends only the date).
-    const dateButton = rows.nth(0).getByRole('button', {name:'📅 期限'});
+    const dateButton = rows.nth(0).locator('.ws-focus-milestone').getByRole('button', {name:'📅 目標日'});
     assert.match(await dateButton.getAttribute('title'), /🎯「Launch」の目標日/);
     await dateButton.click();
-    await rows.nth(0).locator('input[type=date]').fill('2026-10-20');
+    await rows.nth(0).locator('.ws-focus-milestone input[type=date]').fill('2026-10-20');
     await page.waitForFunction(() => document.querySelectorAll('.ws-focus:not(.ws-focus-waiting):not(.ws-focus-stalled) .ws-focus-item').length === 2);
     assert.deepEqual(writes.at(-1), {path:'Work/Website',revision:'v1',due:'2026-10-20',milestone_line:9});
     // Complete writes done:true for the exact line and revision.
@@ -241,6 +246,11 @@ test('Focus re-date shows the new date, or says why not', {timeout: 30000}, asyn
       else if (reply === 'apply') {
         plan = {...plan, items: plan.items.map(i => i.kind === 'single'
           ? {...i, due: body.due, days: 5, revision: 'v3'} : i)};
+      } else if (reply === 'apply-project') {
+        plan = {...plan, items: plan.items.map(i => i.kind === 'project' ? {...i, due: body.due, days: 6} : i)};
+      } else if (reply === 'next-milestone') {
+        plan = {...plan, items: plan.items.map(i => i.kind === 'project'
+          ? {...i, milestone: '1on1', milestone_due: '2026-10-15', milestone_days: -1, milestone_line: 10} : i)};
       }
     } else if (p.endsWith('/messages')) data = {messages:[]};
     return route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});
@@ -256,7 +266,7 @@ test('Focus re-date shows the new date, or says why not', {timeout: 30000}, asyn
   // Success: the single action's own line is rewritten, and the row shows the new date.
   await redate('2026-10-21');
   await single.getByText('あと5日').waitFor();
-  assert.deepEqual(writes.at(-1), {path:'Work',revision:'v2',due:'2026-10-21',line:2});
+  assert.deepEqual(writes.at(-1), {path:'Work',due:'2026-10-21',line:2,revision:'v2'});
   await page.locator('.toast').filter({hasText:'保存'}).first().waitFor();
   // Saved, but the plan still shows another date: say so instead of a silent "saved".
   reply = 'ignore';
@@ -267,10 +277,31 @@ test('Focus re-date shows the new date, or says why not', {timeout: 30000}, asyn
   reply = 'conflict';
   await redate('2026-10-26');
   await page.locator('.toast').filter({hasText:'The file changed'}).waitFor();
-  // A milestone deadline whose row could not be found offers no 📅 at all.
-  plan = planFixture(); plan.items[0] = {...plan.items[0], due_line: null};
-  await page.evaluate(() => window.ConsoleFocusWorkspace.load());
+  // The project row's own 📅 writes its next action's line, and shows the new date.
+  reply = 'apply-project';
   const project = page.locator('.ws-focus-item').filter({hasText:'Ship the guide'});
+  await project.locator('.ws-focus-actions').getByRole('button', {name:'📅 期限'}).click();
+  await project.locator('.ws-focus-actions input[type=date]').fill('2026-10-22');
+  await project.getByText('あと6日').waitFor();
+  assert.deepEqual(writes.at(-1), {path:'Work/Website',due:'2026-10-22',line:3,revision:'v1'});
+  // Moving the milestone lets the next one surface: the toast names it, the row shows it.
+  reply = 'next-milestone';
+  await project.locator('.ws-focus-milestone').getByRole('button', {name:'📅 目標日'}).click();
+  await project.locator('.ws-focus-milestone input[type=date]').fill('2026-10-30');
+  await page.locator('.toast').filter({hasText:'「Launch」を 2026-10-30 に変更しました。いま一番近いマイルストーンは「1on1」（2026-10-15）'}).waitFor();
+  assert.deepEqual(writes.at(-1), {path:'Work/Website',due:'2026-10-30',milestone_line:9,revision:'v1'});
+  assert.match(await project.locator('.ws-focus-milestone').innerText(), /🎯 1on1/);
+  // A follow-up's 📅 writes its 連絡待ち line.
+  reply = 'ignore';
+  const follow = page.locator('.ws-focus-item').filter({hasText:'Client / Feedback'});
+  await follow.getByRole('button', {name:'📅 催促日'}).click();
+  await follow.locator('input[type=date]').fill('2026-10-19');
+  await page.waitForFunction(() => document.querySelectorAll('.toast').length > 0);
+  assert.deepEqual(writes.at(-1), {path:'Work/Website',due:'2026-10-19',follow_up_line:12,revision:'v1'});
+  // A milestone whose row could not be found offers no 📅 for it.
+  plan = planFixture(); plan.items[0] = {...plan.items[0], milestone_line: null, milestone_revision: null};
+  await page.evaluate(() => window.ConsoleFocusWorkspace.load());
   await project.getByRole('button', {name:'▶ AIに実行'}).waitFor();
-  assert.equal(await project.getByRole('button', {name:'📅 期限'}).count(), 0);
+  await page.waitForFunction(() => !document.querySelector('.ws-focus-milestone button'));
+  assert.match(await project.locator('.ws-focus-milestone').innerText(), /🎯 1on1|🎯 Launch/);
 });

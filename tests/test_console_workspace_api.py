@@ -295,3 +295,12 @@ async def test_due_change_goes_to_the_milestone_row_and_refreshes_the_plan(env, 
     assert (await response.json())["milestones"][0]["date"] == "2026-11-30"
     assert "| Launch | 2026-11-30 | ⬜ |" in status.read_text(encoding="utf-8")
     assert invalidated
+
+
+async def test_a_conflict_makes_the_next_plan_read_fresh(env, notes):
+    env.console.workspace = Workspace(notes)
+    invalidated = []
+    env.console.workspace_plan.invalidate = lambda: invalidated.append(1)
+    payload = {"path": "Work/Client", "revision": "stale", "due": "2026-11-30", "line": 2}
+    response = await env.client.patch("/console/api/workspace/tasks", json=payload, headers=WRITE)
+    assert response.status == 409 and invalidated
