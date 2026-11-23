@@ -551,6 +551,27 @@ class Workspace:
                 action = f"期限変更: {label}"
             self._write_tasks(path, "".join(lines), revision, action)
 
+    def finish_milestone(self, path: str, revision: str, line: Any) -> None:
+        """Mark an open (⬜/🟡) マイルストーン row done (✅), keeping the row and its notes,
+        as the Workspace format asks: the table shows how far the project has come."""
+        if isinstance(line, bool) or not isinstance(line, int):
+            raise WorkspaceError("Unknown milestone line")
+        with self._lock:
+            entry = self.entry(path)
+            if entry["revision"] != revision:
+                raise WorkspaceConflictError("The file changed. Refresh and try again.")
+            milestone = next((m for m in entry["milestones"] if m["line"] == line), None)
+            if milestone is None:
+                raise WorkspaceError("Unknown milestone line")
+            content = _read(self._directory(path) / entry["file"])
+            if _revision(content) != revision:
+                raise WorkspaceConflictError("The file changed. Refresh and try again.")
+            lines = content.splitlines(keepends=True)
+            lines[line - 1] = re.sub("[⬜🟡]", "✅", lines[line - 1], count=1)
+            self._write_tasks(
+                path, "".join(lines), revision, f"マイルストーン完了: {milestone['name']}"
+            )
+
     def finish(self, path: str, texts: list[str], label: str, *, done: bool) -> dict[str, Any]:
         """Follow a Console item finishing (or reopening) into the original Markdown.
 

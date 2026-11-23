@@ -475,3 +475,25 @@ def test_set_due_moves_a_follow_up_date_on_its_waiting_line(notes):
             "2026-12-01",
             follow_up_line=1,
         )
+
+
+def test_finish_milestone_marks_the_row_done_and_keeps_its_notes(notes):
+    status = notes / "02_Contexts" / "Work" / "Client" / "Website" / "status.md"
+    status.write_text(_MILESTONE_STATUS, encoding="utf-8")
+    workspace = Workspace(notes)
+    entry = workspace.entry("Work/Client/Website")
+    workspace.finish_milestone("Work/Client/Website", entry["revision"], 10)
+    text = status.read_text(encoding="utf-8")
+    assert "| Receive the check | 2026-11-16 | ✅ waiting |" in text
+    assert "| Next 1on1 | 2026-11-17 | ⬜ |" in text
+    assert [m["name"] for m in workspace.entry("Work/Client/Website")["milestones"]] == [
+        "Next 1on1"
+    ]
+    log = (status.parent / "log.md").read_text(encoding="utf-8")
+    assert "マイルストーン完了: Receive the check" in log
+    revision = workspace.entry("Work/Client/Website")["revision"]
+    for bad in (9, 10, True, "11"):
+        with pytest.raises(WorkspaceError):
+            workspace.finish_milestone("Work/Client/Website", revision, bad)
+    with pytest.raises(WorkspaceConflictError):
+        workspace.finish_milestone("Work/Client/Website", "stale", 11)
