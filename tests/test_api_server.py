@@ -1622,7 +1622,7 @@ class TestIngestResult:
         assert rec2["error"] == "kaboom"
 
     @pytest.mark.asyncio
-    async def test_sink_attaches_answer_markdown_to_thread(
+    async def test_sink_attaches_plain_text_answer_with_line_breaks(
         self, result_client: TestClient, mock_cog: MagicMock, ingest_repo
     ) -> None:
         resp = await result_client.post("/api/ingest", json={"content": "hello"}, headers=self.AUTH)
@@ -1633,14 +1633,28 @@ class TestIngestResult:
             "claude_discord.ext.api_server.send_file_blobs",
             new_callable=AsyncMock,
         ) as send_file_blobs:
-            await sink("answer via sink", None)
+            await sink("first line\n第二行\nthird line", None)
 
         rec = await ingest_repo.get(result_id)
-        assert rec["result"] == "answer via sink"
-        send_file_blobs.assert_awaited_once()
-        thread, blobs = send_file_blobs.await_args.args[:2]
+        assert rec["result"] == "first line\n第二行\nthird line"
+        poll = await result_client.get(f"/api/ingest/{result_id}", headers=self.AUTH)
+        assert poll.status == 200
+        assert await poll.json() == {
+            "result_id": result_id,
+            "status": "done",
+            "result": "first line\n第二行\nthird line",
+            "error": None,
+            "thread_id": "111222333",
+            "thread_name": "Ingested thread",
+        }
+        assert send_file_blobs.await_count == 1
+        thread, attachment_blobs = send_file_blobs.await_args.args[:2]
         assert thread.id == 111222333
-        assert blobs == [("ccdb-answer.md", b"answer via sink")]
+        assert attachment_blobs == [
+            ("ccdb-answer.md", "first line\n第二行\nthird line".encode()),
+            ("ccdb-answer.txt", "first line\n第二行\nthird line".encode()),
+        ]
+        assert send_file_blobs.await_args.kwargs["content"] == "-# 📎 Answer attached"
 
     @pytest.mark.asyncio
     async def test_sink_does_not_attach_on_error(
