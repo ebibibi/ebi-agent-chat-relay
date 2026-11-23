@@ -26,8 +26,11 @@ window.ConsoleFocusWorkspace = (() => {
     no_line: "元の行を特定できないため、ここでは操作できません",
     stale: (d) => `😴 ${d}日停滞`, stalled: (n) => `😴 停滞中のプロジェクト（${n}件）`,
     no_next: "次のアクションが未設定 — 1つ決める", stalled_more: (n) => `ほか ${n} 件を表示`,
+    redate_target: "📅 目標日", redate_task: "このタスクの期限（行の 📅）を変更",
+    redate_follow_up: "📅 催促日", redate_follow_up_hint: "連絡待ちの催促日（📅）を変更",
     redate_milestone: (m) => `🎯「${m}」の目標日を変更（プロジェクトの期限）`,
-    due_not_shown: (d) => `保存しましたが、表示される期限は ${d || "なし"} のままです。status.md を確認してください`,
+    due_not_shown: (d) => `保存しましたが、表示される期限は ${d || "なし"} のままです。元のファイルを確認してください`,
+    milestone_next: (m, iso, next, d) => `🎯「${m}」を ${iso} に変更しました。いま一番近いマイルストーンは「${next}」（${d}）です`,
   } : {
     title: "🗂️ From Ebi Workspace", plan: "📋 Today's plan (goodmorning)", waiting: "⏳ Waiting for (Ebi Workspace)",
     done: "✅ Done", redate: "📅 Due", run: "▶ Run with AI", delegate: "▶ Hand to AI",
@@ -39,8 +42,11 @@ window.ConsoleFocusWorkspace = (() => {
     no_line: "The original line could not be identified, so it cannot be changed here",
     stale: (d) => `😴 stalled ${d}d`, stalled: (n) => `😴 Stalled projects (${n})`,
     no_next: "No next action yet — decide one", stalled_more: (n) => `Show ${n} more`,
+    redate_target: "📅 Target", redate_task: "Change this task's own due date (📅 on its line)",
+    redate_follow_up: "📅 Follow-up", redate_follow_up_hint: "Change the follow-up date (📅) of this waiting item",
     redate_milestone: (m) => `Change the target date of milestone "${m}" (the project's deadline)`,
-    due_not_shown: (d) => `Saved, but the deadline shown is still ${d || "none"}. Check status.md`,
+    due_not_shown: (d) => `Saved, but the deadline shown is still ${d || "none"}. Check the original file`,
+    milestone_next: (m, iso, next, d) => `Moved "${m}" to ${iso}. The nearest milestone is now "${next}" (${d})`,
   };
 
   // Task text is Obsidian Markdown; a row shows it as plain text.
@@ -94,19 +100,26 @@ window.ConsoleFocusWorkspace = (() => {
     await api("/workspace/tasks", { method: "PATCH", body: { path: item.path, line: item.line, revision: item.revision, done: true } });
     toast(T.saved);
   });
-  // The server writes the date where goodmorning reads it: a project's deadline is the
-  // target date of the milestone row that set it (due_line), anything else the task's own 📅.
-  // After saving, the row must show the new date; if it does not, say so instead of
-  // letting a write that changed nothing look like success.
-  const redate = (item, iso) => act(async () => {
-    const body = { path: item.path, revision: item.revision, due: iso };
-    if (item.due_source === "milestone") body.milestone_line = item.due_line;
-    else body.line = item.line;
-    await api("/workspace/tasks", { method: "PATCH", body });
+  // Every date a row shows has its own 📅, and each writes where goodmorning reads that date:
+  //   "task"      — the row's own date: 📅 on the next action / single action line
+  //   "milestone" — the 🎯 line: the target date of the マイルストーン row that ranks the project
+  //   "follow_up" — a 催促 row: the 📅 follow-up date on its 連絡待ち line
+  // After saving, the row is read again; a date that did not take is said out loud, and moving
+  // a milestone that lets an earlier one surface says which one now sets the deadline.
+  const TARGETS = {
+    task: (item) => ({ line: item.line, revision: item.revision }),
+    milestone: (item) => ({ milestone_line: item.milestone_line, revision: item.milestone_revision }),
+    follow_up: (item) => ({ follow_up_line: item.due_line, revision: item.follow_up_revision }),
+  };
+  const redate = (item, iso, target) => act(async () => {
+    await api("/workspace/tasks", { method: "PATCH", body: { path: item.path, due: iso, ...TARGETS[target](item) } });
     await load();
     const after = plan && [...(plan.items || []), ...(plan.stalled || [])]
-      .find((i) => i.path === item.path && i.text === item.text);
-    toast(!after || after.due === iso ? T.saved : L().due_not_shown(after.due));
+      .find((i) => i.path === item.path && i.kind === item.kind && i.text === item.text);
+    if (target === "milestone") {
+      const next = after && after.milestone_due;
+      toast(!next || next === iso ? T.saved : L().milestone_next(plain(item.milestone), iso, plain(after.milestone), next));
+    } else toast(!after || after.due === iso ? T.saved : L().due_not_shown(after.due));
   });
   const run = (item) => act(async () => {
     const result = await api("/workspace/run", { method: "POST", body: { path: item.path, line: item.line, revision: item.revision } });
@@ -114,18 +127,30 @@ window.ConsoleFocusWorkspace = (() => {
     openItem(result.item.id);
   });
 
-  function dateButton(item) {
-    // A deadline from a milestone row that could not be found has nowhere to be written.
-    if (item.due_source === "milestone" && (item.due_line === null || item.due_line === undefined)) return [];
-    const hint = item.due_source === "milestone" && item.milestone ? L().redate_milestone(plain(item.milestone)) : "";
-    const input = h("input", { type: "date", class: "ws-focus-date", "aria-label": hint || L().redate,
-      value: item.due || "", hidden: true,
-      onchange: (e) => { if (e.target.value) redate(item, e.target.value); } });
-    const button = h("button", { type: "button", class: "btn", disabled: busy, text: L().redate, title: hint, onclick: () => {
+  function dateButton(item, target, value, label, hint) {
+    const input = h("input", { type: "date", class: "ws-focus-date", "aria-label": hint,
+      value: value || "", hidden: true,
+      onchange: (e) => { if (e.target.value) redate(item, e.target.value, target); } });
+    const button = h("button", { type: "button", class: "btn", disabled: busy, text: label, title: hint, onclick: () => {
       input.hidden = false;
       if (input.showPicker) { try { input.showPicker(); } catch { input.focus(); } } else input.focus();
     } });
     return [button, input];
+  }
+  const known = (v) => v !== null && v !== undefined;
+
+  // "🎯 milestone · 6d overdue · 📅 target date": the date that ranks the project, editable here.
+  function milestoneNode(item) {
+    if (!item.milestone) return null;
+    const l = L();
+    const due = dueText({ due: item.milestone_due, days: item.milestone_days });
+    const over = known(item.milestone_days) && item.milestone_days < 0;
+    const editable = known(item.milestone_line) && Boolean(item.milestone_revision);
+    return h("div", { class: "ws-focus-milestone" },
+      h("span", { class: "dim ws-focus-milestone-name", text: `🎯 ${plain(item.milestone)}` }),
+      due ? h("span", { class: "tag" + (over ? " ws-due-over" : ""), text: due }) : null,
+      ...(editable ? dateButton(item, "milestone", item.milestone_due, l.redate_target,
+        l.redate_milestone(plain(item.milestone))) : []));
   }
 
   function itemNode(item) {
@@ -141,19 +166,20 @@ window.ConsoleFocusWorkspace = (() => {
     ].filter(Boolean).map((t) => h("span", { class: "tag" + (stale && t === l.stale(item.stale_days) ? " ws-stale" : ""), text: t }));
     const due = dueText(item);
     if (due) tags.splice(1, 0, h("span", { class: "tag" + (over ? " ws-due-over" : ""), text: due }));
+    const followUp = item.due_source === "follow_up" && known(item.due_line) && Boolean(item.follow_up_revision);
     const actions = usable ? [
       h("button", { type: "button", class: "btn", disabled: busy, text: l.done, onclick: () => complete(item) }),
-      ...dateButton(item),
+      ...dateButton(item, "task", item.due, l.redate, l.redate_task),
       h("button", { type: "button", class: "btn", disabled: busy, text: l.run, onclick: () => run(item) }),
-    ] : [];
+    ] : followUp ? dateButton(item, "follow_up", item.due, l.redate_follow_up, l.redate_follow_up_hint) : [];
     return h("li", { class: "ws-focus-item" },
       h("div", { class: "ws-focus-text" + (item.text ? "" : " dim"), text: item.text ? plain(item.text) : l.no_next }),
       h("div", { class: "ws-focus-meta" },
         h("span", { class: "dim ws-focus-path", text: item.path }),
         ...tags),
-      item.milestone ? h("div", { class: "dim ws-focus-milestone", text: `🎯 ${plain(item.milestone)}` }) : null,
+      milestoneNode(item),
       item.status ? h("div", { class: "dim ws-focus-status", text: `📍 ${plain(item.status)}` }) : null,
-      h("div", { class: "ws-focus-actions", title: usable ? "" : l.no_line },
+      h("div", { class: "ws-focus-actions", title: usable || followUp ? "" : l.no_line },
         ...actions,
         h("button", { type: "button", class: "btn ghost", title: l.open_hint, "aria-label": l.open_hint,
           text: l.open, onclick: () => window.ConsoleWorkspace.open(item.path) })));

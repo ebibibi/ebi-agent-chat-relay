@@ -439,3 +439,39 @@ def test_set_due_rejects_anything_but_an_iso_date(notes, due):
 def test_set_due_with_a_stale_revision_is_a_conflict(notes):
     with pytest.raises(WorkspaceConflictError):
         Workspace(notes).set_due("Work/Client", "old", "2026-11-30", line=2)
+
+
+def test_set_due_moves_a_follow_up_date_on_its_waiting_line(notes):
+    status = notes / "02_Contexts" / "Work" / "Client" / "Website" / "status.md"
+    status.write_text(
+        status.read_text(encoding="utf-8")
+        + "- Vendor / Quote / 2026-10-01〜 📅2026-10-08\n- [ ] Legal / Review\n",
+        encoding="utf-8",
+    )
+    workspace = Workspace(notes)
+    entry = workspace.entry("Work/Client/Website")
+    lines = {w["text"]: w["line"] for w in entry["waiting"]}
+    assert set(lines) == {"Client / Feedback", "Vendor / Quote / 2026-10-01〜", "Legal / Review"}
+    workspace.set_due(
+        "Work/Client/Website",
+        entry["revision"],
+        "2026-11-30",
+        follow_up_line=lines["Legal / Review"],
+    )
+    entry = workspace.entry("Work/Client/Website")
+    workspace.set_due(
+        "Work/Client/Website",
+        entry["revision"],
+        "2026-12-01",
+        follow_up_line=lines["Vendor / Quote / 2026-10-01〜"],
+    )
+    text = status.read_text(encoding="utf-8")
+    assert "- Vendor / Quote / 2026-10-01〜 📅2026-12-01\n" in text
+    assert "- [ ] Legal / Review 📅2026-11-30\n" in text
+    with pytest.raises(WorkspaceError):
+        workspace.set_due(
+            "Work/Client/Website",
+            workspace.entry("Work/Client/Website")["revision"],
+            "2026-12-01",
+            follow_up_line=1,
+        )

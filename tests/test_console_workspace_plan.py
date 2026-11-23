@@ -165,8 +165,13 @@ def test_plan_ranks_by_the_plugin_and_points_at_markdown_lines(notes, plugin):
     assert project["line"] == entry["tasks"][0]["line"]
     assert project["revision"] == entry["revision"]
     assert project["more"] == 1 and project["status"] == "Ready"
-    assert project["priority"] == "P1" and project["days"] == 2
+    assert project["priority"] == "P1" and project["milestone_days"] == 2
+    # The project's deadline belongs to its milestone; the next action has no date of its own.
+    assert project["days"] is None and project["due_source"] == "task"
     assert follow_up["line"] is None and follow_up["revision"] is None
+    # A follow-up is re-dated on its 連絡待ち line.
+    assert follow_up["due_source"] == "follow_up" and follow_up["due_line"] == 15
+    assert follow_up["follow_up_revision"] == entry["revision"]
     assert single["path"] == "Work/Client" and single["line"] == 2 and single["days"] == 1
     assert [w["what"] for w in plan["waiting"]] == ["Feedback", "Quote"]
     assert plan["lapsed"] == 1 and plan["total"] == 3
@@ -340,53 +345,162 @@ _STATUS = (
 )
 
 
-def test_a_milestone_deadline_points_at_the_milestone_row_it_came_from(notes, plugin):
-    # The reported bug: the row shows the milestone's date, so 📅 must edit that row.
+def test_a_row_shows_its_own_date_and_the_milestone_shows_its_date(notes, plugin):
+    # The reported bug: the row's tag showed the milestone's date, so moving the date the
+    # button wrote never changed it, and moving the milestone only surfaced the next one.
     plan = WorkspacePlan(Workspace(notes), plugin)
     row = _dated(
         plan, notes, _STATUS, nearest_deadline="2026-10-09", nearest_milestone="Receive the check"
     )
-    assert row["due"] == "2026-10-09" and row["days"] == -7
-    assert row["due_source"] == "milestone" and row["due_line"] == 7
+    assert row["due"] == "2026-11-30" and row["days"] == 45 and row["due_source"] == "task"
     assert row["line"] == 3
+    assert row["milestone"] == "Receive the check"
+    assert row["milestone_due"] == "2026-10-09" and row["milestone_days"] == -7
+    assert row["milestone_line"] == 7 and row["milestone_revision"] == row["revision"]
 
 
-def test_without_a_milestone_the_row_shows_and_edits_the_tasks_own_date(notes, plugin):
+def test_a_next_action_without_a_date_has_none(notes, plugin):
     plan = WorkspacePlan(Workspace(notes), plugin)
-    row = _dated(plan, notes, _STATUS.split("## マイルストーン")[0])
-    assert row["due"] == "2026-11-30" and row["due_source"] == "task"
-    assert row["due_line"] is None
+    row = _dated(plan, notes, _STATUS.replace(" 📅2026-11-30", ""))
+    assert row["due"] is None and row["due_source"] == "task" and row["milestone"] is None
 
 
 def test_an_unlocatable_milestone_has_no_line_to_edit(notes, plugin):
     plan = WorkspacePlan(Workspace(notes), plugin)
     row = _dated(plan, notes, _STATUS, nearest_deadline="2026-10-12", nearest_milestone="Gone")
-    assert row["due"] == "2026-10-12" and row["due_source"] == "milestone"
-    assert row["due_line"] is None
+    assert row["milestone_due"] == "2026-10-12" and row["milestone_line"] is None
+    assert row["milestone_revision"] is None
 
 
-def test_redating_a_milestone_changes_what_the_next_plan_shows(notes, plugin):
-    """End to end with the plugin's real scanner: the date written is the date read back."""
+def test_a_project_without_next_action_still_offers_its_milestone(notes, plugin):
+    plan = WorkspacePlan(Workspace(notes), plugin)
+    (notes / "02_Contexts" / "Work" / "Client" / "Website" / "status.md").write_text(
+        _STATUS, encoding="utf-8"
+    )
+    scan = plan._scan()
+    scan["projects"] = [
+        {
+            **_project("Work/Client/Website", 10, "no_next_action", actions=()),
+            "nearest_deadline": "2026-10-09",
+            "nearest_milestone": "Receive the check",
+        }
+    ]
+    scan["single_actions"] = []
+    row = plan.shape(scan)["stalled"][0]
+    assert row["kind"] == "no_next" and row["due"] is None
+    assert row["milestone_line"] == 7 and row["milestone_revision"]
+
+
+def test_an_ambiguous_waiting_line_cannot_be_redated(notes, plugin):
+    status = notes / "02_Contexts" / "Work" / "Client" / "Website" / "status.md"
+    status.write_text(
+        status.read_text(encoding="utf-8") + "- Client / Feedback 📅2026-10-01\n", encoding="utf-8"
+    )
+    follow_up = WorkspacePlan(Workspace(notes), plugin).read()["items"][1]
+    assert follow_up["kind"] == "follow_up" and follow_up["due_line"] is None
+
+
+def _real_plan(notes: Path, status: str, actions: str | None = None):
     real = discover_plugin()
     if real is None:
         pytest.skip("the Ebi Workspace plugin is not installed here")
-    status = notes / "02_Contexts" / "Work" / "Client" / "Website" / "status.md"
-    today = date.today()
-    soon = date.fromordinal(today.toordinal() - 3).isoformat()
-    later = date.fromordinal(today.toordinal() + 9).isoformat()
-    status.write_text(
-        "# Website\n優先度: P1\n最終更新: " + today.isoformat() + "\n## 現在地\nok\n"
-        "## 次のアクション\n- [ ] 🧑 Review the video\n## マイルストーン\n"
-        "| マイルストーン | 目標日 | 状態 |\n|---|---|---|\n"
-        f"| Receive the check | {soon} | 🟡 |\n## 連絡待ち\nなし\n",
-        encoding="utf-8",
-    )
+    project = notes / "02_Contexts" / "Work" / "Client" / "Website"
+    (project / "status.md").write_text(status, encoding="utf-8")
+    if actions is not None:
+        (project.parent / "single-actions.md").write_text(actions, encoding="utf-8")
     workspace = Workspace(notes)
-    plan = WorkspacePlan(workspace, real)
-    row = next(i for i in plan.read()["items"] if i["path"] == "Work/Client/Website")
-    assert row["due"] == soon and row["due_source"] == "milestone"
-    workspace.set_due(row["path"], row["revision"], later, milestone_line=row["due_line"])
+    return workspace, WorkspacePlan(workspace, real)
+
+
+def _iso(days: int) -> str:
+    return date.fromordinal(date.today().toordinal() + days).isoformat()
+
+
+def _real_status(milestones: str, next_action: str = "🧑 Review the video", waiting: str = "なし"):
+    return (
+        "# Website\n優先度: P1\n最終更新: " + date.today().isoformat() + "\n## 現在地\nok\n"
+        f"## 次のアクション\n- [ ] {next_action}\n## マイルストーン\n"
+        "| マイルストーン | 目標日 | 状態 |\n|---|---|---|\n"
+        f"{milestones}## 連絡待ち\n{waiting}\n"
+    )
+
+
+def _find(plan: WorkspacePlan, kind: str, path: str = "Work/Client/Website") -> dict:
     plan.invalidate()
-    row = next(i for i in plan.read()["items"] if i["path"] == "Work/Client/Website")
-    assert row["due"] == later
-    assert status.read_text(encoding="utf-8").count(later) == 1
+    data = plan.read()
+    return next(
+        i for i in [*data["items"], *data["stalled"]] if i["kind"] == kind and i["path"] == path
+    )
+
+
+# Every date a Focus row shows, re-dated where it is written, read back by the plugin's real
+# scanner: what the browser shows after the save is the date that was chosen.
+
+
+def test_real_scanner_task_date_on_a_project_next_action(notes, plugin):
+    status = _real_status(f"| Check | {_iso(-3)} | 🟡 |\n")
+    workspace, plan = _real_plan(notes, status)
+    row = _find(plan, "project")
+    assert row["due"] is None and row["milestone_due"] == _iso(-3)
+    workspace.set_due(row["path"], row["revision"], _iso(9), line=row["line"])
+    row = _find(plan, "project")
+    assert row["due"] == _iso(9) and row["milestone_due"] == _iso(-3)
+
+
+def test_real_scanner_milestone_date_and_the_next_one_surfacing(notes, plugin):
+    status = _real_status(f"| Check | {_iso(-7)} | 🟡 |\n| 1on1 | {_iso(-6)} | ⬜ |\n")
+    workspace, plan = _real_plan(notes, status)
+    row = _find(plan, "project")
+    assert row["milestone"] == "Check" and row["milestone_due"] == _iso(-7)
+    workspace.set_due(
+        row["path"], row["milestone_revision"], _iso(7), milestone_line=row["milestone_line"]
+    )
+    row = _find(plan, "project")
+    # The moved milestone is no longer the nearest; the row says which one now is.
+    assert row["milestone"] == "1on1" and row["milestone_due"] == _iso(-6)
+    workspace.set_due(
+        row["path"], row["milestone_revision"], _iso(8), milestone_line=row["milestone_line"]
+    )
+    row = _find(plan, "project")
+    assert row["milestone"] == "Check" and row["milestone_due"] == _iso(7)
+
+
+def test_real_scanner_follow_up_date(notes, plugin):
+    status = _real_status(
+        f"| Check | {_iso(30)} | ⬜ |\n",
+        waiting=f"- Client / Feedback / {_iso(-10)}〜 📅{_iso(-1)}",
+    )
+    workspace, plan = _real_plan(notes, status)
+    row = _find(plan, "follow_up")
+    assert row["due"] == _iso(-1) and row["due_line"] is not None
+    workspace.set_due(
+        row["path"], row["follow_up_revision"], _iso(0), follow_up_line=row["due_line"]
+    )
+    row = _find(plan, "follow_up")
+    assert row["due"] == _iso(0)
+    text = workspace.document("Work/Client/Website", "status.md")
+    assert text.count("📅") == 1
+
+
+@pytest.mark.parametrize(
+    "task",
+    [
+        "[P1] Call back 📅{d}",
+        "[P1] Call back 期限: {d}",
+        "[P1] Call back（期限: **{md}**）",
+        "[P1] Call back 📅{d} 🔁毎週月曜",
+    ],
+)
+def test_real_scanner_single_action_in_every_notation(notes, plugin, task):
+    past = date.fromordinal(date.today().toordinal() - 2)
+    line = task.format(d=past.isoformat(), md=f"{past.month}/{past.day}")
+    workspace, plan = _real_plan(
+        notes, _real_status(f"| Check | {_iso(30)} | ⬜ |\n"), f"# Tasks\n- [ ] {line}\n"
+    )
+    row = _find(plan, "single", "Work/Client")
+    assert row["due"] == past.isoformat()
+    workspace.set_due(row["path"], row["revision"], _iso(3), line=row["line"])
+    row = _find(plan, "single", "Work/Client")
+    assert row["due"] == _iso(3)
+    text = workspace.document("Work/Client", "single-actions.md")
+    assert text.count("📅") == 1 and "期限" not in text

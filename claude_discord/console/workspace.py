@@ -81,6 +81,36 @@ def with_due(text: str, due: str) -> str:
     return f"{edited.rstrip()} 📅{due}"
 
 
+_WAITING_HEADINGS = ("連絡待ち", "ブロッカー")
+_FOLLOW_UP_DATE = re.compile(r"\s*📅\s*\d{4}-\d{2}-\d{2}")
+_WAITING_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ ]\]\s+)?(.*)$")
+
+
+def _waiting(content: str) -> list[dict[str, Any]]:
+    """Lines of a project's 連絡待ち section, keyed by the text goodmorning reports for them
+    (the item without its 📅 follow-up date), so a follow-up row can be re-dated."""
+    found = []
+    inside = False
+    for number, line in enumerate(content.splitlines(), 1):
+        if line.startswith("## "):
+            inside = line[3:].strip() in _WAITING_HEADINGS
+            continue
+        if not inside or line.startswith("#") or not line.strip():
+            continue
+        match = _WAITING_ITEM.match(line)
+        text = _FOLLOW_UP_DATE.sub("", match[1] if match else line).strip()
+        if text:
+            found.append({"line": number, "text": text})
+    return found
+
+
+def with_follow_up(text: str, due: str) -> str:
+    """A 連絡待ち line with exactly one 📅 follow-up date, *due*."""
+    stripped = _FOLLOW_UP_DATE.sub("", text.rstrip("\r\n")).rstrip()
+    ending = text[len(text.rstrip("\r\n")) :]
+    return f"{stripped} 📅{due}{ending}"
+
+
 def _milestones(content: str) -> list[dict[str, Any]]:
     """Open (⬜/🟡) dated rows of the ``## マイルストーン`` table, as goodmorning reads them.
 
@@ -290,6 +320,7 @@ class Workspace:
             "revision": _revision(content),
             "tasks": _tasks(content, project),
             "milestones": _milestones(content) if project else [],
+            "waiting": _waiting(content) if project else [],
         }
 
     def snapshot(self) -> dict[str, Any]:
@@ -469,12 +500,14 @@ class Workspace:
         *,
         line: Any = None,
         milestone_line: Any = None,
+        follow_up_line: Any = None,
     ) -> None:
         """Change a deadline where goodmorning reads it.
 
         ``milestone_line`` names an open row of a project's マイルストーン table, whose
         target date is the project's deadline; otherwise ``line`` names a task whose
-        own deadline (📅 or 期限: …) is replaced by a single ``📅<due>``.
+        own deadline (📅 or 期限: …) is replaced by a single ``📅<due>``; ``follow_up_line``
+        names a 連絡待ち line whose 📅 follow-up date is set.
         """
         if not isinstance(due, str) or not _ISO_DATE.fullmatch(due):
             raise WorkspaceError("due must be a date (YYYY-MM-DD)")
@@ -500,6 +533,14 @@ class Workspace:
                     raise WorkspaceError("Unknown milestone line")
                 lines[milestone_line - 1] = _ISO_DATE.sub(due, lines[milestone_line - 1], count=1)
                 action = f"期限変更: {milestone['name']} {milestone['date']} → {due}"
+            elif follow_up_line is not None:
+                if isinstance(follow_up_line, bool) or not isinstance(follow_up_line, int):
+                    raise WorkspaceError("Unknown waiting line")
+                waiting = next((w for w in entry["waiting"] if w["line"] == follow_up_line), None)
+                if waiting is None:
+                    raise WorkspaceError("Unknown waiting line")
+                lines[follow_up_line - 1] = with_follow_up(lines[follow_up_line - 1], due)
+                action = f"催促日変更: {waiting['text']} → {due}"
             else:
                 task = self._task_at(entry, line)
                 label = with_due(task["text"], due)
