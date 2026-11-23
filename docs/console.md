@@ -289,6 +289,8 @@ notification posts a reminder; it does not by itself start an agent turn.
 Paste a file, drop it on the reply box, or pick it with 📎 next to Send — up to 10 per reply.
 Each uploads at once (`POST /console/api/uploads`, the raw body, `X-Filename` the
 percent-encoded name) and waits above the box: images as thumbnails, other files as a named chip.
+Past four files the row folds to the first three and a **+N** button that shows the rest; the
+row scrolls past a fixed height either way, so Send stays on screen.
 Images (PNG, JPEG, GIF, WebP) are checked by their bytes and capped at 10 MB; any other file is
 kept as it came under a bare, sanitised version of its name, up to 50 MB. The reply names the
 uploads (`files`), and the agent receives each one by local path. Uploads are served back only

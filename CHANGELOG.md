@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Attaching many files to a Console reply no longer pushes Send off the screen: past four, the
+  tray folds to three and a **+N** button that shows the rest, and its height is capped.
 - Decision cards no longer disappear when the person writes anything in their thread or the agent
   marks it without a request (#1438). A card closes when answered on the card, replaced by the same
   key, closed by its agent (`DELETE /api/threads/{id}/decisions/{key}`) or when the thread is
