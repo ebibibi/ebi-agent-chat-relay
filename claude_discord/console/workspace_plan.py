@@ -29,7 +29,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from .workspace import Workspace, WorkspaceError
+from .workspace import Workspace, WorkspaceError, due_on
 
 logger = logging.getLogger(__name__)
 
@@ -229,9 +229,32 @@ class WorkspacePlan:
                 return {"due": None, "days": None}
             return {"due": value, "days": (date.fromisoformat(value) - today).days}
 
+        def project_due(p: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+            """Where the row's deadline comes from, so 📅 edits the date it shows.
+
+            goodmorning reads a project's deadline from its open マイルストーン rows only;
+            with none, the next action's own 📅 (if any) is what the row shows instead.
+            """
+            found = entry(p["rel_path"])
+            if p["nearest_deadline"]:
+                rows = [
+                    m
+                    for m in (found or {}).get("milestones", [])
+                    if m["date"] == p["nearest_deadline"]
+                ]
+                named = [m for m in rows if m["name"] == p.get("nearest_milestone")]
+                pick = (named or rows or [None])[0]
+                return {
+                    **due(p["nearest_deadline"]),
+                    "due_source": "milestone",
+                    "due_line": pick["line"] if pick else None,
+                }
+            own = due_on(task["raw"], today) if task.get("raw") else None
+            return {**due(own.isoformat() if own else None), "due_source": "task", "due_line": None}
+
         def project_row(p: dict[str, Any]) -> dict[str, Any]:
             stale = p["category"] == "stale"
-            return row(
+            project = row(
                 "project",
                 p["rel_path"],
                 p["next_actions"][0],
@@ -242,8 +265,8 @@ class WorkspacePlan:
                 stale_days=p["staleness_days"] if stale else None,
                 # Why a project ranks high is often a milestone, not its next action.
                 milestone=p.get("nearest_milestone") or None,
-                **due(p["nearest_deadline"]),
             )
+            return {**project, **project_due(p, project)}
 
         lapsed = int(scan.get("lapsed_days", 14))
         rows: list[dict[str, Any]] = []
@@ -309,6 +332,8 @@ class WorkspacePlan:
                         s["text"],
                         s["score"],
                         priority=s["priority"] or None,
+                        due_source="task",
+                        due_line=None,
                         **due(s["deadline"]),
                     )
                 )

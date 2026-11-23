@@ -12,11 +12,12 @@ function planFixture() {
     today_plan:'### オススメ着手順\n1. Ship the website',
     items:[
       {kind:'project',path:'Work/Website',text:'**Ship** the [[Docs/guide|guide]]',score:80,line:3,
-        raw:'**Ship** the [[Docs/guide|guide]] 🔁毎週',revision:'v1',priority:'P1',more:1,status:'Ready',due:'2026-10-14',days:-2,milestone:'Launch'},
+        raw:'**Ship** the [[Docs/guide|guide]] 🔁毎週',revision:'v1',priority:'P1',more:1,status:'Ready',due:'2026-10-14',days:-2,milestone:'Launch',
+        due_source:'milestone',due_line:9},
       {kind:'follow_up',path:'Work/Website',text:'Client / Feedback',score:70,line:null,raw:null,revision:null,
         priority:'P1',due:'2026-10-16',days:0},
       {kind:'single',path:'Work',text:'Call back',score:40,line:2,raw:'[P2] Call back 📅2026-10-17',
-        revision:'v2',priority:'P2',due:'2026-10-17',days:1},
+        revision:'v2',priority:'P2',due:'2026-10-17',days:1,due_source:'task',due_line:null},
     ],
     stalled_total:7,
     stalled:[
@@ -105,12 +106,14 @@ for (const mode of ['available','plugin-missing']) {
     const waiting = page.locator('.ws-focus-waiting .ws-focus-item');
     assert.equal(await waiting.count(), 1);
     assert.match(await waiting.innerText(), /Vendor \/ Quote/);
-    // Re-date keeps the recurrence rule after the new date.
-    await rows.nth(0).getByRole('button', {name:'📅 期限'}).click();
+    // A project's deadline is its milestone's target date: 📅 says so and edits that row,
+    // not the next action (the server rewrites the Markdown; the browser sends only the date).
+    const dateButton = rows.nth(0).getByRole('button', {name:'📅 期限'});
+    assert.match(await dateButton.getAttribute('title'), /🎯「Launch」の目標日/);
+    await dateButton.click();
     await rows.nth(0).locator('input[type=date]').fill('2026-10-20');
     await page.waitForFunction(() => document.querySelectorAll('.ws-focus:not(.ws-focus-waiting):not(.ws-focus-stalled) .ws-focus-item').length === 2);
-    assert.deepEqual(writes.at(-1), {path:'Work/Website',line:3,revision:'v1',
-      text:'**Ship** the [[Docs/guide|guide]] 📅2026-10-20 🔁毎週'});
+    assert.deepEqual(writes.at(-1), {path:'Work/Website',revision:'v1',due:'2026-10-20',milestone_line:9});
     // Complete writes done:true for the exact line and revision.
     plan = planFixture(); plan.items = plan.items.slice(2);
     await page.evaluate(() => window.ConsoleFocusWorkspace.load());
@@ -208,4 +211,66 @@ test('Focus plan lines hand off to AI', {timeout: 30000}, async t => {
   await buttons.nth(3).click();
   await page.waitForFunction(() => state.open === 'r3');
   assert.deepEqual(runs.at(-1), {path:'Work',line:5,revision:'w1'});
+});
+
+// A re-date must change what the row shows. A save that did not (or failed) is said out loud,
+// and a successful one shows the new date at once.
+test('Focus re-date shows the new date, or says why not', {timeout: 30000}, async t => {
+  const browser = await chromium.launch({headless:true,args:['--no-sandbox']});
+  t.after(() => browser.close());
+  const page = await browser.newPage({viewport:{width:1440,height:900},locale:'ja-JP'});
+  const writes = [];
+  let plan = planFixture();
+  let reply = 'apply';
+  await page.route('http://console.test/**', async route => {
+    const p = new URL(route.request().url()).pathname;
+    if (p === '/' || p.startsWith('/static/')) {
+      const file = p === '/' ? 'index.html' : path.basename(p);
+      return route.fulfill({body:fs.readFileSync(path.join(root,file)),contentType:
+        file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html'});
+    }
+    let data = {};
+    let status = 200;
+    if (p.endsWith('/board')) data = {items:[],slots:{},places:[]};
+    else if (p.endsWith('/workspace/plan')) data = plan;
+    else if (p.endsWith('/workspace')) data = {available:true,entries:[]};
+    else if (p.endsWith('/workspace/tasks')) {
+      const body = route.request().postDataJSON();
+      writes.push(body);
+      if (reply === 'conflict') { status = 409; data = {error:'The file changed. Refresh and try again.'}; }
+      else if (reply === 'apply') {
+        plan = {...plan, items: plan.items.map(i => i.kind === 'single'
+          ? {...i, due: body.due, days: 5, revision: 'v3'} : i)};
+      }
+    } else if (p.endsWith('/messages')) data = {messages:[]};
+    return route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});
+  });
+  await page.goto('http://console.test/');
+  await page.evaluate(() => setView('focus'));
+  const single = page.locator('.ws-focus-item').filter({hasText:'Call back'});
+  await single.waitFor();
+  const redate = async (iso) => {
+    await single.getByRole('button', {name:'📅 期限'}).click();
+    await single.locator('input[type=date]').fill(iso);
+  };
+  // Success: the single action's own line is rewritten, and the row shows the new date.
+  await redate('2026-10-21');
+  await single.getByText('あと5日').waitFor();
+  assert.deepEqual(writes.at(-1), {path:'Work',revision:'v2',due:'2026-10-21',line:2});
+  await page.locator('.toast').filter({hasText:'保存'}).first().waitFor();
+  // Saved, but the plan still shows another date: say so instead of a silent "saved".
+  reply = 'ignore';
+  await page.evaluate(() => document.querySelectorAll('.toast').forEach(t => t.remove()));
+  await redate('2026-10-25');
+  await page.locator('.toast').filter({hasText:'表示される期限は 2026-10-21 のまま'}).waitFor();
+  // A failed save shows the server's reason.
+  reply = 'conflict';
+  await redate('2026-10-26');
+  await page.locator('.toast').filter({hasText:'The file changed'}).waitFor();
+  // A milestone deadline whose row could not be found offers no 📅 at all.
+  plan = planFixture(); plan.items[0] = {...plan.items[0], due_line: null};
+  await page.evaluate(() => window.ConsoleFocusWorkspace.load());
+  const project = page.locator('.ws-focus-item').filter({hasText:'Ship the guide'});
+  await project.getByRole('button', {name:'▶ AIに実行'}).waitFor();
+  assert.equal(await project.getByRole('button', {name:'📅 期限'}).count(), 0);
 });

@@ -26,6 +26,8 @@ window.ConsoleFocusWorkspace = (() => {
     no_line: "元の行を特定できないため、ここでは操作できません",
     stale: (d) => `😴 ${d}日停滞`, stalled: (n) => `😴 停滞中のプロジェクト（${n}件）`,
     no_next: "次のアクションが未設定 — 1つ決める", stalled_more: (n) => `ほか ${n} 件を表示`,
+    redate_milestone: (m) => `🎯「${m}」の目標日を変更（プロジェクトの期限）`,
+    due_not_shown: (d) => `保存しましたが、表示される期限は ${d || "なし"} のままです。status.md を確認してください`,
   } : {
     title: "🗂️ From Ebi Workspace", plan: "📋 Today's plan (goodmorning)", waiting: "⏳ Waiting for (Ebi Workspace)",
     done: "✅ Done", redate: "📅 Due", run: "▶ Run with AI", delegate: "▶ Hand to AI",
@@ -37,6 +39,8 @@ window.ConsoleFocusWorkspace = (() => {
     no_line: "The original line could not be identified, so it cannot be changed here",
     stale: (d) => `😴 stalled ${d}d`, stalled: (n) => `😴 Stalled projects (${n})`,
     no_next: "No next action yet — decide one", stalled_more: (n) => `Show ${n} more`,
+    redate_milestone: (m) => `Change the target date of milestone "${m}" (the project's deadline)`,
+    due_not_shown: (d) => `Saved, but the deadline shown is still ${d || "none"}. Check status.md`,
   };
 
   // Task text is Obsidian Markdown; a row shows it as plain text.
@@ -73,14 +77,6 @@ window.ConsoleFocusWorkspace = (() => {
     return l.on(item.due);
   }
 
-  // "📅2026-10-20" replaces the task's own date, or is added before a 🔁 rule / at the end.
-  function withDue(raw, iso) {
-    if (/📅\d{4}-\d{2}-\d{2}/.test(raw)) return raw.replace(/📅\d{4}-\d{2}-\d{2}/, `📅${iso}`);
-    const repeat = raw.indexOf("🔁");
-    return repeat >= 0 ? `${raw.slice(0, repeat).trimEnd()} 📅${iso} ${raw.slice(repeat)}`
-      : `${raw.trimEnd()} 📅${iso}`;
-  }
-
   async function act(fn) {
     if (busy) return;
     busy = true;
@@ -98,9 +94,19 @@ window.ConsoleFocusWorkspace = (() => {
     await api("/workspace/tasks", { method: "PATCH", body: { path: item.path, line: item.line, revision: item.revision, done: true } });
     toast(T.saved);
   });
+  // The server writes the date where goodmorning reads it: a project's deadline is the
+  // target date of the milestone row that set it (due_line), anything else the task's own 📅.
+  // After saving, the row must show the new date; if it does not, say so instead of
+  // letting a write that changed nothing look like success.
   const redate = (item, iso) => act(async () => {
-    await api("/workspace/tasks", { method: "PATCH", body: { path: item.path, line: item.line, revision: item.revision, text: withDue(item.raw, iso) } });
-    toast(T.saved);
+    const body = { path: item.path, revision: item.revision, due: iso };
+    if (item.due_source === "milestone") body.milestone_line = item.due_line;
+    else body.line = item.line;
+    await api("/workspace/tasks", { method: "PATCH", body });
+    await load();
+    const after = plan && [...(plan.items || []), ...(plan.stalled || [])]
+      .find((i) => i.path === item.path && i.text === item.text);
+    toast(!after || after.due === iso ? T.saved : L().due_not_shown(after.due));
   });
   const run = (item) => act(async () => {
     const result = await api("/workspace/run", { method: "POST", body: { path: item.path, line: item.line, revision: item.revision } });
@@ -109,10 +115,13 @@ window.ConsoleFocusWorkspace = (() => {
   });
 
   function dateButton(item) {
-    const input = h("input", { type: "date", class: "ws-focus-date", "aria-label": L().redate,
+    // A deadline from a milestone row that could not be found has nowhere to be written.
+    if (item.due_source === "milestone" && (item.due_line === null || item.due_line === undefined)) return [];
+    const hint = item.due_source === "milestone" && item.milestone ? L().redate_milestone(plain(item.milestone)) : "";
+    const input = h("input", { type: "date", class: "ws-focus-date", "aria-label": hint || L().redate,
       value: item.due || "", hidden: true,
       onchange: (e) => { if (e.target.value) redate(item, e.target.value); } });
-    const button = h("button", { type: "button", class: "btn", disabled: busy, text: L().redate, onclick: () => {
+    const button = h("button", { type: "button", class: "btn", disabled: busy, text: L().redate, title: hint, onclick: () => {
       input.hidden = false;
       if (input.showPicker) { try { input.showPicker(); } catch { input.focus(); } } else input.focus();
     } });
