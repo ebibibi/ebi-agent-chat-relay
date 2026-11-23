@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from aiohttp import web
 
-from ..database.page_files import PageFileError, declared_type, size_limit
+from ..database.page_files import PageFileError
 from ..database.pages_repo import (
     DEFAULT_ITEM_LIMIT,
     STATE_OPEN,
@@ -16,6 +17,8 @@ from ..database.pages_repo import (
     PageNotFoundError,
     PageRepository,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def _guarded(
@@ -108,23 +111,27 @@ async def handle_upload_file(request: web.Request, repo: PageRepository | None) 
 
     The body is the raw file, ``Content-Type`` its type and ``X-Filename`` its percent-encoded
     name. It is streamed to disk with its own size limit: a video is far larger than the
-    listener's JSON limit.
+    listener's JSON limit. Before it is kept, videos of long-resolved items are cleared, and an
+    upload that would leave too little disk free is refused with 507.
     """
 
     async def action(pages: PageRepository) -> web.Response:
         slug = _slug(request)
         if await pages.get_page(slug) is None:
             raise PageNotFoundError(f"unknown page: {slug}")
-        content_type = request.headers.get("Content-Type", "")
-        if request.content_length:
-            limit = size_limit(declared_type(content_type))
-            if request.content_length > limit:
-                raise PageFileError(f"the file is larger than {limit // (1024 * 1024)} MB", 413)
+        try:
+            freed = await pages.prune_videos()
+        except Exception:  # housekeeping must not cost the upload
+            logger.exception("Could not clear old page videos")
+        else:
+            if freed:
+                logger.info("Cleared %d bytes of videos from long-resolved page items", freed)
         stored = await pages.files.save(
             slug,
-            request.content.iter_chunked(64 * 1024),
-            content_type,
+            request.content.iter_chunked(1024 * 1024),
+            request.headers.get("Content-Type", ""),
             request.headers.get("X-Filename"),
+            request.content_length,
         )
         return web.json_response(stored.as_dict(), status=201)
 

@@ -29,6 +29,7 @@ const definition = (n) => [{slug:'posts', title:'📣 投稿待ち', open_label:
   for (const viewport of [{width:1280,height:900},{width:390,height:844}]) {
     let open = fixtures();
     const patches = [];
+    const fileRequests = [];
     const context = await browser.newContext({viewport, locale:'ja-JP', acceptDownloads:true});
     const page = await context.newPage();
     const errors = [];
@@ -43,6 +44,11 @@ const definition = (n) => [{slug:'posts', title:'📣 投稿待ち', open_label:
         return route.fulfill({contentType:type, body:fs.readFileSync(root + file)});
       }
       if (url.pathname.startsWith(FILES)) {
+        fileRequests.push(url.pathname);
+        if (url.searchParams.get('download') === '1') {
+          return route.fulfill({contentType:'video/mp4', body:MP4,
+            headers:{'Content-Disposition':'attachment; filename="teaser.mp4"'}});
+        }
         return url.pathname.endsWith('.png')
           ? route.fulfill({contentType:'image/png', body:PNG})
           : route.fulfill({contentType:'video/mp4', body:MP4});
@@ -113,9 +119,18 @@ const definition = (n) => [{slug:'posts', title:'📣 投稿待ち', open_label:
     assert.equal(await outside.getAttribute('rel'), 'noopener noreferrer');
     assert.ok((await outside.textContent()).includes(hostile));
 
-    // A video is fetched only when asked for, then plays from a blob.
+    // A video is fetched only when asked for. Signed in by cookie, the browser streams it from
+    // its URL (in ranges) instead of loading the whole file into a blob first.
+    assert.equal(fileRequests.filter((u) => u.endsWith('.mp4')).length, 0, 'no video before play');
     await page.locator('.page-video').click();
-    await page.waitForFunction(() => document.querySelector('video.page-player')?.src.startsWith('blob:'));
+    await page.waitForFunction(() => document.querySelector('video.page-player'));
+    assert.equal(await page.locator('video.page-player').getAttribute('src'), `${FILES}/teaser.mp4`);
+
+    // Saving a video is the browser's own download (resumable), not a blob built in memory.
+    const [video] = await Promise.all([page.waitForEvent('download'),
+      page.locator('.page-save').nth(1).click()]);
+    assert.equal(video.suggestedFilename(), 'teaser.mp4');
+    assert.ok(video.url().endsWith('/teaser.mp4?download=1'));
 
     // Saving gives the file under its name.
     const [download] = await Promise.all([page.waitForEvent('download'),
@@ -166,6 +181,39 @@ const definition = (n) => [{slug:'posts', title:'📣 投稿待ち', open_label:
       }
     }
     assert.deepEqual(errors, []);
+    await context.close();
+  }
+
+  // Signed in with a bearer token, which a <video src> cannot carry: the video comes as a blob.
+  {
+    const context = await browser.newContext({locale:'ja-JP'});
+    const page = await context.newPage();
+    const open = fixtures();
+    await page.route('http://console.test/**', async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === '/') return route.fulfill({contentType:'text/html', body:fs.readFileSync(root + 'index.html')});
+      if (url.pathname.startsWith('/static/')) {
+        const file = url.pathname.split('/').pop();
+        const type = file.endsWith('.css') ? 'text/css' : file.endsWith('.js') ? 'text/javascript' : 'image/svg+xml';
+        return route.fulfill({contentType:type, body:fs.readFileSync(root + file)});
+      }
+      if (url.pathname.startsWith(FILES)) {
+        assert.equal(route.request().headers().authorization, 'Bearer tok', 'the token rides along');
+        return route.fulfill({contentType:url.pathname.endsWith('.png') ? 'image/png' : 'video/mp4',
+          body:url.pathname.endsWith('.png') ? PNG : MP4});
+      }
+      let data = {};
+      if (url.pathname.endsWith('/board')) data = {items:[], slots:{}, places:[], pages:definition(open.length)};
+      else if (url.pathname.endsWith('/pages/posts/items')) data = {items: url.searchParams.get('state') === 'open' ? open : []};
+      return route.fulfill({contentType:'application/json', body:JSON.stringify(data)});
+    });
+    await page.goto('http://console.test/');
+    await page.evaluate(() => { localStorage.setItem('lang', 'ja'); localStorage.setItem('token', 'tok'); });
+    await page.reload();
+    await page.waitForFunction(() => document.querySelector('.nav-page'));
+    await page.locator('.nav-page').click();
+    await page.locator('.page-video').click();
+    await page.waitForFunction(() => document.querySelector('video.page-player')?.src.startsWith('blob:'));
     await context.close();
   }
   await browser.close();

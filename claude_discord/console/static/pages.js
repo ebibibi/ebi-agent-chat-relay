@@ -15,7 +15,7 @@ window.ConsolePages = (() => {
     close: "閉じる", tab_open: "未処理", tab_done: "完了", tab_skipped: "見送り", empty: "ここには何もありません",
     by_person: "手動", by_auto: (who) => `自動確認（${who}）`, result: "結果を開く", heading: "📋 ページ",
     all: "すべて", no_target: "投稿先なし", targets: "投稿先で絞り込む",
-    over: (n) => `${n} 超過`, save: "保存", share: "共有", play: "再生", result_url: "投稿URL（任意）",
+    over: (n) => `${n} 超過`, save: "保存", share: "共有", play: "再生", unplayable: "再生できませんでした", result_url: "投稿URL（任意）",
     bad_url: "投稿URLは http(s) で始まるリンクにしてください", attachments: "添付",
     copy_link: "リンクをコピー", link: "共有リンク",
   } : {
@@ -23,7 +23,7 @@ window.ConsolePages = (() => {
     close: "Close", tab_open: "Open", tab_done: "Done", tab_skipped: "Skipped", empty: "Nothing here",
     by_person: "by hand", by_auto: (who) => `checked automatically (${who})`, result: "Open result", heading: "📋 Pages",
     all: "All", no_target: "No target", targets: "Filter by target",
-    over: (n) => `${n} over`, save: "Save", share: "Share", play: "Play", result_url: "Post URL (optional)",
+    over: (n) => `${n} over`, save: "Save", share: "Share", play: "Play", unplayable: "could not be played", result_url: "Post URL (optional)",
     bad_url: "The post URL must start with http(s)", attachments: "Attachments",
     copy_link: "Copy link", link: "Link to share",
   };
@@ -139,7 +139,19 @@ window.ConsolePages = (() => {
     reader.readAsDataURL(blob);
   });
 
+  // Signed in with a session cookie, the browser fetches a stored video itself: in ranges, so
+  // it plays at once, seeks, resumes a broken download and never holds a gigabyte in memory.
+  // A bearer token cannot ride on <video src> or a plain link; that sign-in keeps the blob.
+  const streams = (a) => a.kind === "video" && !localStorage.getItem("token");
+
   async function save(a) {
+    if (streams(a)) {
+      const link = h("a", { href: `${a.url}?download=1`, download: a.name });
+      document.body.append(link);
+      link.click();
+      link.remove();
+      return;
+    }
     try {
       const href = URL.createObjectURL(await blobOf(a));
       const link = h("a", { href, download: a.name });
@@ -169,8 +181,9 @@ window.ConsolePages = (() => {
       h("span", { text: `▶ ${L().play}` }), h("span", { class: "page-thumb-name", text: a.name }));
     tile.addEventListener("click", async () => {
       try {
-        const src = URL.createObjectURL(await blobOf(a));
+        const src = streams(a) ? a.url : URL.createObjectURL(await blobOf(a));
         const video = h("video", { class: "page-player", src, controls: "", playsinline: "", preload: "metadata" });
+        video.addEventListener("error", () => toast(`${a.name}: ${L().unplayable}`));
         tile.replaceWith(video);
         video.play().catch(() => { /* a click is not always enough to autoplay */ });
       } catch (err) { toast(err.message); }

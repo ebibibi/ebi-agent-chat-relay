@@ -13,7 +13,7 @@ import json
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlsplit
@@ -425,6 +425,38 @@ class PageRepository:
             raise PageNotFoundError(f"unknown page: {slug}")
         # Off the event loop: a page may hold large videos.
         await asyncio.to_thread(self.files.remove_page, slug)
+
+    async def prune_videos(self, now: datetime | None = None) -> int:
+        """Delete videos only resolved items list, resolved over the retention period ago.
+
+        A posted video has done its job, and at a gigabyte each they would fill the disk. A file
+        any open or recently resolved item still lists is kept, and so is every image. Answers
+        the bytes freed; a retention of 0 days keeps everything.
+        """
+        days = self.files.video_retain_days
+        if days <= 0:
+            return 0
+        cutoff = ((now or datetime.now(UTC)) - timedelta(days=days)).strftime(_TIME_FORMAT)
+        async with aiosqlite.connect(self._db_path) as db:
+            rows = await db.execute_fetchall(
+                "SELECT state, resolved_at, attachments FROM console_page_items"
+                " WHERE attachments != ''"
+            )
+        keep: set[tuple[str, str]] = set()
+        stale: set[tuple[str, str]] = set()
+        for state, resolved_at, attachments in rows:
+            fresh = state == STATE_OPEN or resolved_at >= cutoff
+            for entry in json.loads(attachments):
+                stored = parse_url(entry.get("url", ""))
+                if stored is None or entry.get("kind") != "video":
+                    continue
+                (keep if fresh else stale).add(stored[:2])
+        doomed = stale - keep
+        if not doomed:
+            return 0
+        return sum(
+            [await asyncio.to_thread(self.files.remove, slug, token) for slug, token in doomed]
+        )
 
     async def list_items(
         self,

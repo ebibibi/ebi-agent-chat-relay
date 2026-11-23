@@ -93,12 +93,48 @@ types, recognised by the file's bytes and not by the header alone:
 | Kind | Types | Up to |
 |---|---|---|
 | image | `image/png`, `image/jpeg`, `image/gif`, `image/webp` | 10 MB |
-| video | `video/mp4`, `video/quicktime`, `video/webm` | 200 MB |
+| video | `video/mp4`, `video/quicktime`, `video/webm` | 4 GB (`CCDB_PAGE_VIDEO_MAX_MB`) |
 
 Anything else is refused with `415`, a file whose bytes are not the type it claims with `400`, a
-larger one with `413`. The page must exist (`404` otherwise). The extension comes from the bytes.
-Files are kept under `page_files/<slug>/` next to the database and served only to a signed-in
-Console user, inert (`nosniff`, a sandboxing CSP). Deleting the page deletes its files.
+larger one with `413`, and one the disk cannot take with `507`. The page must exist (`404`
+otherwise). The extension comes from the bytes. Files are kept under `page_files/<slug>/` next to
+the database and served only to a signed-in Console user, inert (`nosniff`, a sandboxing CSP).
+
+#### Long videos
+
+The video limit is large enough for a 20-minute 1080p screen recording (about 1.2 GB) kept at a
+bitrate where slide text stays sharp. Uploads are streamed to disk, never held in memory, so the
+limit costs disk space only. Three settings, read when the relay starts, each with a default:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `CCDB_PAGE_VIDEO_MAX_MB` | `4096` | Largest video accepted, in MB. Images stay at 10 MB. |
+| `CCDB_PAGE_FILES_MIN_FREE_MB` | `1024` | Free disk space an upload must leave. Checked against `Content-Length` before the first byte, and every 256 MB for an upload of unknown length; refused with `507`. |
+| `CCDB_PAGE_VIDEO_RETAIN_DAYS` | `30` | Days a video is kept after the last item listing it was resolved. `0` keeps every video. |
+
+A value that is not a whole number in range is logged and replaced by the default.
+
+Stored files are served with `Accept-Ranges: bytes` and answer `Range` requests with `206`. The
+Console fetches a video only when ▶ is pressed; signed in with a session cookie (passkey, sign-in,
+Access or a proxy in front of it), the browser then streams it in ranges, so it starts at once,
+can seek, and "Save" is the browser's own download, resumable and never held in memory. A
+reverse proxy that cuts long responses cuts one range, which the browser asks for again. Signed
+in with a bearer token only, which neither a `<video>` element nor a plain link can carry, the
+Console still fetches the whole file first, as before; prefer a session sign-in for long videos.
+The share sheet also hands over the whole file, so on a phone share a long video from the saved
+copy rather than from the page.
+
+#### Disk space and clean-up
+
+- Deleting a page deletes all of its files.
+- Each upload first clears videos whose items were all resolved (done or skipped) more than
+  `CCDB_PAGE_VIDEO_RETAIN_DAYS` ago. A video any open item, or any item resolved within the
+  period, still lists is kept; images are never cleared this way (they are small and the done tab
+  shows them). A cleared video's item keeps its text and post URL; only the file is gone.
+- An uploaded file no item ever lists is kept until its page is deleted, so a generator that
+  uploads and then fails to register its item should retry the registration with the same URL
+  rather than upload again.
+- With the defaults, one 1.2 GB video a day settles at about 36 GB plus the reserve.
 
 ### Register a post
 
