@@ -996,8 +996,9 @@ Everything the family produced, in one list, newest first, each labelled with th
 
 An image shows a thumbnail (click to enlarge), a video plays in place on **▶ Play** (fetched only then,
 so opening the panel on a phone downloads no clips), a text document opens in the preview, and every
-file has **⬇ Download**. The first six show; the rest fold under **n more**, and entries marked
-superseded fold under **Replaced (n)**, struck through. Playing a video survives the panel's periodic
+file has **⬇ Download**. The list is grouped by kind — 🎬 videos, 🖼️ images, 📄 documents and notes —
+each newest first with three shown and the rest under **n more**; 🔗 PRs, releases and links form their own
+group, folded until opened. Entries marked superseded fold under **Replaced (n)**, struck through. Playing a video survives the panel's periodic
 redraw. Chat threads are read through the Discord API (the last 300 messages of each, at most 30
 threads per family) and cached until the thread gets a new message or ten minutes pass; a thread that
 could not be read is counted under the list.
@@ -1036,7 +1037,9 @@ curl -s -X PUT "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/situation" \
 | `superseded` | `true` folds the entry (or the named file) under **Replaced** |
 
 Like the other fields, the array is replaced as a whole: read the record, keep the earlier entries, send
-the full list. Agents are told to list what they produce here as a matter of course.
+the full list. The server stamps each entry with `at`, the time it was first declared, and keeps that time
+when the same entry (same `url`, else `file`, else `title`) is sent again; the panel sorts by it. An `at`
+in the request is accepted, so a record read back can be resent as is, and ignored. Agents are told to list what they produce here as a matter of course.
 
 **🙋 Needed from you** is not written by the parent any more. It shows the family's open
 [decision requests](#secretary-mode) as the same cards as the secretary home (same buttons, an answer

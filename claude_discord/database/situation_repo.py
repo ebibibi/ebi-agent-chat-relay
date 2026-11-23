@@ -29,7 +29,8 @@ MAX_ENTRIES = 40
 MAX_ENTRY_CHARS = 600
 #: What a deliverable entry may say about itself; ``kind`` only picks the icon.
 DELIVERABLE_KINDS = ("pr", "release", "note", "doc", "video", "image", "link", "file")
-DELIVERABLE_KEYS = frozenset({"title", "url", "file", "kind", "note", "superseded"})
+#: ``at`` is accepted so a record read back can be resent as is, but the server sets it.
+DELIVERABLE_KEYS = frozenset({"title", "url", "file", "kind", "note", "superseded", "at"})
 MAX_TITLE_CHARS = 200
 MAX_NOTE_CHARS = 300
 MAX_URL_CHARS = 2000
@@ -131,6 +132,15 @@ def _deliverable(entry: Any) -> dict[str, Any]:
     return clean
 
 
+def _identity(entry: dict[str, Any]) -> str:
+    """What makes two declarations the same deliverable: its address, else its file, else title."""
+    if entry.get("url"):
+        return str(entry["url"])
+    if entry.get("file"):
+        return f"file:{entry['file']}"
+    return str(entry.get("title", ""))
+
+
 def _entries(name: str, value: Any) -> list[str]:
     if name == "asks" and isinstance(value, list) and any(isinstance(e, dict) for e in value):
         raise SituationError(
@@ -205,7 +215,23 @@ class ThreadSituationRepository:
                 found.append(record)
         return found
 
+    async def _stamped(self, thread_id: int, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Each entry with the time it was first declared, kept across rewrites of the list.
+
+        The panel sorts by it: one shared record time would put a whole list above every file,
+        in the order the agent happened to write it (#1548).
+        """
+        before = await self.get(thread_id)
+        known = {_identity(e): e.get("at") for e in (before.deliverables if before else [])}
+        now = datetime.now(UTC).isoformat()
+        return [{**e, "at": known.get(_identity(e)) or now} for e in entries]
+
     async def update(self, thread_id: int, fields: dict[str, list[Any]]) -> Situation:
+        if "deliverables" in fields:
+            fields = {
+                **fields,
+                "deliverables": await self._stamped(thread_id, fields["deliverables"]),
+            }
         """Replace the named fields in one statement, so two writers cannot lose a field."""
         values = [
             json.dumps(fields[name], ensure_ascii=False) if name in fields else None
