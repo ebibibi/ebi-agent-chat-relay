@@ -21,24 +21,87 @@ jobs:
         run: |
           set -euo pipefail
 
-          PR=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
-            --jq '[.[] | select(.base.ref == "main" and .merged_at != null)]
-                  | sort_by(.merged_at) | last // empty')
+          MAX_PR_LOOKUP_ATTEMPTS=12
+          PR=""
+          PR_NUMBER=""
+          PR_TITLE=""
+          HEAD_REF=""
 
-          if [ -z "$PR" ]; then
-            echo "::notice::No merged pull request is associated with $GITHUB_SHA; nothing to do."
-            echo "found=false" >> "$GITHUB_OUTPUT"
-            exit 0
+          for attempt in $(seq 1 "$MAX_PR_LOOKUP_ATTEMPTS"); do
+            ASSOCIATED_PRS=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+              2>/dev/null || true)
+            CANDIDATE_NUMBER=$(printf '%s' "$ASSOCIATED_PRS" | jq -r \
+              --arg sha "$GITHUB_SHA" \
+              '[.[]? | select(.base.ref == "main" and .merged_at != null
+                              and .merge_commit_sha == $sha)]
+               | sort_by(.merged_at) | last.number // empty' 2>/dev/null || true)
+
+            if [ -n "$CANDIDATE_NUMBER" ]; then
+              PR=$(gh pr view "$CANDIDATE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+                --json number,title,headRefName,baseRefName,mergedAt,mergeCommit \
+                2>/dev/null || true)
+              if printf '%s' "$PR" | jq -e --arg sha "$GITHUB_SHA" \
+                '.baseRefName == "main" and .mergedAt != null
+                 and .mergeCommit.oid == $sha' >/dev/null 2>&1; then
+                PR_NUMBER=$(printf '%s' "$PR" | jq -r '.number')
+                PR_TITLE=$(printf '%s' "$PR" | jq -r '.title')
+                HEAD_REF=$(printf '%s' "$PR" | jq -r '.headRefName')
+                break
+              fi
+            fi
+
+            if [ "$attempt" -lt "$MAX_PR_LOOKUP_ATTEMPTS" ]; then
+              sleep 10
+            fi
+          done
+
+          if [ -z "$PR_NUMBER" ]; then
+            # The push can arrive before the commits/{sha}/pulls index is ready.
+            # Only an explicit PR reference earns the idempotent upgrade fallback.
+            COMMIT_MESSAGE=$(jq -r ".head_commit.message // \"\"" "$GITHUB_EVENT_PATH")
+            COMMIT_SUBJECT=${COMMIT_MESSAGE%%$'\n'*}
+            PR_NUMBER=$(printf '%s\n' "$COMMIT_SUBJECT" \
+              | sed -nE 's/.*\(#([0-9]+)\).*/\1/p')
+
+            if [ -n "$PR_NUMBER" ]; then
+              PR=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+                --json number,title,headRefName,baseRefName,mergedAt,mergeCommit \
+                2>/dev/null || true)
+              if printf '%s' "$PR" | jq -e --arg sha "$GITHUB_SHA" \
+                '.baseRefName == "main" and .mergedAt != null
+                 and .mergeCommit.oid == $sha' >/dev/null 2>&1; then
+                PR_NUMBER=$(printf '%s' "$PR" | jq -r '.number')
+                PR_TITLE=$(printf '%s' "$PR" | jq -r '.title')
+                HEAD_REF=$(printf '%s' "$PR" | jq -r '.headRefName')
+              else
+                echo "::notice::PR #$PR_NUMBER is referenced but not confirmed as the merged main PR for $GITHUB_SHA; allowing upgrade only."
+                echo "verified=false" >> "$GITHUB_OUTPUT"
+                echo "found=false" >> "$GITHUB_OUTPUT"
+                echo "unresolved=true" >> "$GITHUB_OUTPUT"
+                echo "upgrade_only=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            else
+              echo "::notice::No PR reference in commit subject; nothing to do for $GITHUB_SHA."
+              echo "verified=false" >> "$GITHUB_OUTPUT"
+              echo "found=false" >> "$GITHUB_OUTPUT"
+              echo "unresolved=false" >> "$GITHUB_OUTPUT"
+              echo "upgrade_only=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
           fi
 
+          echo "verified=true" >> "$GITHUB_OUTPUT"
           echo "found=true" >> "$GITHUB_OUTPUT"
-          echo "number=$(echo "$PR" | jq -r '.number')" >> "$GITHUB_OUTPUT"
-          echo "title=$(echo "$PR" | jq -r '.title')" >> "$GITHUB_OUTPUT"
-          echo "head_ref=$(echo "$PR" | jq -r '.head.ref')" >> "$GITHUB_OUTPUT"
+          echo "unresolved=false" >> "$GITHUB_OUTPUT"
+          echo "upgrade_only=false" >> "$GITHUB_OUTPUT"
+          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "title=$PR_TITLE" >> "$GITHUB_OUTPUT"
+          echo "head_ref=$HEAD_REF" >> "$GITHUB_OUTPUT"
 
       - name: Classify the merged pull request
         id: classify
-        if: steps.pr.outputs.found == 'true'
+        if: steps.pr.outputs.verified == 'true'
         env:
           HEAD_REF: ${{ steps.pr.outputs.head_ref }}
           PR_TITLE: ${{ steps.pr.outputs.title }}
@@ -57,7 +120,9 @@ jobs:
           fi
 
       - name: Trigger EbiBot upgrade
-        if: steps.classify.outputs.eligible == 'true'
+        if: >-
+          steps.classify.outputs.eligible == 'true' ||
+          (steps.pr.outputs.unresolved == 'true' && steps.pr.outputs.upgrade_only == 'true')
         env:
           WEBHOOK_URL: ${{ secrets.DOCS_SYNC_WEBHOOK_URL }}
         run: |
