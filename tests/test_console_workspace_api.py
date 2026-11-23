@@ -270,3 +270,28 @@ async def test_the_board_writes_back_a_done_thread_whose_task_is_still_open(env,
     board = await (await env.client.get("/console/api/board", headers=AUTH)).json()
     assert [d["id"] for d in board["guide"]["drift"]] == [item_id]
     assert env.console.workspace.entry("Work/Client/Website")["tasks"][0]["done"] is False
+
+
+async def test_due_change_goes_to_the_milestone_row_and_refreshes_the_plan(env, notes):
+    status = notes / "02_Contexts" / "Work" / "Client" / "Website" / "status.md"
+    status.write_text(
+        "# Website\n## 次のアクション\n- [ ] Ship it\n## マイルストーン\n"
+        "| Launch | 2026-10-09 | ⬜ |\n",
+        encoding="utf-8",
+    )
+    env.console.workspace = Workspace(notes)
+    invalidated = []
+    env.console.workspace_plan.invalidate = lambda: invalidated.append(1)
+    entry = env.console.workspace.entry("Work/Client/Website")
+    payload = {"path": entry["path"], "revision": entry["revision"], "due": "2026-11-30"}
+    bad = await env.client.patch(
+        "/console/api/workspace/tasks", json={**payload, "milestone_line": 3}, headers=WRITE
+    )
+    assert bad.status == 400 and "milestone" in (await bad.json())["error"]
+    response = await env.client.patch(
+        "/console/api/workspace/tasks", json={**payload, "milestone_line": 5}, headers=WRITE
+    )
+    assert response.status == 200
+    assert (await response.json())["milestones"][0]["date"] == "2026-11-30"
+    assert "| Launch | 2026-11-30 | ⬜ |" in status.read_text(encoding="utf-8")
+    assert invalidated

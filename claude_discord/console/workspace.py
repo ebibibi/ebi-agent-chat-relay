@@ -8,7 +8,7 @@ import os
 import re
 import tempfile
 import threading
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -27,6 +27,84 @@ _NEXT = {
     "Next actions",
     "Next Actions",
 }
+
+
+# The deadline notations the plugin's goodmorning reads on a task line, in its order:
+# "📅2026-04-10" (canonical), "期限: 2026-04-10" and "期限: 4/10", either possibly in bold.
+_DUE = re.compile(
+    r"📅\s*(\d{4}-\d{2}-\d{2})|期限[:：\s]*\**(?:(\d{4}-\d{2}-\d{2})|(\d{1,2})/(\d{1,2}))\**"
+)
+_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_MILESTONES = "マイルストーン"
+
+
+def due_on(text: str, today: date) -> date | None:
+    """The deadline goodmorning reads from a task line, or None (mirrors its scanner)."""
+    for match in _DUE.finditer(text):
+        iso = match[1] or match[2]
+        try:
+            if iso:
+                return date.fromisoformat(iso)
+            candidate = date(today.year, int(match[3]), int(match[4]))
+        except ValueError:
+            continue
+        # A short date far in the past means next year, as goodmorning reads it.
+        if (today - candidate).days > 180:
+            candidate = candidate.replace(year=today.year + 1)
+        return candidate
+    return None
+
+
+def with_due(text: str, due: str) -> str:
+    """*text* with exactly one deadline, ``📅<due>``, whatever notation it used before.
+
+    The first existing marker is replaced in place; any further ones are removed, so a
+    line never ends up with two dates that disagree. Without a marker the date goes
+    before a 🔁 recurrence rule, or at the end.
+    """
+    seen = False
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal seen
+        if seen:
+            return ""
+        seen = True
+        return f"📅{due}"
+
+    edited = _DUE.sub(replace, text)
+    if seen:
+        edited = re.sub(r"[（(]\s*[）)]", "", edited)
+        return re.sub(r"[ \t]{2,}", " ", edited).strip()
+    repeat = edited.find("🔁")
+    if repeat >= 0:
+        return f"{edited[:repeat].rstrip()} 📅{due} {edited[repeat:]}"
+    return f"{edited.rstrip()} 📅{due}"
+
+
+def _milestones(content: str) -> list[dict[str, Any]]:
+    """Open (⬜/🟡) dated rows of the ``## マイルストーン`` table, as goodmorning reads them.
+
+    Their target date is the project's deadline in the Workspace format, so a project
+    row's due date is edited here, not on its next action.
+    """
+    found = []
+    inside = False
+    for number, line in enumerate(content.splitlines(), 1):
+        if line.startswith("## "):
+            inside = line[3:].strip() == _MILESTONES
+            continue
+        if not inside or ("⬜" not in line and "🟡" not in line):
+            continue
+        match = _ISO_DATE.search(line)
+        if match is None:
+            continue
+        try:
+            when = date.fromisoformat(match[0])
+        except ValueError:
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        found.append({"line": number, "name": cells[0] or match[0], "date": when.isoformat()})
+    return found
 
 
 class WorkspaceError(ValueError):
@@ -211,6 +289,7 @@ class Workspace:
             "file": filename,
             "revision": _revision(content),
             "tasks": _tasks(content, project),
+            "milestones": _milestones(content) if project else [],
         }
 
     def snapshot(self) -> dict[str, Any]:
@@ -359,25 +438,77 @@ class Workspace:
             entry = self.entry(path)
             if entry["revision"] != revision:
                 raise WorkspaceConflictError("The file changed. Refresh and try again.")
-            if (
-                isinstance(line, bool)
-                or not isinstance(line, int)
-                or not any(t["line"] == line for t in entry["tasks"])
-            ):
-                raise WorkspaceError("Unknown task line")
+            task = self._task_at(entry, line)
             if done is not None and not isinstance(done, bool):
                 raise WorkspaceError("done must be a boolean")
             content = _read(self._directory(path) / entry["file"])
             if _revision(content) != revision:
                 raise WorkspaceConflictError("The file changed. Refresh and try again.")
             lines = content.splitlines(keepends=True)
-            task = next(t for t in entry["tasks"] if t["line"] == line)
             label = self._text(text) if text is not None else task["text"]
             edited = _edit_line(lines[line - 1], text=label, done=done)
             if edited is None:
                 raise WorkspaceConflictError("The task changed. Refresh and try again.")
             lines[line - 1] = edited
             self._write_tasks(path, "".join(lines), revision, f"タスク更新: {label}")
+
+    @staticmethod
+    def _task_at(entry: dict[str, Any], line: Any) -> dict[str, Any]:
+        if isinstance(line, bool) or not isinstance(line, int):
+            raise WorkspaceError("Unknown task line")
+        task = next((t for t in entry["tasks"] if t["line"] == line), None)
+        if task is None:
+            raise WorkspaceError("Unknown task line")
+        return task
+
+    def set_due(
+        self,
+        path: str,
+        revision: str,
+        due: Any,
+        *,
+        line: Any = None,
+        milestone_line: Any = None,
+    ) -> None:
+        """Change a deadline where goodmorning reads it.
+
+        ``milestone_line`` names an open row of a project's マイルストーン table, whose
+        target date is the project's deadline; otherwise ``line`` names a task whose
+        own deadline (📅 or 期限: …) is replaced by a single ``📅<due>``.
+        """
+        if not isinstance(due, str) or not _ISO_DATE.fullmatch(due):
+            raise WorkspaceError("due must be a date (YYYY-MM-DD)")
+        try:
+            date.fromisoformat(due)
+        except ValueError as exc:
+            raise WorkspaceError("due must be a date (YYYY-MM-DD)") from exc
+        with self._lock:
+            entry = self.entry(path)
+            if entry["revision"] != revision:
+                raise WorkspaceConflictError("The file changed. Refresh and try again.")
+            content = _read(self._directory(path) / entry["file"])
+            if _revision(content) != revision:
+                raise WorkspaceConflictError("The file changed. Refresh and try again.")
+            lines = content.splitlines(keepends=True)
+            if milestone_line is not None:
+                if isinstance(milestone_line, bool) or not isinstance(milestone_line, int):
+                    raise WorkspaceError("Unknown milestone line")
+                milestone = next(
+                    (m for m in entry["milestones"] if m["line"] == milestone_line), None
+                )
+                if milestone is None:
+                    raise WorkspaceError("Unknown milestone line")
+                lines[milestone_line - 1] = _ISO_DATE.sub(due, lines[milestone_line - 1], count=1)
+                action = f"期限変更: {milestone['name']} {milestone['date']} → {due}"
+            else:
+                task = self._task_at(entry, line)
+                label = with_due(task["text"], due)
+                edited = _edit_line(lines[line - 1], text=label)
+                if edited is None:
+                    raise WorkspaceConflictError("The task changed. Refresh and try again.")
+                lines[line - 1] = edited
+                action = f"期限変更: {label}"
+            self._write_tasks(path, "".join(lines), revision, action)
 
     def finish(self, path: str, texts: list[str], label: str, *, done: bool) -> dict[str, Any]:
         """Follow a Console item finishing (or reopening) into the original Markdown.

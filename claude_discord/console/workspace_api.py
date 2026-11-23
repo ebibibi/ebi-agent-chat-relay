@@ -215,6 +215,16 @@ class WorkspaceRoutes:
                 await asyncio.to_thread(
                     self.server.workspace.add_task, path, body.get("text", ""), revision
                 )
+            elif "due" in body:
+                # A deadline goes where goodmorning reads it (a milestone row or the task).
+                await asyncio.to_thread(
+                    self.server.workspace.set_due,
+                    path,
+                    revision,
+                    body.get("due"),
+                    line=body.get("line"),
+                    milestone_line=body.get("milestone_line"),
+                )
             else:
                 await asyncio.to_thread(
                     self.server.workspace.update_task,

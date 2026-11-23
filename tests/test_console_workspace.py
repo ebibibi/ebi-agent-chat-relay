@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import re
+from datetime import date
 from pathlib import Path
 
 import pytest
 
-from claude_discord.console.workspace import Workspace, WorkspaceConflictError, WorkspaceError
+from claude_discord.console.workspace import (
+    Workspace,
+    WorkspaceConflictError,
+    WorkspaceError,
+    due_on,
+    with_due,
+)
 
 
 @pytest.fixture
@@ -335,3 +343,99 @@ def test_context_reads_current_state_waiting_and_the_latest_log(notes):
     assert "2026-10-08" in context["log"] and "2026-10-01" not in context["log"]
     client = Workspace(notes).context("Work/Client")
     assert (client["kind"], client["current"], client["waiting"]) == ("context", "", [])
+
+
+# --- Deadlines are written where goodmorning reads them --------------------------------
+
+_MILESTONE_STATUS = (
+    "# Website\n最終更新: 2026-01-01\n## 次のアクション\n- [ ] 🧑 Review the video\n"
+    "## マイルストーン\n\n| マイルストーン | 目標日 | 状態 |\n|---|---|---|\n"
+    "| Done one | 2026-10-01 | ✅ |\n| Receive the check | 2026-11-16 | 🟡 waiting |\n"
+    "| Next 1on1 | 2026-11-17 | ⬜ |\n## 連絡待ち\nなし\n"
+)
+
+
+def test_project_entries_list_their_open_dated_milestones(notes):
+    status = notes / "02_Contexts" / "Work" / "Client" / "Website" / "status.md"
+    status.write_text(_MILESTONE_STATUS, encoding="utf-8")
+    milestones = Workspace(notes).entry("Work/Client/Website")["milestones"]
+    assert milestones == [
+        {"line": 10, "name": "Receive the check", "date": "2026-11-16"},
+        {"line": 11, "name": "Next 1on1", "date": "2026-11-17"},
+    ]
+    assert Workspace(notes).entry("Work/Client")["milestones"] == []
+
+
+def test_set_due_moves_the_milestone_date_and_leaves_the_task_alone(notes):
+    status = notes / "02_Contexts" / "Work" / "Client" / "Website" / "status.md"
+    status.write_text(_MILESTONE_STATUS, encoding="utf-8")
+    workspace = Workspace(notes)
+    entry = workspace.entry("Work/Client/Website")
+    workspace.set_due("Work/Client/Website", entry["revision"], "2026-11-30", milestone_line=10)
+    text = status.read_text(encoding="utf-8")
+    assert "| Receive the check | 2026-11-30 | 🟡 waiting |" in text
+    assert "- [ ] 🧑 Review the video\n" in text
+    assert "📅" not in text
+    log = (status.parent / "log.md").read_text(encoding="utf-8")
+    assert "期限変更: Receive the check 2026-11-16 → 2026-11-30" in log
+
+
+@pytest.mark.parametrize("line", [9, 4, 999, True, "10"])
+def test_set_due_rejects_a_line_that_is_not_an_open_milestone(notes, line):
+    status = notes / "02_Contexts" / "Work" / "Client" / "Website" / "status.md"
+    status.write_text(_MILESTONE_STATUS, encoding="utf-8")
+    workspace = Workspace(notes)
+    revision = workspace.entry("Work/Client/Website")["revision"]
+    with pytest.raises(WorkspaceError):
+        workspace.set_due("Work/Client/Website", revision, "2026-11-30", milestone_line=line)
+    assert status.read_text(encoding="utf-8") == _MILESTONE_STATUS
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        ("Call back", "Call back 📅2026-11-30"),
+        ("[P2] Call back 📅2026-10-17", "[P2] Call back 📅2026-11-30"),
+        ("Call back 📅 2026-10-17 🔁毎週", "Call back 📅2026-11-30 🔁毎週"),
+        ("Call back 🔁毎週", "Call back 📅2026-11-30 🔁毎週"),
+        ("Call back 期限: 2026-10-17", "Call back 📅2026-11-30"),
+        ("Call back（期限: **4/10**）", "Call back（📅2026-11-30）"),
+        ("Call back 期限：10/17 📅2026-10-20", "Call back 📅2026-11-30"),
+        ("Call back 📅2026-10-17 then 期限: 10/18 too", "Call back 📅2026-11-30 then too"),
+    ],
+)
+def test_with_due_leaves_exactly_one_deadline_in_any_notation(before, after):
+    assert with_due(before, "2026-11-30") == after
+    assert len(re.findall(r"📅|期限", with_due(before, "2026-11-30"))) == 1
+
+
+def test_due_on_reads_the_notations_goodmorning_reads():
+    today = date(2026, 11, 23)
+    assert due_on("x 📅2026-12-01", today) == date(2026, 12, 1)
+    assert due_on("x 期限: **2026-12-02**", today) == date(2026, 12, 2)
+    assert due_on("x 期限: 12/3", today) == date(2026, 12, 3)
+    assert due_on("x 期限: 1/5", today) == date(2027, 1, 5)  # far past means next year
+    assert due_on("x 期限: 13/40", today) is None
+    assert due_on("no date", today) is None
+
+
+def test_set_due_rewrites_a_single_action_in_place(notes):
+    actions = notes / "02_Contexts" / "Work" / "Client" / "single-actions.md"
+    actions.write_text("# Tasks\n- [ ] [P2] Call back 期限: 10/17\n", encoding="utf-8")
+    workspace = Workspace(notes)
+    revision = workspace.entry("Work/Client")["revision"]
+    workspace.set_due("Work/Client", revision, "2026-11-30", line=2)
+    assert actions.read_text(encoding="utf-8") == "# Tasks\n- [ ] [P2] Call back 📅2026-11-30\n"
+
+
+@pytest.mark.parametrize("due", ["2026-13-01", "11/30", "", None, 20261130])
+def test_set_due_rejects_anything_but_an_iso_date(notes, due):
+    workspace = Workspace(notes)
+    revision = workspace.entry("Work/Client")["revision"]
+    with pytest.raises(WorkspaceError):
+        workspace.set_due("Work/Client", revision, due, line=2)
+
+
+def test_set_due_with_a_stale_revision_is_a_conflict(notes):
+    with pytest.raises(WorkspaceConflictError):
+        Workspace(notes).set_due("Work/Client", "old", "2026-11-30", line=2)
