@@ -120,6 +120,16 @@ class DataLayout:
             if not Path(path).resolve().is_relative_to(base)
         }
 
+    def ensure_db_dirs(self) -> None:
+        """Create only the parent directories of the SQLite databases. Idempotent.
+
+        SQLite creates a missing database file but not its directory, so these
+        must exist before the first open. Optional paths (worktrees, the Teams
+        vault, the log file) are left to the features that use them.
+        """
+        for path in (self.sessions_db, self.tasks_db, self.notifications_db):
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+
     def ensure_dirs(self) -> None:
         """Create the directories the paths imply. Idempotent."""
         for path in self.all_paths().values():
