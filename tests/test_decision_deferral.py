@@ -69,13 +69,6 @@ async def test_deferring_a_closed_request_does_not_reopen_it(repo):
     assert await repo.list_open() == []
 
 
-def test_deferred_only_work_is_not_a_canvas_attention_count():
-    from claude_discord.console.canvas import _counts
-
-    counts = _counts([_item("t1", decision_deferred=True)], {})
-    assert counts["decide"] == 0 and counts["waiting_without_request"] == 0
-
-
 async def test_existing_database_gains_nullable_deferral_without_losing_requests(tmp_path):
     import json
 

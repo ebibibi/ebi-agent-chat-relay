@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from claude_discord.console.canvas_repo import CanvasRepository
+from claude_discord.console.console_state import ConsoleStateRepository
 from claude_discord.console.morning import build_morning_brief, render_markdown
 from claude_discord.console.night import NightSettingsError, parse_night_settings
 from claude_discord.console.night_shift import (
@@ -96,7 +96,7 @@ def test_shift_limit_is_a_setting_with_a_default() -> None:
 async def repo():
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
-    store = CanvasRepository(path)
+    store = ConsoleStateRepository(path)
     await store.init_db()
     yield store
     os.unlink(path)
@@ -104,7 +104,7 @@ async def repo():
 
 class World:
     def __init__(self) -> None:
-        self.items = [_item(1), _item(2), _item(3, "waiting"), _item(99)]
+        self.items = [_item(1), _item(2), _item(3, "waiting")]
         self.requests: list[dict[str, Any]] = []
         self.sent: list[tuple[str, str]] = []
         self.clock = [NOW]
@@ -128,11 +128,8 @@ class World:
     async def limit(self) -> int:
         return 8
 
-    async def exclude(self) -> str | None:
-        return "t99"  # the canvas secretary
 
-
-def _shift(repo: CanvasRepository, world: World) -> NightShift:
+def _shift(repo: ConsoleStateRepository, world: World) -> NightShift:
     return NightShift(
         repo,
         board=world.board,
@@ -141,7 +138,6 @@ def _shift(repo: CanvasRepository, world: World) -> NightShift:
         waiting=world.waiting,
         scopes=lambda: ["drafts and read-only checks"],
         limit=world.limit,
-        exclude=world.exclude,
         clock=lambda: world.clock[0],
     )
 
@@ -234,8 +230,8 @@ async def test_the_console_routes_plan_show_and_cancel(tmp_path) -> None:
     db = str(tmp_path / "sessions.db")
     work = WorkItemRepository(db)
     await work.init_db()
-    canvas_repo = CanvasRepository(db)
-    await canvas_repo.init_db()
+    state_repo = ConsoleStateRepository(db)
+    await state_repo.init_db()
     api = MagicMock()
     api.default_channel_id = None
     api.lineage_repo = None
@@ -249,7 +245,7 @@ async def test_the_console_routes_plan_show_and_cancel(tmp_path) -> None:
         work,
         ConsoleAuthenticator(ConsoleAuthConfig(token="tok")),
         port=0,
-        canvas_repo=canvas_repo,
+        state_repo=state_repo,
     )
     client = TestClient(TestServer(console.app))
     await client.start_server()

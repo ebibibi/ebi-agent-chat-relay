@@ -372,8 +372,8 @@ def _detail(value: Any, problems: list[str]) -> dict[str, str]:
 def agent_guide(scopes: Mapping[str, str] | None = None) -> str:
     """The system-prompt section every agent with the control plane gets.
 
-    One place for the format and the bar. Requests ride on the markers only: the secretary home,
-    canvas mode and the thread's own situation panel all show them from the same store.
+    One place for the format and the bar. Requests ride on the markers only: the secretary home
+    and the thread's own situation panel both show them from the same store.
     *scopes* (the owner's approved defaults, #1478) adds the ``if_no_answer`` paragraph.
     """
     return _guide_base() + _guide_defaults(scopes)
@@ -403,7 +403,7 @@ def _guide_base() -> str:
         "write it as a decision request. The Console shows it as a card the user answers with "
         'one tap: beside this thread\'s conversation (the panel "where things stand", which '
         "appears for any thread with an open request, with or without child threads), in its "
-        "parent's panel if it has one, and on the secretary home and canvas. "
+        "parent's panel if it has one, and on the secretary home. "
         "The bar: someone who has forgotten this whole matter can answer from the card "
         "alone, without opening the thread or "
         "anything else. Write in the user's language, plainly: no internal shorthand, no IDs "

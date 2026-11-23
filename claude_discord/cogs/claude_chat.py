@@ -427,7 +427,7 @@ class ClaudeChatCog(commands.Cog):
                 effort=effort_override if effort_override is not None else _UNSET,
             )
 
-        # A screen AI (Console canvas mode) decides this one turn; nothing is stored.
+        # A per-turn AI (e.g. an automation entry's) decides this one turn; nothing is stored.
         backend = (
             ai.backend
             if ai is not None

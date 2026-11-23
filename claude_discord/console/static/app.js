@@ -229,8 +229,6 @@ async function refresh() {
       && Date.now() - state.renderedAt < STALE_RENDER_MS;
     state.boardSig = sig;
     state.lastSync = new Date();
-    // Canvas mode reads its widgets on every poll; it redraws itself only when they changed.
-    if (window.ConsoleCanvas.on()) window.ConsoleCanvas.onBoard();
     $("sync").className = "sync";
     $("sync").textContent = `${T.updated} ${state.lastSync.toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}`;
     if (unchanged) return;
@@ -481,7 +479,6 @@ function render() {
   renderList();
   renderDetail();
   window.ConsoleZen.paint();
-  window.ConsoleCanvas.paint();
 }
 
 function renderNav() {
@@ -676,7 +673,6 @@ function renderDetail() {
   window.ConsoleSituation.render(item);
   window.ConsoleThreadNotes.render(item);
   window.ConsoleZen.bar(pane);
-  window.ConsoleCanvas.bar(pane);
   placeToasts();
   const msgs = $("msgs");
   if (item.thread_id) fillMessages(msgs);
@@ -1091,8 +1087,6 @@ async function loadMessages(id) {
 function closeItem() {
   // Working through a queue, leaving a thread means "next one" (zen.js).
   if (window.ConsoleZen.onClose(state.open)) return;
-  // Canvas mode: leaving a thread goes back to the secretary (canvas.js).
-  if (window.ConsoleCanvas.onClose()) return;
   markSeen(state.open); state.open = null; render();
 }
 async function patch(id, changes) {
@@ -1120,8 +1114,7 @@ async function sendReply(id, box) {
       if (!/^\/(backend|model|effort)\b/.test(text)) { await refresh(); setTimeout(() => loadMessages(id), 1500); }
       return;
     }
-    // Canvas mode's screen AI rides on what is sent from it (screenai.js); nothing is stored.
-    const body = { ...(await window.ConsolePaste.prepareText(text, files)), ...(window.ConsoleScreenAI?.body() || {}) };
+    const body = await window.ConsolePaste.prepareText(text, files);
     const sent = await api(`/items/${encodeURIComponent(id)}/reply`, { method: "POST", body });
     box.value = "";
     delete state.drafts[id];

@@ -514,10 +514,10 @@ class ApiServer:
         self.app.router.add_post("/api/teams/reply/status", self.teams_reply_status)
         # Startup resume routes
         self.app.router.add_post("/api/mark-resume", self.mark_resume)
-        # Canvas mode: the resident secretary's widgets, notes and digest (ADR-0025)
-        from .canvas_api import CanvasApi
+        # The night settings and the morning brief (#1476)
+        from .night_api import NightApi
 
-        CanvasApi(self).register(self.app.router)
+        NightApi(self).register(self.app.router)
 
     def _build_external_app(self) -> web.Application:
         """Build the app served on the externally reachable listener.
