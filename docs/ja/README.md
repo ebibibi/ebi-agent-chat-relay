@@ -16,10 +16,10 @@
 スマートフォンでも使える専用の Web コンソール（Entra ID サインイン対応）、Discord、Microsoft Teams のどれからでも。賢いモデルに指揮を任せ、手を動かす
 作業は安いモデルに振り、人間は本当に自分が決めるべきところだけ判断します。
 
-![Ebi AI Console: Claude Opus のマネージャーが Codex とローカルモデルの子エージェントを指揮している画面](../images/readme/console-family.png)
+![Ebi AI Console: Claude Opus のマネージャーが Codex とローカルモデルの子エージェントを指揮している画面](../images/readme/ja/console-family.png)
 
 <sub>この README のスクリーンショットはすべて架空のサンプルデータです。
-[`scripts/readme_screenshots.cjs`](../../scripts/readme_screenshots.cjs) で再生成できます。</sub>
+[`scripts/readme_screenshots.cjs`](../../scripts/readme_screenshots.cjs) を `node scripts/readme_screenshots.cjs --lang ja` で実行すると再生成できます。</sub>
 
 ## 選ばれる理由
 
@@ -35,7 +35,7 @@
 
 ## 🖥️ Ebi AI Console — ターミナルの子守りではなく、監督を
 
-![Focus ビュー: 次の一手を選び、エージェントが書いた返信の下書きを表示](../images/readme/console-focus.png)
+![Focus ビュー: 次の一手を選び、エージェントが書いた返信の下書きを表示](../images/readme/ja/console-focus.png)
 
 エージェントを何体も動かすのは簡単です。難しいのは把握し続けること。コンソールはまず
 **「いま何をすればいい？」** に答えます。
@@ -56,7 +56,7 @@
 - **検索・共有・まとめて完了** — 会話の中身を検索、スレッドリンクをコピー、複数スレッドをまとめて完了
   （親を完了すると子も完了）。
 
-<img src="../images/readme/console-mobile.png" alt="スマートフォンで見たコンソール" width="260" align="right">
+<img src="../images/readme/ja/console-mobile.png" alt="スマートフォンで見たコンソール" width="260" align="right">
 
 **スマートフォンでも。** ホーム画面にインストールでき、モバイルレイアウトでも入力欄に手が届きます。
 電車の中からエージェントの様子を見て、詰まっている質問にだけ答えれば、あとは続きをやってくれます。

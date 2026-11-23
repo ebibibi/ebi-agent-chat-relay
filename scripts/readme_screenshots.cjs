@@ -3,14 +3,15 @@
 // The bundled web client is served as-is; every /console/api call is answered from the
 // fixtures below, so no relay, database or real conversation is involved.
 //
-//   npm i playwright && node scripts/readme_screenshots.cjs [outdir]
+//   npm i playwright && node scripts/readme_screenshots.cjs [outdir] [--lang en|ja]
 //   (CONSOLE_TEST_CHROMIUM=/path/to/chrome to use an already installed browser)
 const { chromium } = require('playwright');
 const fs = require('node:fs');
 const path = require('node:path');
+const { parseScreenshotOptions } = require('./readme_screenshot_options.cjs');
 
 const root = path.resolve(__dirname, '../claude_discord/console/static') + '/';
-const out = path.resolve(process.argv[2] || path.join(__dirname, '../docs/images/readme'));
+const { language, out } = parseScreenshotOptions(process.argv.slice(2), __dirname, process.cwd());
 const NOW = Date.parse('2026-10-16T09:30:00Z');
 const ago = (min) => new Date(NOW - min * 60e3).toISOString().replace(/\.\d+Z$/, 'Z');
 
@@ -86,6 +87,63 @@ const messages = {
     msg(4, 'agent', '**Update:** the security review found no blocking issues (2 minor notes, already fixed). Checkout is 70% done; E2E tests are being written against the new flow.\n\n**One thing for you:** the API reference PR is ready — please approve it when you have a minute.', 3),
   ],
 };
+
+function localizeSamples(lang) {
+  if (lang !== 'ja') return;
+
+  const translations = {
+    t101: { title: 'ストア v2.0 を今週リリース', next: '各担当の進捗を確認する', why: '判断が必要な点だけ確認します' },
+    t102: { title: '新しい購入フローを実装', next: '購入手順の E2E テストを作成する', why: '購入フローの確認を進めています', report: '住所入力まで完了しました。購入処理を実装しています。' },
+    t103: { title: '購入フローの Playwright E2E テスト', next: 'チェックアウトの E2E テストを追加する', why: 'リリース前に購入手順を確認します', report: '24件中18件のシナリオを作成しました。残りは購入処理の実装後に追加します。' },
+    t104: { title: 'PR #128（決済）のセキュリティレビュー', next: 'レビュー結果を確認する', why: 'セキュリティレビューは完了しました', report: '重大な問題はありません。レート制限とエラーメッセージの改善を同じ PR で対応しました。' },
+    t105: { title: 'v2 API リファレンスを更新', next: 'ドキュメントの差分を確認し、PR を承認する', why: 'ドキュメント PR の確認だけが残っています', report: '14個のエンドポイントを文書化し、例を再生成しました。PR の確認をお願いします。' },
+    t106: { title: '顧客対応：請求書 CSV の氏名が文字化けする', next: '返信文を送り、修正版 CSV を添付する', why: '顧客は本日中の回答を待っています' },
+    t107: { title: 'SDK の Python 3.11 サポートを終了する？', next: 'v3 で終了するか、もう1リリース維持するか決める', why: '次のリリース方針を確認する必要があります' },
+    t108: { title: 'v1.9.4 の本番デプロイを承認する', next: 'CI ポータルでデプロイを承認する', why: 'ステージングは成功し、人による承認を待っています' },
+    t109: { title: 'main の不安定な CI ジョブを調査する', next: '失敗したジョブのログを比較する', why: '原因を特定して再発を防ぎます' },
+    t110: { title: 'v2.0 のリリース記事を下書きする', next: '下書きを読み、タイトル案を出す', why: '公開前の確認を待っています' },
+    t111: { title: '依存関係を毎晩監査する', next: '監査結果を確認する', why: '新しい脆弱性や更新を確認します' },
+    t112: { title: '検索インデックス再構築の不安定さを調べる', next: 'ステージング DB 復旧後に再試行する', why: 'ステージング DB に接続できず失敗しました' },
+    t113: { title: '配送料計算を整理する', next: '計算ロジックを確認する', why: '既存の配送条件を保って整理します' },
+    t114: { title: '週次メトリクスをまとめる', next: '週次レポートを作成する', why: '今週の傾向を共有します' },
+  };
+  for (const it of items) {
+    const values = translations[it.id];
+    if (!values) continue;
+    it.title = values.title;
+    if (it.ai) {
+      it.ai.next_step = values.next;
+      it.ai.reason = values.why;
+    }
+  }
+  for (const row of guide.next) {
+    const values = translations[row.id];
+    if (!values) continue;
+    row.title = values.title;
+    row.next_step = values.next;
+    row.why = values.why;
+  }
+  for (const [id, values] of Object.entries(translations)) {
+    if (values.report) {
+      reports[id] = values.report;
+      if (messages[id]?.[1]) messages[id][1].content = values.report;
+    } else if (messages[id]?.[1]) {
+      messages[id][1].content = values.next
+        ? `**次のステップ:** ${values.next}\n\n${values.why}。`
+        : '作業中です。';
+    }
+    if (messages[id]?.[0]) messages[id][0].content = values.title;
+  }
+  messages.t101 = [
+    msg(101, 'human', '今週中にストア v2.0 を公開してください。子エージェントに作業を分け、進捗を共有してください。判断が必要なときだけ確認してください。', 50),
+    msg(102, 'agent', 'ストア v2.0 の作業計画を作成しました。各担当の進捗を追跡しています。', 4),
+  ];
+  messages.t106 = [
+    msg(106, 'human', '顧客名「Zoë Müller」が請求書 CSV で文字化けすると報告がありました。原因を調べて修正し、返信文を下書きしてください。', 42),
+    msg(107, 'agent', '原因：CSV を Latin-1 で書き出していたため、Excel で氏名が文字化けしていました。', 8),
+    msg(108, 'agent', '修正案：UTF-8 BOM 付きで保存します。修正版 CSV と返信文を確認してください。', 2),
+  ];
+}
 messages.t106 = [
   msg('t106a', 'human', 'A customer says the invoice CSV export mangles names like "Zoë Müller". Find the cause, fix it, and draft a reply.', 42),
   msg('t106b', 'activity', '-# 🔧 Bash · grep -rn "to_csv" billing/', 38),
@@ -148,16 +206,16 @@ function answer(pathname) {
   return {};
 }
 
-async function page(browser, viewport, opts = {}) {
-  const p = await browser.newPage({ viewport, locale: 'en-US', timezoneId: 'UTC', ...opts });
+async function page(browser, viewport, lang = 'en', opts = {}) {
+  const p = await browser.newPage({ viewport, locale: lang === 'ja' ? 'ja-JP' : 'en-US', timezoneId: 'UTC', ...opts });
   p.on('pageerror', (e) => console.error('pageerror:', e.message));
-  await p.addInitScript((now) => {
+  await p.addInitScript(({ now, selectedLanguage }) => {
     const RealDate = Date;
     // Freeze the clock so relative times in the UI match the fixtures.
     globalThis.Date = class extends RealDate { constructor(...a) { super(...(a.length ? a : [now])); } static now() { return now; } };
-    localStorage.setItem('lang', 'en');
+    localStorage.setItem('lang', selectedLanguage);
     localStorage.setItem('workspaceOfferDismissed', '1');
-  }, NOW);
+  }, { now: NOW, selectedLanguage: lang });
   await p.route('http://console.test/**', async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === '/') return route.fulfill({ contentType: 'text/html', body: fs.readFileSync(root + 'index.html', 'utf8') });
@@ -175,27 +233,31 @@ async function page(browser, viewport, opts = {}) {
 }
 
 (async () => {
+  localizeSamples(language);
   fs.mkdirSync(out, { recursive: true });
   const browser = await chromium.launch({ headless: true, executablePath: process.env.CONSOLE_TEST_CHROMIUM, args: ['--no-sandbox'] });
   const shots = (process.env.SHOTS || 'focus,family,mobile').split(',');
 
   if (shots.includes('focus')) {
-    const p = await page(browser, { width: 1440, height: 900 });
+    const p = await page(browser, { width: 1440, height: 900 }, language);
     await p.evaluate(() => { setView('focus'); return openItem('t106'); });
     await p.waitForTimeout(800);
     await p.screenshot({ path: path.join(out, 'console-focus.png') });
     await p.close();
   }
   if (shots.includes('family')) {
-    const p = await page(browser, { width: 1440, height: 900 });
+    const p = await page(browser, { width: 1440, height: 900 }, language);
     await p.evaluate(() => { setView('tree'); return openItem('t101'); });
-    await p.locator('.family-report').first().waitFor();
+    const familyHeading = p.locator('.family-heading');
+    await familyHeading.waitFor({ state: 'visible' });
+    if (await familyHeading.getAttribute('aria-expanded') === 'false') await familyHeading.click();
+    await p.locator('.family-tasks:not([hidden]) .family-report').first().waitFor({ state: 'visible' });
     await p.waitForTimeout(800);
     await p.screenshot({ path: path.join(out, 'console-family.png') });
     await p.close();
   }
   if (shots.includes('mobile')) {
-    const p = await page(browser, { width: 390, height: 844 }, { isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+    const p = await page(browser, { width: 390, height: 844 }, language, { isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
     await p.evaluate(() => setView('focus'));
     await p.waitForTimeout(800);
     await p.screenshot({ path: path.join(out, 'console-mobile.png') });
