@@ -313,6 +313,8 @@ async def test_missing_resume_retries_only_before_turn_start(transport, tmp_path
             "code": -32600, "message": "no rollout found for thread id"
         }}), flush=True)
         continue
+    if method == "thread/start":
+        assert "excludeTurns" not in m["params"]
     result = {}""",
     )
     terminal = {
@@ -338,6 +340,49 @@ async def test_missing_resume_retries_only_before_turn_start(transport, tmp_path
         events = [e async for e in CodexRunner(working_dir=str(tmp_path)).run("hello", "dead-beef")]
     assert any(e.session_id == "a1b2-1234" for e in events)
     assert events[-1].is_complete and not events[-1].error
+
+
+@pytest.mark.parametrize("session_id", [None, "dead-beef"])
+async def test_resume_omits_large_unused_history(transport, tmp_path, session_id) -> None:
+    """Resume must not transfer an unused history larger than the bounded reader."""
+    peer = tmp_path / "peer.py"
+    peer.write_text(r"""
+import json, sys
+
+thread = "dead-beef"
+for line in sys.stdin:
+    m = json.loads(line)
+    if "id" not in m:
+        continue
+    method = m.get("method")
+    result = {}
+    if method in ("thread/start", "thread/resume"):
+        result = {"thread": {"id": thread, "turns": []}}
+        if method == "thread/start":
+            assert "excludeTurns" not in m["params"]
+        elif not m["params"].get("excludeTurns"):
+            result["thread"]["turns"] = [{"text": "x" * (11 * 1024 * 1024)}]
+    if method == "turn/start":
+        assert m["params"]["threadId"] == thread
+        result = {"turn": {"id": "turn1"}}
+    print(json.dumps({"id": m["id"], "result": result}), flush=True)
+    if method == "turn/start":
+        print(json.dumps({"method": "turn/completed", "params": {
+            "threadId": thread, "turn": {"id": "turn1", "status": "completed"}
+        }}), flush=True)
+""")
+    spawn = asyncio.create_subprocess_exec
+
+    async def start(*args, **kwargs) -> asyncio.subprocess.Process:
+        return await spawn(sys.executable, str(peer), **kwargs)
+
+    runner = CodexRunner(working_dir=str(tmp_path), timeout_seconds=3)
+    with patch("asyncio.create_subprocess_exec", side_effect=start):
+        async with asyncio.timeout(15):
+            events = [event async for event in runner.run("hello", session_id)]
+    assert any(e.session_id == "dead-beef" for e in events)
+    assert events[-1].is_complete and not events[-1].error
+    assert runner._process.returncode == 0
 
 
 async def test_timeout_interrupts_turn_and_closes_process(transport, tmp_path):
