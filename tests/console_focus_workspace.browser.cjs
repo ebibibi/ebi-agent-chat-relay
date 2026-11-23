@@ -91,8 +91,13 @@ for (const mode of ['available','plugin-missing']) {
     // The milestone that set the deadline, so the reason for the rank is visible.
     // The milestone shows its own date; the row's tag is the next action's own date (none here).
     assert.equal(await rows.nth(0).locator('.ws-focus-milestone-name').innerText(), '🎯 Launch');
-    assert.match(await rows.nth(0).locator('.ws-focus-milestone').innerText(), /期限2日超過/);
-    assert.doesNotMatch(await rows.nth(0).locator('.ws-focus-meta').innerText(), /期限/);
+    // ...labelled as the project's, worded as a target date, never as this task's deadline.
+    const ms = await rows.nth(0).locator('.ws-focus-milestone').innerText();
+    assert.match(ms, /プロジェクト/);
+    assert.match(ms, /目標日を2日過ぎています/);
+    assert.doesNotMatch(ms, /期限/);
+    assert.doesNotMatch(await rows.nth(0).locator('.ws-focus-meta').innerText(), /期限|超過/);
+    assert.equal(await rows.nth(0).locator('.ws-due-over').count(), 0);
     assert.equal(await rows.nth(1).locator('.ws-focus-milestone').count(), 0);
     assert.equal(await rows.nth(1).getByRole('button', {name:'✅ 完了'}).count(), 0);
     // A follow-up row offers only its follow-up date.
@@ -114,7 +119,7 @@ for (const mode of ['available','plugin-missing']) {
     // A project's deadline is its milestone's target date: 📅 says so and edits that row,
     // not the next action (the server rewrites the Markdown; the browser sends only the date).
     const dateButton = rows.nth(0).locator('.ws-focus-milestone').getByRole('button', {name:'📅 目標日'});
-    assert.match(await dateButton.getAttribute('title'), /🎯「Launch」の目標日/);
+    assert.match(await dateButton.getAttribute('title'), /マイルストーン「Launch」の目標日を変更（このタスクの期限ではありません）/);
     await dateButton.click();
     await rows.nth(0).locator('.ws-focus-milestone input[type=date]').fill('2026-10-20');
     await page.waitForFunction(() => document.querySelectorAll('.ws-focus:not(.ws-focus-waiting):not(.ws-focus-stalled) .ws-focus-item').length === 2);
@@ -248,6 +253,9 @@ test('Focus re-date shows the new date, or says why not', {timeout: 30000}, asyn
           ? {...i, due: body.due, days: 5, revision: 'v3'} : i)};
       } else if (reply === 'apply-project') {
         plan = {...plan, items: plan.items.map(i => i.kind === 'project' ? {...i, due: body.due, days: 6} : i)};
+      } else if (reply === 'milestone-done') {
+        plan = {...plan, items: plan.items.map(i => i.kind === 'project'
+          ? {...i, milestone: 'Beta', milestone_due: '2026-10-28', milestone_days: 12, milestone_line: 11} : i)};
       } else if (reply === 'next-milestone') {
         plan = {...plan, items: plan.items.map(i => i.kind === 'project'
           ? {...i, milestone: '1on1', milestone_due: '2026-10-15', milestone_days: -1, milestone_line: 10} : i)};
@@ -288,9 +296,17 @@ test('Focus re-date shows the new date, or says why not', {timeout: 30000}, asyn
   reply = 'next-milestone';
   await project.locator('.ws-focus-milestone').getByRole('button', {name:'📅 目標日'}).click();
   await project.locator('.ws-focus-milestone input[type=date]').fill('2026-10-30');
-  await page.locator('.toast').filter({hasText:'「Launch」を 2026-10-30 に変更しました。いま一番近いマイルストーンは「1on1」（2026-10-15）'}).waitFor();
+  await page.locator('.toast').filter({hasText:'「Launch」の目標日を 2026-10-30 に変更しました。次に近いマイルストーンは「1on1」（2026-10-15）'}).waitFor();
   assert.deepEqual(writes.at(-1), {path:'Work/Website',due:'2026-10-30',milestone_line:9,revision:'v1'});
   assert.match(await project.locator('.ws-focus-milestone').innerText(), /🎯 1on1/);
+  // The row's own date and the project's milestone never read as two deadlines of one task.
+  assert.match(await project.locator('.ws-focus-meta').innerText(), /あと6日/);
+  assert.doesNotMatch(await project.locator('.ws-focus-meta').innerText(), /超過/);
+  // ✅ marks the milestone done in its table; the toast names the next one.
+  reply = 'milestone-done';
+  await project.locator('.ws-focus-milestone').getByRole('button', {name:'✅ 済み'}).click();
+  await page.locator('.toast').filter({hasText:'「1on1」を済みにしました。次のマイルストーンは「Beta」です'}).waitFor();
+  assert.deepEqual(writes.at(-1), {path:'Work/Website',revision:'v1',milestone_line:10,milestone_done:true});
   // A follow-up's 📅 writes its 連絡待ち line.
   reply = 'ignore';
   const follow = page.locator('.ws-focus-item').filter({hasText:'Client / Feedback'});
@@ -303,5 +319,5 @@ test('Focus re-date shows the new date, or says why not', {timeout: 30000}, asyn
   await page.evaluate(() => window.ConsoleFocusWorkspace.load());
   await project.getByRole('button', {name:'▶ AIに実行'}).waitFor();
   await page.waitForFunction(() => !document.querySelector('.ws-focus-milestone button'));
-  assert.match(await project.locator('.ws-focus-milestone').innerText(), /🎯 1on1|🎯 Launch/);
+  assert.match(await project.locator('.ws-focus-milestone').innerText(), /🎯 Launch/);
 });

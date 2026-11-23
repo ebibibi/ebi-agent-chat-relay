@@ -43,10 +43,13 @@
 .ws-focus-meta, .ws-focus-actions { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:4px; font-size:12px; }
 .ws-focus-path { overflow-wrap:anywhere; }
 .ws-focus-status { font-size:12px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.ws-focus-milestone { display:flex; gap:6px; align-items:center; font-size:12px; margin-top:2px; min-width:0; }
-.ws-focus-milestone-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.ws-focus-milestone { display:flex; gap:6px; align-items:center; flex-wrap:wrap; font-size:12px; margin-top:6px;
+  padding:4px 8px; border-left:3px solid var(--line); background:color-mix(in srgb, var(--line) 25%, transparent); border-radius:4px; min-width:0; }
+.ws-focus-project-label { font-size:11px; padding:0 6px; border:1px solid var(--line); border-radius:999px; flex:none; opacity:.8; }
+.ws-focus-milestone-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; flex:0 1 auto; opacity:.85; }
+.ws-ms-when { flex:none; opacity:.85; }
+.ws-ms-over { color:var(--me); opacity:1; }
 .ws-focus-milestone .btn { padding:1px 6px; font-size:12px; flex:none; }
-.ws-focus-milestone .tag { flex:none; }
 .ws-focus-actions .btn { padding:3px 8px; font-size:12px; }
 .ws-focus-date[hidden] { display:none; }
 .ws-focus-lapsed { padding:6px 14px; font-size:12px; }

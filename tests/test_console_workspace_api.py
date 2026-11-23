@@ -304,3 +304,23 @@ async def test_a_conflict_makes_the_next_plan_read_fresh(env, notes):
     payload = {"path": "Work/Client", "revision": "stale", "due": "2026-11-30", "line": 2}
     response = await env.client.patch("/console/api/workspace/tasks", json=payload, headers=WRITE)
     assert response.status == 409 and invalidated
+
+
+async def test_milestone_done_goes_through_the_task_route(env, notes):
+    status = notes / "02_Contexts" / "Work" / "Client" / "Website" / "status.md"
+    status.write_text(
+        "# Website\n## 次のアクション\n- [ ] Ship it\n## マイルストーン\n"
+        "| Launch | 2026-10-09 | 🟡 note |\n",
+        encoding="utf-8",
+    )
+    env.console.workspace = Workspace(notes)
+    entry = env.console.workspace.entry("Work/Client/Website")
+    payload = {
+        "path": entry["path"],
+        "revision": entry["revision"],
+        "milestone_line": 5,
+        "milestone_done": True,
+    }
+    response = await env.client.patch("/console/api/workspace/tasks", json=payload, headers=WRITE)
+    assert response.status == 200 and (await response.json())["milestones"] == []
+    assert "| Launch | 2026-10-09 | ✅ note |" in status.read_text(encoding="utf-8")

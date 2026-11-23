@@ -21,30 +21,38 @@ window.ConsoleFocusWorkspace = (() => {
     delegate_hint: "この行をAIに任せる（該当タスクがあればその行を、無ければ新しい仕事として着手）",
     delegate_note: "今日のプラン（goodmorning）からAIに任せた行:", open: "📂", open_hint: "Ebi Workspace で開く",
     more: (n) => `ほか ${n} 件`, follow_up: "📣 催促", lapsed: (n, d) => `期限を${d}日以上過ぎたものが ${n} 件（goodmorning の「期限の見直し」）`,
-    over: (d) => `期限${d}日超過`, today: "今日が期限", soon: (d) => `あと${d}日`, on: (s) => `期限 ${s}`,
+    over: (d) => `期限${d}日超過`, today: "今日が期限", soon: (d) => `期限まであと${d}日`, on: (s) => `期限 ${s}`,
     since: (s) => `${s}〜`, nudge: (s) => `催促 ${s}`, total: (n, all) => `上位 ${n} 件 / 全 ${all} 件`,
     no_line: "元の行を特定できないため、ここでは操作できません",
     stale: (d) => `😴 ${d}日停滞`, stalled: (n) => `😴 停滞中のプロジェクト（${n}件）`,
     no_next: "次のアクションが未設定 — 1つ決める", stalled_more: (n) => `ほか ${n} 件を表示`,
     redate_target: "📅 目標日", redate_task: "このタスクの期限（行の 📅）を変更",
     redate_follow_up: "📅 催促日", redate_follow_up_hint: "連絡待ちの催促日（📅）を変更",
-    redate_milestone: (m) => `🎯「${m}」の目標日を変更（プロジェクトの期限）`,
+    redate_milestone: (m) => `プロジェクトのマイルストーン「${m}」の目標日を変更（このタスクの期限ではありません）`,
+    project_label: "プロジェクト", ms_over: (d) => `目標日を${d}日過ぎています`, ms_today: "目標日は今日",
+    ms_soon: (d) => `目標日まであと${d}日`, ms_on: (s) => `目標日 ${s}`,
+    ms_done: "✅ 済み", ms_done_hint: (m) => `マイルストーン「${m}」を済み（✅）にする`,
+    ms_finished: (m, next) => `🎯「${m}」を済みにしました` + (next ? `。次のマイルストーンは「${next}」です` : ""),
     due_not_shown: (d) => `保存しましたが、表示される期限は ${d || "なし"} のままです。元のファイルを確認してください`,
-    milestone_next: (m, iso, next, d) => `🎯「${m}」を ${iso} に変更しました。いま一番近いマイルストーンは「${next}」（${d}）です`,
+    milestone_next: (m, iso, next, d) => `🎯「${m}」の目標日を ${iso} に変更しました。次に近いマイルストーンは「${next}」（${d}）です`,
   } : {
     title: "🗂️ From Ebi Workspace", plan: "📋 Today's plan (goodmorning)", waiting: "⏳ Waiting for (Ebi Workspace)",
     done: "✅ Done", redate: "📅 Due", run: "▶ Run with AI", delegate: "▶ Hand to AI",
     delegate_hint: "Hand this line to an agent (its task if one matches, otherwise as new work)",
     delegate_note: "Handed to an agent from today's plan (goodmorning):", open: "📂", open_hint: "Open in Ebi Workspace",
     more: (n) => `${n} more`, follow_up: "📣 Follow up", lapsed: (n, d) => `${n} item(s) more than ${d} days overdue (goodmorning's review list)`,
-    over: (d) => `${d}d overdue`, today: "due today", soon: (d) => `in ${d}d`, on: (s) => `due ${s}`,
+    over: (d) => `${d}d overdue`, today: "due today", soon: (d) => `due in ${d}d`, on: (s) => `due ${s}`,
     since: (s) => `since ${s}`, nudge: (s) => `follow up ${s}`, total: (n, all) => `top ${n} of ${all}`,
     no_line: "The original line could not be identified, so it cannot be changed here",
     stale: (d) => `😴 stalled ${d}d`, stalled: (n) => `😴 Stalled projects (${n})`,
     no_next: "No next action yet — decide one", stalled_more: (n) => `Show ${n} more`,
     redate_target: "📅 Target", redate_task: "Change this task's own due date (📅 on its line)",
     redate_follow_up: "📅 Follow-up", redate_follow_up_hint: "Change the follow-up date (📅) of this waiting item",
-    redate_milestone: (m) => `Change the target date of milestone "${m}" (the project's deadline)`,
+    redate_milestone: (m) => `Change the target date of the project's milestone "${m}" (not this task's due date)`,
+    project_label: "Project", ms_over: (d) => `target date passed ${d}d ago`, ms_today: "target date is today",
+    ms_soon: (d) => `target date in ${d}d`, ms_on: (s) => `target ${s}`,
+    ms_done: "✅ Done", ms_done_hint: (m) => `Mark milestone "${m}" done (✅)`,
+    ms_finished: (m, next) => `Marked "${m}" done` + (next ? `. Next milestone: "${next}"` : ""),
     due_not_shown: (d) => `Saved, but the deadline shown is still ${d || "none"}. Check the original file`,
     milestone_next: (m, iso, next, d) => `Moved "${m}" to ${iso}. The nearest milestone is now "${next}" (${d})`,
   };
@@ -121,6 +129,15 @@ window.ConsoleFocusWorkspace = (() => {
       toast(!next || next === iso ? T.saved : L().milestone_next(plain(item.milestone), iso, plain(after.milestone), next));
     } else toast(!after || after.due === iso ? T.saved : L().due_not_shown(after.due));
   });
+  const finishMilestone = (item) => act(async () => {
+    await api("/workspace/tasks", { method: "PATCH", body: { path: item.path, revision: item.milestone_revision,
+      milestone_line: item.milestone_line, milestone_done: true } });
+    await load();
+    const after = plan && [...(plan.items || []), ...(plan.stalled || [])]
+      .find((i) => i.path === item.path && i.kind === item.kind && i.text === item.text);
+    const next = after && after.milestone && after.milestone !== item.milestone ? plain(after.milestone) : null;
+    toast(L().ms_finished(plain(item.milestone), next));
+  });
   const run = (item) => act(async () => {
     const result = await api("/workspace/run", { method: "POST", body: { path: item.path, line: item.line, revision: item.revision } });
     await refresh();
@@ -139,18 +156,34 @@ window.ConsoleFocusWorkspace = (() => {
   }
   const known = (v) => v !== null && v !== undefined;
 
-  // "🎯 milestone · 6d overdue · 📅 target date": the date that ranks the project, editable here.
+  // The project's nearest open milestone, kept apart from the task: the row's tag is only ever
+  // the task's own deadline, so a project milestone that has slipped never reads as this task
+  // being overdue. It is labelled "プロジェクト", worded as a target date, and can be moved or
+  // marked done (✅ in the マイルストーン table) right here.
+  function milestoneWhen(days, due) {
+    const l = L();
+    if (!known(days)) return null;
+    if (days < 0) return l.ms_over(-days);
+    if (days === 0) return l.ms_today;
+    if (days <= 7) return l.ms_soon(days);
+    return l.ms_on(due);
+  }
   function milestoneNode(item) {
     if (!item.milestone) return null;
     const l = L();
-    const due = dueText({ due: item.milestone_due, days: item.milestone_days });
+    const when = milestoneWhen(item.milestone_days, item.milestone_due);
     const over = known(item.milestone_days) && item.milestone_days < 0;
     const editable = known(item.milestone_line) && Boolean(item.milestone_revision);
+    const name = plain(item.milestone);
     return h("div", { class: "ws-focus-milestone" },
-      h("span", { class: "dim ws-focus-milestone-name", text: `🎯 ${plain(item.milestone)}` }),
-      due ? h("span", { class: "tag" + (over ? " ws-due-over" : ""), text: due }) : null,
-      ...(editable ? dateButton(item, "milestone", item.milestone_due, l.redate_target,
-        l.redate_milestone(plain(item.milestone))) : []));
+      h("span", { class: "ws-focus-project-label", text: l.project_label }),
+      h("span", { class: "ws-focus-milestone-name", text: `🎯 ${name}` }),
+      when ? h("span", { class: "ws-ms-when" + (over ? " ws-ms-over" : ""), text: when }) : null,
+      ...(editable ? [
+        h("button", { type: "button", class: "btn", disabled: busy, text: l.ms_done, title: l.ms_done_hint(name),
+          onclick: () => finishMilestone(item) }),
+        ...dateButton(item, "milestone", item.milestone_due, l.redate_target, l.redate_milestone(name)),
+      ] : []));
   }
 
   function itemNode(item) {
