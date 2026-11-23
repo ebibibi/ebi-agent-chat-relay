@@ -385,18 +385,64 @@ async def test_api_rejects_a_bad_max_wait(slots) -> None:
             assert response.status == 400
 
 
-async def test_a_command_killed_by_the_restart_itself_is_not_a_failure() -> None:
-    """``sudo systemctl restart`` dies with SIGTERM when systemd stops this process's cgroup.
+async def test_a_command_killed_by_the_restart_itself_waits_for_bot_shutdown() -> None:
+    """A service-cgroup SIGTERM is success only when the bot begins shutting down."""
 
-    That is the restart happening: it must not be reported as failed (which drops the
-    saved runs and the requesting thread's resume) while this process is being stopped.
-    """
-    bot = MagicMock()
-    bot.close = AsyncMock()
+    class ClosingBot:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def is_closed(self) -> bool:
+            return self.closed
+
+    bot = ClosingBot()
     killed = "sh -c 'kill -TERM $$'"
-    # Still waiting for this process to be stopped: no failure reported yet.
-    with pytest.raises(TimeoutError):
-        await asyncio.wait_for(build_restart_action(bot, command=killed, grace_seconds=5)(), 0.5)
-    # Still alive after the grace period: now it is a failure.
-    with pytest.raises(RuntimeError, match="not restarted"):
+    task = asyncio.create_task(build_restart_action(bot, command=killed, grace_seconds=0.5)())
+    await asyncio.sleep(0.05)
+    bot.closed = True
+    await task
+
+
+async def test_a_command_killed_by_the_restart_itself_is_a_failure_if_bot_keeps_running() -> None:
+    bot = MagicMock()
+    bot.is_closed = lambda: False
+    killed = "sh -c 'kill -TERM $$'"
+    with pytest.raises(RuntimeError, match="process was not stopped"):
         await build_restart_action(bot, command=killed, grace_seconds=0.01)()
+
+
+async def test_reserved_restart_keeps_saved_queue_when_bot_shutdown_follows_sigterm() -> None:
+    class ClosingBot:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def is_closed(self) -> bool:
+            return self.closed
+
+    slots = SessionSlotScheduler(1)
+    slots.hold()
+    waiter = await _queued(slots, 4, resume_prompt="queued")
+    repo = _resume_repo()
+    bot = ClosingBot()
+    reservation = RestartReservation(
+        slots,
+        build_restart_action(bot, command="sh -c 'kill -TERM $$'", grace_seconds=0.5),
+        resume_repo=repo,
+        poll_interval=0.005,
+    )
+    assert reservation.reserve(resume_thread_id=8, resume_prompt="verify")
+
+    await _until(lambda: repo.mark.await_count == 2)
+    await asyncio.sleep(0.05)
+    bot.closed = True
+    await _until(lambda: reservation._task is not None and reservation._task.done())
+
+    assert reservation.status()["phase"] == "restarting"
+    assert reservation.status()["last_error"] is None
+    assert slots.held
+    assert not waiter.done()
+    repo.delete_by_thread.assert_not_awaited()
+    assert [(call.args[0], call.kwargs["reason"]) for call in repo.mark.call_args_list] == [
+        (4, QUEUED_RESTART_REASON),
+        (8, RESERVED_RESTART_REASON),
+    ]
