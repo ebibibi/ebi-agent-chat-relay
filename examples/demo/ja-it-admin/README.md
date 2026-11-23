@@ -35,3 +35,12 @@ leave a selection in the middle, and let other threads update: focus, compositio
 the selection must stay in the connected editor while surrounding progress changes.
 Repeat on a phone's situation tab and on the secretary home. Removing or resolving the
 request must still remove its editor; an explicit click elsewhere must keep its focus.
+
+## Deliverables in the situation panel
+
+Start one of the passkey family's children (全社のパスキー移行を統括して) from the Console and ask it to
+write a short Markdown report and attach it. Open the parent: the panel's 📦 成果物 lists the report
+labelled with the child, and 👁 プレビュー opens it. Have the parent declare a link with
+`deliverables` (see docs/console.md, "📦 Deliverables") and mark an older file `superseded`: the link
+appears with ↗ 開く and the old file folds under 置き換え済み. Repeat on a phone's 現在地 tab. A thread on
+its own that produced a file shows the panel with only 📦 成果物.

@@ -4,7 +4,8 @@
 // answered on its own. The person can fold it to a rail; the choice is remembered.
 // What is measured (status, running, waits, latest reports) needs no agent; what only the
 // parent can say comes from /items/{id}/situation and shows how old it is.
-// Loaded after family.js, wspane.js and situation_reply.js and before app.js.
+// What the family produced is listed by deliverables.js, in a section of its own.
+// Loaded after family.js, wspane.js, deliverables.js and situation_reply.js and before app.js.
 "use strict";
 window.ConsoleSituation = (() => {
   const REFRESH_MS = 8_000;
@@ -148,6 +149,14 @@ window.ConsoleSituation = (() => {
       text: l.updated(rel(m.written.updated_at)) + (stale ? ` · ${l.stale}` : "") });
   }
 
+  // Deliverables are listed per family, so a parent and its children share one list.
+  function deliverables(m, family) {
+    const D = window.ConsoleDeliverables;
+    const members = new Map([family.root, ...family.rows.map((r) => r.item)]
+      .filter((i) => i.thread_id).map((i) => [i.thread_id, { id: i.id, label: title(i) }]));
+    return D.section(family.root.id, (threadId) => members.get(threadId) || null);
+  }
+
   function core(m, family, cardsOnly = false) {
     const l = L();
     const written = m.written || { asks: [], doing: [], decided: [] };
@@ -177,12 +186,18 @@ window.ConsoleSituation = (() => {
       h("h2", { class: "sit-title", text: l.title }),
       h("button", { type: "button", class: "btn sit-hide", title: l.hide, "aria-label": l.hide, text: "›",
         onclick: () => setHidden(true) }));
-    if (cardsOnly) return [top, section(l.asks, "asks", l.none, cards, needs, asks)];
+    const produced = window.ConsoleDeliverables.entries(family.root.id).length ? deliverables(m, family) : null;
+    if (cardsOnly) {
+      // Alone: the cards and what the thread produced, no empty headings.
+      const asking = cards.length || needs.length || asks.length;
+      return [top, asking || !produced ? section(l.asks, "asks", l.none, cards, needs, asks) : null, produced];
+    }
     return [
       top,
       freshness(m, family),
       section(l.asks, "asks", l.none, cards, needs, asks),
       section(l.running, "running", l.none, doing, waits),
+      deliverables(m, family),
       section(l.members, "members", l.none, others.map((i) => memberRow(i, m))),
       section(l.decided, "decided", l.none, decided, candidates, finished),
     ];
@@ -256,12 +271,14 @@ window.ConsoleSituation = (() => {
     const inFamily = Boolean(family.parent || family.rows.length);
     const holder = family ? recordHolder(item, family) : item;
     if (holder.thread_id) load(holder.id);
+    if (family.root.thread_id) window.ConsoleDeliverables.load(family.root.id);
+    const produced = window.ConsoleDeliverables.entries(family.root.id);
     const data = cache.get(holder.id)?.data || null;
     const situation = data && data.situation;
     const written = Boolean(situation && (situation.asks.length || situation.doing.length || situation.decided.length));
     // Any thread with an open decision request shows it here, family or not (#1396).
     const ownCards = item.thread_id ? window.ConsoleSecretary.cardsFor(new Set([item.thread_id])).length : 0;
-    const show = Boolean(inFamily || written || ownCards);
+    const show = Boolean(inFamily || written || ownCards || produced.length);
     // Alone and with nothing written: only the cards, no empty "running" or "decided".
     const cardsOnly = !inFamily && !written;
     const tabs = body.dataset.layout === "tabs";
@@ -283,13 +300,13 @@ window.ConsoleSituation = (() => {
       [...m.members, ...m.candidates, ...m.finished].map((i) =>
         [i.id, i.status, i.queued, i.running, i.title, i.ai && i.ai.next_step, reports.get(i.id)?.text,
           rel(i.last_activity_at)]),
-      m.written ? rel(m.written.updated_at) : ""]);
+      m.written ? rel(m.written.updated_at) : "", produced]);
     // Kept on the node: opening another thread rebuilds the pane and empties it.
     const slot = $("d-side-core");
     if (slot.dataset.key === key) return;
     slot.dataset.key = key;
     const top = side.scrollTop;
-    window.ConsoleSecretary.replaceContent(slot, ...core(m, family, cardsOnly));
+    window.ConsoleSecretary.replaceContent(slot, ...core(m, family, cardsOnly).filter(Boolean));
     side.scrollTop = top;
   }
 
@@ -327,6 +344,8 @@ window.ConsoleSituation = (() => {
     node.prepend(h("div", { class: "dim msg-background", text: L().background }));
     return node;
   }
+
+  window.ConsoleDeliverables.onChange = redrawOpen;
 
   // A parent's record changes nothing on the board, so the board's refresh would not redraw it.
   setInterval(() => { if (!document.hidden) redrawOpen(); }, REFRESH_MS);

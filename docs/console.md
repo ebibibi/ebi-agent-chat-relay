@@ -882,6 +882,7 @@ Endpoints need authentication unless marked *(no sign-in)*. Every method except 
 | GET | `/console/api/items/{id}/live` | A console conversation's running turn: status, tool activity, the answer so far, whether it can be stopped |
 | POST | `/console/api/items/{id}/messages/{message_id}/actions/{action_id}` | Press a button listed in a message's `actions` (404 once it is answered) |
 | GET | `/console/api/items/{id}/situation` | What the thread's parent wrote for [the family panel](#where-things-stand) (`situation`, or `null`), and every active wait (`waits`) |
+| GET | `/console/api/items/{id}/deliverables` | What the item's whole family produced, newest first: collected files and declared entries (`deliverables`), the family's threads (`threads`) and those that could not be read (`unread`) |
 | POST | `/console/api/items/{id}/stop` | Stop the running turn of a console conversation (409 when nothing runs) |
 | GET | `/console/api/files/{key}/{token}/{name}` | A file an agent delivered in a console conversation |
 | POST | `/console/api/items/{id}/start` | Hand a written-down item to an agent in a console conversation (no chat thread) |
@@ -959,6 +960,7 @@ the parent while you stay on a child.
 |---|---|---|
 | 🙋 Needed from you | Every family member marked ❓ 👀 📋 ⚠️, with its latest report and **↩ Reply** | `asks`, each with **↩ Answer** |
 | ⚙️ Running | Active waits | `doing` |
+| 📦 Deliverables | Every file the relay attached in any family thread | `deliverables` |
 | 👥 Each thread | Every other open member: status, how long ago, its latest report, **↩ Reply** | — |
 | ✅ Decided and done | 🏁 completion candidates, finished children (folded) | `decided` |
 
@@ -978,7 +980,27 @@ that counts what is asked of you; on that tab the panel's reply box is the only 
 a single button brings the tab back.
 
 The panel names how old the parent's record is, and flags one more than 15 minutes older than the family's
-latest activity. A thread with no children shows no panel unless its agent wrote a record.
+latest activity. A thread with no children shows no panel unless its agent wrote a record, has an open
+decision request, or produced something.
+
+#### 📦 Deliverables
+
+Everything the family produced, in one list, newest first, each labelled with the thread it came from
+(the label opens that thread). A parent and each of its children show the same list.
+
+- **Collected:** every file the relay's own bot attached in a family thread (what an agent hands over with
+  the attachment marker file), and every file a Console conversation delivered (`📎 Files:`). Nothing
+  else: a person's upload, a webhook post or an outside address in a message is not listed.
+- **Declared:** what the family's agents list in `deliverables` (below): PRs, releases, published or
+  outside URLs, notes in the vault (`/#note/...`), each with **↗ Open**.
+
+An image shows a thumbnail (click to enlarge), a video plays in place on **▶ Play** (fetched only then,
+so opening the panel on a phone downloads no clips), a text document opens in the preview, and every
+file has **⬇ Download**. The first six show; the rest fold under **n more**, and entries marked
+superseded fold under **Replaced (n)**, struck through. Playing a video survives the panel's periodic
+redraw. Chat threads are read through the Discord API (the last 300 messages of each, at most 30
+threads per family) and cached until the thread gets a new message or ten minutes pass; a thread that
+could not be read is counted under the list.
 
 The parent keeps its part with the control-plane API. Agents are told how in their run context:
 
@@ -991,6 +1013,30 @@ curl -s -X PUT "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/situation" \
 
 Each field is an array of up to 40 strings of up to 600 characters. A field you send replaces that
 field and one you leave out stays.
+
+`deliverables` is an array of up to 40 objects, written by a parent or a child alike (the panel merges
+the family's records):
+
+```bash
+curl -s -X PUT "$CCDB_API_URL/api/threads/$DISCORD_THREAD_ID/situation" \
+  -H "Content-Type: application/json" \
+  -d '{"deliverables": [
+        {"title": "PR #12 Payment retries", "url": "https://github.com/o/r/pull/12", "kind": "pr"},
+        {"title": "Design note", "url": "/#note/02_Contexts/x/design.md", "kind": "note", "note": "v2"},
+        {"title": "Prototype v1", "file": "short_v1.mp4", "superseded": true}]}'
+```
+
+| Key | |
+|---|---|
+| `title` | Required, up to 200 characters |
+| `url` | `https://`, `http://` or a Console link starting with `/#`; anything else is refused |
+| `file` | Instead of (or with) `url`: the name of a file the thread attached. The newest file of that name (own thread first, then the family) takes the title, note and flag; a name that matches nothing is listed as not found |
+| `kind` | Optional icon: `pr`, `release`, `note`, `doc`, `video`, `image`, `link`, `file` |
+| `note` | Optional, one line, up to 300 characters |
+| `superseded` | `true` folds the entry (or the named file) under **Replaced** |
+
+Like the other fields, the array is replaced as a whole: read the record, keep the earlier entries, send
+the full list. Agents are told to list what they produce here as a matter of course.
 
 **🙋 Needed from you** is not written by the parent any more. It shows the family's open
 [decision requests](#secretary-mode) as the same cards as the secretary home (same buttons, an answer
