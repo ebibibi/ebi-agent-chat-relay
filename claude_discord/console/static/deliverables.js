@@ -9,14 +9,23 @@
 "use strict";
 window.ConsoleDeliverables = (() => {
   const REFRESH_MS = 60_000;
-  const VISIBLE = 6;
+  const VISIBLE = 3; // per group; the rest of a group folds
+  // Groups in the order the person looks for them; links (PRs, releases) fold by default (#1548).
+  const GROUPS = [
+    { key: "video", kinds: ["video"] },
+    { key: "image", kinds: ["image"] },
+    { key: "doc", kinds: ["note", "doc", "file"] },
+    { key: "link", kinds: ["pr", "release", "link"], folded: true },
+  ];
   const STRINGS = {
     en: { head: "📦 Deliverables", none: "Nothing yet", more: (n) => `${n} more`, replaced: (n) => `Replaced (${n})`,
       play: "Play", preview: "Preview", download: "Download", open: "Open", missing: "file not found in the thread",
-      unread: (n) => `${n} thread(s) could not be read`, failed: "Could not load" },
+      unread: (n) => `${n} thread(s) could not be read`, failed: "Could not load",
+      groups: { video: "🎬 Videos", image: "🖼️ Images", doc: "📄 Documents and notes", link: "🔗 PRs and links" } },
     ja: { head: "📦 成果物", none: "まだありません", more: (n) => `ほか ${n}件`, replaced: (n) => `置き換え済み（${n}件）`,
       play: "再生", preview: "プレビュー", download: "ダウンロード", open: "開く", missing: "スレッドにファイルが見つかりません",
-      unread: (n) => `${n}件のスレッドを読めませんでした`, failed: "読み込めませんでした" },
+      unread: (n) => `${n}件のスレッドを読めませんでした`, failed: "読み込めませんでした",
+      groups: { video: "🎬 動画", image: "🖼️ 画像", doc: "📄 文書・ノート", link: "🔗 PR・リンク" } },
   };
   const L = () => STRINGS[document.documentElement.lang === "ja" ? "ja" : "en"];
   const ICON = { pr: "🔀", release: "🏷️", note: "📝", doc: "📄", video: "🎬", image: "🖼️", link: "🔗", file: "📎" };
@@ -138,29 +147,46 @@ window.ConsoleDeliverables = (() => {
   }
 
   // The section for the panel of *id*; *threadOf* maps a thread id to {id, label} or null.
+  const time = (e) => Date.parse(e.at) || 0;
+  const groupOf = (e) => GROUPS.find((g) => g.kinds.includes(kindOf(e))) || GROUPS[2];
+
+  // The section for the panel of *id*; *threadOf* maps a thread id to {id, label} or null.
+  // Grouped by kind, newest first in each group; replaced versions fold at the end.
   function section(id, threadOf) {
     const l = L();
     const data = cache.get(id)?.data || null;
-    const list = entries(id);
+    const list = [...entries(id)].sort((a, b) => time(b) - time(a));
     const key = JSON.stringify([LANG, data, list.map((e) => threadOf(e.thread_id)?.label)]);
     const kept = nodes.get(id);
     if (kept && kept.key === key) return kept.node;
     const current = list.filter((e) => !e.superseded);
     const replaced = list.filter((e) => e.superseded);
-    const rows = current.slice(0, VISIBLE).map((e) => row(e, threadOf));
-    const fold = (summary, items) => items.length ? h("li", { class: "sit-row" }, h("details", { class: "dlv-fold" },
-      h("summary", { class: "dim", text: summary }),
-      h("ul", { class: "sit-list" }, ...items.map((e) => row(e, threadOf))))) : null;
+    const rows = (items) => items.map((e) => row(e, threadOf));
+    const fold = (summary, items, cls = "") => items.length ? h("li", { class: "sit-row" },
+      h("details", { class: `dlv-fold ${cls}`.trim() }, h("summary", { class: "dim", text: summary }),
+        h("ul", { class: "sit-list" }, ...rows(items)))) : null;
+    const groups = GROUPS.map((g) => {
+      const items = current.filter((e) => groupOf(e) === g);
+      if (!items.length) return null;
+      const label = `${l.groups[g.key]} (${items.length})`;
+      if (g.folded) return h("li", { class: "dlv-group", "data-group": g.key },
+        h("details", { class: "dlv-fold" }, h("summary", { class: "dlv-group-head", text: label }),
+          h("ul", { class: "sit-list" }, ...rows(items))));
+      return h("li", { class: "dlv-group", "data-group": g.key },
+        h("div", { class: "dlv-group-head", text: label }),
+        h("ul", { class: "sit-list" }, ...rows(items.slice(0, VISIBLE)),
+          fold(l.more(items.length - VISIBLE), items.slice(VISIBLE))));
+    });
     const unread = (data?.unread || []).length;
     const node = h("section", { class: "sit-section deliverables" },
       h("h3", { class: "sit-head", text: list.length ? `${l.head} (${current.length})` : l.head }),
-      list.length ? h("ul", { class: "sit-list" }, ...rows,
-        fold(l.more(current.length - VISIBLE), current.slice(VISIBLE)), fold(l.replaced(replaced.length), replaced))
+      list.length ? h("ul", { class: "sit-list" }, ...groups, fold(l.replaced(replaced.length), replaced))
         : h("div", { class: "dim sit-empty", text: l.none }),
       unread ? h("div", { class: "dim sit-detail", text: l.unread(unread) }) : null);
     nodes.set(id, { key, node });
     return node;
   }
+
 
   return { load, entries, section, set onChange(fn) { onChange = fn; } };
 })();

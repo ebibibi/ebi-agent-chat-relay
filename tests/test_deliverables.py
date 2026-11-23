@@ -107,9 +107,12 @@ async def test_deliverables_are_kept_apart_from_the_other_fields(repo) -> None:
         PARENT, {"deliverables": [{"title": "PR", "url": "https://github.com/o/r/pull/1"}]}
     )
     assert stored.decided == ["Ship"]
-    assert stored.as_dict()["deliverables"] == [
-        {"title": "PR", "url": "https://github.com/o/r/pull/1"}
-    ]
+    [entry] = stored.as_dict()["deliverables"]
+    assert entry["at"]
+    assert {k: v for k, v in entry.items() if k != "at"} == {
+        "title": "PR",
+        "url": "https://github.com/o/r/pull/1",
+    }
     assert (await repo.update(PARENT, {"doing": ["x"]})).deliverables == stored.deliverables
     assert [r.thread_id for r in await repo.get_many([PARENT, CHILD, PARENT])] == [PARENT]
 
@@ -312,3 +315,46 @@ async def test_the_console_lists_a_conversations_files_and_declarations(env, rep
     assert {e.get("title") or e["name"] for e in body["deliverables"]} == {"Release", "report.md"}
     capture = await env.client.get("/console/api/items/cabc/deliverables", headers=AUTH)
     assert (await capture.json())["deliverables"] == []
+
+
+# -- when each entry was declared (#1548) ---------------------------------------------------
+
+
+async def test_each_deliverable_keeps_the_time_it_was_first_declared(repo) -> None:
+    first = {"title": "PR #1", "url": "https://github.com/o/r/pull/1"}
+    stored = await repo.update(PARENT, {"deliverables": [first]})
+    born = stored.deliverables[0]["at"]
+    assert born
+    # The agent reads the record back and resends it, with "at", plus a new entry.
+    again = await repo.update(
+        PARENT,
+        {
+            "deliverables": parse_situation(
+                {"deliverables": [{"title": "Video", "file": "v.mp4"}, *stored.deliverables]}
+            )["deliverables"]
+        },
+    )
+    by_title = {e["title"]: e["at"] for e in again.deliverables}
+    assert by_title["PR #1"] == born
+    assert by_title["Video"] >= born
+
+
+def test_a_sent_time_is_ignored() -> None:
+    entry = {"title": "x", "url": "https://a.example", "at": "1999-01-01"}
+    assert "at" not in parse_situation({"deliverables": [entry]})["deliverables"][0]
+
+
+def test_declared_entries_sort_by_their_own_time() -> None:
+    record = SimpleNamespace(
+        thread_id=PARENT,
+        updated_at="2026-11-23T09:00:00+00:00",
+        deliverables=[
+            {"title": "old PR", "url": "https://a.example/1", "at": "2026-11-20T00:00:00+00:00"},
+            {"title": "legacy", "url": "https://a.example/2"},
+        ],
+    )
+    files = [
+        {"source": "file", "thread_id": "200", "name": "v.mp4", "at": "2026-11-22T00:00:00+00:00"}
+    ]
+    merged = merge(files, [record])
+    assert [e.get("title") or e["name"] for e in merged] == ["legacy", "v.mp4", "old PR"]

@@ -455,8 +455,9 @@ async def _build_system_context(config: RunConfig) -> str | None:
         'doc|video|image|link|file", "note": "optional, one line"}`. To title an attached '
         'file or mark an old version replaced, name it instead of a url: `{"title": '
         '"Prototype v1", "file": "short_v1.mp4", "superseded": true}`. The field is '
-        "replaced as a whole: GET it, keep the earlier entries (newest first), and send the "
-        "full list."
+        "replaced as a whole: GET it, keep the earlier entries, and send the full list (the "
+        "server keeps when each was first listed and the panel sorts and groups by itself). "
+        "Set `kind` so the entry lands in the right group; PRs and links are folded."
     )
 
     done_section = _build_done_marker_section(config)

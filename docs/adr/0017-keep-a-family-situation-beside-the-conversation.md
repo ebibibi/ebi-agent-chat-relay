@@ -74,6 +74,11 @@ file and mark it superseded. Only the relay's own attachments and `http(s)://` o
 so a message cannot put an outside address on the list. Chat threads are read through the Discord API and
 cached per thread until a new message arrives, which bounds the cost of a panel that polls.
 
+*Amended 2026-11-23 (#1548):* on a real family the list ran to dozens of entries, the declared ones above
+every file because they shared their record's time. Each declared entry now keeps the time it was first
+declared, and the section groups by kind with links (PRs, releases) folded, since the person comes for the
+videos, images and documents.
+
 ## Consequences
 
 - The written part is only as current as the agent keeps it, which the staleness note makes visible rather

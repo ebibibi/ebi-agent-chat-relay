@@ -79,3 +79,6 @@
 .dlv-video { width: 100%; max-height: 60vh; border-radius: 4px; background: #000; }
 .dlv-fold summary { cursor: pointer; font-size: 12px; }
 .dlv-fold > .sit-list { margin-top: 6px; }
+.dlv-group { display: flex; flex-direction: column; gap: 6px; }
+.dlv-group-head { font-size: 12px; font-weight: 700; color: var(--dim); }
+.dlv-group summary.dlv-group-head { cursor: pointer; }

@@ -19,6 +19,8 @@ const family = {threads: ['10', '11'], unread: [], deliverables: [
   {source: 'file', thread_id: '11', at: '2026-11-23T07:00:00Z', name: 'report.md', url: cdn('report.md'), content_type: 'text/markdown', size: 20},
   {source: 'file', thread_id: '11', at: '2026-11-23T06:00:00Z', name: 'frame.png', url: cdn('frame.png'), content_type: 'image/png', size: 70},
   {source: 'file', thread_id: '11', at: '2026-11-22T06:00:00Z', name: 'short_v1.mp4', url: cdn('short_v1.mp4'), content_type: 'video/mp4', size: 9, title: '試作 v1', superseded: true},
+  ...[1, 2, 3].map((n) => ({source: 'file', thread_id: '11', at: `2026-11-21T0${n}:00:00Z`, name: `shot${n}.png`, url: cdn(`shot${n}.png`), content_type: 'image/png', size: 70})),
+  ...[1, 2, 3, 4, 5].map((n) => ({source: 'declared', thread_id: '10', at: `2026-11-23T09:0${n}:00Z`, title: `PR #10${n}`, url: `https://github.com/o/r/pull/10${n}`, kind: 'pr'})),
 ]};
 const single = {threads: ['42'], unread: [], deliverables: [
   {source: 'declared', thread_id: '42', at: '2026-11-23T08:00:00Z', title: '調査メモ', url: '/#note/02_Contexts/x/memo.md', kind: 'note'}]};
@@ -65,17 +67,29 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
     if (width <= 900) await page.locator('#d-tabs button', {hasText: '現在地'}).first().click();
     const section = page.locator('#d-side .sit-section.deliverables');
     await section.locator('.dlv-row').first().waitFor();
-    assert.match(await section.locator('.sit-head').innerText(), /📦 成果物 \(4\)/);
-    const titles = await section.locator(':scope > .sit-list > .dlv-row .dlv-title').allInnerTexts();
-    assert.deepEqual(titles.map((t) => t.replace(/^\S+\s/, '')), ['PR #77 試作の台本', '試作 v2', 'report.md', 'frame.png']);
-    assert.match(await section.locator('.dlv-row').first().innerText(), /ショート動画の企画（親）/, 'labelled with its thread');
+    assert.match(await section.locator('.sit-head').innerText(), /📦 成果物 \(12\)/);
+    // Grouped by kind in a fixed order; PRs and links fold by default (#1548).
+    const groups = await section.locator('.dlv-group').evaluateAll((n) => n.map((g) => g.dataset.group));
+    assert.deepEqual(groups, ['video', 'image', 'doc', 'link']);
+    const shown = (group) => section.locator(`.dlv-group[data-group="${group}"] > .sit-list > .dlv-row .dlv-title`).allInnerTexts();
+    assert.deepEqual((await shown('video')).map((t) => t.replace(/^\S+\s/, '')), ['試作 v2']);
+    // Newest first, three per group, the rest folded.
+    assert.deepEqual((await shown('image')).map((t) => t.replace(/^\S+\s/, '')), ['frame.png', 'shot3.png', 'shot2.png']);
+    assert.match(await section.locator('.dlv-group[data-group="image"] summary').innerText(), /ほか 1件/);
+    const links = section.locator('.dlv-group[data-group="link"] > details');
+    assert.equal(await links.evaluate((d) => d.open), false, 'links start folded');
+    assert.match(await links.locator('summary').innerText(), /PR・リンク \(6\)/);
+    await links.locator('summary').click();
+    const prs = (await links.locator('.dlv-row .dlv-title').allInnerTexts()).map((t) => t.replace(/^\S+\s/, ''));
+    assert.deepEqual(prs.slice(0, 2), ['PR #105', 'PR #104'], 'newest PR first');
+    assert.match(await links.locator('.dlv-row').last().innerText(), /ショート動画の企画（親）/, 'labelled with its thread');
     assert.equal(await section.locator('.dlv-row a[href="https://github.com/o/r/pull/77"]').count(), 1);
     // The replaced version is folded away.
-    const fold = section.locator('details.dlv-fold');
+    const fold = section.locator(':scope > .sit-list > li > details.dlv-fold').last();
     assert.match(await fold.locator('summary').innerText(), /置き換え済み（1件）/);
     assert.equal(await fold.locator('.dlv-row').isVisible(), false);
     // An image has a thumbnail.
-    await section.locator('.dlv-row[data-kind="image"] .dlv-thumb img').waitFor();
+    await section.locator('.dlv-row[data-kind="image"] .dlv-thumb img').first().waitFor();
     if (process.env.SHOTS) await page.screenshot({path: `${process.env.SHOTS}/deliverables-${width}.png`});
     // A video plays in place and survives a redraw.
     await section.locator('.dlv-row[data-kind="video"]').first().getByRole('button', {name: /再生/}).click();

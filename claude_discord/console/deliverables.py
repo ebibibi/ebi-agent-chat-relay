@@ -132,7 +132,8 @@ def merge(files: list[dict], records: list[Any]) -> list[dict]:
                     _annotate(target, entry)
                     if not entry.get("url"):
                         continue
-            row = {"source": "declared", "thread_id": thread, "at": record.updated_at, **entry}
+            row = {"source": "declared", "thread_id": thread, **entry}
+            row["at"] = entry.get("at") or record.updated_at
             if entry.get("file") and not entry.get("url"):
                 row["missing"] = True
             declared.append(row)
