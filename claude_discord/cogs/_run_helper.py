@@ -444,7 +444,19 @@ async def _build_system_context(config: RunConfig) -> str | None:
         "outlives its answer. Send `asks` only as `[]` to clear what an older turn wrote. "
         "`doing`: what is moving now, in a few words. "
         "`decided`: decisions made and outcomes finished; keep them across updates. "
-        "No secrets, and no chat narrative. A thread without children need not use it."
+        "No secrets, and no chat narrative. A thread without children need not use it "
+        "for these.\n"
+        "Deliverables: the panel lists every file this family's threads attached (the "
+        "attachment marker file) by itself, newest first. Whenever you produce something "
+        "that is not an attached file (a PR, a release, a published or external URL, a "
+        "note in the vault), list it in `deliverables`, in this thread and in a child "
+        "thread alike; the panel merges the whole family. Each entry: "
+        '`{"title": "...", "url": "https://... or /#note/...", "kind": "pr|release|note|'
+        'doc|video|image|link|file", "note": "optional, one line"}`. To title an attached '
+        'file or mark an old version replaced, name it instead of a url: `{"title": '
+        '"Prototype v1", "file": "short_v1.mp4", "superseded": true}`. The field is '
+        "replaced as a whole: GET it, keep the earlier entries (newest first), and send the "
+        "full list."
     )
 
     done_section = _build_done_marker_section(config)

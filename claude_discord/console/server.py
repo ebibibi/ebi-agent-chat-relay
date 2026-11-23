@@ -65,6 +65,7 @@ from .commands import (
 from .conversations import ConversationRepository
 from .decision_cleanup import DecisionReviewer
 from .decision_defaults import DecisionDefaulter
+from .deliverables import DeliverableCollector
 from .files import resolve_file
 from .guide import build_guide
 from .logsafe import q as _q
@@ -340,6 +341,14 @@ class ConsoleServer:
         self._tasks: set[asyncio.Task[Any]] = set()
         #: Request id -> (expiry, files): a chat thread's attachments, read once (#1374).
         self._request_files_cache: dict[int, tuple[float, list[dict[str, str]]]] = {}
+        #: What each family produced, for the situation panel (#1537).
+        self.deliverables = DeliverableCollector(
+            lineage=self._lineage,
+            conversations=lambda: self.conversations,
+            chat_thread=self._chat_thread,
+            bot_id=self._bot_id,
+            records=self._family_records,
+        )
         #: Canvas mode's resident secretary (ADR-0025); None turns the mode off.
         self.canvas = self._build_canvas(canvas_repo)
         #: The 🌙 night shift (#1511): hands the agents' own next moves over for the night.
@@ -441,6 +450,7 @@ class ConsoleServer:
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/messages", self.messages)
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/notes", workspace_routes.thread_notes)
         r.add_get(f"{API_PREFIX}/items/{{item_id}}/situation", self.situation)
+        r.add_get(f"{API_PREFIX}/items/{{item_id}}/deliverables", self.family_deliverables)
         r.add_post(f"{API_PREFIX}/items/{{item_id}}/reply", self.reply)
         r.add_post(
             f"{API_PREFIX}/items/{{item_id}}/messages/{{message_id}}/actions/{{action_id}}",
@@ -794,6 +804,26 @@ class ConsoleServer:
         return web.json_response(
             {"situation": written.as_dict() if written else None, "waits": waits}
         )
+
+    async def family_deliverables(self, request: web.Request) -> web.Response:
+        """What the family of an item produced: attached files and declared deliverables."""
+        thread_id = _thread_of(request.match_info["item_id"])
+        if thread_id is None:
+            return web.json_response({"deliverables": [], "threads": [], "unread": []})
+        return web.json_response(await self.deliverables.for_thread(thread_id))
+
+    async def _chat_thread(self, thread_id: int) -> Any:
+        """A chat thread under a watched channel, or None: the gate every reply passes too."""
+        thread, err = await self._thread_for(f"t{int(thread_id)}")
+        return None if err is not None else thread
+
+    def _bot_id(self) -> int | None:
+        me = getattr(getattr(self.api.bot, "user", None), "id", None)
+        return me if isinstance(me, int) else None
+
+    async def _family_records(self, thread_ids: list[int]) -> list[Any]:
+        repo = self.api.situation_repo
+        return await repo.get_many(thread_ids) if repo is not None else []
 
     async def _parent_of(self, thread_id: int) -> int | None:
         """The thread that spawned *thread_id*, or None (also when lineage is unavailable)."""

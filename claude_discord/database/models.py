@@ -153,7 +153,8 @@ CREATE TABLE IF NOT EXISTS thread_situation (
     asks TEXT NOT NULL DEFAULT '[]',
     doing TEXT NOT NULL DEFAULT '[]',
     decided TEXT NOT NULL DEFAULT '[]',
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    deliverables TEXT NOT NULL DEFAULT '[]'
 );
 
 -- Decision requests an agent sent the person (decision_repo.py, ADR-0024).
@@ -288,6 +289,8 @@ _MIGRATIONS = [
         "decided TEXT NOT NULL DEFAULT '[]', "
         "updated_at TEXT NOT NULL)"
     ),
+    # deliverables: what a thread produced that is not a file it attached (#1537)
+    "ALTER TABLE thread_situation ADD COLUMN deliverables TEXT NOT NULL DEFAULT '[]'",
     # decision_requests added for secretary mode v2 (ADR-0024)
     (
         "CREATE TABLE IF NOT EXISTS decision_requests ("

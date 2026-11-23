@@ -64,6 +64,16 @@ Separately, prompts the relay starts a turn with (relays, finished waits, restar
 by author as `activity`. They were stored without the bot flag so the agent receives them as prompts, and
 were shown as if the person had written them. Agent answers in such a turn stay visible and are labelled.
 
+*Amended 2026-11-23 (#1537):* the person asked "where can I see the prototype?" because a family's files
+were spread over its children's messages. The panel gains **📦 Deliverables**, under the same two-source
+rule. Measured: every file the relay's own bot attached in any family thread (and a Console
+conversation's delivered files), read from the conversation itself rather than from a log of deliveries,
+so files delivered before this change are listed too. Written: `deliverables` in any family member's
+record (not only the parent's), for what is not a file (a PR, a release, a note) or to title an attached
+file and mark it superseded. Only the relay's own attachments and `http(s)://` or `/#` links are accepted,
+so a message cannot put an outside address on the list. Chat threads are read through the Discord API and
+cached per thread until a new message arrives, which bounds the cost of a panel that polls.
+
 ## Consequences
 
 - The written part is only as current as the agent keeps it, which the staleness note makes visible rather

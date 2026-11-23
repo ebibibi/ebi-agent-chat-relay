@@ -8,27 +8,39 @@ and a family can exist with no project at all.
 
 A write replaces only the fields it names, so a parent can drop an answered question
 without resending every decision.
+
+``deliverables`` is what the thread produced that is not an attached file (a PR, a release,
+a note), or a title and a "superseded" flag for a file it attached. Files themselves are
+collected from the conversation (``console/deliverables.py``), never written here.
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
 import aiosqlite
 
-SITUATION_FIELDS = ("asks", "doing", "decided")
+SITUATION_FIELDS = ("asks", "doing", "decided", "deliverables")
+TEXT_FIELDS = ("asks", "doing", "decided")
 MAX_ENTRIES = 40
 MAX_ENTRY_CHARS = 600
+#: What a deliverable entry may say about itself; ``kind`` only picks the icon.
+DELIVERABLE_KINDS = ("pr", "release", "note", "doc", "video", "image", "link", "file")
+DELIVERABLE_KEYS = frozenset({"title", "url", "file", "kind", "note", "superseded"})
+MAX_TITLE_CHARS = 200
+MAX_NOTE_CHARS = 300
+MAX_URL_CHARS = 2000
+MAX_FILE_CHARS = 300
 
 
 class SituationError(ValueError):
     """A situation update that cannot be stored. The message is written for the agent."""
 
 
-def parse_situation(body: Any) -> dict[str, list[str]]:
+def parse_situation(body: Any) -> dict[str, list[Any]]:
     """Validate a write: the fields it names, each a list of short non-empty strings.
 
     An unknown field is refused rather than ignored: ``decisions`` instead of ``decided``
@@ -41,7 +53,82 @@ def parse_situation(body: Any) -> dict[str, list[str]]:
         raise SituationError(f"Unknown field {unknown[0]!r}; use {', '.join(SITUATION_FIELDS)}")
     if not body:
         raise SituationError(f"Name at least one of {', '.join(SITUATION_FIELDS)}")
-    return {name: _entries(name, value) for name, value in body.items()}
+    return {
+        name: _deliverables(value) if name == "deliverables" else _entries(name, value)
+        for name, value in body.items()
+    }
+
+
+def _deliverables(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise SituationError("deliverables must be an array of objects")
+    if len(value) > MAX_ENTRIES:
+        raise SituationError(
+            f"deliverables has more than {MAX_ENTRIES} entries; drop what nobody needs any more"
+        )
+    return [_deliverable(entry) for entry in value]
+
+
+def _short(entry: dict[str, Any], key: str, limit: int) -> str:
+    value = entry.get(key)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise SituationError(f"deliverables: {key} must be a string")
+    value = value.strip()
+    if len(value) > limit:
+        raise SituationError(f"deliverables: {key} is over {limit} characters; shorten it")
+    return value
+
+
+def _safe_url(url: str) -> bool:
+    """An address the panel may link to: the web, or a link inside the Console (``/#...``)."""
+    if any(ch.isspace() or ord(ch) < 32 for ch in url):
+        return False
+    lowered = url.lower()
+    return lowered.startswith(("https://", "http://")) or url.startswith("/#")
+
+
+def _deliverable(entry: Any) -> dict[str, Any]:
+    if not isinstance(entry, dict):
+        raise SituationError(
+            'each deliverable is an object such as {"title": "PR #12", "url": "https://..."}'
+        )
+    unknown = sorted(set(entry) - DELIVERABLE_KEYS)
+    if unknown:
+        raise SituationError(
+            f"deliverables: unknown key {unknown[0]!r}; use {', '.join(sorted(DELIVERABLE_KEYS))}"
+        )
+    title = _short(entry, "title", MAX_TITLE_CHARS)
+    if not title:
+        raise SituationError("deliverables: every entry needs a title")
+    url = _short(entry, "url", MAX_URL_CHARS)
+    file = _short(entry, "file", MAX_FILE_CHARS)
+    if not url and not file:
+        raise SituationError(
+            f"deliverables: {title!r} needs a url, or file (the name of a file the thread attached)"
+        )
+    if url and not _safe_url(url):
+        raise SituationError(
+            f"deliverables: the url of {title!r} must start with https://, http:// or /# "
+            "(a Console link such as /#note/...)"
+        )
+    kind = _short(entry, "kind", 20)
+    if kind and kind not in DELIVERABLE_KINDS:
+        raise SituationError(f"deliverables: kind must be one of {', '.join(DELIVERABLE_KINDS)}")
+    superseded = entry.get("superseded", False)
+    if not isinstance(superseded, bool):
+        raise SituationError("deliverables: superseded must be true or false")
+    clean: dict[str, Any] = {"title": title}
+    for key, value in (("url", url), ("file", file), ("kind", kind)):
+        if value:
+            clean[key] = value
+    note = _short(entry, "note", MAX_NOTE_CHARS)
+    if note:
+        clean["note"] = note
+    if superseded:
+        clean["superseded"] = True
+    return clean
 
 
 def _entries(name: str, value: Any) -> list[str]:
@@ -69,6 +156,7 @@ class Situation:
     doing: list[str]
     decided: list[str]
     updated_at: str
+    deliverables: list[dict[str, Any]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -77,6 +165,7 @@ class Situation:
             "asks": self.asks,
             "doing": self.doing,
             "decided": self.decided,
+            "deliverables": self.deliverables,
             "updated_at": self.updated_at,
         }
 
@@ -104,9 +193,19 @@ class ThreadSituationRepository:
             doing=json.loads(row["doing"]),
             decided=json.loads(row["decided"]),
             updated_at=row["updated_at"],
+            deliverables=json.loads(row["deliverables"] or "[]"),
         )
 
-    async def update(self, thread_id: int, fields: dict[str, list[str]]) -> Situation:
+    async def get_many(self, thread_ids: list[int]) -> list[Situation]:
+        """The records of several threads (a family), in no particular order."""
+        found = []
+        for thread_id in dict.fromkeys(int(t) for t in thread_ids):
+            record = await self.get(thread_id)
+            if record is not None:
+                found.append(record)
+        return found
+
+    async def update(self, thread_id: int, fields: dict[str, list[Any]]) -> Situation:
         """Replace the named fields in one statement, so two writers cannot lose a field."""
         values = [
             json.dumps(fields[name], ensure_ascii=False) if name in fields else None
@@ -115,12 +214,15 @@ class ThreadSituationRepository:
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(
                 """
-                INSERT INTO thread_situation (thread_id, asks, doing, decided, updated_at)
-                VALUES (?, COALESCE(?, '[]'), COALESCE(?, '[]'), COALESCE(?, '[]'), ?)
+                INSERT INTO thread_situation
+                    (thread_id, asks, doing, decided, deliverables, updated_at)
+                VALUES (?, COALESCE(?, '[]'), COALESCE(?, '[]'), COALESCE(?, '[]'),
+                        COALESCE(?, '[]'), ?)
                 ON CONFLICT(thread_id) DO UPDATE SET
                     asks = COALESCE(?, asks),
                     doing = COALESCE(?, doing),
                     decided = COALESCE(?, decided),
+                    deliverables = COALESCE(?, deliverables),
                     updated_at = excluded.updated_at
                 """,
                 (int(thread_id), *values, datetime.now(UTC).isoformat(), *values),
