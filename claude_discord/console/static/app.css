@@ -159,6 +159,14 @@ button.slash-now:hover { border-color: var(--accent); }
 .row .side { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; font-size: 12px; color: var(--dim); white-space: nowrap; }
 .row.done .title { color: var(--dim); text-decoration: line-through; }
 .group { padding: 10px 14px 4px; color: var(--dim); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+/* Focus: the open items below the ranking (focus.js restSections), one foldable header each. */
+.group.focus-rest { padding: 6px 8px 2px; text-transform: none; letter-spacing: 0; }
+.focus-rest-toggle { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 6px 8px;
+  background: none; border: 0; border-top: 1px solid var(--line); color: var(--dim);
+  font: inherit; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; flex-wrap: wrap; }
+.focus-rest-toggle:hover, .focus-rest-toggle:focus-visible { color: inherit; }
+.focus-rest-count { min-width: 1.6em; padding: 0 6px; border-radius: 9px; background: rgba(127,127,127,.18); text-align: center; font-size: 12px; }
+.focus-rest-action { margin-left: auto; font-weight: 400; font-size: 12px; }
 .tw { display: inline-block; width: 16px; color: var(--dim); text-align: center; }
 
 .pri { display: inline-block; min-width: 24px; padding: 0 5px; border-radius: 4px; font-size: 11px; font-weight: 700; text-align: center; }
