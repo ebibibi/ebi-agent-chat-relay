@@ -37,3 +37,4 @@ earlier ADR instead of rewriting its history.
 - [ADR-0026: Restart the bot only when nobody is using it, and only when a change needs it](0026-restart-only-when-nobody-is-using-the-bot.md)
 - [ADR-0027: Keep the automation AI policy in the relay; the scheduler's file only seeds it](0027-keep-the-automation-ai-policy-in-the-relay.md)
 - [ADR-0028: Make Console pages a posting queue for any network](0028-make-pages-a-posting-queue-for-any-network.md) — Free target labels, byte-checked attachments, named counting rules (accepted, 2026-11-22).
+- [ADR-0029: Keep goals in one Markdown note and place threads under them](0029-keep-goals-in-a-markdown-note-and-place-threads-under-them.md) — Goals view: note as the only copy, goal → project → thread, pins stay (accepted, 2026-11-24).

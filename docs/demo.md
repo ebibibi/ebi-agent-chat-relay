@@ -77,6 +77,7 @@ The example uses an OS user `ccdb-demo`; replace it with yours.
    CCDB_CONSOLE_TOKEN=<random>                  # the reset seeds items with it
    CCDB_DATA_ROOT=/home/ccdb-demo/data
    EBI_WORKSPACE_NOTES_FOLDER=/home/ccdb-demo/vault
+   CCDB_CONSOLE_GOALS_NOTE=02_Contexts/情シス/目標.md   # the 🧭 Goals view
    CLAUDE_WORKING_DIR=/home/ccdb-demo/vault
    ```
 

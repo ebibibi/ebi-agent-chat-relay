@@ -42,6 +42,7 @@ Desktop controls retain their existing layout.
 | View | Shows |
 |---|---|
 | **Focus** (default) | What you can do now, across every list. Importance (priority first, P0 above P1 whatever else is true; then how close the deadline is; then whose move it is) and readiness are separate axes: only work you can act on right now ranks under "Do this first" and "Then"; anything waiting for a time, a person or a job goes under "⏳ Waiting", soonest first, and moves up once the time it named has come. Each row shows the next step and why it ranks there. Work bound to a place or device (📍 home, office, work PC) is tagged; pick where you are in the bar above the list — one place or several, matched with OR — and work bound to none of them moves to "📍 Somewhere else". Set an item's place with the 📍 button in its header (pick one, Anywhere, or type a new one); add, rename and delete places under "⚙ Manage places" — a rename or delete reaches every item. Work an agent is doing, finished, parked and snoozed items are left out. Reachable with `g f` |
+| **🧭 Goals** | (with an [Ebi Workspace](#optional-ebi-workspace)) What you are working toward, from your goals note, each goal with its done-when, due date, milestone progress and the threads that work toward it. See [Goals](#goals). Reachable with `g o` |
 | **Inbox** | The ball is on you: ❓ waiting for an answer, 👀 something to review, 📋 a task only you can do, ⚠️ a failed turn |
 | **Done?** | 🏁 Completion candidates: the agent believes the work is finished. Only you close an item — confirm it with Done (`e`) and it moves to Done; until then it stays listed and is never hidden by "✅ Done hidden". Reachable with `g c` |
 | **Running** | A turn is in flight (or queued for a slot) |
@@ -1061,6 +1062,68 @@ Console replies relayed into Discord which exceed Discord's 2,000-character mess
 are posted as one UTF-8 `message.txt` attachment. The agent receives the original complete
 prompt. A long URL is never split across two Discord messages. A long first line in a new
 capture is kept in its note even when its title is shortened.
+
+## Goals
+
+The **🧭 Goals** view (shown when an [Ebi Workspace](#optional-ebi-workspace) is configured) puts
+the outcomes you are working toward on screen in your own words, and under each one the threads
+that work toward it. See [ADR-0029](adr/0029-keep-goals-in-a-markdown-note-and-place-threads-under-them.md).
+
+**Your goals note is the only copy.** Choose one Markdown note in the vault — in the view's first
+screen, with `CCDB_CONSOLE_GOALS_NOTE=<vault path>`, or as the first line of
+`${XDG_CONFIG_HOME:-~/.config}/ebi-workspace/console-goals.txt` (an optional `limit: 5` line sets
+how many active goals the view warns above). Each `###` heading in its goals section is one goal:
+
+```markdown
+## Goals
+
+### 1️⃣ Ship the product
+- **Done when**: two customers run it from a config file alone
+- **Due**: 2026-12-31
+- **Projects**: [[02_Contexts/dev/relay/status|relay]]
+
+### ⏸️ Write a book
+```
+
+- The section is `## Goals`, `## Current goals`, `## Focus`, `## 目標` or `## いま集中するもの`;
+  without one, every `###` in the note counts.
+- Fields are read by label, in English or Japanese: done when (`Done when`, `達成の定義`, `判定`),
+  due (`Due`, `期限`, or a date or month in the done-when label such as `判定（2027-01）`) and
+  projects (`Projects`, `プロジェクト`). Everything else under the heading is yours and is left alone.
+- A leading ⏸️ pauses a goal and ✅ completes it; keycap numbers (1️⃣ 2️⃣ …) are kept in order.
+
+**Projects and progress.** A goal's projects are the Workspace projects on its projects line, plus
+any link in its section to a project's `status.md` or `overview.md`. Each shows a bar for its
+`## マイルストーン` table (✅ rows over all rows) and the next milestone with its date.
+
+**Which thread goes where.** Strongest first:
+
+1. **Your choice** — the 🧭 chip under every row in the view; stored as the tag `goal:<id>` on the
+   item (`goal:none` = no goal; "Automatic" removes it).
+2. **The thread's project** — the Workspace project it is bound to (see the binding table under
+   Ebi Workspace) is linked to the goal.
+3. **The parent's goal** — a child goes where its parent went.
+
+Threads bound to a project no goal links are listed under **Projects moving outside your goals**;
+the rest under **Not linked to a goal**. Finished threads stay under their goal for 7 days.
+
+**Each goal card** shows the done-when, the due date (days left or over), milestone progress,
+projects (open the note, ✕ to unlink, ＋ to link), how many threads are ⚡ running, 🙋 waiting on
+you and ✅ done in the last week, ⚠ when its threads have been quiet for 14 days, the open decision
+cards of its threads (answer them in place) and the deliverables they declared. Its threads follow
+as ordinary rows — pinned first, then the ones waiting on you — with the first line of what each is
+doing.
+
+**Editing.** **＋ Write a goal**, and the card's **•••** menu (edit title / done-when / due, ↑ ↓,
+pause, done, resume), write straight into the note: only the lines an edit is about change, the
+note's `updated:` / `最終更新:` move to today, and a line is added to the enclosing Workspace log. An
+edit made in Obsidian since the view read the note is never overwritten: the Console reloads and asks
+you to try again. Renaming a goal keeps the threads you placed under it.
+
+Pins are unchanged: they order what you touch today; goals say what it is for.
+
+API: `GET /console/api/goals`, `POST /console/api/goals` (`revision` and `op`: `add`, `update`,
+`move`, `state`, `link`, `unlink`), `PUT /console/api/goals/config` (`note`, `limit`).
 
 ## Optional Ebi Workspace
 

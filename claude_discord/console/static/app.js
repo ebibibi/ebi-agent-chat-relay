@@ -31,7 +31,7 @@ const I18N = {
     guide_elsewhere: (n) => `Nothing to do here; ${n} item(s) need another place.`,
     guide_batches: "🧺 Decide together", guide_batch: (t, n) => `${t} — ${n} decisions`,
     guide_drift: "🔍 Records the Console could not write back", guide_task_open: (t) => `finished, but the Workspace task "${t}" is still open`, guide_record_stale: "finished after its project records were last updated",
-    me: "Inbox", candidate: "Done?", ai: "Running", todo: "To do", idle: "Idle", recent: "Recent", tree: "Tree", snoozed: "Snoozed", done: "Done",
+    me: "Inbox", candidate: "Done?", ai: "Running", todo: "To do", idle: "Idle", recent: "Recent", goals: "🧭 Goals", tree: "Tree", snoozed: "Snoozed", done: "Done",
     filter: "Filter…", capture: "+ Write down work, Ctrl+Enter to add (c) — lines after the first become a note", capture_ai: "+ Write down work, Ctrl+Enter hands it to AI (c) — lines after the first become a note",
     autostart: "AI starts right away", empty: "Nothing here. 🎉",
     activity: (n) => `⚙ Activity (${n})`, details: "Details",
@@ -58,7 +58,7 @@ const I18N = {
           error: "failed", candidate: "done? (AI thinks so)", done: "done", someday: "someday", todo: "to do", idle: "idle" },
     help: [["j / k", "next / previous"], ["Enter", "open"], ["Esc", "close"], ["e", "done"],
            ["1–4", "priority P0–P3"], ["s", "snooze until tomorrow"], ["c", "write down work"],
-           ["r", "reply"], ["/", "filter"], ["h", "hide / show done"], ["p", "pin / unpin (working on now)"], ["z", "focus mode: only this thread (Esc leaves)"], ["n", "work-through queue: skip to the next"], ["g then f/i/c/a/u/t/w/d", "go to a view"], ["?", "this help"]],
+           ["r", "reply"], ["/", "filter"], ["h", "hide / show done"], ["p", "pin / unpin (working on now)"], ["z", "focus mode: only this thread (Esc leaves)"], ["n", "work-through queue: skip to the next"], ["g then f/o/i/c/a/u/t/w/d", "go to a view"], ["?", "this help"]],
   },
   ja: {
     focus: "🎯 今やること", effort: { quick: "すぐ", short: "少し", deep: "じっくり" }, effort_all: "すべて", effort_bar: "かかる時間：", effort_min: (n) => `${n}分`, effort_hint: "AIにターンを返すまでにあなたが使う時間の見積もり：⚡ 3分以内、⏱ 20分以内、🧘 それ以上", focus_first: "まずこれ", focus_next: "次に", focus_waiting: "⏳ 待ち", focus_elsewhere: "📍 別の場所でやること", place_new: "新しい場所", add: "追加", delete: "削除", place_manage: "場所の管理", place_hint: "ここでしかできない場所・端末", place_count: (n) => `未完了 ${n}件`, place_unlisted: "未登録", place_unlisted_hint: "スレッドで使われているが一覧にない場所（多くはAIの推定）", place_manage_hint: "名前の変更・削除はすべてのスレッドに反映されます。削除した場所のスレッドは「どこでも」になります。", place_none: "まだ場所はありません。", place_delete_confirm: (n, c) => `「${n}」を未完了の ${c} 件から外しますか？`, here: "いまいる場所：", here_hint: "いまいる場所を全部選べます。どれかに当てはまるものを「ここでできる」とみなします", anywhere: "どこでも", place: "場所", place_ph: "どこでも", no_due: "期限なし", bp_backend: "バックエンド", bp_model: "モデル", bp_effort: "思考の深さ", bp_connection: "接続先（どこで動き、誰が払うか）", bp_kind: { subscription: "サブスク", foundry: "Foundry", bedrock: "Bedrock", vertex: "Vertex", api: "API" }, bp_signed_out: "未ログイン", bp_default_route: "配備の既定", bp_no_models: "この接続先は、その先にあるモデルだけ使えます。下に入力してください。",
@@ -81,7 +81,7 @@ const I18N = {
     guide_elsewhere: (n) => `ここでできることはありません。別の場所で ${n} 件。`,
     guide_batches: "🧺 まとめて判断", guide_batch: (t, n) => `${t} — ${n}件の判断`,
     guide_drift: "🔍 記録を自動で直せなかった会話", guide_task_open: (t) => `会話では完了、Workspaceのタスク「${t}」は未完了`, guide_record_stale: "会話のあとにプロジェクトの記録が更新されていません",
-    me: "受信箱", candidate: "完了候補", ai: "実行中", todo: "やること", idle: "止まっている", recent: "更新順", tree: "ツリー", snoozed: "スヌーズ中", done: "完了",
+    me: "受信箱", candidate: "完了候補", ai: "実行中", todo: "やること", idle: "止まっている", recent: "更新順", goals: "🧭 目標", tree: "ツリー", snoozed: "スヌーズ中", done: "完了",
     filter: "絞り込み…", capture: "＋ 思いついた仕事を書いて Ctrl+Enter（c）。2行目以降はメモ", capture_ai: "＋ 思いついた仕事を書いて Ctrl+Enter → AIが着手（c）。2行目以降はメモ",
     autostart: "AIがすぐ着手", empty: "ここには何もありません 🎉",
     activity: (n) => `⚙ 内部の動き（${n}）`, details: "詳細",
@@ -108,7 +108,7 @@ const I18N = {
           error: "失敗", candidate: "完了候補（AI判断）", done: "完了", someday: "いつか", todo: "やること", idle: "止まっている" },
     help: [["j / k", "次 / 前"], ["Enter", "開く"], ["Esc", "閉じる"], ["e", "完了"],
            ["1〜4", "優先度 P0〜P3"], ["s", "明日までスヌーズ"], ["c", "仕事を書き留める"],
-           ["r", "返信"], ["/", "絞り込み"], ["h", "完了を隠す／表示"], ["p", "ピン留め／解除（いまやってる）"], ["z", "集中モード：このスレッドだけ表示（Escで戻る）"], ["n", "連続処理：スキップして次へ"], ["g → f/i/c/a/u/t/w/d", "画面を移動"], ["?", "このヘルプ"]],
+           ["r", "返信"], ["/", "絞り込み"], ["h", "完了を隠す／表示"], ["p", "ピン留め／解除（いまやってる）"], ["z", "集中モード：このスレッドだけ表示（Escで戻る）"], ["n", "連続処理：スキップして次へ"], ["g → f/o/i/c/a/u/t/w/d", "画面を移動"], ["?", "このヘルプ"]],
   },
 };
 // ?lang=ja|en pins the language; otherwise the browser's preference decides.
@@ -125,13 +125,13 @@ document.documentElement.lang = LANG;
 const STATUS_ICON = { running: "⚙️", waiting: "❓", review: "👀", action: "📋", error: "⚠️",
   candidate: "🏁", done: "✅", someday: "💤", todo: "○", idle: "·" };
 const VIEWS = [
-  { key: "focus", hot: true }, { key: "me", hot: true }, { key: "candidate" }, { key: "ai" }, { key: "todo" }, { key: "idle" },
+  { key: "focus", hot: true }, { key: "goals", when: () => window.ConsoleWorkspace.available() }, { key: "me", hot: true }, { key: "candidate" }, { key: "ai" }, { key: "todo" }, { key: "idle" },
   { sep: true }, { key: "recent" }, { key: "tree" }, { key: "snoozed" }, { key: "done" },
 ];
 // A built-in list, or a saved view (views.js) — known once the first board arrives.
-const isViewKey = (key) => VIEWS.some((v) => v.key === key) || window.ConsoleViews.isKey(key) ||
+const isViewKey = (key) => VIEWS.some((v) => v.key === key && (!v.when || v.when())) || window.ConsoleViews.isKey(key) ||
   (key === window.ConsoleSecretary.VIEW && window.ConsoleSecretary.on());
-const VIEW_KEYS = { f: "focus", i: "me", c: "candidate", a: "ai", u: "recent", t: "tree", w: "todo", d: "done" };
+const VIEW_KEYS = { f: "focus", o: "goals", i: "me", c: "candidate", a: "ai", u: "recent", t: "tree", w: "todo", d: "done" };
 
 const state = {
   items: [], byId: new Map(), slots: {}, view: localStorage.getItem("view") || "focus",
@@ -243,6 +243,7 @@ async function refresh() {
     window.ConsolePages.onBoard(data.pages || []);
     window.ConsoleFocus.setGuide(data.guide || null);
     window.ConsoleSecretary.onBoard(data.secretary || null);
+    window.ConsoleGoals.onBoard();
     if (!state.defaultsLoaded) { state.defaultsLoaded = true; window.ConsoleBackend.loadDefaults(); }
     if (state.open && !state.byId.has(state.open)) state.open = null;
     // Whatever is on screen is being read.
@@ -337,7 +338,9 @@ function visibleRows() {
   if (state.view === window.ConsoleSecretary.VIEW) return window.ConsoleSecretary.rows();
   const ungrouped = ungroupedRows();
   // Recent is a timeline: family regrouping would pull an older parent above its child.
-  const rows = chronologicalView() ? ungrouped : window.ConsoleFamily.groupRows(ungrouped);
+  // Goals place each thread on its own (a child may serve another goal than its parent), so
+  // regrouping by family would pull a whole family under the goal of one of its children.
+  const rows = chronologicalView() || state.view === "goals" ? ungrouped : window.ConsoleFamily.groupRows(ungrouped);
   const pins = rows.filter(r => r.pinId);
   pins.forEach((row, index) => {
     row.pinFirst = index > 0 ? pins[0].pinId : null;
@@ -368,7 +371,8 @@ function ungroupedRows() {
 }
 const chronologicalView = () => state.view === "recent" && !window.ConsoleViews.active();
 function pinnedFirst(items) {
-  if (chronologicalView()) return viewRows(items);
+  // Goals order their own threads, pinned ones first within each goal.
+  if (chronologicalView() || state.view === "goals") return viewRows(items);
   const pinned = state.view === "done" ? [] : items.filter(isPinned)
     .sort((a, b) => (a.pin_position != null) - (b.pin_position != null) ||
       (a.pin_position ?? 0) - (b.pin_position ?? 0) ||
@@ -383,12 +387,13 @@ function dropEmptyGroups(rows) {
     rows.slice(i + 1).find((n) => n.group !== undefined || n.item)?.item !== undefined);
 }
 // Views that list every bucket at once; the others are one bucket each.
-const isWideView = () => ["focus", "tree", "recent"].includes(state.view) || window.ConsoleViews.active();
+const isWideView = () => ["focus", "goals", "tree", "recent"].includes(state.view) || window.ConsoleViews.active();
 function viewRows(items) {
   if (window.ConsoleViews.active()) return window.ConsoleViews.rows(items);
   if (state.view === "tree") return treeRows(items.filter((i) => i.bucket !== "done"));
   if (state.view === "recent") return window.ConsoleRecent.rows(items);
   if (state.view === "focus") return window.ConsoleFocus.rows(items);
+  if (state.view === "goals") return window.ConsoleGoals.rows(items);
   return window.ConsoleWsFilter.rows(items.filter((i) => i.bucket === state.view));
 }
 function treeRows(items) {
@@ -486,11 +491,12 @@ function renderNav() {
   for (const i of state.items) counts[i.bucket] = (counts[i.bucket] || 0) + 1;
   counts.tree = state.items.filter((i) => i.bucket !== "done").length;
   counts.focus = window.ConsoleFocus.count(state.items);
+  counts.goals = window.ConsoleGoals.count();
   const nav = $("nav-views");
   nav.replaceChildren(...[
     window.ConsoleSecretary.switcher(),
     window.ConsoleSecretary.nav(),
-    ...VIEWS.map((v) => v.sep ? h("div", { class: "sep" }) : h("button", {
+    ...VIEWS.filter((v) => !v.when || v.when()).map((v) => v.sep ? h("div", { class: "sep" }) : h("button", {
       class: state.view === v.key ? "active" : "",
       "aria-current": state.view === v.key ? "page" : null,
       onclick: () => setView(v.key),
@@ -632,7 +638,8 @@ function rowNode({ item, depth, children, rowKey, family, pinId, pinPrevious, pi
         state.selected === item.id ? h("span", {class:"selection-label",text: document.documentElement.lang === "ja" ? "▶ 選択中" : "▶ Selected"}) : null,
         item.title || item.thread_name || item.id),
       h("div", { class: "meta" }, ...meta),
-      state.view === "focus" ? window.ConsoleFocus.note(item) : null),
+      state.view === "focus" ? window.ConsoleFocus.note(item) : null,
+      state.view === "goals" ? window.ConsoleGoals.note(item) : null),
     h("div", { class: "side" }, ...side),
   );
 }
