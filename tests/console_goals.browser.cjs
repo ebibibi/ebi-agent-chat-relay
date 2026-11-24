@@ -84,6 +84,12 @@ test('Goals view on a desktop', {timeout: 40000}, async (t) => {
   assert.match(await card.locator('.goal-counts').textContent(), /あなた待ち 1/);
   assert.equal(await card.locator('.goal-deliverables a').getAttribute('href'), 'https://example.com/pull/12');
 
+  // The long sections start folded; the filter chips are hidden in this view.
+  assert.equal(await page.locator('.row[data-item-id="t4"]').count(), 0);
+  assert.equal(await page.locator('.status-bar, .ws-filter-bar').count(), 0);
+  assert.match(await page.locator('.goal-yours').textContent(), /あなた待ち 1件/);
+  await page.locator('.goal-section-toggle').nth(0).click();
+  await page.locator('.goal-section-toggle').nth(1).click();
   // Threads are ordinary rows under their goal: the one waiting on you first.
   const titles = await page.locator('#list > li').evaluateAll((lis) => lis.map((li) =>
     li.dataset.goalId ? `goal:${li.dataset.goalId}` : li.classList.contains('goal-card') ? 'outside'
@@ -165,4 +171,57 @@ test('Goals view asks for a note when none is configured', {timeout: 30000}, asy
   await page.locator('.goal-setup .btn.primary').click();
   await page.waitForTimeout(200);
   assert.deepEqual(writes, [{note: '02_Contexts/Me/goals.md'}]);
+});
+
+test('Work starts from a goal, projects join goals, the header shows the goal', {timeout: 40000}, async (t) => {
+  const browser = await chromium.launch({headless: true, args: ['--no-sandbox']});
+  t.after(() => browser.close());
+  const writes = [];
+  const page = await browser.newPage({viewport: {width: 1440, height: 900}, locale: 'ja-JP'});
+  await page.route('http://console.test/**', async (route) => {
+    const p = new URL(route.request().url()).pathname;
+    if (p === '/' || p.startsWith('/static/')) {
+      const file = p === '/' ? 'index.html' : path.basename(p);
+      return route.fulfill({body: fs.readFileSync(path.join(root, file)), contentType:
+        file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html'});
+    }
+    const method = route.request().method();
+    let data = {};
+    if (method !== 'GET') writes.push({p, method, body: route.request().postDataJSON()});
+    if (p.endsWith('/board')) data = {items, slots: {}, places: []};
+    else if (p.endsWith('/workspace')) data = {available: true, entries: [{path: 'Work/Website', kind: 'project', tasks: []}]};
+    else if (p.endsWith('/goals') && method === 'GET') data = goalsFixture();
+    else if (p.endsWith('/goals')) data = {note: {path: 'x', revision: 'r2'}};
+    else if (p.endsWith('/items') && method === 'POST') data = {item: {id: 't1', thread_id: '1'}};
+    else if (p.endsWith('/messages')) data = {messages: []};
+    return route.fulfill({status: method === 'POST' && p.endsWith('/items') ? 201 : 200,
+      contentType: 'application/json', body: JSON.stringify(data)});
+  });
+  await page.goto('http://console.test/');
+  await page.waitForFunction(() => window.ConsoleWorkspace && window.ConsoleWorkspace.available());
+  await page.evaluate(() => setView('goals'));
+  await page.locator('.goal-card').first().waitFor();
+
+  // An empty goal is compact, with starting work as its main action.
+  const hire = page.locator('.goal-card[data-goal-id="g2"]');
+  assert.ok(await hire.evaluate((el) => el.classList.contains('compact')));
+  await page.locator('.goal-card[data-goal-id="g1"] .goal-start').click();
+  await page.locator('.goal-start-text').fill('Write the FAQ page\nUse the client notes');
+  await page.locator('.goal-start-form .btn.primary').click();
+  await page.waitForFunction(() => document.querySelector('#d-head'));
+  const start = writes.find((w) => w.p.endsWith('/items'));
+  assert.deepEqual(start.body, {title: 'Write the FAQ page', start: true, tags: ['goal:g1'],
+    note: 'Use the client notes', workspace_path: 'Work/Website'});
+
+  // The thread header always says which goal the thread serves.
+  await page.locator('#d-head .goal-head-chip').waitFor();
+  assert.match(await page.locator('#d-head .goal-head-chip').textContent(), /目標: 1️⃣ Launch the website/);
+
+  // A project outside every goal joins one in one tap.
+  await page.evaluate(() => setView('goals'));
+  await page.locator('.goal-section-toggle').first().click();
+  await page.locator('.goal-card.outside .goal-into').click();
+  await page.locator('.goal-pop .ws-bind-option', {hasText: 'Hire someone'}).click();
+  await page.waitForTimeout(200);
+  assert.deepEqual(writes.at(-1).body, {op: 'link', id: 'g2', project: 'Me/Ads', revision: 'r1'});
 });

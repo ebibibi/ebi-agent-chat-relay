@@ -29,6 +29,10 @@ window.ConsoleGoals = (() => {
       missing: (p) => `The goals note ${p} is missing or hidden.`, loading: "Loading goals…",
       pick: "Goal", pick_auto: "Automatic", pick_none: "No goal", placed: { chosen: "your choice", project: "from the project", parent: "from the parent" },
       project_pick: "Link a Workspace project", state: { paused: "⏸ paused", done: "✅ done" },
+      start: "＋ Start work on this goal", start_ph: "What should the AI do for this goal? First line = title. Ctrl+Enter sends",
+      start_send: "Start", started: "Started under the goal", into_goal: "Put under a goal ▾", into_pick: "Put this project under",
+      yours_total: (n) => `🙋 ${n} waiting on you`, nothing_yours: "Nothing waits on you", jump: (g, n) => `${g} ${n}`,
+      section: (t, n) => `${t} (${n})`, header_pick: "🧭 Goal:", header_none: "🧭 Choose a goal",
     },
     ja: {
       title: "🧭 目標", source: "正本:", active: (n, l) => (l ? `進行中 ${n} / 上限 ${l}` : `進行中 ${n}`),
@@ -47,6 +51,10 @@ window.ConsoleGoals = (() => {
       missing: (p) => `目標のノート ${p} が見つからないか、非表示に設定されています。`, loading: "目標を読み込み中…",
       pick: "目標", pick_auto: "自動", pick_none: "目標なし", placed: { chosen: "あなたが選択", project: "プロジェクトから", parent: "親スレッドから" },
       project_pick: "Workspace のプロジェクトを紐づける", state: { paused: "⏸ 止めている", done: "✅ 達成" },
+      start: "＋ この目標で仕事を始める", start_ph: "この目標のために AI に何をしてほしいか。1行目が題名。Ctrl+Enter で送信",
+      start_send: "始める", started: "目標の下で仕事を始めました", into_goal: "この目標に入れる ▾", into_pick: "このプロジェクトを入れる目標",
+      yours_total: (n) => `🙋 あなた待ち ${n}件`, nothing_yours: "あなた待ちはありません", jump: (g, n) => `${g} ${n}件`,
+      section: (t, n) => `${t}（${n}）`, header_pick: "🧭 目標:", header_none: "🧭 目標を選ぶ",
     },
   };
   const L = () => STR[document.documentElement.lang === "ja" ? "ja" : "en"];
@@ -56,6 +64,14 @@ window.ConsoleGoals = (() => {
   let loading = null;
   let editing = null; // a goal id, "new", or null
   let showPaused = localStorage.getItem("goalsShowPaused") === "1";
+  let starting = null; // the goal whose "start work" box is open
+  // Folded sections ("outside", "unlinked"): folded unless opened, remembered per browser.
+  const opened = new Set(JSON.parse(localStorage.getItem("goalsOpenSections") || "[]"));
+  const toggleSection = (key) => {
+    if (opened.has(key)) opened.delete(key); else opened.add(key);
+    localStorage.setItem("goalsOpenSections", JSON.stringify([...opened]));
+    render();
+  };
 
   const isView = () => typeof state !== "undefined" && state.view === VIEW;
 
@@ -72,7 +88,14 @@ window.ConsoleGoals = (() => {
   }
 
   // The board moved: the goals' threads may have, too.
-  function onBoard() { if (isView()) load(); }
+  // Outside the view the goals feed only the thread header's goal chip, so they refresh slower.
+  let lastQuiet = 0;
+  function onBoard() {
+    if (isView()) { load(); return; }
+    if (!window.ConsoleWorkspace?.available() || Date.now() - lastQuiet < 60000) return;
+    lastQuiet = Date.now();
+    load();
+  }
 
   // -- writing ---------------------------------------------------------------------------
   async function send(action, { quiet = false } = {}) {
@@ -181,6 +204,13 @@ window.ConsoleGoals = (() => {
       run: () => send({ op: "link", id: goal.id, project: e.path }) })));
   }
 
+  // Link a project that moves outside every goal to one of them: all its threads follow.
+  function intoGoal(project, anchor) {
+    const goals = (data?.goals || []).filter((g) => g.state === "active");
+    popup(anchor, L().into_pick, goals.map((g) => ({ label: `${g.number || "🧭"} ${g.title}`,
+      run: () => send({ op: "link", id: g.id, project: project.path }) })));
+  }
+
   function goalPicker(item, anchor) {
     const l = L();
     const chosen = (item.tags || []).find((t) => t.startsWith("goal:"))?.slice(5) || null;
@@ -190,6 +220,47 @@ window.ConsoleGoals = (() => {
       { label: `🚫 ${l.pick_none}`, on: chosen === "none", run: () => chooseGoal(item, "none") },
       ...goals.map((g) => ({ label: `${g.number || "🧭"} ${g.title}`, on: chosen === g.id, run: () => chooseGoal(item, g.id) })),
     ]);
+  }
+
+  // -- starting work from a goal --------------------------------------------------------
+  // A new conversation tagged with the goal and bound to its first project, so the agent
+  // gets that project's Workspace context and working folder. Same route as the capture box.
+  async function startWork(goal, text) {
+    const [first, ...rest] = text.trim().split("\n");
+    const body = { title: first.trim().slice(0, 200), start: true, tags: [`goal:${goal.id}`] };
+    const note = first.trim().length > 200 ? text.trim() : rest.join("\n").trim();
+    if (note) body.note = note;
+    if (goal.projects.length) body.workspace_path = goal.projects[0].path;
+    const data = await api("/items", { method: "POST", body });
+    starting = null;
+    toast(data.start_error || L().started);
+    await refresh();
+    await load(true);
+    if (data.item?.id) openItem(data.item.id);
+  }
+
+  function startBox(goal) {
+    const l = L();
+    if (starting !== goal.id) {
+      return h("button", { type: "button", class: "btn primary goal-start", text: l.start,
+        onclick: () => { starting = goal.id; render(); } });
+    }
+    const box = h("textarea", { class: "goal-in goal-start-text", rows: 3, placeholder: l.start_ph, "aria-label": l.start });
+    let busy = false;
+    const go = async () => {
+      if (busy || !box.value.trim()) { box.focus(); return; }
+      busy = true;
+      try { await startWork(goal, box.value); } catch (err) { toast(err.message); busy = false; }
+    };
+    box.addEventListener("keydown", (e) => {
+      if (isSendKey(e)) { e.preventDefault(); go(); }
+      if (e.key === "Escape") { starting = null; render(); }
+    });
+    setTimeout(() => box.focus(), 0);
+    return h("div", { class: "goal-form goal-start-form" }, box,
+      h("div", { class: "goal-form-buttons" },
+        h("button", { type: "button", class: "btn primary", text: l.start_send, onclick: go }),
+        h("button", { type: "button", class: "btn ghost", text: l.cancel, onclick: () => { starting = null; render(); } })));
   }
 
   // -- the form that writes or edits a goal ----------------------------------------------
@@ -238,6 +309,18 @@ window.ConsoleGoals = (() => {
           onclick: () => send({ op: "move", id: goal.id, index: index + 1 }, { quiet: true }) }),
         ...stateButtons));
     const asks = asksFor(goal.items);
+    const empty = !goal.items.length && !goal.projects.length;
+    const start = goal.state === "active" ? startBox(goal) : null;
+    if (empty) {
+      return h("li", { class: `goal-card compact state-${goal.state}`, "data-goal-id": goal.id },
+        h("div", { class: "goal-head" },
+          h("span", { class: "goal-num", text: goal.number || (goal.state === "active" ? "🧭" : "") }),
+          h("span", { class: "goal-title", text: goal.title }),
+          goal.state !== "active" ? h("span", { class: "goal-chip", text: l.state[goal.state] }) : null,
+          dueChip(goal), tools),
+        goal.done_when ? h("div", { class: "goal-done" }, h("span", { class: "dim", text: `${l.done_when} ` }), goal.done_when) : null,
+        h("div", { class: "goal-actions" }, start, projectLinks(goal)));
+    }
     return h("li", { class: `goal-card state-${goal.state}`, "data-goal-id": goal.id },
       h("div", { class: "goal-head" },
         h("span", { class: "goal-num", text: goal.number || (goal.state === "active" ? "🧭" : "") }),
@@ -250,7 +333,8 @@ window.ConsoleGoals = (() => {
       counts(goal.counts, goal.quiet),
       asks.length ? h("div", { class: "goal-asks" }, ...asks) : null,
       deliverables(goal.deliverables),
-      goal.items.length ? null : h("div", { class: "dim goal-empty", text: l.none_yet }));
+      goal.items.length ? null : h("div", { class: "dim goal-empty", text: l.none_yet }),
+      start ? h("div", { class: "goal-actions" }, start) : null);
   }
 
   // The open decision cards of these threads, answered in place like on the secretary home.
@@ -261,10 +345,12 @@ window.ConsoleGoals = (() => {
 
   function outsideCard(project) {
     const asks = asksFor(project.items);
-    return h("li", { class: "goal-card outside" },
+    return h("li", { class: "goal-card outside", "data-project": project.path },
       h("div", { class: "goal-head" },
         h("span", { class: "goal-num", text: "🗂️" }),
-        h("a", { class: "goal-title", href: `#note/${encodeURI(`02_Contexts/${project.path}/status.md`)}`, text: project.path })),
+        h("a", { class: "goal-title", href: `#note/${encodeURI(`02_Contexts/${project.path}/status.md`)}`, text: project.path }),
+        h("button", { type: "button", class: "btn ghost goal-into", text: L().into_goal,
+          onclick: (e) => intoGoal(project, e.currentTarget) })),
       progress(project),
       counts(project.counts, false),
       asks.length ? h("div", { class: "goal-asks" }, ...asks) : null,
@@ -282,7 +368,37 @@ window.ConsoleGoals = (() => {
         h("button", { type: "button", class: "btn primary goal-add", text: l.add, onclick: () => { editing = "new"; render(); } }),
         h("button", { type: "button", class: "btn ghost", text: showPaused ? l.hide_paused : l.show_paused,
           onclick: () => { showPaused = !showPaused; localStorage.setItem("goalsShowPaused", showPaused ? "1" : "0"); render(); } })),
+      yours(),
       editing === "new" ? form(null) : null);
+  }
+
+  // How much waits on the person, and where: one jump per goal that holds some.
+  function yours() {
+    const l = L();
+    const holders = [...data.goals.filter((g) => g.state === "active"), ...data.outside];
+    const total = holders.reduce((n, g) => n + g.counts.yours, 0) +
+      data.unlinked.filter((id) => state.byId.get(id)?.bucket === "me").length;
+    if (!total) return h("div", { class: "goal-yours dim", text: l.nothing_yours });
+    // A jump into a folded section opens it first, then scrolls once it is drawn.
+    const jump = (label, n, sel, section) => h("button", { type: "button", class: "chip goal-jump", text: l.jump(label, n),
+      onclick: () => {
+        if (section && !opened.has(section)) toggleSection(section);
+        requestAnimationFrame(() => document.querySelector(sel)?.scrollIntoView({ block: "start", behavior: "smooth" }));
+      } });
+    const looseYours = data.unlinked.filter((id) => state.byId.get(id)?.bucket === "me").length;
+    return h("div", { class: "goal-yours" }, h("span", { class: "goal-yours-total", text: l.yours_total(total) }),
+      ...data.goals.filter((g) => g.state === "active" && g.counts.yours)
+        .map((g) => jump(g.number || g.title.slice(0, 12), g.counts.yours, `[data-goal-id="${g.id}"]`)),
+      ...data.outside.filter((p) => p.counts.yours)
+        .map((p) => jump(`🗂️ ${p.name}`, p.counts.yours, `[data-project="${CSS.escape(p.path)}"]`, "outside")),
+      looseYours ? jump(l.unlinked, looseYours, '[data-section="unlinked"]', "unlinked") : null);
+  }
+
+  function sectionHead(key, title, n) {
+    const open = opened.has(key);
+    return h("li", { class: "goal-section", "data-section": key }, h("button", { type: "button", class: "goal-section-toggle",
+      "aria-expanded": open ? "true" : "false", onclick: () => toggleSection(key),
+      text: `${open ? "▾" : "▸"} ${L().section(title, n)}` }));
   }
 
   function setupCard() {
@@ -319,16 +435,16 @@ window.ConsoleGoals = (() => {
       out.push(...ordered(goal.items, items).map((item) => ({ item, depth: 0 })));
     });
     if (data.outside.length) {
-      out.push({ group: l.outside, cls: "group goal-group" });
-      for (const project of data.outside) {
+      out.push({ node: sectionHead("outside", l.outside, data.outside.length) });
+      for (const project of opened.has("outside") ? data.outside : []) {
         out.push({ node: outsideCard(project) });
         out.push(...ordered(project.items, items).map((item) => ({ item, depth: 0 })));
       }
     }
     const loose = ordered(data.unlinked, items);
     if (loose.length) {
-      out.push({ group: `${l.unlinked}（${loose.length}）`, cls: "group goal-group" });
-      out.push(...loose.map((item) => ({ item, depth: 0 })));
+      out.push({ node: sectionHead("unlinked", l.unlinked, loose.length) });
+      if (opened.has("unlinked")) out.push(...loose.map((item) => ({ item, depth: 0 })));
     }
     return out;
   }
@@ -347,7 +463,18 @@ window.ConsoleGoals = (() => {
     return h("div", { class: "goal-note" }, doing ? h("span", { class: "dim", text: doing }) : null, chip);
   }
 
+  // In the thread header: which goal this thread serves, always visible, one tap to change.
+  function headerChip(item) {
+    if (!window.ConsoleWorkspace?.available() || !data || !data.available) return null;
+    const l = L();
+    const goal = data.goals.find((g) => g.items.includes(item.id));
+    return h("button", { type: "button", class: "btn goal-head-chip" + (goal ? " on" : ""),
+      title: goal ? goal.title : l.pick,
+      onclick: (e) => goalPicker(item, e.currentTarget),
+      text: goal ? `${l.header_pick} ${goal.number || ""} ${goal.title} ▾` : `${l.header_none} ▾` });
+  }
+
   const count = () => (data && data.available ? data.goals.filter((g) => g.state === "active").length : 0);
 
-  return { VIEW, rows, note, onBoard, load, count, strings: L };
+  return { VIEW, rows, note, onBoard, load, count, headerChip, strings: L };
 })();

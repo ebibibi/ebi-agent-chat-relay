@@ -69,3 +69,26 @@ a.goal-title { font-weight: 600; }
   .goal-done, .goal-progress, .goal-projects, .goal-counts, .goal-deliverables, .goal-asks, .goal-empty { margin-left: 0; }
   .goal-bar { width: 90px; }
 }
+
+/* Round 2: start work from a goal, fold the long sections, the thread header's goal chip. */
+.goal-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 8px 0 0 32px; }
+.goal-actions .goal-projects { margin: 0; }
+.goal-start { font-weight: 600; }
+.goal-start-form { flex: 1 1 100%; margin-top: 0; }
+.goal-card.compact { padding: 8px 14px; }
+.goal-card.compact .goal-title { font-size: 14.5px; }
+.goal-into { font-size: 12px; padding: 1px 8px; white-space: nowrap; }
+.goal-yours { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; font-size: 13px; }
+.goal-yours-total { color: var(--me); font-weight: 650; margin-right: 4px; }
+.goal-jump { cursor: pointer; }
+.goal-section { list-style: none; margin: 14px 12px 4px; }
+.goal-section-toggle { background: none; border: 0; color: var(--dim); font-weight: 600; font-size: 13px; padding: 4px 0;
+  cursor: pointer; }
+.goal-section-toggle:hover { color: var(--text); }
+.goal-head-chip { max-width: 22em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
+.goal-head-chip.on { color: var(--text); border-color: var(--accent); }
+@media (max-width: 900px) {
+  .goal-actions { margin-left: 0; }
+  .goal-section { margin-left: 8px; margin-right: 8px; }
+  .goal-head-chip { max-width: 100%; }
+}
