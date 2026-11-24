@@ -71,8 +71,8 @@ class GoalRoutes:
 
         for goal in goals:
             goal["projects"] = gl.resolve_projects(goal, resolve, note["path"], project_paths)
-        linked = {p for g in goals for p in g["projects"]}
-        bound = {i.get("workspace_path") for i in items if i.get("workspace_path")}
+        linked: set[str] = {p for g in goals for p in g["projects"]}
+        bound: set[str] = {str(i["workspace_path"]) for i in items if i.get("workspace_path")}
         projects = self._projects(entries, linked | {p for p in bound if p in project_paths})
         screen = gl.build(goals, items, projects)
         active = sum(1 for g in goals if g["state"] == gl.STATE_ACTIVE)
