@@ -149,6 +149,22 @@ class IngestResultRepository:
             row = await cursor.fetchone()
         return dict(row) if row is not None else None
 
+    async def thread_ids_for_teams_thread(self, teams_thread_key: str) -> list[int]:
+        """Every thread spawned for a Teams thread's replies, newest first, no duplicates."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT thread_id FROM ingest_results WHERE teams_thread_key = ? "
+                "AND thread_id IS NOT NULL ORDER BY created_at DESC, rowid DESC",
+                (teams_thread_key,),
+            )
+            rows = await cursor.fetchall()
+        ids: list[int] = []
+        for (raw,) in rows:
+            text = str(raw or "")
+            if text.isdigit() and int(text) not in ids:
+                ids.append(int(text))
+        return ids
+
     async def set_thread(
         self, result_id: str, thread_id: str, thread_name: str | None = None
     ) -> None:

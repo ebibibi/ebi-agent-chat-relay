@@ -514,6 +514,7 @@ class ApiServer:
         self.app.router.add_post("/api/teams/sync/push", self.teams_sync_push)
         self.app.router.add_post("/api/teams/sync/ignore", self.teams_sync_ignore)
         self.app.router.add_post("/api/teams/reply/status", self.teams_reply_status)
+        self.app.router.add_post("/api/teams/reply/done", self.teams_reply_done)
         # Startup resume routes
         self.app.router.add_post("/api/mark-resume", self.mark_resume)
         # The night settings and the morning brief (#1476)
@@ -548,6 +549,9 @@ class ApiServer:
         app.router.add_post("/api/teams/sync/ignore", self.teams_sync_ignore)
         # Read-only, and the extension's way back to the reply it asked for.
         app.router.add_post("/api/teams/reply/status", self.teams_reply_status)
+        # The person's "I answered": closes only the threads drafted for that
+        # Teams thread, never an arbitrary one (see teams_reply_done_api).
+        app.router.add_post("/api/teams/reply/done", self.teams_reply_done)
         return app
 
     @web.middleware
@@ -3603,8 +3607,48 @@ class ApiServer:
                     {"mid": c.mid, "kind": c.kind, "author": c.author, "excerpt": c.excerpt}
                     for c in status.changes
                 ],
+                # Lets the client offer "I answered" only where it works.
+                "capabilities": {"reply_done": True},
             }
         )
+
+    async def teams_reply_done(self, request: web.Request) -> web.Response:
+        """POST /api/teams/reply/done — the person answered; close the reply threads.
+
+        See :mod:`claude_discord.ext.teams_reply_done_api` for the rules.
+        """
+        from .teams_reply_done_api import handle_reply_done
+
+        parsed, err = await self._read_teams_request(request, require_body=False)
+        if err is not None:
+            return err
+        if err := self._require_ingest_repo():
+            return err
+        ref, _visible, _coverage = parsed  # type: ignore[misc]
+        thread_ids = await self.ingest_repo.thread_ids_for_teams_thread(  # type: ignore[union-attr]
+            teams_reply.thread_key(ref)
+        )
+        return await handle_reply_done(
+            thread_ids,
+            running_thread_ids=self._running_thread_ids,
+            close=self._close_reply_thread,
+        )
+
+    async def _close_reply_thread(self, thread_id: int) -> str | None:
+        """Mark one thread done like the Console's Done button; an error text or None."""
+        if self._console is not None:
+            from ..console.work_repo import WorkItemError, thread_item_id
+
+            try:
+                await self._console.complete_item(thread_item_id(thread_id))
+            except WorkItemError as exc:
+                return str(exc)
+            return None
+        response = await self._apply_thread_outcome(thread_id, OUTCOME_DONE)
+        if response.status in (200, 202):
+            return None
+        body = json.loads(cast(bytes, response.body))
+        return str(body.get("error") or f"HTTP {response.status}")
 
     def _run_is_active(self, run: dict | None) -> bool:
         """Whether a turn is in flight in the thread this run started."""

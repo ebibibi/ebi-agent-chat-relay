@@ -223,6 +223,7 @@ uv sync --extra api
 | POST | `/api/teams/sync/push` | Store the wanted messages as one file each under the vault, with attachments and an append-only `chain.jsonl` |
 | POST | `/api/teams/sync/ignore` | Stop (`ignore: true`) or resume (`ignore: false`) tracking attachment gaps of a thread. Ignored files leave `pending`/`unavailable`, are no longer requested, and stay listed under `ignored` and in the README |
 | POST | `/api/teams/reply/status` | Read-only, ingest-token gated. Where a thread's latest reply stands, given the messages on screen: `none`, `generating`, `ready`, `unverified`, `stale`, `posted` or `failed`, with the body and what changed |
+| POST | `/api/teams/reply/done` | Ingest-token gated. The person answered: close every reply thread spawned for that Teams thread like the Console's Done button. 409 while one is running (nothing closed), 404 when none exists |
 | POST | `/api/mark-resume` | Mark a thread for automatic resume on next bot startup |
 | GET | `/api/lounge` | Read recent AI Lounge messages |
 | POST | `/api/lounge` | Post a message to the AI Lounge (with optional `label`); returns a `hint` field when the message exceeds 200 characters |
