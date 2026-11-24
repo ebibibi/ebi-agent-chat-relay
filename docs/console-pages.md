@@ -240,8 +240,11 @@ apps ignore text that comes with a shared video, which is why the text is on the
 Back in the Console, **Posted?** marks the row done and moves on; **Later** goes to the next row
 without changing anything. On a card, done is one tap: there is no post-URL field.
 
-The walk explains itself (#1574): the button names the action and what is left, and each step
-says what to do on this target, matched to the device. Where the browser cannot hand files to an
+The walk explains itself before anything is pressed (#1574). It is the one highlighted button
+on a card, and under it the card lists the targets in walk order and the walk's three steps.
+A row's own buttons (open, copy, done, skip) are folded under "Handle <target> on its own", and
+every button, there and in the walk, has one line under it saying what pressing it does and
+whether it records anything. Each step says what to do on this target, matched to the device. Where the browser cannot hand files to an
 app (most desktops), the step says so and offers the stored files to save and attach by hand.
 The walk's position is kept in `localStorage` (`page-flow:<slug>`, for 12 hours), written the
 moment the text is handed over: a phone that reloads the Console while the person is in the

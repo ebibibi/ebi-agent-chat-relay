@@ -44,6 +44,12 @@ window.ConsolePageCards = (() => {
       files.length ? h("div", { class: "page-files", "aria-label": l.attachments }, files.map(kit.attachment)) : null);
   }
 
+  // A button with one line under it saying what pressing it does (#1574).
+  function act(button, note, primary = false) {
+    return h("div", { class: "page-act" + (primary ? " is-primary" : "") }, button,
+      h("span", { class: "page-act-note dim", text: note }));
+  }
+
   function actions(item, kit) {
     const l = kit.L();
     const { button, link } = kit;
@@ -52,25 +58,35 @@ window.ConsolePageCards = (() => {
     }
     if (!actionable(item)) return [];
     const labels = kit.labels();
-    return [item.url ? link(labels.open, item.url, "btn page-open") : null,
-      item.body ? button(l.copy, () => kit.copy(item.body), "btn page-copy") : null,
-      item.link ? button(`🔗 ${l.copy_link}`, () => kit.copy(item.link), "btn page-copy-link") : null,
-      button(labels.done, () => kit.change(item, "done"), "btn page-done"),
-      button(labels.skip, () => kit.change(item, "skipped"), "btn page-skip")];
+    return [item.url ? act(link(labels.open, item.url, "btn page-open"), l.does_open) : null,
+      item.body ? act(button(l.copy, () => kit.copy(item.body), "btn page-copy"), l.does_copy) : null,
+      item.link ? act(button(`🔗 ${l.copy_link}`, () => kit.copy(item.link), "btn page-copy-link"), l.does_copy_link) : null,
+      act(button(labels.done, () => kit.change(item, "done"), "btn page-done"), l.does_done),
+      act(button(labels.skip, () => kit.change(item, "skipped"), "btn page-skip"), l.does_skip)];
+  }
+
+  // On the open tab a row's own buttons are folded: the walk is the one thing to press, and a
+  // person who wants to finish one target by hand opens it.
+  function rowActions(item, kit) {
+    const buttons = actions(item, kit).filter(Boolean);
+    if (!buttons.length) return null;
+    const box = h("div", { class: "page-item-actions page-row-actions" }, buttons);
+    if (kit.tab() !== "open") return box;
+    return h("details", { class: "page-row-manual" },
+      h("summary", { text: kit.L().manual(item.target || kit.L().no_target) }), box);
   }
 
   function row(item, kit) {
     const l = kit.L();
     const cls = ["page-row", `is-${item.state}`, item.mode === "auto" ? "is-auto" : "",
       item.faded ? "faded" : ""].filter(Boolean).join(" ");
-    const buttons = actions(item, kit).filter(Boolean);
     return h("div", { class: cls, "data-key": item.key },
       h("div", { class: "page-row-main" },
         h("span", { class: "page-row-mark", "aria-hidden": "true", text: mark(item) }),
         h("span", { class: "page-target", text: item.target || l.no_target }),
         h("span", { class: "page-row-status", text: status(item, kit) }),
         item.result_url ? kit.link(`${l.result} ↗`, item.result_url, "page-row-result") : null),
-      buttons.length ? h("div", { class: "page-item-actions page-row-actions" }, buttons) : null,
+      rowActions(item, kit),
       detail(item, kit));
   }
 
@@ -197,11 +213,11 @@ window.ConsolePageCards = (() => {
       step,
       flow.resumed ? line("page-next-resumed", l.resumed(target)) : null,
       line("page-next-question", l.posted_question(target)),
-      line("page-next-hint dim", l.ask_hint),
       h("div", { class: "page-next-actions" },
-        kit.button(`✅ ${l.yes_next}`, () => answer(card, item, "done", kit), "btn primary page-next-yes"),
-        kit.button(l.again, () => { put(card.group, { ...flow, stage: "go", resumed: false }); kit.redraw(); }, "btn page-next-again"),
-        kit.button(l.skip_this, () => answer(card, item, "skipped", kit), "btn page-next-skip")));
+        act(kit.button(`✅ ${l.yes_next}`, () => answer(card, item, "done", kit), "btn primary page-next-yes"), l.does_yes, true),
+        act(kit.button(l.again, () => { put(card.group, { ...flow, stage: "go", resumed: false }); kit.redraw(); },
+          "btn page-next-again"), l.does_again),
+        act(kit.button(l.skip_this, () => answer(card, item, "skipped", kit), "btn page-next-skip"), l.does_skip_next)));
     // Back from the posting app, the question may sit below a long list: bring it into view once.
     if (flow.resumed && !flow.shown) {
       flow.shown = true;
@@ -239,10 +255,9 @@ window.ConsolePageCards = (() => {
       files,
       item.body ? h("div", { class: "page-next-preview", text: item.body }) : null,
       h("div", { class: "page-next-actions" },
-        go,
-        kit.button(l.later, () => advance(card, item.key, kit), "btn page-next-later"),
-        kit.button(l.stop, () => stop(card, kit), "btn page-next-stop")),
-      line("page-next-hint dim", l.go_hint));
+        act(go, l.does_go, true),
+        act(kit.button(l.later, () => advance(card, item.key, kit), "btn page-next-later"), l.does_later),
+        act(kit.button(l.stop, () => stop(card, kit), "btn page-next-stop"), l.does_stop)));
   }
 
   function sheet(card, kit) {
@@ -263,6 +278,15 @@ window.ConsolePageCards = (() => {
     return flow.stage === "ask" ? askSheet(card, item, flow, step, kit) : goSheet(card, item, flow, step, kit);
   }
 
+  // What the walk will do, shown before it starts: the order of targets and the three steps.
+  function overview(data, kit) {
+    const l = kit.L();
+    const order = actionableRows(data).map((i) => i.target || l.no_target).join(" → ");
+    return h("div", { class: "page-next-overview" },
+      line("page-next-order", l.walk_order(order)),
+      h("ol", { class: "page-next-steps" }, l.walk_steps.map((text) => h("li", { text }))));
+  }
+
   function card(data, rows, kit) {
     const l = kit.L();
     const left = actionableRows(data).length;
@@ -275,7 +299,7 @@ window.ConsolePageCards = (() => {
       flow || (kit.tab() === "open" && left
         ? h("div", { class: "page-card-foot" },
           kit.button(`▶ ${l.start_walk(left)}`, () => start(data, kit), "btn primary page-next"),
-          line("page-next-hint dim", l.start_hint))
+          overview(data, kit))
         : null));
   }
 
