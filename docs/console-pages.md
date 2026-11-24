@@ -25,6 +25,7 @@ The page appears in the menu at the next board refresh, with the number of open 
 | `title` | Required, up to 60 characters. Shown as given, so choose the language yourself |
 | `open_label`, `done_label`, `skip_label` | Optional button labels; the Console's own words otherwise |
 | `position` | Optional order in the menu |
+| `fade_days`, `expire_days` | Optional days before an open item is dimmed, then skipped; 0 = never ([Fade and expire](#fade-and-expire)) |
 | `max_chars` | Optional default character limit for the items' `body` (0 or absent: none) |
 | `count` | How `body` is counted against the limit: `chars` (default) or `weighted` (see below) |
 
@@ -166,9 +167,91 @@ a job that watches one network and resolves what it finds there.
   (CJK, emoji) is 2. It approximates such a network's count; the network's own composer has the
   final word.
 
+## One card per piece of content
+
+When the same video or article goes to several networks, register one item per network with the
+same `group`. The Console shows each group as **one card** with a row per target, in the order the
+rows were registered: what an automation already posted (with a link to the post), what it is
+still posting, and what a person posts by hand. A page that never sets `group` lists exactly what
+it listed before.
+
+```bash
+curl -s -X PUT "$CCDB_API_URL/api/pages/out" -H "Content-Type: application/json" \
+  -d '{"title": "📣 Out", "done_label": "Posted", "fade_days": 3, "expire_days": 7}'
+
+# A row an automation posts: nobody is asked to act on it while it is pending.
+curl -s -X POST "$CCDB_API_URL/api/pages/out/items" -H "Content-Type: application/json" \
+  -d '{"key": "vid-42:net-a", "group": "vid-42", "group_title": "Regions explained (11/25)",
+       "target": "Net A", "mode": "auto", "body": "..."}'
+
+# A row a person posts, with the video to hand over.
+curl -s -X POST "$CCDB_API_URL/api/pages/out/items" -H "Content-Type: application/json" \
+  -d '{"key": "vid-42:net-b", "group": "vid-42", "group_title": "Regions explained (11/25)",
+       "target": "Net B", "body": "...", "url": "https://net-b.example/compose",
+       "attachments": ["/console/api/pages/out/files/<token>/clip.mp4"]}'
+```
+
+| Item field | Meaning |
+|---|---|
+| `group` | Optional content key, the same characters as `key`. Items sharing it are one card |
+| `group_title` | Optional card title, up to 200 characters; else the first item's `title` |
+| `mode` | `manual` (default): a person finishes it. `auto`: an automation posts it and reports the outcome |
+
+`mode` is kept when the key is registered again, like `state`: a generator that runs twice does not
+send a row that fell back to a person back to the automation.
+
+### Report an automatic post
+
+The automation that posted reports on the same item, so the card shows it beside the rows left:
+
+```bash
+# Posted: the row shows "posted automatically" and links the post.
+curl -s -X PATCH "$CCDB_API_URL/api/pages/out/items/vid-42:net-a" -H "Content-Type: application/json" \
+  -d '{"state": "done", "resolved_by": "net-a-poster", "result_url": "https://net-a.example/p/1"}'
+
+# Failed: the row stays on the card for a person, with the reason.
+curl -s -X PATCH "$CCDB_API_URL/api/pages/out/items/vid-42:net-a" -H "Content-Type: application/json" \
+  -d '{"state": "open", "mode": "manual", "error": "token expired"}'
+```
+
+`error` (up to 500 characters) is accepted only with `state: open` and is cleared when the row is
+finished. An `auto` row with no outcome after 6 hours is treated as a row for a person (`stalled`
+in the response, and counted in the menu), so a crashed automation never hides a post. A link
+found later can be added with another `PATCH` carrying `state: done` and the `result_url`.
+
+### Tabs, the menu count and the filter
+
+A card is on the **open** tab while any of its rows is open, and its finished rows stay on it; on
+**done** once nothing is open; on **skipped** when every row was skipped. The menu counts rows a
+person should finish (manual rows and stalled `auto` rows). The target filter counts, on the open
+tab, the rows still open, and shows only the chosen target's rows.
+
+`GET /api/pages/{slug}/cards?state=open&limit=50` lists cards as the Console shows them: each with
+`group` (empty for an item without one), `title`, `state`, `created_at` and every row in `items`.
+`GET /api/pages/{slug}/items?group=vid-42` lists one card's rows in one state.
+
+### Next ▶
+
+A card with rows to post has **Next ▶**. Each step shows the target and its text, then one tap
+copies the text to the clipboard and either hands the stored files (with the text) to the share
+sheet, so a phone passes the video straight to the posting app, or opens the item's `url`. Files
+are fetched before the tap: a phone browser opens the share sheet only right after a tap. Some
+apps ignore text that comes with a shared video, which is why the text is on the clipboard too.
+Back in the Console, **Posted?** marks the row done and moves on; **Later** goes to the next row
+without changing anything. On a card, done is one tap: there is no post-URL field.
+
+### Fade and expire
+
+`fade_days` and `expire_days` on the page (0-365, 0 = never, the default) keep the queue from
+turning into debt. An open row a person should finish is dimmed (`faded`) once it is older than
+`fade_days`, and every open row older than `expire_days` is skipped with `resolved_by: "expired"`.
+Expiring runs when the board lists pages, at most once a minute. The age is `created_at`, so an
+item imported with an old `created_at` may be skipped at once.
+
 ## What a page is not
 
 A page is one list with these actions. It does not lay out arbitrary content, and it does not post
 anywhere itself. Why a screen is data and not a plugin:
 [ADR-0018](adr/0018-add-console-screens-as-registered-data.md); why posting fields are generic
-labels and attachments are stored by the relay: [ADR-0028](adr/0028-make-pages-a-posting-queue-for-any-network.md).
+labels and attachments are stored by the relay, and why a piece of content is one card:
+[ADR-0028](adr/0028-make-pages-a-posting-queue-for-any-network.md).

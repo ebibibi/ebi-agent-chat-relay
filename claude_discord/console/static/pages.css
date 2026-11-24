@@ -41,3 +41,38 @@
   .page-item-actions .page-done { order:11; }
   .page-item-actions .page-done ~ .btn { order:12; }
 }
+/* One card per piece of content (#1564, pagecards.js): a row per target, and "Next ▶". */
+.page-card { margin:12px 0; padding:12px 14px; border:1px solid var(--line); border-radius:var(--radius); background:var(--bg); }
+.page-card-head { display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:4px 10px; margin-bottom:8px; }
+.page-card-title { font-weight:700; overflow-wrap:anywhere; }
+.page-card-when { font-size:12px; }
+.page-rows { display:flex; flex-direction:column; }
+.page-row { padding:8px 0; border-top:1px solid var(--line); }
+.page-row:first-child { border-top:0; }
+.page-row-main { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; }
+.page-row-mark { width:1.4em; text-align:center; }
+.page-row-status { font-size:13px; color:var(--dim); overflow-wrap:anywhere; }
+.page-row.is-open:not(.is-auto) .page-row-status { color:inherit; }
+.page-row-result { font-size:13px; }
+.page-row-actions { margin-top:6px; padding-left:calc(1.4em + 8px); }
+.page-row.faded { opacity:.55; }
+.page-row-detail { margin-top:6px; padding-left:calc(1.4em + 8px); }
+.page-row-detail > summary { display:flex; gap:10px; align-items:baseline; cursor:pointer; font-size:13px; color:var(--dim); }
+.page-row-detail > .page-item-body { margin-top:6px; }
+.page-card-foot { margin-top:10px; }
+.page-next { width:100%; min-height:40px; }
+.page-next-sheet { margin-top:10px; padding:10px 12px; border:1px solid var(--accent); border-radius:var(--radius); background:var(--raise); }
+.page-next-step { font-weight:600; margin-bottom:6px; overflow-wrap:anywhere; }
+.page-next-preview { max-height:6.5em; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; color:var(--dim); }
+.page-next-question { margin:4px 0; }
+.page-next-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+.page-next-actions .primary { flex:1 1 100%; min-height:44px; }
+@media (max-width: 640px) {
+  .page-card { padding:10px; }
+  .page-row-actions, .page-row-detail { padding-left:0; }
+  .page-next-actions > * { flex:1 1 auto; min-height:44px; }
+}
+.page-row-detail > summary { list-style:none; }
+.page-row-detail > summary::-webkit-details-marker { display:none; }
+.page-row-detail > summary::before { content:"▸"; }
+.page-row-detail[open] > summary::before { content:"▾"; }

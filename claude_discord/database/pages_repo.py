@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -38,11 +39,28 @@ MAX_CHAR_LIMIT = 100_000
 MAX_URL_CHARS = 16_000
 DEFAULT_ITEM_LIMIT = 200
 MAX_ITEM_LIMIT = 1000
+MAX_GROUP_TITLE_CHARS = 200
+MAX_ERROR_CHARS = 500
+#: The most days a page may let an open item wait before it fades or is skipped.
+MAX_DAYS = 365
 
 STATE_OPEN = "open"
 STATE_DONE = "done"
 STATE_SKIPPED = "skipped"
 STATES = frozenset({STATE_OPEN, STATE_DONE, STATE_SKIPPED})
+
+#: Who finishes an item (#1564). "manual": a person. "auto": an automation that posts it and
+#: reports the outcome; until it does, nobody is asked to act on the item.
+MODE_MANUAL = "manual"
+MODE_AUTO = "auto"
+MODES = frozenset({MODE_MANUAL, MODE_AUTO})
+#: How long an automatic item may stay open without an outcome before a person is asked to
+#: finish it. Posting over an API takes minutes; hours of silence mean the automation is gone.
+AUTO_RESULT_WAIT = timedelta(hours=6)
+#: ``resolved_by`` of an item the page skipped because it waited longer than ``expire_days``.
+EXPIRED_BY = "expired"
+#: Expiring runs at most this often when the board lists pages.
+_EXPIRE_EVERY_SECONDS = 60.0
 
 #: How a body is counted against a limit. "chars" counts code points. "weighted" counts the way
 #: networks that budget by display width do: wide (CJK, emoji) characters as 2 and every link as
@@ -62,13 +80,15 @@ _URL = re.compile(r"https?://[\x21-\x7e]+", re.IGNORECASE)
 _SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
 _KEY = re.compile(r"[\w.:-]{1,128}")
 _LABELS = ("open_label", "done_label", "skip_label")
-_PAGE_FIELDS = frozenset({"title", "position", "max_chars", "count", *_LABELS})
+_DAYS = ("fade_days", "expire_days")
+_PAGE_FIELDS = frozenset({"title", "position", "max_chars", "count", *_LABELS, *_DAYS})
 _ITEM_FIELDS = frozenset(
     {"key", "title", "body", "url", "source", "created_at"}
     | {"target", "attachments", "max_chars", "count", "link"}
+    | {"group", "group_title", "mode"}
 )
 _ATTACHMENT_FIELDS = frozenset({"url", "name"})
-_RESOLVE_FIELDS = frozenset({"state", "result_url", "resolved_by"})
+_RESOLVE_FIELDS = frozenset({"state", "result_url", "resolved_by", "mode", "error"})
 _TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 _SCHEMA = """
@@ -82,7 +102,9 @@ CREATE TABLE IF NOT EXISTS console_pages (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     max_chars INTEGER NOT NULL DEFAULT 0,
-    count TEXT NOT NULL DEFAULT ''
+    count TEXT NOT NULL DEFAULT '',
+    fade_days INTEGER NOT NULL DEFAULT 0,
+    expire_days INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS console_page_items (
     page_slug TEXT NOT NULL REFERENCES console_pages(slug) ON DELETE CASCADE,
@@ -101,6 +123,10 @@ CREATE TABLE IF NOT EXISTS console_page_items (
     max_chars INTEGER NOT NULL DEFAULT 0,
     count TEXT NOT NULL DEFAULT '',
     link TEXT NOT NULL DEFAULT '',
+    group_key TEXT NOT NULL DEFAULT '',
+    group_title TEXT NOT NULL DEFAULT '',
+    mode TEXT NOT NULL DEFAULT 'manual',
+    error TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (page_slug, key)
 );
 CREATE INDEX IF NOT EXISTS idx_console_page_items_state
@@ -111,6 +137,9 @@ _ADDED_COLUMNS = {
     "console_pages": (
         ("max_chars", "INTEGER NOT NULL DEFAULT 0"),
         ("count", "TEXT NOT NULL DEFAULT ''"),
+        # How long an open item may wait before it fades and is skipped (#1564).
+        ("fade_days", "INTEGER NOT NULL DEFAULT 0"),
+        ("expire_days", "INTEGER NOT NULL DEFAULT 0"),
     ),
     "console_page_items": (
         ("target", "TEXT NOT NULL DEFAULT ''"),
@@ -119,6 +148,11 @@ _ADDED_COLUMNS = {
         ("count", "TEXT NOT NULL DEFAULT ''"),
         # The link to share, kept apart from the body so a person can leave it out (#1530).
         ("link", "TEXT NOT NULL DEFAULT ''"),
+        # One card per piece of content, and rows an automation posts (#1564).
+        ("group_key", "TEXT NOT NULL DEFAULT ''"),
+        ("group_title", "TEXT NOT NULL DEFAULT ''"),
+        ("mode", "TEXT NOT NULL DEFAULT 'manual'"),
+        ("error", "TEXT NOT NULL DEFAULT ''"),
     ),
 }
 
@@ -142,6 +176,9 @@ class Page:
     open_count: int
     max_chars: int = 0
     count: str = COUNT_CHARS
+    #: Days an open item waits before it is shown faded, and before it is skipped; 0 = never.
+    fade_days: int = 0
+    expire_days: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -154,6 +191,8 @@ class Page:
             "open_count": self.open_count,
             "max_chars": self.max_chars,
             "count": self.count,
+            "fade_days": self.fade_days,
+            "expire_days": self.expire_days,
         }
 
 
@@ -179,6 +218,16 @@ class PageItem:
     #: A link to share with the post, copied on its own: some networks limit posts with links,
     #: so the person decides each time whether to paste it. Not counted in ``length``.
     link: str = ""
+    #: The piece of content the item promotes; items sharing it form one card (#1564).
+    group: str = ""
+    group_title: str = ""
+    mode: str = MODE_MANUAL
+    #: Why automatic posting failed, kept while the row waits for a person.
+    error: str = ""
+    #: An automatic item that has not reported within ``AUTO_RESULT_WAIT``: a person finishes it.
+    stalled: bool = False
+    #: An open item a person should finish that is older than the page's ``fade_days``.
+    faded: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -198,6 +247,12 @@ class PageItem:
             "count": self.count,
             "length": self.length,
             "link": self.link,
+            "group": self.group,
+            "group_title": self.group_title,
+            "mode": self.mode,
+            "error": self.error,
+            "stalled": self.stalled,
+            "faded": self.faded,
         }
 
 
@@ -287,6 +342,33 @@ def _count_rule(body: dict[str, Any], default: str) -> str:
     return str(value)
 
 
+def _days(body: dict[str, Any], field: str) -> int:
+    value = body.get(field, 0)
+    if value is None:
+        return 0
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= MAX_DAYS:
+        raise PageError(f"{field} must be an integer from 0 to {MAX_DAYS}")
+    return value
+
+
+def _mode(body: dict[str, Any]) -> str | None:
+    value = body.get("mode")
+    if value is None:
+        return None
+    if value not in MODES:
+        raise PageError(f"mode must be one of: {', '.join(sorted(MODES))}")
+    return str(value)
+
+
+def _group(body: dict[str, Any]) -> str:
+    value = body.get("group", "")
+    if value in ("", None):
+        return ""
+    if not isinstance(value, str) or not _KEY.fullmatch(value):
+        raise PageError("group must be 1-128 letters, digits, '_', '.', ':' or '-'")
+    return value
+
+
 def _check_link(url: str, field: str) -> str:
     try:
         parts = urlsplit(url)
@@ -315,17 +397,27 @@ def check_state(state: object) -> str:
     return str(state)
 
 
-_ITEM_COLUMNS = (
+ITEM_COLUMNS = (
     "key, title, body, url, source, state, resolved_by, result_url, created_at, resolved_at,"
-    " target, attachments, max_chars, count, link"
+    " target, attachments, max_chars, count, link, group_key, group_title, mode, error"
 )
 _PAGE_COLUMNS = "p.slug, p.title, p.open_label, p.done_label, p.skip_label, p.position"
 
 
-def _item(row: tuple[Any, ...], page: Page) -> PageItem:
-    *base, target, attachments, max_chars, count, link = row
+def _stamp(moment: datetime) -> str:
+    return moment.astimezone(UTC).strftime(_TIME_FORMAT)
+
+
+def make_item(row: tuple[Any, ...], page: Page, now: datetime | None = None) -> PageItem:
+    """An item from a row of ``ITEM_COLUMNS``, with what is derived from its page and age."""
+    *base, target, attachments, max_chars, count, link, group, group_title, mode, error = row
     rule = count or page.count
     limit = max_chars or page.max_chars
+    moment = now or datetime.now(UTC)
+    created_at, is_open = base[8], base[5] == STATE_OPEN
+    stalled = is_open and mode == MODE_AUTO and created_at < _stamp(moment - AUTO_RESULT_WAIT)
+    needs_person = is_open and (mode != MODE_AUTO or stalled)
+    fade_cutoff = _stamp(moment - timedelta(days=page.fade_days))
     return PageItem(
         *base,
         target=target,
@@ -334,6 +426,12 @@ def _item(row: tuple[Any, ...], page: Page) -> PageItem:
         count=rule,
         length=count_chars(base[2], rule),
         link=link,
+        group=group,
+        group_title=group_title,
+        mode=mode or MODE_MANUAL,
+        error=error,
+        stalled=stalled,
+        faded=needs_person and page.fade_days > 0 and created_at < fade_cutoff,
     )
 
 
@@ -345,7 +443,12 @@ class PageRepository:
 
     def __init__(self, db_path: str, files_dir: Path | None = None) -> None:
         self._db_path = db_path
+        self._expired_at = float("-inf")
         self.files = PageFiles(files_dir or Path(db_path).parent / "page_files")
+
+    @property
+    def db_path(self) -> str:
+        return self._db_path
 
     async def init_db(self) -> None:
         async with aiosqlite.connect(self._db_path) as db:
@@ -358,21 +461,74 @@ class PageRepository:
                         await db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
             await db.commit()
 
-    async def list_pages(self) -> list[Page]:
+    async def list_pages(self, now: datetime | None = None) -> list[Page]:
+        """Every page with the number of open items a person should finish.
+
+        The board calls this every few seconds, so it is also where open items past their
+        page's ``expire_days`` are skipped: at most once a minute, or whenever *now* is given.
+        """
+        if now is not None or time.monotonic() - self._expired_at >= _EXPIRE_EVERY_SECONDS:
+            self._expired_at = time.monotonic()
+            await self.expire_stale(now)
+        return await self._pages(now)
+
+    async def _pages(self, now: datetime | None = None) -> list[Page]:
+        # An automatic item counts once it has waited too long for its outcome.
+        cutoff = _stamp((now or datetime.now(UTC)) - AUTO_RESULT_WAIT)
         async with aiosqlite.connect(self._db_path) as db:
             rows = await db.execute_fetchall(
                 f"""
                 SELECT {_PAGE_COLUMNS},
                        (SELECT COUNT(*) FROM console_page_items i
-                         WHERE i.page_slug = p.slug AND i.state = 'open'),
-                       p.max_chars, p.count
+                         WHERE i.page_slug = p.slug AND i.state = 'open'
+                           AND (i.mode != 'auto' OR i.created_at < ?)),
+                       p.max_chars, p.count, p.fade_days, p.expire_days
                   FROM console_pages p ORDER BY p.position, p.created_at
-                """  # noqa: S608 (constants)
+                """,  # noqa: S608 (constants)
+                (cutoff,),
             )
-        return [Page(*row[:7], max_chars=row[7], count=row[8] or COUNT_CHARS) for row in rows]
+        return [
+            Page(
+                *row[:7],
+                max_chars=row[7],
+                count=row[8] or COUNT_CHARS,
+                fade_days=row[9],
+                expire_days=row[10],
+            )
+            for row in rows
+        ]
 
     async def get_page(self, slug: str) -> Page | None:
-        return next((p for p in await self.list_pages() if p.slug == slug), None)
+        return next((p for p in await self._pages() if p.slug == slug), None)
+
+    async def expire_stale(self, now: datetime | None = None) -> int:
+        """Skip open items older than their page's ``expire_days``; answers how many.
+
+        A queue a person never empties turns into debt: what was not posted within a week is
+        no longer worth posting. Pages without ``expire_days`` are never touched.
+        """
+        moment = now or datetime.now(UTC)
+        total = 0
+        async with aiosqlite.connect(self._db_path) as db:
+            pages = await db.execute_fetchall(
+                "SELECT slug, expire_days FROM console_pages WHERE expire_days > 0"
+            )
+            for slug, days in pages:
+                cursor = await db.execute(
+                    "UPDATE console_page_items SET state = ?, resolved_by = ?, resolved_at = ?"
+                    " WHERE page_slug = ? AND state = ? AND created_at < ?",
+                    (
+                        STATE_SKIPPED,
+                        EXPIRED_BY,
+                        _stamp(moment),
+                        slug,
+                        STATE_OPEN,
+                        _stamp(moment - timedelta(days=days)),
+                    ),
+                )
+                total += max(cursor.rowcount, 0)
+            await db.commit()
+        return total
 
     async def _require_page(self, slug: str) -> Page:
         page = await self.get_page(slug)
@@ -391,22 +547,25 @@ class PageRepository:
             raise PageError("position must be an integer")
         max_chars = _limit(fields)
         rule = _count_rule(fields, COUNT_CHARS)
-        if await self.get_page(slug) is None and len(await self.list_pages()) >= MAX_PAGES:
+        days = [_days(fields, name) for name in _DAYS]
+        if await self.get_page(slug) is None and len(await self._pages()) >= MAX_PAGES:
             raise PageError(f"at most {MAX_PAGES} pages")
         now = _now()
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(
                 """
                 INSERT INTO console_pages (slug, title, open_label, done_label, skip_label,
-                                           position, created_at, updated_at, max_chars, count)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                           position, created_at, updated_at, max_chars, count,
+                                           fade_days, expire_days)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(slug) DO UPDATE SET
                     title = excluded.title, open_label = excluded.open_label,
                     done_label = excluded.done_label, skip_label = excluded.skip_label,
                     position = excluded.position, updated_at = excluded.updated_at,
-                    max_chars = excluded.max_chars, count = excluded.count
+                    max_chars = excluded.max_chars, count = excluded.count,
+                    fade_days = excluded.fade_days, expire_days = excluded.expire_days
                 """,
-                (slug, title, *labels, position, now, now, max_chars, rule),
+                (slug, title, *labels, position, now, now, max_chars, rule, *days),
             )
             await db.commit()
         page = await self.get_page(slug)
@@ -464,23 +623,30 @@ class PageRepository:
         state: str = STATE_OPEN,
         limit: int = DEFAULT_ITEM_LIMIT,
         target: str | None = None,
+        *,
+        group: str | None = None,
+        now: datetime | None = None,
     ) -> list[PageItem]:
         """Items in one state: open ones oldest first, resolved ones latest first.
 
-        *target*, when given, keeps only the items registered for that target.
+        *target* or *group*, when given, keeps only the items registered for it.
         """
         check_state(state)
         page = await self._require_page(slug)
         order = "created_at, key" if state == STATE_OPEN else "resolved_at DESC, key"
-        where = "page_slug = ? AND state = ?" + (" AND target = ?" if target is not None else "")
-        params: tuple[Any, ...] = (slug, state) if target is None else (slug, state, target)
+        where = "page_slug = ? AND state = ?"
+        params: tuple[Any, ...] = (slug, state)
+        for column, value in (("target", target), ("group_key", group)):
+            if value is not None:
+                where += f" AND {column} = ?"
+                params = (*params, value)
         async with aiosqlite.connect(self._db_path) as db:
             rows = await db.execute_fetchall(
-                f"SELECT {_ITEM_COLUMNS} FROM console_page_items"  # noqa: S608 (constants)
+                f"SELECT {ITEM_COLUMNS} FROM console_page_items"  # noqa: S608 (constants)
                 f" WHERE {where} ORDER BY {order} LIMIT ?",
                 (*params, max(1, min(limit, MAX_ITEM_LIMIT))),
             )
-        return [_item(tuple(row), page) for row in rows]
+        return [make_item(tuple(row), page, now) for row in rows]
 
     async def add_item(self, slug: str, body: Any) -> tuple[PageItem, bool]:
         """Register an item. The second value is False when its key already existed.
@@ -500,26 +666,33 @@ class PageRepository:
         target = _text(fields, "target", MAX_TARGET_CHARS)
         max_chars = _limit(fields)
         rule = _count_rule(fields, "")
+        group = _group(fields)
+        group_title = _text(fields, "group_title", MAX_GROUP_TITLE_CHARS)
+        mode = _mode(fields) or MODE_MANUAL
         created_at = _timestamp(fields) or _now()
         await self._require_page(slug)
         attachments = json.dumps(self._attachments(slug, fields.get("attachments")))
         values = (title, text, url, source, target, attachments, max_chars, rule, link)
+        values += (group, group_title)
         async with aiosqlite.connect(self._db_path) as db:
             cursor = await db.execute(
                 """
                 INSERT INTO console_page_items
                     (page_slug, key, title, body, url, source, target, attachments, max_chars,
-                     count, link, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     count, link, group_key, group_title, mode, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(page_slug, key) DO NOTHING
                 """,
-                (slug, key, *values, created_at),
+                (slug, key, *values, mode, created_at),
             )
             created = cursor.rowcount > 0
+            # The mode is left alone too: a failed automatic post that fell back to a person
+            # must not go back to waiting for the automation when the generator runs again.
             if not created:
                 await db.execute(
                     "UPDATE console_page_items SET title = ?, body = ?, url = ?, source = ?,"
-                    " target = ?, attachments = ?, max_chars = ?, count = ?, link = ?"
+                    " target = ?, attachments = ?, max_chars = ?, count = ?, link = ?,"
+                    " group_key = ?, group_title = ?"
                     " WHERE page_slug = ? AND key = ?",
                     (*values, slug, key),
                 )
@@ -561,6 +734,10 @@ class PageRepository:
 
         Going back to open clears who resolved it and the result, so a reopened item does not
         keep claiming an outcome.
+
+        An automation reports a failed post with ``{"state": "open", "mode": "manual",
+        "error": "..."}``: the row stays on its card for a person, with the reason. The error is
+        cleared when the item is finished, since it no longer describes the row.
         """
         fields = _object(body, _RESOLVE_FIELDS)
         state = check_state(fields.get("state"))
@@ -570,18 +747,25 @@ class PageRepository:
             if resolved_by is not None
             else _text(fields, "resolved_by", MAX_RESOLVER_CHARS)
         )
-        await self._require_item(slug, key)
+        mode = _mode(fields)
+        error = _text(fields, "error", MAX_ERROR_CHARS)
         reopened = state == STATE_OPEN
+        if error and not reopened:
+            raise PageError("error describes a row still open: send it with state open")
+        current = await self._require_item(slug, key)
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(
                 "UPDATE console_page_items"
-                " SET state = ?, resolved_by = ?, result_url = ?, resolved_at = ?"
+                " SET state = ?, resolved_by = ?, result_url = ?, resolved_at = ?,"
+                " mode = ?, error = ?"
                 " WHERE page_slug = ? AND key = ?",
                 (
                     state,
                     "" if reopened else resolver,
                     "" if reopened else result_url,
                     "" if reopened else _now(),
+                    mode or current.mode,
+                    error if reopened else "",
                     slug,
                     key,
                 ),
@@ -593,11 +777,11 @@ class PageRepository:
         page = await self._require_page(slug)
         async with aiosqlite.connect(self._db_path) as db:
             rows = await db.execute_fetchall(
-                f"SELECT {_ITEM_COLUMNS} FROM console_page_items"  # noqa: S608 (constants)
+                f"SELECT {ITEM_COLUMNS} FROM console_page_items"  # noqa: S608 (constants)
                 " WHERE page_slug = ? AND key = ?",
                 (slug, key),
             )
         rows = list(rows)
         if not rows:
             raise PageNotFoundError(f"unknown item: {key}")
-        return _item(tuple(rows[0]), page)
+        return make_item(tuple(rows[0]), page)

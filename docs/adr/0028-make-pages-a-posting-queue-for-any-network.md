@@ -104,3 +104,30 @@ exists to show.
   orphan from a file whose item is about to be registered would need a grace period for little
   gain.
 
+## Addendum (2026-11-24): one card per piece of content (#1564)
+
+One video promoted on six networks was six rows, spread over pages per network, and posts that an
+automation made elsewhere did not appear at all. The person went back and forth and could not see
+what was left for one piece of content.
+
+- **A group, not a page kind.** Items gain an optional `group` (the content key) and `group_title`;
+  the Console draws a group as one card with a row per target. An item without a group is a card
+  of its own, drawn as before, so existing pages and callers see no change. Considered and
+  rejected: a card object with its own endpoint (a second thing to keep in step with its rows) and
+  one item with a row list inside (every row would lose its own state, resolver and URL).
+- **Automatic rows live on the same card.** `mode: auto` rows are posted by an automation, which
+  reports the outcome with the existing `PATCH`: done with the post URL, or back to `manual` with an
+  `error`. A failure therefore lands on the card as a row for a person, never silently. Silence
+  counts as failure after 6 hours (`stalled`), a constant rather than a setting: API posts take
+  minutes, and the number only decides when a person is asked to step in.
+- **The tab follows the rows.** A card stays on the open tab while any row is open, so the posted
+  rows are visible next to the ones left; the cards endpoint returns whole groups for that reason.
+- **"Next" hands over, it does not post.** It copies the text and passes the files through the
+  share sheet (or opens the item's link), then asks. The relay still posts nowhere. Files are
+  fetched before the tap because a share sheet opens only within a tap's activation.
+- **Done is one tap again on cards.** The optional post-URL field is not shown on cards: pasting a
+  URL by hand was the step people skipped, and automation that can see the post fills it later.
+  Items without a group keep the field.
+- **Old rows fade, then go.** `fade_days` / `expire_days` are page settings, off by default, since
+  only some pages are queues that lose value with age. Expiring piggybacks on the board's page
+  listing (at most once a minute) instead of adding a timer.

@@ -10,6 +10,7 @@ from typing import Any
 from aiohttp import web
 
 from ..database.page_files import PageFileError
+from ..database.pages_cards import list_cards
 from ..database.pages_repo import (
     DEFAULT_ITEM_LIMIT,
     STATE_OPEN,
@@ -78,8 +79,20 @@ async def handle_list_items(request: web.Request, repo: PageRepository | None) -
     async def action(pages: PageRepository) -> web.Response:
         state = request.query.get("state", STATE_OPEN)
         target = request.query.get("target")
-        items = await pages.list_items(_slug(request), state, _limit(request), target)
+        group = request.query.get("group")
+        items = await pages.list_items(_slug(request), state, _limit(request), target, group=group)
         return web.json_response({"items": [i.as_dict() for i in items]})
+
+    return await _guarded(repo, action)
+
+
+async def handle_list_cards(request: web.Request, repo: PageRepository | None) -> web.Response:
+    """One card per group of items (the content they promote), with every row of the group."""
+
+    async def action(pages: PageRepository) -> web.Response:
+        state = request.query.get("state", STATE_OPEN)
+        cards = await list_cards(pages, _slug(request), state, _limit(request))
+        return web.json_response({"cards": cards})
 
     return await _guarded(repo, action)
 
