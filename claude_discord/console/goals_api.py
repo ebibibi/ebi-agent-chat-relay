@@ -13,9 +13,10 @@ from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
 
+from . import goal_brief
 from . import goals as gl
 from .vault import VaultConflictError, VaultError
-from .work_repo import WorkItemError
+from .work_repo import WorkItemError, thread_item_id
 from .workspace import WorkspaceError
 from .workspace_api import WorkspaceRoutes
 
@@ -231,3 +232,111 @@ class GoalRoutes:
         except OSError:
             return _error("Could not save the goals configuration", 500)
         return web.json_response({"note": note, "limit": limit})
+
+    # -- the agent's goal context ----------------------------------------------------------
+    #: How far up the family a goal is inherited.
+    MAX_PARENT_HOPS = 5
+
+    async def brief(self, item_id: str) -> str | None:
+        """``[GOAL CONTEXT]`` for the item's next turn, or None when it serves no goal.
+
+        The goal is found as on the Goals screen: the person's choice (tag), else the item's
+        Workspace project linked to a goal, else its parent's goal. Never raises: a missing
+        or unreadable goals note leaves the turn without the block.
+        """
+        try:
+            return await self._brief(item_id)
+        except Exception:
+            logger.exception("console: goal context for %s not built", item_id)
+            return None
+
+    async def _parent_of(self, item_id: str, lineage: dict[int, int]) -> str | None:
+        overlay = await self.server.work_repo.get(item_id)
+        if overlay is not None and overlay.parent_id:
+            return overlay.parent_id
+        if item_id.startswith("t") and item_id[1:].isdigit():
+            up = lineage.get(int(item_id[1:]))
+            return thread_item_id(up) if up else None
+        return None
+
+    async def _brief(self, item_id: str) -> str | None:
+        server = self.server
+        if server.workspace.root is None:
+            return None
+        config = await asyncio.to_thread(gl.load_config)
+        if not config["note"]:
+            return None
+        goals, note, projects = await asyncio.to_thread(self._goal_model, config["note"])
+        if not goals:
+            return None
+        lineage = await server._lineage()
+        current: str | None = item_id
+        goal: dict[str, Any] | None = None
+        for _ in range(self.MAX_PARENT_HOPS + 1):
+            if current is None:
+                break
+            overlay = await server.work_repo.get(current)
+            choice = gl.chosen_goal({"tags": list(overlay.tags) if overlay else []})
+            if choice == "none":
+                return None
+            goal = next((g for g in goals if g["id"] == choice), None)
+            path = overlay.workspace_path if overlay else None
+            if goal is None and path:
+                goal = next(
+                    (g for g in goals if any(gl._under(path, p) for p in g["projects"])), None
+                )
+            if goal is not None:
+                break
+            current = await self._parent_of(current, lineage)
+        if goal is None:
+            return None
+        parent = await self._parent_of(item_id, lineage)
+        return goal_brief.brief(
+            goal,
+            note_file=str(server.workspace.root / note["path"]),
+            section=goal_brief.section_text(note["text"], goal),
+            projects=[projects[p] for p in goal["projects"] if p in projects],
+            parent=await self._family_doing(parent),
+        )
+
+    def _goal_model(self, note_path: str) -> tuple[list[dict], dict[str, Any], dict[str, dict]]:
+        """Goals with resolved projects, the note, and each linked project's folder and
+        milestones (the Workspace adapter part)."""
+        workspace = self.server.workspace
+        note = self._read_note(note_path)
+        goals = gl.parse_goals(note["text"])
+        entries = workspace.snapshot()["entries"]
+        known = {e["path"] for e in entries if e.get("kind") == "project"}
+        index = self.server.note_index
+
+        def resolve(target: str, source: str) -> str | None:
+            return index.resolve(target, source)["path"]
+
+        for goal in goals:
+            goal["projects"] = gl.resolve_projects(goal, resolve, note["path"], known)
+        linked: set[str] = {p for g in goals for p in g["projects"]}
+        info = self._projects(entries, linked)
+        root = workspace.root
+        projects = {
+            p: {
+                "path": p,
+                "directory": str(root / "02_Contexts" / p) if root else p,
+                "milestones": info.get(p, {}).get("milestones"),
+            }
+            for p in linked
+        }
+        return goals, note, projects
+
+    async def _family_doing(self, item_id: str | None) -> str | None:
+        """The first "doing" line of a thread's situation: where its family stands."""
+        repo = getattr(self.server.api, "situation_repo", None)
+        if repo is None or not item_id or not item_id.startswith("t") or not item_id[1:].isdigit():
+            return None
+        try:
+            written = await repo.get(int(item_id[1:]))
+        except Exception:
+            # The family's state is garnish; the goal itself still goes out.
+            logger.exception("console: situation of %s unreadable", item_id)
+            return None
+        doing = getattr(written, "doing", None) if written else None
+        return str(doing[0])[:300] if isinstance(doing, list) and doing else None

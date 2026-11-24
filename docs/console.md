@@ -1119,6 +1119,14 @@ the title, the rest the note, and Ctrl+Enter (or Start) hands it to an agent at 
 carries the goal's tag and is bound to the goal's first project, so the agent gets that project's
 Workspace context and working folder. The thread opens straight away.
 
+**The agent knows the goal.** While a Console conversation serves a goal (chosen, through its
+project or through its parent), every turn carries a `[GOAL CONTEXT]` block beside the Workspace
+brief: the goal's title, state and due date, done-when and why, the goals note and heading to read,
+an excerpt of the goal's section, the linked projects' `overview.md` / `status.md` with milestone
+progress, and what the parent conversation is doing. Like the Workspace brief it is filed under
+activity, not the conversation, and moving the thread to another goal (or to "No goal") changes it
+from the next turn. Threads that live in Discord or Teams do not get it.
+
 **The goal on every thread.** The thread header shows **🧭 Goal: …** (or **🧭 Choose a goal**); one
 tap changes it, like the chip under each row.
 

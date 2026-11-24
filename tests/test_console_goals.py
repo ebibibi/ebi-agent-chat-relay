@@ -266,3 +266,32 @@ def test_config_file_and_environment(tmp_path, monkeypatch) -> None:
     for bad in ("../x.md", "/abs.md", "a.txt", "", "a\\b.md"):
         with pytest.raises(gl.GoalError):
             gl.clean_note_path(bad)
+
+
+def test_goal_brief_names_the_goal_its_note_and_projects() -> None:
+    from claude_discord.console import goal_brief
+
+    relay = ids(NOTE)["Make the relay a product"]
+    section = goal_brief.section_text(NOTE, relay)
+    assert section.startswith("- **判定（2026-12末）**")
+    text = goal_brief.brief(
+        relay,
+        note_file="/vault/focus.md",
+        section=section,
+        projects=[
+            {
+                "path": "dev/relay",
+                "directory": "/vault/02_Contexts/dev/relay",
+                "milestones": {"done": 1, "total": 2, "next": {"name": "GA", "date": "2026-12-01"}},
+            }
+        ],
+        parent="Stage 2 waiting for review",
+    )
+    assert text.startswith("[GOAL CONTEXT]\n")
+    assert '"Make the relay a product" (active, due 2026-12-31)' in text
+    assert "Done when: two customer instances from config alone" in text
+    assert "/vault/focus.md" in text and "/vault/02_Contexts/dev/relay/overview.md" in text
+    assert "milestones 1/2, next: GA 2026-12-01" in text
+    assert "The parent conversation is currently: Stage 2 waiting for review" in text
+    long = goal_brief.brief(relay, note_file="x", section="a" * 5000, projects=[])
+    assert len(long) < 2000
