@@ -109,6 +109,13 @@ max_chars = 2200
 attachments = [{ url = "https://example.com/media/ca101-intro.mp4", name = "ca101-intro.mp4" }]
 source = "社内勉強会"
 
+# The Goals view reads 情シス/目標.md; this item shows a thread moving between goals.
+[[items]]
+title = "目標ごとに仕事の進み具合を見る"
+note = "メニューの「🧭 目標」を開く。目標ごとに達成の定義・期限・紐づくスレッドが並ぶ。このスレッドの 🧭 チップから「2️⃣ Azure の請求を毎月説明できる」に移し、「＋ 目標を書く」で目標を1つ足して、目標.md に書き込まれたことを確認する。"
+priority = 1
+project = "Console確認"
+
 # Reorder two pins using their row buttons, then reload to verify persistence.
 [[items]]
 title = "ピン留めを好きな順番に並べる"

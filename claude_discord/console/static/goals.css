@@ -1,0 +1,71 @@
+/* The Goals view (goals.js): one card per goal, the goal's threads as ordinary rows below it. */
+.goal-header, .goal-card, .goal-setup { list-style: none; margin: 10px 12px 4px; }
+.goal-header { margin-top: 12px; }
+.goal-source { font-size: 12.5px; margin-bottom: 8px; overflow-wrap: anywhere; }
+.goal-source a, .goal-card a { color: var(--accent); text-decoration: none; }
+.goal-source a:hover, .goal-card a:hover { text-decoration: underline; }
+.goal-bar-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.goal-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px;
+  position: relative; }
+.goal-card.state-paused, .goal-card.state-done { opacity: .72; }
+.goal-card.outside { border-style: dashed; }
+.goal-head { display: flex; align-items: center; gap: 10px; }
+.goal-num { font-size: 17px; min-width: 22px; }
+.goal-title { flex: 1; font-size: 15px; font-weight: 650; min-width: 0; overflow-wrap: anywhere; }
+a.goal-title { font-weight: 600; }
+.goal-chip { font-size: 11.5px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line); color: var(--dim);
+  white-space: nowrap; }
+.goal-chip.due { color: var(--me); border-color: #5a4526; }
+.goal-chip.due.over { color: var(--err); border-color: #6b2f2f; }
+
+.goal-done { margin: 6px 0 4px 32px; font-size: 13px; color: #c9ced6; overflow-wrap: anywhere; }
+.goal-progress, .goal-projects, .goal-counts, .goal-deliverables, .goal-asks, .goal-empty {
+  margin-left: 32px; }
+.goal-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12.5px; margin-top: 4px; }
+.goal-bar { display: inline-block; width: 140px; height: 6px; background: var(--raise); border-radius: 3px; overflow: hidden; }
+.goal-bar i { display: block; height: 100%; background: var(--ai); }
+.goal-projects { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; margin-top: 6px; }
+.goal-project { display: inline-flex; align-items: center; gap: 2px; }
+.goal-x { background: none; border: 0; color: var(--dim); font-size: 11px; padding: 0 3px; }
+.goal-x:hover { color: var(--err); }
+.goal-add-project { font-size: 12px; padding: 1px 8px; }
+.goal-counts { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; margin-top: 6px; }
+.goal-counts .c-run { color: var(--accent); }
+.goal-counts .c-you { color: var(--dim); }
+.goal-counts .c-you.hot { color: var(--me); font-weight: 600; }
+.goal-counts .c-done { color: var(--ai); }
+.goal-counts .c-quiet { color: var(--err); }
+.goal-deliverables { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; margin-top: 6px; }
+.goal-asks { margin-top: 8px; }
+.goal-asks > * { margin-bottom: 6px; }
+.goal-empty { font-size: 12.5px; margin-top: 6px; }
+
+.goal-tools { position: relative; }
+.goal-tools > summary { list-style: none; cursor: pointer; color: var(--dim); padding: 0 6px; border-radius: 6px; }
+.goal-tools > summary::-webkit-details-marker { display: none; }
+.goal-tools[open] > summary { background: var(--raise); color: var(--text); }
+.goal-tools-body { position: absolute; right: 0; top: 24px; z-index: 5; display: flex; flex-direction: column; gap: 4px;
+  background: var(--raise); border: 1px solid var(--line); border-radius: 8px; padding: 6px; min-width: 130px; }
+
+.goal-form { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.goal-in { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; width: 100%; }
+.goal-in.due { max-width: 260px; }
+.goal-form-buttons { display: flex; gap: 8px; }
+.goal-setup { padding: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.goal-setup .goal-in { margin: 8px 0; }
+
+/* Under a thread row: what it is doing, and the chip that moves it to another goal. */
+.goal-note { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; margin-top: 2px; }
+.goal-note .dim { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.goal-pick { cursor: pointer; background: none; border: 1px dashed var(--line); color: var(--dim); }
+.goal-pick:hover { color: var(--accent); border-color: var(--accent); }
+.goal-pop { z-index: 20; }
+
+@media (max-width: 900px) {
+  .goal-header, .goal-card, .goal-setup { margin-left: 8px; margin-right: 8px; }
+  .goal-head { flex-wrap: wrap; }
+  .goal-title { flex: 1 1 calc(100% - 70px); }
+  .goal-done, .goal-progress, .goal-projects, .goal-counts, .goal-deliverables, .goal-asks, .goal-empty { margin-left: 0; }
+  .goal-bar { width: 90px; }
+}

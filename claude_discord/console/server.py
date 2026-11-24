@@ -65,6 +65,7 @@ from .decision_cleanup import DecisionReviewer
 from .decision_defaults import DecisionDefaulter
 from .deliverables import DeliverableCollector
 from .files import resolve_file
+from .goals_api import GoalRoutes
 from .guide import build_guide
 from .logsafe import q as _q
 from .messages import KIND_ACTIVITY, serialize_message, with_kind
@@ -395,6 +396,10 @@ class ConsoleServer:
         r.add_post(f"{API_PREFIX}/workspace/tasks", workspace_routes.change)
         r.add_patch(f"{API_PREFIX}/workspace/tasks", workspace_routes.change)
         r.add_post(f"{API_PREFIX}/workspace/run", workspace_routes.run)
+        goal_routes = GoalRoutes(self)
+        r.add_get(f"{API_PREFIX}/goals", goal_routes.read)
+        r.add_post(f"{API_PREFIX}/goals", goal_routes.change)
+        r.add_put(f"{API_PREFIX}/goals/config", goal_routes.config)
         r.add_get(f"{API_PREFIX}/usage", self.usage_read)
         CliLoginRoutes(self.cli_login, lambda request: request[IDENTITY]).register(r, API_PREFIX)
         r.add_get(f"{API_PREFIX}/defaults", self.defaults_read)
