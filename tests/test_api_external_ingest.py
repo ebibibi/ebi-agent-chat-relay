@@ -62,6 +62,8 @@ class TestExternalAppSurface:
             "/api/teams/sync/ignore",
             # Token-gated and read-only: the reply this extension asked for.
             "/api/teams/reply/status",
+            # Token-gated; closes only the threads drafted for the named Teams thread.
+            "/api/teams/reply/done",
         }
 
     def test_does_not_expose_control_plane(
