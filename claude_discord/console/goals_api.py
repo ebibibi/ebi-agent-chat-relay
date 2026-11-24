@@ -158,8 +158,13 @@ class GoalRoutes:
             return _error("No goals note is configured", 400)
         action = dict(body)
         revision = action.pop("revision", None)
-        if action.get("op") in ("link", "unlink") and action.get("project"):
-            action["link"] = f"02_Contexts/{action.pop('project')}/status"
+        if action.get("op") in ("link", "unlink") and "project" in action:
+            project = action.pop("project")
+            entries = await asyncio.to_thread(self.server.workspace.snapshot)
+            known = {e["path"] for e in entries["entries"] if e.get("kind") == "project"}
+            if project not in known:
+                return _error("Unknown Workspace project", 400)
+            action["link"] = f"02_Contexts/{project}/status"
         vault = self.server.vault
         path = config["note"]
 

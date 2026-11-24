@@ -148,3 +148,19 @@ async def test_edits_write_back_with_revision_checks(env, notes, tmp_path, monke
     data = await (await env.client.get("/console/api/goals", headers=AUTH)).json()
     hire3 = next(g for g in data["goals"] if g["title"] == "Hire two")
     assert [p["path"] for p in hire3["projects"]] == ["Work/Client/Website"]
+
+
+async def test_link_refuses_an_unknown_project(env, notes, tmp_path, monkeypatch):
+    setup(env, notes, tmp_path, monkeypatch)
+    data = await (await env.client.get("/console/api/goals", headers=AUTH)).json()
+    response = await env.client.post(
+        "/console/api/goals",
+        headers=WRITE,
+        json={
+            "op": "link",
+            "id": data["goals"][0]["id"],
+            "project": "../../etc",
+            "revision": data["note"]["revision"],
+        },
+    )
+    assert response.status == 400

@@ -130,12 +130,14 @@ window.ConsoleGoals = (() => {
   }
 
   const SHOWN_DELIVERABLES = 5;
+  // Only web links and links inside the Console; anything else is shown as text.
+  const safeUrl = (url) => typeof url === "string" && (/^https?:\/\//i.test(url) || url.startsWith("/#"));
   function deliverables(list) {
     if (!list || !list.length) return null;
     const more = list.length - SHOWN_DELIVERABLES;
     return h("div", { class: "goal-deliverables" }, h("span", { text: L().deliverables }),
       more > 0 ? h("span", { class: "dim goal-more", text: `+${more}` }) : null,
-      ...list.slice(0, SHOWN_DELIVERABLES).map((d) => d.url
+      ...list.slice(0, SHOWN_DELIVERABLES).map((d) => safeUrl(d.url)
         ? h("a", { href: d.url, target: d.url.startsWith("/#") ? null : "_blank", rel: "noopener", text: d.title || d.url })
         : h("span", { class: "dim", text: d.title || d.file })));
   }
