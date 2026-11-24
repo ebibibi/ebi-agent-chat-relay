@@ -1114,6 +1114,23 @@ cards of its threads (answer them in place) and the deliverables they declared. 
 as ordinary rows — pinned first, then the ones waiting on you — with the first line of what each is
 doing.
 
+**Start work from a goal.** **＋ Start work on this goal** on a card opens a box: the first line is
+the title, the rest the note, and Ctrl+Enter (or Start) hands it to an agent at once. The new thread
+carries the goal's tag and is bound to the goal's first project, so the agent gets that project's
+Workspace context and working folder. The thread opens straight away.
+
+**The goal on every thread.** The thread header shows **🧭 Goal: …** (or **🧭 Choose a goal**); one
+tap changes it, like the chip under each row.
+
+**What waits on you.** Under the buttons, **🙋 n waiting on you** counts the threads whose move it is,
+with one jump per goal or project that holds some. In this view the context and status chips are
+hidden and do not filter.
+
+**Folded sections.** **Projects moving outside your goals** and **Not linked to a goal** are one line
+each until opened (remembered per browser). Each outside project has **Put under a goal ▾**: one tap
+writes the project onto that goal's projects line, and its threads move under the goal. A goal with no
+project and no thread is drawn compact, around its start button.
+
 **Editing.** **＋ Write a goal**, and the card's **•••** menu (edit title / done-when / due, ↑ ↓,
 pause, done, resume), write straight into the note: only the lines an edit is about change, the
 note's `updated:` / `最終更新:` move to today, and a line is added to the enclosing Workspace log. An

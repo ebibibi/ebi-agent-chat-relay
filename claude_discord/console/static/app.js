@@ -357,12 +357,15 @@ function ungroupedRows() {
   // The Workspace chips count the view before either filter; the status chips, after it.
   const WF = window.ConsoleWsFilter;
   const inView = isWideView() ? shown : shown.filter((i) => i.bucket === state.view);
-  const wsBar = WF.bar(inView);
-  const items = WF.apply(shown);
+  // The Goals view is organised by goal; the context and status chips would only push it down.
+  const goalsView = state.view === "goals";
+  const wsBar = goalsView ? null : WF.bar(inView);
+  // Hidden chips must not keep filtering what the Goals view shows.
+  const items = goalsView ? shown : WF.apply(shown);
   const SF = window.ConsoleStatusFilter;
   const all = pinnedFirst(items);
-  const bar = SF.bar(all);
-  const rows = SF.active() ? pinnedFirst(SF.apply(items)) : all;
+  const bar = goalsView ? null : SF.bar(all);
+  const rows = SF.active() && !goalsView ? pinnedFirst(SF.apply(items)) : all;
   const viewBar = window.ConsoleViews.bar();
   // The next move is the anchor of Focus, above pins and list filters alike.
   const guide = state.view === "focus" ? window.ConsoleFocus.card(items) : null;
@@ -756,6 +759,7 @@ function headParts(item) {
     "aria-pressed": pinned ? "true" : "false", onclick: () => togglePin(item.id),
     text: pinned ? `📌 ${T.unpin}` : `📌 ${T.pin}` }));
   parts.push(window.ConsolePlaces.picker(item));
+  parts.push(window.ConsoleGoals.headerChip(item));
   const ready = window.ConsoleFocus.readyToggle(item);
   if (ready) parts.push(ready);
   parts.push(window.ConsoleWsBind.control(item));

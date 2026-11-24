@@ -164,3 +164,29 @@ async def test_link_refuses_an_unknown_project(env, notes, tmp_path, monkeypatch
         },
     )
     assert response.status == 400
+
+
+async def test_work_started_from_a_goal_lands_under_it(env, notes, tmp_path, monkeypatch):
+    from tests.test_console_conversations import _settle
+
+    setup(env, notes, tmp_path, monkeypatch)
+    data = await (await env.client.get("/console/api/goals", headers=AUTH)).json()
+    hire = data["goals"][1]
+    created = await env.client.post(
+        "/console/api/items",
+        headers=WRITE,
+        json={
+            "title": "Write the job ad",
+            "start": True,
+            "tags": [f"goal:{hire['id']}"],
+            "workspace_path": "Work/Client/Website",
+        },
+    )
+    assert created.status == 201
+    item = (await created.json())["item"]
+    await _settle(env.host)
+    assert item["thread_id"]
+    data = await (await env.client.get("/console/api/goals", headers=AUTH)).json()
+    placed = next(g for g in data["goals"] if g["id"] == hire["id"])
+    assert placed["items"] == [item["id"]]
+    assert placed["why_placed"] == {item["id"]: "chosen"}
