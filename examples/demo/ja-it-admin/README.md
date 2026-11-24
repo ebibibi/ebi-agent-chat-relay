@@ -5,6 +5,14 @@ must remain at the top, above the pinned group. Reorder the pins and reload: the
 stays first and the two pins keep their saved order. Repeat with a narrow phone viewport.
 Other lists keep their usual pinned-first layout.
 
+## Every unfinished item in Focus
+
+Scroll Focus to the bottom. The ranking above is unchanged; below it, 📂 その他の未完了,
+🤖 AIが作業中, 🏁 完了候補 and 🔍 絞り込みで非表示 each show a count and fold on a tap
+(candidates and filtered items start folded). Narrow the time chip to ⚡: the items it drops
+are counted under 絞り込みで非表示 and appear on one tap. No unfinished thread is missing and
+none is listed twice. Repeat at phone width.
+
 ## Decision card cleanup
 
 Open a thread's situation panel or the secretary home and dismiss one obsolete request with

@@ -110,6 +110,13 @@ attachments = [{ url = "https://example.com/media/ca101-intro.mp4", name = "ca10
 source = "社内勉強会"
 
 # The Goals view reads 情シス/目標.md; this item shows a thread moving between goals.
+# Focus lists every unfinished item: the ranking on top, the rest folded below it.
+[[items]]
+title = "今やることで未完了をすべて見渡す"
+note = "「🎯 今やること」を下までスクロールする。上の「まずこれ／次に」はそのままで、その下に「📂 その他の未完了」「🤖 AIが作業中」「🏁 完了候補」「🔍 絞り込みで非表示」が件数付きで並ぶ。完了候補を開閉し、かかる時間を「⚡ すぐ」に絞ると、外れたものが「絞り込みで非表示」に数えられ、タップで見えることを確認する。スマホ幅でも確認する。"
+priority = 1
+project = "Console確認"
+
 [[items]]
 title = "目標ごとに仕事の進み具合を見る"
 note = "メニューの「🧭 目標」を開く。目標ごとに達成の定義・期限・紐づくスレッドが並ぶ。このスレッドの 🧭 チップから「2️⃣ Azure の請求を毎月説明できる」に移し、「＋ 目標を書く」で目標を1つ足して、目標.md に書き込まれたことを確認する。"

@@ -13,6 +13,8 @@
 // Priority, deadline, readiness and place come from a fast model where nobody set them.
 // Readiness can be overridden ("can do now" / "waiting"); on a thread the override lasts
 // until the conversation moves again, then the model's fresh guess takes over.
+// Below the ranking every other unfinished item is listed once (restSections): Focus never
+// hides open work, it only orders it.
 // Loaded before app.js, which calls rows() from visibleRows() and note() from rowNode().
 "use strict";
 
@@ -146,6 +148,96 @@ window.ConsoleFocus = (() => {
       section(T.guide_drift, drift));
   }
 
+  // Below the ranking, everything else that is still open, so Focus never hides a thread
+  // that is not finished. Each unfinished item lands in exactly one place: the ranked groups
+  // above, or one of these. Agents' work and items the model does not see as the human's
+  // move are listed open; completion candidates and items a filter hid are folded behind a
+  // count, one tap away. The text lives here so app.js (shared with other work) is untouched.
+  const REST_TEXT = {
+    en: { other: "📂 Other open items", agents: "🤖 Agents working", candidates: "🏁 Completion candidates",
+      filtered: "🔍 Hidden by filters", show: "Show", hide: "Hide",
+      hint: "Everything not finished is listed somewhere in Focus. Ranked work stays on top." },
+    ja: { other: "📂 その他の未完了", agents: "🤖 AIが作業中", candidates: "🏁 完了候補",
+      filtered: "🔍 絞り込みで非表示", show: "表示", hide: "畳む",
+      hint: "完了していないものは、すべて今やることのどこかに出ます。上の並びは今やること順です。" },
+  };
+  const restText = () => REST_TEXT[document.documentElement.lang === "ja" ? "ja" : "en"];
+  // Which lower sections are open. Candidates and filtered items start folded: there can be
+  // hundreds of candidates, and a filter was chosen on purpose.
+  const REST_DEFAULT_OPEN = { other: true, agents: true, candidates: false, filtered: false };
+  const REST_KEY = "focusRestOpen";
+  const restOpen = (() => {
+    try { return { ...REST_DEFAULT_OPEN, ...JSON.parse(localStorage.getItem(REST_KEY) || "{}") }; }
+    catch { return { ...REST_DEFAULT_OPEN }; }
+  })();
+  function toggleRest(key) {
+    restOpen[key] = !restOpen[key];
+    localStorage.setItem(REST_KEY, JSON.stringify(restOpen));
+    render();
+  }
+  const isOpen = (i) => i.bucket !== "done";
+  const HUMAN_MARKS = ["error", "action", "review", "waiting"];
+  const humanMark = (i) => { const n = HUMAN_MARKS.indexOf(i.status); return n < 0 ? HUMAN_MARKS.length : n; };
+  const byRecent = (a, b) => (b.last_activity_at || b.created_at || "").localeCompare(a.last_activity_at || a.created_at || "");
+  const agentWork = (i) => Boolean(i.running || i.queued || i.bucket === "ai");
+
+  // The open items Focus has not listed above, split into the four lower sections.
+  function restSections(items, listed) {
+    const rest = items.filter((i) => isOpen(i) && !listed.has(i.id));
+    // Items a list filter (status chips, Workspace chips, a saved view or a search) kept out
+    // of `items` altogether; pinned ones are already on top of the view.
+    const passed = new Set(items.map((i) => i.id));
+    const all = (typeof state !== "undefined" && Array.isArray(state.items)) ? state.items : items;
+    const filteredOut = all.filter((i) => isOpen(i) && !passed.has(i.id) && !(i.pinned_at));
+    const byEffort = rest.filter((i) => ranked(i) && !effortOk(i));
+    const left = rest.filter((i) => !(ranked(i) && !effortOk(i)));
+    return [
+      { key: "other", list: left.filter((i) => !agentWork(i) && i.bucket !== "candidate")
+        .sort((a, b) => humanMark(a) - humanMark(b) || byRecent(a, b)) },
+      { key: "agents", list: left.filter(agentWork).sort(byRecent) },
+      { key: "candidates", list: left.filter((i) => !agentWork(i) && i.bucket === "candidate").sort(byRecent) },
+      { key: "filtered", list: [...byEffort.sort(byImportance), ...filteredOut.sort(byRecent)] },
+    ];
+  }
+
+  function restHeader(key, n) {
+    const open = restOpen[key];
+    const t = restText();
+    return h("li", { class: `group focus-rest focus-rest-${key}` },
+      h("button", { type: "button", class: "focus-rest-toggle", "aria-expanded": open ? "true" : "false",
+        title: t.hint, onclick: () => toggleRest(key) },
+        h("span", { class: "focus-rest-caret", text: open ? "▾" : "▸" }),
+        h("span", { class: "focus-rest-label", text: t[key] }),
+        h("span", { class: "focus-rest-count", text: String(n) }),
+        h("span", { class: "focus-rest-action dim", text: open ? t.hide : t.show })));
+  }
+
+  // The rows under the ranking: each lower section with its count, open or folded.
+  function restRows(items, above) {
+    const out = [];
+    // A thread family is drawn once, where its first member appears (family.js groupRows);
+    // a child whose family is already on screen above is reached through it, not counted here.
+    const byId = (typeof state !== "undefined" && state.byId) || new Map(items.map((i) => [i.id, i]));
+    const rootOf = (i) => {
+      const seen = new Set();
+      while (i.parent_id && byId.has(i.parent_id) && !seen.has(i.id)) { seen.add(i.id); i = byId.get(i.parent_id); }
+      return i.id;
+    };
+    const placed = new Set([...byId.values()].filter((i) => i.pinned_at && isOpen(i)).map(rootOf));
+    for (const i of above) placed.add(rootOf(i));
+    for (const section of restSections(items, new Set(above.map((i) => i.id)))) {
+      // Members of one family within a section share its card there, so they still count.
+      const list = section.list.filter((i) => !placed.has(rootOf(i)));
+      const { key } = section;
+      // Only a section that is open draws its families; a folded one leaves them to later ones.
+      if (restOpen[key]) list.forEach((i) => placed.add(rootOf(i)));
+      if (!list.length) continue;
+      out.push({ node: restHeader(key, list.length) });
+      if (restOpen[key]) out.push(...list.map((item) => ({ item, depth: 0 })));
+    }
+    return out;
+  }
+
   function rows(items) {
     const live = items.filter((i) => ranked(i) && effortOk(i));
     const now = live.filter((i) => i.actionable !== false && !elsewhere(i)).sort(byImportance);
@@ -170,6 +262,7 @@ window.ConsoleFocus = (() => {
     add(T.focus_elsewhere, away);
     add(T.focus_waiting, later);
     node(ws?.waitingCard());
+    out.push(...restRows(items, [...now, ...away, ...later]));
     return out;
   }
 
