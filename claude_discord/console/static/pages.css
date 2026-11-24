@@ -64,13 +64,29 @@
 .page-next-sheet { margin-top:10px; padding:10px 12px; border:1px solid var(--accent); border-radius:var(--radius); background:var(--raise); }
 .page-next-step { font-weight:600; margin-bottom:6px; overflow-wrap:anywhere; }
 .page-next-preview { max-height:6.5em; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; color:var(--dim); }
-.page-next-question { margin:4px 0; }
+.page-next-question { margin:4px 0; font-weight:600; }
+.page-next-how { margin:4px 0 8px; overflow-wrap:anywhere; }
+.page-next-overview { margin-top:8px; font-size:13px; overflow-wrap:anywhere; }
+.page-next-steps { margin:4px 0 0; padding-left:1.6em; color:var(--dim); }
+.page-next-steps li { margin:2px 0; }
+.page-act { display:flex; flex-direction:column; gap:2px; flex:1 1 0; min-width:7em; }
+.page-act > .btn { width:100%; }
+.page-act.is-primary { flex:1 1 100%; }
+.page-act > .btn { order:0; }
+.page-row-actions .page-act { align-self:flex-start; }
+.page-act-note { order:1; font-size:11px; line-height:1.35; overflow-wrap:anywhere; }
+.page-row-manual { margin-top:4px; padding-left:28px; }
+.page-row-manual > summary { cursor:pointer; font-size:13px; color:var(--dim); }
+.page-row-manual > .page-row-actions { padding-left:0; margin-top:6px; }
+.page-next-resumed { margin:2px 0 6px; color:var(--accent); overflow-wrap:anywhere; }
+.page-next-files { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 8px; }
+.page-next-files[hidden] { display:none; }
 .page-next-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
-.page-next-actions .primary { flex:1 1 100%; min-height:44px; }
+.page-next-actions .primary { min-height:44px; }
 @media (max-width: 640px) {
   .page-card { padding:10px; }
-  .page-row-actions, .page-row-detail { padding-left:0; }
-  .page-next-actions > * { flex:1 1 auto; min-height:44px; }
+  .page-row-actions, .page-row-detail, .page-row-manual { padding-left:0; }
+  .page-next-actions .btn, .page-row-actions .btn { min-height:44px; }
 }
 .page-row-detail > summary { list-style:none; }
 .page-row-detail > summary::-webkit-details-marker { display:none; }

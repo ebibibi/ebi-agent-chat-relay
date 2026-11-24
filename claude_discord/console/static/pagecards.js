@@ -1,13 +1,16 @@
 // One card per piece of content on a page (#1564). Items sharing a `group` are drawn as one card
 // with a row per target: rows an automation posted ("auto") show their outcome and link, rows a
 // person finishes show their buttons. "Next ▶" walks a person through the rows still to post:
-// the text goes to the clipboard, the files to the posting app through the share sheet, and on
-// return "Posted?" moves on. Nothing here knows a network by name. Everything is drawn as text.
+// the text goes to the clipboard, the files to the posting app through the share sheet (or, on
+// a device without one, are offered for saving), and on return "Posted?" records it and moves
+// on. Every step says what to do and what to press (#1574), and the walk survives a reload.
+// Nothing here knows a network by name. Everything is drawn as text.
 "use strict";
 
 window.ConsolePageCards = (() => {
   // Per card (by group): which row "Next" is on and whether it is waiting for "Posted?".
   const flows = new Map();
+  let slug = ""; // the page the walks belong to
 
   const actionable = (item) => item.state === "open" && (item.mode !== "auto" || item.stalled);
   const actionableRows = (card) => card.items.filter(actionable);
@@ -41,6 +44,12 @@ window.ConsolePageCards = (() => {
       files.length ? h("div", { class: "page-files", "aria-label": l.attachments }, files.map(kit.attachment)) : null);
   }
 
+  // A button with one line under it saying what pressing it does (#1574).
+  function act(button, note, primary = false) {
+    return h("div", { class: "page-act" + (primary ? " is-primary" : "") }, button,
+      h("span", { class: "page-act-note dim", text: note }));
+  }
+
   function actions(item, kit) {
     const l = kit.L();
     const { button, link } = kit;
@@ -49,37 +58,87 @@ window.ConsolePageCards = (() => {
     }
     if (!actionable(item)) return [];
     const labels = kit.labels();
-    return [item.url ? link(labels.open, item.url, "btn page-open") : null,
-      item.body ? button(l.copy, () => kit.copy(item.body), "btn page-copy") : null,
-      item.link ? button(`🔗 ${l.copy_link}`, () => kit.copy(item.link), "btn page-copy-link") : null,
-      button(labels.done, () => kit.change(item, "done"), "btn page-done"),
-      button(labels.skip, () => kit.change(item, "skipped"), "btn page-skip")];
+    return [item.url ? act(link(labels.open, item.url, "btn page-open"), l.does_open) : null,
+      item.body ? act(button(l.copy, () => kit.copy(item.body), "btn page-copy"), l.does_copy) : null,
+      item.link ? act(button(`🔗 ${l.copy_link}`, () => kit.copy(item.link), "btn page-copy-link"), l.does_copy_link) : null,
+      act(button(labels.done, () => kit.change(item, "done"), "btn page-done"), l.does_done),
+      act(button(labels.skip, () => kit.change(item, "skipped"), "btn page-skip"), l.does_skip)];
+  }
+
+  // On the open tab a row's own buttons are folded: the walk is the one thing to press, and a
+  // person who wants to finish one target by hand opens it.
+  function rowActions(item, kit) {
+    const buttons = actions(item, kit).filter(Boolean);
+    if (!buttons.length) return null;
+    const box = h("div", { class: "page-item-actions page-row-actions" }, buttons);
+    if (kit.tab() !== "open") return box;
+    return h("details", { class: "page-row-manual" },
+      h("summary", { text: kit.L().manual(item.target || kit.L().no_target) }), box);
   }
 
   function row(item, kit) {
     const l = kit.L();
     const cls = ["page-row", `is-${item.state}`, item.mode === "auto" ? "is-auto" : "",
       item.faded ? "faded" : ""].filter(Boolean).join(" ");
-    const buttons = actions(item, kit).filter(Boolean);
     return h("div", { class: cls, "data-key": item.key },
       h("div", { class: "page-row-main" },
         h("span", { class: "page-row-mark", "aria-hidden": "true", text: mark(item) }),
         h("span", { class: "page-target", text: item.target || l.no_target }),
         h("span", { class: "page-row-status", text: status(item, kit) }),
         item.result_url ? kit.link(`${l.result} ↗`, item.result_url, "page-row-result") : null),
-      buttons.length ? h("div", { class: "page-item-actions page-row-actions" }, buttons) : null,
+      rowActions(item, kit),
       detail(item, kit));
   }
 
   // -- "Next ▶" -------------------------------------------------------------------------------
+  // The walk is kept in localStorage per page, so a phone that reloads the Console while the
+  // person is in the posting app comes back to "Posted on X?" instead of a fresh card (#1574).
+  // Only the position is kept; fetched files stay in memory and are fetched again if needed.
+  const KEEP_MS = 12 * 60 * 60 * 1000;
+  const storeKey = (slug) => `page-flow:${slug}`;
+
+  function stored(slug) {
+    try {
+      const all = JSON.parse(localStorage.getItem(storeKey(slug)) || "{}");
+      const now = Date.now();
+      return Object.fromEntries(Object.entries(all && typeof all === "object" ? all : {})
+        .filter(([, f]) => f && typeof f.key === "string" && now - (Number(f.at) || 0) < KEEP_MS));
+    } catch { return {}; }
+  }
+
+  function persist() {
+    if (!slug) return;
+    const all = Object.fromEntries([...flows].map(([group, f]) => [group, { key: f.key, stage: f.stage, at: f.at }]));
+    try {
+      if (Object.keys(all).length) localStorage.setItem(storeKey(slug), JSON.stringify(all));
+      else localStorage.removeItem(storeKey(slug));
+    } catch { /* storage full or blocked: the walk still works until a reload */ }
+  }
+
+  function put(group, flow) { flows.set(group, { ...flow, at: Date.now() }); persist(); }
+  function drop(group) { flows.delete(group); persist(); }
+
+  // Restores a page's walks; a step that was handed over comes back as the question.
+  function reset(page) {
+    flows.clear();
+    slug = page || "";
+    if (!slug) return;
+    for (const [group, f] of Object.entries(stored(slug))) {
+      flows.set(group, { key: f.key, stage: f.stage === "ask" ? "ask" : "go", at: f.at, resumed: f.stage === "ask" });
+    }
+  }
+
+  // Whether a page has a step that was handed over and not yet answered.
+  const pending = (page) => Object.values(stored(page)).some((f) => f.stage === "ask");
+
   function start(card, kit) {
     const first = actionableRows(card)[0];
     if (!first) return;
-    flows.set(card.group, { key: first.key, stage: "go" });
+    put(card.group, { key: first.key, stage: "go" });
     kit.redraw();
   }
 
-  function stop(card, kit) { flows.delete(card.group); kit.redraw(); }
+  function stop(card, kit) { drop(card.group); kit.redraw(); }
 
   // The row after *key* that still needs a person, wrapping round to rows skipped over earlier.
   function after(card, key) {
@@ -91,8 +150,10 @@ window.ConsolePageCards = (() => {
   function advance(card, key, kit) {
     const fresh = kit.cardOf(card.group) || card;
     const next = after(fresh, key);
-    if (next) flows.set(card.group, { key: next.key, stage: "go" });
-    else { flows.delete(card.group); kit.toast(kit.L().card_finished); }
+    if (next) put(card.group, { key: next.key, stage: "go" });
+    // "Later" on the last row left: stay on it rather than claim the card is finished.
+    else if (actionableRows(fresh).some((i) => i.key === key)) kit.toast(kit.L().only_one);
+    else { drop(card.group); kit.toast(kit.L().card_finished); }
     kit.redraw();
   }
 
@@ -103,22 +164,38 @@ window.ConsolePageCards = (() => {
     return flow.files || null;
   }
 
+  // How this step reaches the posting app on this device: "share" (the files go through the
+  // share sheet), "save" (the files must be saved and attached by hand), or "text" (no files).
+  function route(flow, item, kit) {
+    if (!kit.hasFiles(item)) return "text";
+    if (!kit.canShare()) return "save";
+    if (!flow.ready) return "share";
+    return flow.ready.length && navigator.canShare({ files: flow.ready }) ? "share" : "save";
+  }
+
   async function handOver(card, item, flow, kit) {
     const l = kit.L();
-    const files = flow.ready || [];
+    const files = route(flow, item, kit) === "share" ? flow.ready || [] : [];
+    // The question is stored before anything leaves the tab: a phone may reload the Console
+    // while the person is in the posting app, and the share promise never settles then.
+    put(card.group, { ...flow, stage: "ask", resumed: false });
+    flows.set(card.group, { ...flows.get(card.group), stage: "go" });
     // Both calls start inside the tap: the clipboard first, then the share sheet or the link.
     const copied = item.body ? navigator.clipboard.writeText(item.body) : Promise.resolve();
     let shared = Promise.resolve();
-    if (files.length && navigator.canShare({ files })) shared = navigator.share({ files, text: item.body || item.title });
+    if (files.length) shared = navigator.share({ files, text: item.body || item.title });
     else if (item.url) window.open(item.url, "_blank", "noopener,noreferrer");
-    else if (kit.canShare() && item.body) shared = navigator.share({ text: item.body });
+    else if (kit.canShare() && item.body && !kit.hasFiles(item)) shared = navigator.share({ text: item.body });
     try {
       await copied;
       if (item.body) kit.toast(l.copied);
     } catch (err) { kit.toast(err.message); }
     try { await shared; }
-    catch (err) { if (err.name === "AbortError") return; kit.toast(err.message); }
-    flows.set(card.group, { ...flow, stage: "ask" });
+    catch (err) {
+      if (err.name === "AbortError") { put(card.group, { ...flow, stage: "go" }); return; }
+      kit.toast(err.message);
+    }
+    put(card.group, { ...flow, stage: "ask", resumed: false });
     kit.redraw();
   }
 
@@ -127,37 +204,87 @@ window.ConsolePageCards = (() => {
     if (updated) advance(card, item.key, kit);
   }
 
-  function sheet(card, kit) {
-    const flow = flows.get(card.group);
-    const item = flow && card.items.find((i) => i.key === flow.key && actionable(i));
-    if (!flow) return null;
-    if (!item) { flows.delete(card.group); return null; }
+  const line = (cls, text) => h("div", { class: cls, text });
+
+  function askSheet(card, item, flow, step, kit) {
     const l = kit.L();
-    const rows = actionableRows(card);
-    const step = h("div", { class: "page-next-step", text: l.step(rows.indexOf(item) + 1, rows.length, item.target || l.no_target) });
-    if (flow.stage === "ask") {
-      return h("div", { class: "page-next-sheet", role: "group", "aria-label": l.next },
-        step, h("div", { class: "page-next-question", text: l.posted_question(item.target || l.no_target) }),
-        h("div", { class: "page-next-actions" },
-          kit.button(`✅ ${l.yes_next}`, () => answer(card, item, "done", kit), "btn primary page-next-yes"),
-          kit.button(l.again, () => { flows.set(card.group, { ...flow, stage: "go" }); kit.redraw(); }, "btn page-next-again"),
-          kit.button(l.skip, () => answer(card, item, "skipped", kit), "btn page-next-skip")));
+    const target = item.target || l.no_target;
+    const box = h("div", { class: "page-next-sheet", role: "group", "aria-label": l.next },
+      step,
+      flow.resumed ? line("page-next-resumed", l.resumed(target)) : null,
+      line("page-next-question", l.posted_question(target)),
+      h("div", { class: "page-next-actions" },
+        act(kit.button(`✅ ${l.yes_next}`, () => answer(card, item, "done", kit), "btn primary page-next-yes"), l.does_yes, true),
+        act(kit.button(l.again, () => { put(card.group, { ...flow, stage: "go", resumed: false }); kit.redraw(); },
+          "btn page-next-again"), l.does_again),
+        act(kit.button(l.skip_this, () => answer(card, item, "skipped", kit), "btn page-next-skip"), l.does_skip_next)));
+    // Back from the posting app, the question may sit below a long list: bring it into view once.
+    if (flow.resumed && !flow.shown) {
+      flow.shown = true;
+      requestAnimationFrame(() => box.scrollIntoView({ block: "center" }));
     }
+    return box;
+  }
+
+  function goSheet(card, item, flow, step, kit) {
+    const l = kit.L();
+    const target = item.target || l.no_target;
     const pending = prepare(flow, item, kit);
-    const go = kit.button(pending && !flow.ready ? l.preparing : l.hand_over(Boolean(pending), Boolean(item.url)),
-      () => handOver(card, item, flow, kit), "btn primary page-next-go");
+    const how = () => l.how(route(flow, item, kit), target, Boolean(item.url));
+    const label = () => l.hand_over(route(flow, item, kit) === "share", Boolean(item.url));
+    const guide = line("page-next-how", how());
+    const files = h("div", { class: "page-files page-next-files", "aria-label": l.attachments });
+    const showFiles = () => {
+      const save = route(flow, item, kit) === "save";
+      files.hidden = !save;
+      files.replaceChildren(...(save ? kit.storedFiles(item).map((a) => kit.button(`⬇ ${l.save_file(a.name)}`,
+        () => kit.save(a), "btn page-next-save")) : []));
+    };
+    showFiles();
+    const go = kit.button(pending && !flow.ready ? l.preparing : label(),
+      () => handOver(card, item, flows.get(card.group) || flow, kit), "btn primary page-next-go");
     if (pending && !flow.ready) {
       go.disabled = true;
-      pending.then((files) => { flow.ready = files; go.disabled = false; go.textContent = l.hand_over(true, Boolean(item.url)); })
-        .catch((err) => { flow.ready = []; go.disabled = false; go.textContent = l.hand_over(false, Boolean(item.url)); kit.toast(err.message); });
+      const settle = () => { go.disabled = false; go.textContent = label(); guide.textContent = how(); showFiles(); };
+      pending.then((ready) => { flow.ready = ready; settle(); })
+        .catch((err) => { flow.ready = []; settle(); kit.toast(err.message); });
     }
     return h("div", { class: "page-next-sheet", role: "group", "aria-label": l.next },
       step,
+      guide,
+      files,
       item.body ? h("div", { class: "page-next-preview", text: item.body }) : null,
       h("div", { class: "page-next-actions" },
-        go,
-        kit.button(l.later, () => advance(card, item.key, kit), "btn page-next-later"),
-        kit.button(l.stop, () => stop(card, kit), "btn page-next-stop")));
+        act(go, l.does_go, true),
+        act(kit.button(l.later, () => advance(card, item.key, kit), "btn page-next-later"), l.does_later),
+        act(kit.button(l.stop, () => stop(card, kit), "btn page-next-stop"), l.does_stop)));
+  }
+
+  function sheet(card, kit) {
+    const flow = flows.get(card.group);
+    if (!flow) return null;
+    const item = card.items.find((i) => i.key === flow.key && actionable(i));
+    // The row was finished elsewhere (another device, the row's own buttons): pick the next one.
+    if (!item) {
+      const next = actionableRows(card)[0];
+      if (next) flows.set(card.group, { key: next.key, stage: "go", at: Date.now() });
+      else flows.delete(card.group);
+      persist();
+      return next ? sheet(card, kit) : null;
+    }
+    const l = kit.L();
+    const rows = actionableRows(card);
+    const step = line("page-next-step", l.step(rows.indexOf(item) + 1, rows.length, item.target || l.no_target));
+    return flow.stage === "ask" ? askSheet(card, item, flow, step, kit) : goSheet(card, item, flow, step, kit);
+  }
+
+  // What the walk will do, shown before it starts: the order of targets and the three steps.
+  function overview(data, kit) {
+    const l = kit.L();
+    const order = actionableRows(data).map((i) => i.target || l.no_target).join(" → ");
+    return h("div", { class: "page-next-overview" },
+      line("page-next-order", l.walk_order(order)),
+      h("ol", { class: "page-next-steps" }, l.walk_steps.map((text) => h("li", { text }))));
   }
 
   function card(data, rows, kit) {
@@ -171,9 +298,10 @@ window.ConsolePageCards = (() => {
       h("div", { class: "page-rows" }, rows.map((item) => row(item, kit))),
       flow || (kit.tab() === "open" && left
         ? h("div", { class: "page-card-foot" },
-          kit.button(`▶ ${l.next} (${left})`, () => start(data, kit), "btn primary page-next"))
+          kit.button(`▶ ${l.start_walk(left)}`, () => start(data, kit), "btn primary page-next"),
+          overview(data, kit))
         : null));
   }
 
-  return { card, actionable, reset: () => flows.clear() };
+  return { card, actionable, reset, pending };
 })();
