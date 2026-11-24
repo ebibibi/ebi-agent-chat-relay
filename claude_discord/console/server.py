@@ -396,7 +396,7 @@ class ConsoleServer:
         r.add_post(f"{API_PREFIX}/workspace/tasks", workspace_routes.change)
         r.add_patch(f"{API_PREFIX}/workspace/tasks", workspace_routes.change)
         r.add_post(f"{API_PREFIX}/workspace/run", workspace_routes.run)
-        goal_routes = GoalRoutes(self)
+        goal_routes = self.goal_routes = GoalRoutes(self)
         r.add_get(f"{API_PREFIX}/goals", goal_routes.read)
         r.add_post(f"{API_PREFIX}/goals", goal_routes.change)
         r.add_put(f"{API_PREFIX}/goals/config", goal_routes.config)
@@ -1969,11 +1969,16 @@ class ConsoleServer:
                 body["workspace_reason"] = bound[-1].get("workspace_reason")
 
     async def _workspace_brief(self, item_id: str) -> str | None:
-        """The Workspace instructions for the item's agent, sent beside the human's text."""
+        """What the item's agent is told beside the human's text: the Workspace
+        instructions and, while the thread serves a goal, the goal (``[GOAL CONTEXT]``)."""
         if self.workspace.root is None:
             return None
         path = await self._workspace_path(item_id)
-        return await asyncio.to_thread(self.workspace.brief, path) if path else None
+        parts = [await asyncio.to_thread(self.workspace.brief, path) if path else None]
+        routes = getattr(self, "goal_routes", None)
+        if routes is not None:
+            parts.append(await routes.brief(item_id))
+        return "\n".join(p for p in parts if p) or None
 
     async def _workspace_finish(self, item: WorkItem, *, done: bool) -> dict[str, Any] | None:
         """Mirror a human's done/reopen into the bound Workspace entry, never failing it.

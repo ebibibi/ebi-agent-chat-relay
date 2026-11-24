@@ -190,3 +190,84 @@ async def test_work_started_from_a_goal_lands_under_it(env, notes, tmp_path, mon
     placed = next(g for g in data["goals"] if g["id"] == hire["id"])
     assert placed["items"] == [item["id"]]
     assert placed["why_placed"] == {item["id"]: "chosen"}
+
+
+async def test_goal_context_reaches_the_first_turn_and_every_reply(
+    env, notes, tmp_path, monkeypatch
+):
+    from tests.test_console_conversations import _settle
+
+    setup(env, notes, tmp_path, monkeypatch)
+    data = await (await env.client.get("/console/api/goals", headers=AUTH)).json()
+    hire = data["goals"][1]
+    created = await env.client.post(
+        "/console/api/items",
+        headers=WRITE,
+        json={"title": "Write the job ad", "start": True, "tags": [f"goal:{hire['id']}"]},
+    )
+    item = (await created.json())["item"]
+    await _settle(env.host)
+    first = env.runs[-1].prompt
+    assert first.startswith("Write the job ad")
+    assert "[GOAL CONTEXT]" in first
+    assert 'work toward the goal "Hire someone"' in first
+    assert str(notes / "02_Contexts/Work/focus.md") in first
+
+    reply = await env.client.post(
+        f"/console/api/items/{item['id']}/reply", headers=WRITE, json={"text": "Shorter please"}
+    )
+    assert reply.status == 202
+    await _settle(env.host)
+    assert env.runs[-1].prompt.startswith("Shorter please")
+    assert '"Hire someone"' in env.runs[-1].prompt
+
+
+async def test_goal_context_follows_the_project_and_the_parent(env, notes, tmp_path, monkeypatch):
+    from tests.test_console_conversations import _settle
+
+    setup(env, notes, tmp_path, monkeypatch)
+    created = await env.client.post(
+        "/console/api/items",
+        headers=WRITE,
+        json={"title": "Fix the footer", "start": True, "workspace_path": "Work/Client/Website"},
+    )
+    item = (await created.json())["item"]
+    await _settle(env.host)
+    prompt = env.runs[-1].prompt
+    assert 'goal "Launch the website" (active, due 2026-12-20)' in prompt
+    assert "Done when: the client signs off" in prompt
+    assert "Linked project Work/Client/Website" in prompt
+    assert "milestones 1/2, next: Launch 2026-12-20" in prompt
+
+    child = await env.client.post(
+        "/console/api/items",
+        headers=WRITE,
+        json={"title": "Check the links", "parent_id": item["id"], "start": True},
+    )
+    assert child.status == 201
+    await _settle(env.host)
+    assert '"Launch the website"' in env.runs[-1].prompt
+
+    # A person's "no goal" removes the block.
+    await env.client.patch(
+        f"/console/api/items/{item['id']}", headers=WRITE, json={"tags": ["goal:none"]}
+    )
+    await env.client.post(
+        f"/console/api/items/{item['id']}/reply", headers=WRITE, json={"text": "Next"}
+    )
+    await _settle(env.host)
+    assert "[GOAL CONTEXT]" not in env.runs[-1].prompt
+
+
+async def test_no_goals_note_means_no_goal_context(env, notes, tmp_path, monkeypatch):
+    from tests.test_console_conversations import _settle
+
+    setup(env, notes, tmp_path, monkeypatch, configured=False)
+    await env.client.post(
+        "/console/api/items",
+        headers=WRITE,
+        json={"title": "Fix the footer", "start": True, "workspace_path": "Work/Client/Website"},
+    )
+    await _settle(env.host)
+    assert "[EBI WORKSPACE CONTEXT]" in env.runs[-1].prompt
+    assert "[GOAL CONTEXT]" not in env.runs[-1].prompt
