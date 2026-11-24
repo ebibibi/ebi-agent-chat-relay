@@ -240,6 +240,14 @@ apps ignore text that comes with a shared video, which is why the text is on the
 Back in the Console, **Posted?** marks the row done and moves on; **Later** goes to the next row
 without changing anything. On a card, done is one tap: there is no post-URL field.
 
+The walk explains itself (#1574): the button names the action and what is left, and each step
+says what to do on this target, matched to the device. Where the browser cannot hand files to an
+app (most desktops), the step says so and offers the stored files to save and attach by hand.
+The walk's position is kept in `localStorage` (`page-flow:<slug>`, for 12 hours), written the
+moment the text is handed over: a phone that reloads the Console while the person is in the
+posting app reopens the page on return and asks **Posted?** again for that target. Nothing is
+recorded until it is answered. **Later** on the only row left stays on it.
+
 ### Fade and expire
 
 `fade_days` and `expire_days` on the page (0-365, 0 = never, the default) keep the queue from

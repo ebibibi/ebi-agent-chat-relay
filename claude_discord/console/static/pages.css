@@ -64,7 +64,13 @@
 .page-next-sheet { margin-top:10px; padding:10px 12px; border:1px solid var(--accent); border-radius:var(--radius); background:var(--raise); }
 .page-next-step { font-weight:600; margin-bottom:6px; overflow-wrap:anywhere; }
 .page-next-preview { max-height:6.5em; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; color:var(--dim); }
-.page-next-question { margin:4px 0; }
+.page-next-question { margin:4px 0; font-weight:600; }
+.page-next-how { margin:4px 0 8px; overflow-wrap:anywhere; }
+.page-next-hint { margin-top:6px; font-size:12px; overflow-wrap:anywhere; }
+.page-card-foot .page-next-hint { margin-top:4px; }
+.page-next-resumed { margin:2px 0 6px; color:var(--accent); overflow-wrap:anywhere; }
+.page-next-files { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 8px; }
+.page-next-files[hidden] { display:none; }
 .page-next-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
 .page-next-actions .primary { flex:1 1 100%; min-height:44px; }
 @media (max-width: 640px) {

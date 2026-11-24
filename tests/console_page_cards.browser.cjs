@@ -1,6 +1,7 @@
 // One card per piece of content (#1564): items sharing a group are one card with a row per
 // target. Automatic rows show their outcome, manual rows their buttons, and "Next ▶" walks a
-// phone through the rows left: copy the text, hand the video over, "Posted?", next.
+// phone through the rows left: copy the text, hand the video over, "Posted?", next. Each step
+// says what to do, the walk survives a reload, and a desktop is told to save the video (#1574).
 const { chromium } = require('playwright');
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
@@ -118,38 +119,87 @@ async function open(browser, viewport) {
       assert.equal(await page.locator('.page-card').count(), 1);
       assert.equal(await page.locator('.page-row[data-key="c"] .page-row-status').textContent(), '投稿済み');
       assert.deepEqual(patches, [['c', {state:'done'}]]);
-    } else {
+
+      // Without a share sheet the video cannot reach the app: the step says so and offers it to save.
       await page.evaluate(() => {
+        Object.defineProperty(navigator, 'share', {configurable:true, value:undefined});
+        Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async () => {}}});
+      });
+      await page.locator('.page-next').click();
+      assert.equal(await page.locator('.page-next-step').textContent(), 'Net D（残り 1 件中 1 件目）');
+      assert.match(await page.locator('.page-next-how').textContent(), /直接渡せません.*保存/);
+      assert.equal(await page.locator('.page-next-go').textContent(), '📋 本文をコピー');
+      if (process.env.CONSOLE_TEST_SHOT_SAVE) await page.locator('.page-card').screenshot({path:process.env.CONSOLE_TEST_SHOT_SAVE});
+      const download = page.waitForEvent('download');
+      await page.locator('.page-next-save').click();
+      assert.equal((await download).suggestedFilename(), 'clip.mp4');
+      // "Later" on the only row left stays on it instead of calling the card finished.
+      await page.locator('.page-next-later').click();
+      assert.equal(await page.locator('.page-next-step').textContent(), 'Net D（残り 1 件中 1 件目）');
+      await page.locator('.page-next-stop').click();
+      assert.equal(await page.locator('.page-next-sheet').count(), 0);
+      assert.equal(await page.evaluate(() => localStorage.getItem('page-flow:out')), null, 'ending the walk forgets it');
+    } else {
+      const mock = () => page.evaluate(() => {
         window.copied = []; window.shared = []; window.opened = [];
         Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async (t) => { window.copied.push(t); }}});
         navigator.canShare = () => true;
         navigator.share = async (data) => { window.shared.push({text:data.text, files:(data.files || []).map((f) => [f.name, f.type, f.size])}); };
         window.open = (url) => { window.opened.push(url); return null; };
       });
+      await mock();
       if (process.env.CONSOLE_TEST_SHOT_PHONE) await page.screenshot({path:process.env.CONSOLE_TEST_SHOT_PHONE, fullPage:true});
       const box = await page.locator('.page-shell').boundingBox();
       assert.ok(box.x >= 0 && box.x + box.width <= viewport.width, 'the panel fits a phone');
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth) <= viewport.width, 'no sideways scroll');
 
-      // Next ▶ starts at the first row a person posts.
+      // The button says what it does and how many are left; a line says what the walk records.
       const next = page.locator('.page-next');
-      assert.equal(await next.textContent(), '▶ 次へ (2)');
+      assert.equal(await next.textContent(), '▶ 未投稿を順に投稿する（残り 2）');
       assert.ok((await next.boundingBox()).height >= 40);
+      assert.match(await page.locator('.page-card-foot .page-next-hint').textContent(), /「投稿した」を押した媒体だけ/);
+      if (process.env.CONSOLE_TEST_SHOT_START) await page.locator('.page-card').screenshot({path:process.env.CONSOLE_TEST_SHOT_START});
       await next.click();
-      assert.equal(await page.locator('.page-next-step').textContent(), '1 / 2 · Net C');
+      // The step says where we are, what to do on this target and what "Later" means.
+      assert.equal(await page.locator('.page-next-step').textContent(), 'Net C（残り 2 件中 1 件目）');
+      assert.match(await page.locator('.page-next-how').textContent(), /Net C の投稿画面を新しいタブで開きます/);
+      assert.equal(await page.locator('.page-next-later').textContent(), 'あとで（記録せず次へ）');
+      assert.match(await page.locator('.page-next-sheet .page-next-hint').textContent(), /何も記録せずに/);
+      assert.equal(await page.locator('.page-next-save').count(), 0, 'nothing to save on a text row');
       const go = page.locator('.page-next-go');
       assert.equal(await go.textContent(), '📋 本文をコピーして投稿画面を開く');
       await go.click();
       await page.locator('.page-next-question').waitFor();
       assert.deepEqual(await page.evaluate(() => [window.copied, window.opened]), [['本文 C'], ['https://c.example/compose?text=c']]);
-      assert.equal(await page.locator('.page-next-question').textContent(), 'Net C に投稿しましたか？');
-      if (process.env.CONSOLE_TEST_SHOT_ASK) await page.locator('.page-card').screenshot({path:process.env.CONSOLE_TEST_SHOT_ASK});
+      assert.equal(await page.locator('.page-next-question').textContent(), 'Net C に投稿できましたか？');
+      assert.equal(await page.locator('.page-next-resumed').count(), 0);
+
+      // The phone reloads the Console while the person is in the posting app: on return the page
+      // opens by itself at the same question, and nothing was recorded meanwhile.
+      await page.reload();
+      await page.locator('.page-next-question').waitFor();
+      assert.equal(await page.locator('.page-next-question').textContent(), 'Net C に投稿できましたか？');
+      assert.match(await page.locator('.page-next-resumed').textContent(), /前回の続き.*Net C/);
+      assert.deepEqual(patches, []);
+      // ...and scrolled into view, since it may sit below a long list.
+      await page.waitForFunction(() => { const r = document.querySelector('.page-next-yes').getBoundingClientRect();
+        return r.top >= 0 && r.bottom <= innerHeight; });
+      if (process.env.CONSOLE_TEST_SHOT_ASK) await page.screenshot({path:process.env.CONSOLE_TEST_SHOT_ASK});
+      await mock();
       await page.locator('.page-next-yes').click();
 
       // The next row carries a video: it is fetched first, then handed to the share sheet with the text.
-      await page.waitForFunction(() => document.querySelector('.page-next-step')?.textContent === '1 / 1 · Net D');
+      await page.waitForFunction(() => document.querySelector('.page-next-step')?.textContent === 'Net D（残り 1 件中 1 件目）');
       await page.waitForFunction(() => document.querySelector('.page-next-go')?.textContent === '📋 本文をコピーして動画をアプリへ渡す');
+      assert.match(await page.locator('.page-next-how').textContent(), /共有メニュー.*Net D のアプリ/);
+      assert.equal(await page.locator('.page-next-save').count(), 0, 'the share sheet carries the video');
       if (process.env.CONSOLE_TEST_SHOT_GO) await page.locator('.page-card').screenshot({path:process.env.CONSOLE_TEST_SHOT_GO});
+      // Closing the share sheet without choosing an app keeps the step where it was.
+      await page.evaluate(() => { const real = navigator.share;
+        navigator.share = async () => { navigator.share = real; throw new DOMException('cancelled', 'AbortError'); }; });
+      await page.locator('.page-next-go').click();
+      await page.waitForFunction(() => JSON.parse(localStorage.getItem('page-flow:out') || '{}')['yt-1']?.stage === 'go');
+      assert.equal(await page.locator('.page-next-question').count(), 0);
       await page.locator('.page-next-go').click();
       await page.locator('.page-next-question').waitFor();
       const shared = await page.evaluate(() => window.shared);
@@ -157,6 +207,7 @@ async function open(browser, viewport) {
       await page.locator('.page-next-yes').click();
       await page.waitForFunction(() => !document.querySelector('.page-next-sheet'));
       assert.deepEqual(patches, [['c', {state:'done'}], ['d', {state:'done'}]]);
+      assert.equal(await page.evaluate(() => localStorage.getItem('page-flow:out')), null, 'a finished walk is forgotten');
       // The automatic row is still open, so the card stays, with nothing left to press.
       assert.equal(await page.locator('.page-card').count(), 1);
       assert.equal(await page.locator('.page-next').count(), 0);
