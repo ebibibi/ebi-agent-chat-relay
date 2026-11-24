@@ -71,6 +71,44 @@ count = "chars"
 attachments = [{ url = "https://example.com/media/a-day.mp4", name = "a-day.mp4" }]
 source = "採用"
 
+# One card per piece of content (docs/console-pages.md#one-card-per-piece-of-content): the same
+# video on several networks is one card. The automatic row needs nobody; "次へ ▶" walks through
+# the rows posted by hand. Old rows fade after 3 days and are skipped after 7.
+[[pages]]
+slug = "out"
+title = "📣 配信"
+done_label = "投稿した"
+fade_days = 3
+expire_days = 7
+
+[[pages.items]]
+key = "ca101:blog"
+group = "ca101"
+group_title = "勉強会「条件付きアクセス入門」の録画"
+target = "社内ブログ"
+mode = "auto"
+body = "勉強会の録画を公開しました。"
+source = "社内勉強会"
+
+[[pages.items]]
+key = "ca101:sns"
+group = "ca101"
+group_title = "勉強会「条件付きアクセス入門」の録画"
+target = "社内SNS"
+body = "条件付きアクセスの入門回、録画を公開しました。来られなかった方もどうぞ。"
+url = "https://example.com/compose?text=ca101"
+source = "社内勉強会"
+
+[[pages.items]]
+key = "ca101:video"
+group = "ca101"
+group_title = "勉強会「条件付きアクセス入門」の録画"
+target = "動画サイト · 採用チャンネル"
+body = "冒頭3分の切り出しです。全編は社内ポータルで。"
+max_chars = 2200
+attachments = [{ url = "https://example.com/media/ca101-intro.mp4", name = "ca101-intro.mp4" }]
+source = "社内勉強会"
+
 # Reorder two pins using their row buttons, then reload to verify persistence.
 [[items]]
 title = "ピン留めを好きな順番に並べる"

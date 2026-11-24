@@ -4,6 +4,7 @@ const { chromium } = require('playwright');
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
 const root = require('node:path').resolve(__dirname, '../claude_discord/console/static') + '/';
+const asCards = (list) => list.map((i) => ({group:'', title:i.title, state:i.state, created_at:i.created_at, items:[i]}));
 
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
@@ -55,7 +56,7 @@ const definition = (n) => [{slug:'posts', title:'📣 投稿待ち', open_label:
       }
       let data = {};
       if (url.pathname.endsWith('/board')) data = {items:[], slots:{}, places:[], pages:definition(open.length)};
-      else if (url.pathname.endsWith('/pages/posts/items')) data = {items: url.searchParams.get('state') === 'open' ? open : []};
+      else if (url.pathname.endsWith('/pages/posts/cards')) data = {cards: asCards(url.searchParams.get('state') === 'open' ? open : [])};
       else if (request.method() === 'PATCH' && url.pathname.includes('/pages/posts/items/')) {
         const key = url.pathname.split('/').pop();
         patches.push([key, request.postDataJSON()]);
@@ -204,7 +205,7 @@ const definition = (n) => [{slug:'posts', title:'📣 投稿待ち', open_label:
       }
       let data = {};
       if (url.pathname.endsWith('/board')) data = {items:[], slots:{}, places:[], pages:definition(open.length)};
-      else if (url.pathname.endsWith('/pages/posts/items')) data = {items: url.searchParams.get('state') === 'open' ? open : []};
+      else if (url.pathname.endsWith('/pages/posts/cards')) data = {cards: asCards(url.searchParams.get('state') === 'open' ? open : [])};
       return route.fulfill({contentType:'application/json', body:JSON.stringify(data)});
     });
     await page.goto('http://console.test/');

@@ -20,6 +20,7 @@ from urllib.parse import quote
 
 from aiohttp import web
 
+from ..database.pages_cards import list_cards
 from ..database.pages_repo import STATE_OPEN, PageError, PageNotFoundError, PageRepository
 
 RESOLVED_BY_PERSON = "person"
@@ -59,6 +60,13 @@ class PageRoutes:
             target = request.query.get("target")
             items = await repo.list_items(request.match_info["slug"], state, target=target)
             return {"items": [i.as_dict() for i in items]}
+
+        return await self._run(action)
+
+    async def cards(self, request: web.Request) -> web.Response:
+        async def action(repo: PageRepository) -> dict[str, Any]:
+            state = request.query.get("state", STATE_OPEN)
+            return {"cards": await list_cards(repo, request.match_info["slug"], state)}
 
         return await self._run(action)
 

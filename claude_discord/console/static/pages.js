@@ -6,6 +6,9 @@
 // goes (a free label), carry images or videos, and declare a character limit. Nothing here
 // knows a network by name. The link to share is kept apart from the text (#1530): some networks
 // limit posts with links, so the person copies it only when they choose to.
+//
+// Items sharing a group are one card per piece of content (#1564, pagecards.js). The list is
+// fetched as cards; an item without a group is a card of its own and is drawn as before.
 "use strict";
 
 window.ConsolePages = (() => {
@@ -18,6 +21,13 @@ window.ConsolePages = (() => {
     over: (n) => `${n} 超過`, save: "保存", share: "共有", play: "再生", unplayable: "再生できませんでした", result_url: "投稿URL（任意）",
     bad_url: "投稿URLは http(s) で始まるリンクにしてください", attachments: "添付",
     copy_link: "リンクをコピー", link: "共有リンク",
+    posted_by_hand: "投稿済み", posted_auto: "自動で投稿済み", expired: "期限切れで見送り",
+    auto_pending: "自動で投稿中", auto_silent: "自動投稿の結果が届いていません。手で投稿してください",
+    auto_failed: (e) => `自動投稿できませんでした（${e}）。手で投稿してください`, not_posted: "未投稿",
+    text: "本文", text_and_files: "本文と添付", next: "次へ", step: (i, n, t) => `${i} / ${n} · ${t}`,
+    hand_over: (files, url) => files ? "📋 本文をコピーして動画をアプリへ渡す" : url ? "📋 本文をコピーして投稿画面を開く" : "📋 本文をコピー",
+    preparing: "動画を準備中…", later: "あとで", stop: "やめる", posted_question: (t) => `${t} に投稿しましたか？`,
+    yes_next: "投稿した → 次へ", again: "もう一度", card_finished: "このカードはすべて終わりました",
   } : {
     open: "Open", done: "Done", skip: "Skip", reopen: "Back to open", copy: "Copy text", copied: "Copied",
     close: "Close", tab_open: "Open", tab_done: "Done", tab_skipped: "Skipped", empty: "Nothing here",
@@ -26,6 +36,13 @@ window.ConsolePages = (() => {
     over: (n) => `${n} over`, save: "Save", share: "Share", play: "Play", unplayable: "could not be played", result_url: "Post URL (optional)",
     bad_url: "The post URL must start with http(s)", attachments: "Attachments",
     copy_link: "Copy link", link: "Link to share",
+    posted_by_hand: "Posted", posted_auto: "Posted automatically", expired: "Skipped: too old",
+    auto_pending: "Posting automatically", auto_silent: "No result from the automatic post. Post it by hand",
+    auto_failed: (e) => `Automatic post failed (${e}). Post it by hand`, not_posted: "Not posted",
+    text: "Text", text_and_files: "Text and files", next: "Next", step: (i, n, t) => `${i} / ${n} · ${t}`,
+    hand_over: (files, url) => files ? "📋 Copy text, send the video to the app" : url ? "📋 Copy text, open the composer" : "📋 Copy text",
+    preparing: "Preparing the video…", later: "Later", stop: "Stop", posted_question: (t) => `Posted on ${t}?`,
+    yes_next: "Posted → next", again: "Again", card_finished: "Everything on this card is finished",
   };
   const STORED = "/console/api/pages/";
 
@@ -33,7 +50,7 @@ window.ConsolePages = (() => {
   let panel = null;
   let current = null;
   let tab = "open";
-  let items = [];
+  let cards = []; // the tab's cards; a card is a group of items, or one item without a group
   let target = null; // null = every target
   const blobs = new Map(); // stored image URL -> Promise<Blob>; videos are too large to keep
 
@@ -76,7 +93,8 @@ window.ConsolePages = (() => {
     ensurePanel();
     current = page;
     tab = "open";
-    items = [];
+    cards = [];
+    window.ConsolePageCards.reset();
     target = localStorage.getItem(targetKey(slug));
     panel.hidden = false;
     panel.setAttribute("aria-label", page.title);
@@ -92,23 +110,31 @@ window.ConsolePages = (() => {
     const slug = current.slug;
     const wanted = tab;
     try {
-      const data = await api(`/pages/${encodeURIComponent(slug)}/items?state=${wanted}`);
+      const data = await api(`/pages/${encodeURIComponent(slug)}/cards?state=${wanted}`);
       // A tab or page changed while this was on its way: the newer request will draw.
       if (current?.slug !== slug || tab !== wanted) return;
-      items = data.items || [];
+      cards = data.cards || [];
       draw();
     } catch (err) { toast(err.message); }
   }
 
+  // Which tab a card belongs on, from its rows (as the server decides it).
+  const tabOf = (card) => card.items.some((i) => i.state === "open") ? "open"
+    : card.items.some((i) => i.state === "done") ? "done" : "skipped";
+
+  // Answers the updated item, or null when the change failed (already shown as a toast).
   async function change(item, state, resultUrl = "") {
     try {
       const body = resultUrl ? { state, result_url: resultUrl } : { state };
-      await api(`/pages/${encodeURIComponent(current.slug)}/items/${encodeURIComponent(item.key)}`,
+      const data = await api(`/pages/${encodeURIComponent(current.slug)}/items/${encodeURIComponent(item.key)}`,
         { method: "PATCH", body });
-      items = items.filter((i) => i.key !== item.key);
+      const updated = { ...item, ...(data?.item || {}), state };
+      cards = cards.map((c) => ({ ...c, items: c.items.map((i) => i.key === item.key ? updated : i) }))
+        .filter((c) => tabOf(c) === tab);
       draw();
       refresh();
-    } catch (err) { toast(err.message); }
+      return updated;
+    } catch (err) { toast(err.message); return null; }
   }
 
   async function copy(text) {
@@ -207,12 +233,15 @@ window.ConsolePages = (() => {
   // The system share sheet hands text and files to an app (a phone's posting app) in one step.
   function canShare() { return typeof navigator.share === "function" && typeof navigator.canShare === "function"; }
 
+  const hasFiles = (item) => (item.attachments || []).some(stored);
+  const filesOf = (item) => Promise.all((item.attachments || []).filter(stored).map(async (a) => {
+    const blob = await blobOf(a);
+    return new File([blob], a.name, { type: blob.type });
+  }));
+
   async function share(item) {
     try {
-      const files = await Promise.all((item.attachments || []).filter(stored).map(async (a) => {
-        const blob = await blobOf(a);
-        return new File([blob], a.name, { type: blob.type });
-      }));
+      const files = await filesOf(item);
       const data = { text: item.body || item.title };
       if (files.length && navigator.canShare({ files })) data.files = files;
       await navigator.share(data);
@@ -289,16 +318,29 @@ window.ConsolePages = (() => {
   function tabButton(key, text) {
     return h("button", {
       type: "button", class: "page-tab" + (tab === key ? " on" : ""), "aria-pressed": tab === key ? "true" : "false",
-      text, onclick: () => { tab = key; items = []; draw(); load(); },
+      text, onclick: () => { tab = key; cards = []; draw(); load(); },
     });
   }
 
   // -- the target filter ----------------------------------------------------------------------
+  // On the open tab a card also shows rows already finished; the filter counts what is left.
+  const counted = (item) => tab !== "open" || item.state === "open";
+  const rowsOf = () => cards.flatMap((c) => c.items).filter(counted);
+
   function targetCounts() {
     const counts = new Map();
-    for (const item of items) counts.set(item.target || "", (counts.get(item.target || "") || 0) + 1);
+    for (const item of rowsOf()) counts.set(item.target || "", (counts.get(item.target || "") || 0) + 1);
     return counts;
   }
+
+  const kit = {
+    L, tab: () => tab, labels: () => ({
+      open: current.open_label || L().open, done: current.done_label || L().done, skip: current.skip_label || L().skip,
+    }),
+    change, copy, toast: (text) => toast(text), attachment, counter, when, canShare, hasFiles, filesOf,
+    button: (...args) => button(...args), link: (...args) => link(...args),
+    cardOf: (group) => cards.find((c) => c.group === group), redraw: () => draw(),
+  };
 
   function choose(value) {
     target = value;
@@ -317,7 +359,7 @@ window.ConsolePages = (() => {
     }, h("span", { text }), h("span", { class: "count", text: String(n) }));
     const named = [...counts.keys()].filter(Boolean).sort((a, b) => a.localeCompare(b));
     return h("div", { class: "page-targets", role: "group", "aria-label": l.targets },
-      chip(null, l.all, items.length),
+      chip(null, l.all, rowsOf().length),
       ...named.map((value) => chip(value, value, counts.get(value))),
       counts.has("") ? chip("", l.no_target, counts.get("")) : null);
   }
@@ -328,17 +370,19 @@ window.ConsolePages = (() => {
     const counts = targetCounts();
     // A remembered target with nothing in this list shows everything rather than an empty page.
     const active = target !== null && counts.has(target) && counts.size > 1 ? target : null;
-    const shown = active === null ? items : items.filter((i) => (i.target || "") === active);
+    const matches = (i) => active === null || ((i.target || "") === active && counted(i));
+    const shown = cards.map((c) => ({ card: c, rows: c.items.filter(matches) })).filter((c) => c.rows.length);
     const count = tab === "open" && current.open_count ? ` · ${current.open_count}` : "";
     panel.replaceChildren(h("div", { class: "ws-shell page-shell" },
       h("div", { class: "ws-head" },
         h("h1", { text: current.title + count }),
         button(l.close, hide)),
       h("div", { class: "page-tabs" },
-        tabButton("open", l.tab_open), tabButton("done", l.tab_done), tabButton("skipped", l.tab_skipped)),
+          tabButton("open", l.tab_open), tabButton("done", l.tab_done), tabButton("skipped", l.tab_skipped)),
       targetBar(counts, active),
       shown.length
-        ? h("ul", { class: "page-items" }, shown.map(row))
+        ? h("ul", { class: "page-items" }, shown.map(({ card, rows }) => card.group
+          ? window.ConsolePageCards.card(card, rows, kit) : row(rows[0])))
         : h("p", { class: "empty page-empty", text: l.empty })));
     // Redrawing removes the focused button; keep focus inside so Escape still closes the panel.
     if (!panel.hidden && !panel.contains(document.activeElement)) panel.focus();

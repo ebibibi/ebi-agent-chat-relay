@@ -433,6 +433,7 @@ class ConsoleServer:
         r.add_get(f"{API_PREFIX}/secretary/stats", secretary_routes.stats)
         r.add_post(f"{API_PREFIX}/pages/{{slug}}", page_routes.define)
         r.add_get(f"{API_PREFIX}/pages/{{slug}}/items", page_routes.items)
+        r.add_get(f"{API_PREFIX}/pages/{{slug}}/cards", page_routes.cards)
         r.add_post(f"{API_PREFIX}/pages/{{slug}}/items", page_routes.add)
         r.add_patch(f"{API_PREFIX}/pages/{{slug}}/items/{{key}}", page_routes.change)
         r.add_get(f"{API_PREFIX}/pages/{{slug}}/files/{{token}}/{{name}}", page_routes.file)

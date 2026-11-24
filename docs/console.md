@@ -760,6 +760,7 @@ Endpoints need authentication unless marked *(no sign-in)*. Every method except 
 | PATCH / DELETE | `/console/api/views/{id}` | Change (`name`, `query`, `position`) or delete a saved view |
 | POST | `/console/api/pages/{slug}` | Define a [page](console-pages.md) (also in every board as `pages`) |
 | GET / POST | `/console/api/pages/{slug}/items` | One page's items in one state (`?state=open`); register an item |
+| GET | `/console/api/pages/{slug}/cards` | One page's [cards](console-pages.md#one-card-per-piece-of-content) on one tab (`?state=open`) |
 | PATCH | `/console/api/pages/{slug}/items/{key}` | A person moves an item to `open`, `done` or `skipped`, optionally with the `result_url` of the post |
 | GET | `/console/api/pages/{slug}/files/{token}/{name}` | A file uploaded to a page, inline (`?download=1` to save) |
 | GET / POST / PATCH / DELETE | `/console/api/places` | The managed list of places with open-item counts; add `{name}`, rename `{from, name}` (every item follows), delete `{name}` (items become doable anywhere) |

@@ -66,6 +66,7 @@ from .entra_auth import EntraTokenVerifier, looks_like_jwt
 from .pages_api import (
     handle_add_item,
     handle_delete_page,
+    handle_list_cards,
     handle_list_items,
     handle_list_pages,
     handle_put_page,
@@ -473,6 +474,7 @@ class ApiServer:
         self.app.router.add_put("/api/pages/{slug}", self.put_page)
         self.app.router.add_delete("/api/pages/{slug}", self.delete_page)
         self.app.router.add_get("/api/pages/{slug}/items", self.list_page_items)
+        self.app.router.add_get("/api/pages/{slug}/cards", self.list_page_cards)
         self.app.router.add_post("/api/pages/{slug}/items", self.add_page_item)
         self.app.router.add_patch("/api/pages/{slug}/items/{key}", self.resolve_page_item)
         self.app.router.add_post("/api/pages/{slug}/files", self.upload_page_file)
@@ -2049,6 +2051,10 @@ class ApiServer:
     async def list_page_items(self, request: web.Request) -> web.Response:
         """GET /api/pages/{slug}/items?state=open — one page's items in one state."""
         return await handle_list_items(request, self.page_repo)
+
+    async def list_page_cards(self, request: web.Request) -> web.Response:
+        """GET /api/pages/{slug}/cards?state=open — items grouped into one card per content."""
+        return await handle_list_cards(request, self.page_repo)
 
     async def add_page_item(self, request: web.Request) -> web.Response:
         """POST /api/pages/{slug}/items — register an item; an existing key keeps its state."""
