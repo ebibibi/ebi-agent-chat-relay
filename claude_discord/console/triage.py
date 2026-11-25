@@ -131,6 +131,11 @@ not outstanding human actions. Do not invent a task to fill the queue. Recency a
 thread do not imply work. A real unanswered decision or explicitly requested review is work.
 next: the specific outstanding human action, at most 60 characters. When needs_human is
 false, next is "", ready is false, ready_at is null and waiting_for is "".
+Treat a provider/backend error in the latest agent message, including its structured embed
+title or description, as a failed run rather than an unanswered question. Surface the specific
+latest blocking reason in reason, next or waiting_for. Do not ask the owner to reply just because
+a run failed; needs_human is true only when the error gives a concrete owner action. Do not
+recommend retrying a blocked request or bypassing provider controls.
 Read the latest exchange as the current state; earlier asks may already be settled.
 ready: true only if the person can do "next" right now, at their desk, without waiting.
 false if "next" has to wait: for a time or date ("tomorrow at 20:00", "after the meeting"),

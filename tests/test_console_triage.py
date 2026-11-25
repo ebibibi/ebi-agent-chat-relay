@@ -270,6 +270,63 @@ async def test_board_shows_guesses_and_a_human_edit_pins_them(tmp_path) -> None:
         assert item["ai"]["reason"] == "期限が近い"
 
 
+async def test_triage_messages_include_synthetic_embed_error_text_only(
+    tmp_path, monkeypatch
+) -> None:
+    db = str(tmp_path / "sessions.db")
+    work = WorkItemRepository(db)
+    await work.init_db()
+    api = MagicMock()
+    api.default_channel_id = None
+    api.lineage_repo = None
+    api.session_repo = None
+    api.bot.get_channel.return_value = None
+    api.bot.cogs = {}
+    api._running_thread_ids.return_value = set()
+    console = ConsoleServer(api, work, ConsoleAuthenticator(ConsoleAuthConfig(token=TOKEN)), port=0)
+
+    async def decision_messages(item):
+        return [
+            {
+                "kind": "agent",
+                "content": "",
+                "embeds": [
+                    {
+                        "title": "Synthetic provider blocked",
+                        "description": (
+                            "Synthetic 429: capacity is unavailable until the stated reset."
+                        ),
+                        "color": 123456,
+                        "url": "https://example.invalid/private-detail",
+                    }
+                ],
+            }
+        ]
+
+    monkeypatch.setattr(console, "decision_messages", decision_messages)
+    messages = await console.triage_messages(_item())
+
+    assert len(messages) == 1
+    assert messages[0][0] == "agent"
+    assert "Synthetic provider blocked" in messages[0][1]
+    assert "Synthetic 429: capacity is unavailable until the stated reset." in messages[0][1]
+    assert "private-detail" not in messages[0][1]
+    assert "123456" not in messages[0][1]
+
+
+def test_provider_failure_triage_guidance_does_not_request_a_reply_by_default() -> None:
+    prompt = build_prompt(
+        title="Synthetic backend failure",
+        status="idle",
+        messages=[("agent", "[Embed] Synthetic provider blocked: Synthetic 429")],
+        now=NOW,
+    )
+    normalized = " ".join(prompt.split())
+    assert "provider/backend error" in normalized
+    assert "Do not ask the owner to reply just because a run failed" in normalized
+    assert "Synthetic 429" in normalized
+
+
 # -- the second axis: can it be done now? -----------------------------------
 
 
