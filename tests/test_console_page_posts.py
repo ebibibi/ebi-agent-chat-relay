@@ -291,6 +291,8 @@ async def test_an_uploaded_image_or_video_can_be_attached_and_served(
     assert added.status == 201
     [attachment] = (await added.json())["item"]["attachments"]
     assert attachment["kind"] == kind and attachment["name"] == file["name"]
+    # The size rides along so the save button can say how big the download is (#1589).
+    assert attachment["size"] == len(data)
 
     shown = await console.get(file["url"], headers=AUTH)
     assert shown.status == 200

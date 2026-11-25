@@ -74,7 +74,7 @@ call, post by post. With the link inside `body`, they had to delete it by hand e
 - The generator decides per target whether the link also goes into the body; nothing in the relay
   names a network. Registering a key again refreshes `link` like the other fields, so an open item
   can move its link out of the body without losing its state.
-- The share sheet still hands over the body only: the person adds the link there when they choose.
+- The body and the link are copied separately; the person adds the link where they choose (the share button was removed in #1589).
 
 ## Addendum (2026-11-23): long videos (#1538)
 
@@ -122,9 +122,11 @@ what was left for one piece of content.
   minutes, and the number only decides when a person is asked to step in.
 - **The tab follows the rows.** A card stays on the open tab while any row is open, so the posted
   rows are visible next to the ones left; the cards endpoint returns whole groups for that reason.
-- **"Next" hands over, it does not post.** It copies the text and passes the files through the
-  share sheet (or opens the item's link), then asks. The relay still posts nowhere. Files are
-  fetched before the tap because a share sheet opens only within a tap's activation.
+- **Plain buttons, not a walk (2026-11-25, #1589).** Each row a person finishes has save (a
+  normal download, its size shown), copy, open the composer and posted, usable in any order. The
+  earlier "Next" walk handed files to the share sheet, which meant reading a whole file into the
+  page before the tap; a gigabyte video never got ready on a phone, and walking from the first
+  row pushed people onto a network they had not chosen. The relay still posts nowhere.
 - **Done is one tap again on cards.** The optional post-URL field is not shown on cards: pasting a
   URL by hand was the step people skipped, and automation that can see the post fills it later.
   Items without a group keep the field.
