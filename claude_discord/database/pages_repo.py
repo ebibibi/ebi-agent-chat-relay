@@ -209,7 +209,7 @@ class PageItem:
     created_at: str
     resolved_at: str
     target: str = ""
-    attachments: list[dict[str, str]] = field(default_factory=list)
+    attachments: list[dict[str, Any]] = field(default_factory=list)
     #: The limit and counting rule in force (the item's own, else the page's); 0 = no limit.
     limit: int = 0
     count: str = COUNT_CHARS
@@ -699,7 +699,7 @@ class PageRepository:
             await db.commit()
         return await self._require_item(slug, key), created
 
-    def _attachments(self, slug: str, raw: object) -> list[dict[str, str]]:
+    def _attachments(self, slug: str, raw: object) -> list[dict[str, Any]]:
         """Checked attachments: links people may open, or files uploaded to this page."""
         if raw is None:
             return []
@@ -709,7 +709,7 @@ class PageRepository:
             raise PageError(f"at most {MAX_ATTACHMENTS} attachments")
         return [self._attachment(slug, entry) for entry in raw]
 
-    def _attachment(self, slug: str, entry: object) -> dict[str, str]:
+    def _attachment(self, slug: str, entry: object) -> dict[str, Any]:
         if not isinstance(entry, str | dict):
             raise PageError("attachments: each entry must be a URL or an object with a url")
         fields = _object({"url": entry} if isinstance(entry, str) else entry, _ATTACHMENT_FIELDS)
@@ -721,7 +721,13 @@ class PageRepository:
             found = self.files.describe(file_slug, token, file_name) if file_slug == slug else None
             if found is None:
                 raise PageError("attachments: no such file was uploaded to this page")
-            return {"url": found.url, "name": name or found.name, "kind": found.kind}
+            # The size lets the Console say how big a download is before anyone starts it.
+            return {
+                "url": found.url,
+                "name": name or found.name,
+                "kind": found.kind,
+                "size": found.size,
+            }
         _check_link(url, "attachments")
         fallback = unquote(urlsplit(url).path.rstrip("/").rsplit("/", 1)[-1]) or url
         name = name or fallback[:MAX_ATTACHMENT_NAME_CHARS]

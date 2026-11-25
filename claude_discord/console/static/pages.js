@@ -9,6 +9,8 @@
 //
 // Items sharing a group are one card per piece of content (#1564, pagecards.js). The list is
 // fetched as cards; an item without a group is a card of its own and is drawn as before.
+// Files are saved with a normal download and picked in the posting app; nothing reads a file
+// into memory to hand it to a share sheet (#1589).
 "use strict";
 
 window.ConsolePages = (() => {
@@ -18,71 +20,31 @@ window.ConsolePages = (() => {
     close: "閉じる", tab_open: "未処理", tab_done: "完了", tab_skipped: "見送り", empty: "ここには何もありません",
     by_person: "手動", by_auto: (who) => `自動確認（${who}）`, result: "結果を開く", heading: "📋 ページ",
     all: "すべて", no_target: "投稿先なし", targets: "投稿先で絞り込む",
-    over: (n) => `${n} 超過`, save: "保存", share: "共有", play: "再生", unplayable: "再生できませんでした", result_url: "投稿URL（任意）",
+    over: (n) => `${n} 超過`, save: "保存", play: "再生", unplayable: "再生できませんでした", result_url: "投稿URL（任意）",
     bad_url: "投稿URLは http(s) で始まるリンクにしてください", attachments: "添付",
     copy_link: "リンクをコピー", link: "共有リンク",
     posted_by_hand: "投稿済み", posted_auto: "自動で投稿済み", expired: "期限切れで見送り",
     auto_pending: "自動で投稿中", auto_silent: "自動投稿の結果が届いていません。手で投稿してください",
     auto_failed: (e) => `自動投稿できませんでした（${e}）。手で投稿してください`, not_posted: "未投稿",
-    text: "本文", text_and_files: "本文と添付", next: "未投稿を順に投稿", step: (i, n, t) => `${t}（残り ${n} 件中 ${i} 件目）`,
-    start_walk: (n) => `未投稿を順に投稿する（残り ${n}）`,
-    walk_order: (o) => `押すと、この順に1媒体ずつ案内します: ${o}`,
-    walk_steps: ["ボタン1つで本文をコピーし、投稿画面（スマホは共有メニュー）を開く", "投稿先で本文を貼り付けて投稿する",
-      "ここに戻って「投稿した」を押す → 投稿済みと記録して次の媒体へ"],
-    manual: (t) => `${t} だけを個別に操作する`,
-    does_open: "投稿先の画面が新しいタブで開く（記録は変わらない）", does_copy: "本文をコピーするだけ（記録は変わらない）",
-    does_copy_link: "共有リンクをコピーするだけ（記録は変わらない）", does_done: "この媒体を投稿済みと記録する",
-    does_skip: "この媒体は投稿しないと記録する",
-    does_go: "記録はまだ変わりません", does_later: "記録せず次の媒体へ。一周すると戻る", does_stop: "案内を閉じる。記録済みはそのまま",
-    does_yes: "投稿済みと記録して次の媒体へ", does_again: "もう一度コピーして開き直す", does_skip_next: "投稿しないと記録して次の媒体へ",
-    how: (route, t, url) => route === "share"
-      ? `下のボタンで本文をコピーし、共有メニューを開きます。${t} のアプリを選んで動画を渡し、本文を貼り付けて投稿したら、この画面に戻ってください。`
-      : route === "save"
-        ? `この端末からは動画を ${t} へ直接渡せません。先に下の「⬇ 保存」で動画を保存し、${url ? "投稿画面" : `${t} の投稿`}で添付してください。本文はボタンでコピーされます。`
-        : url ? `下のボタンで本文をコピーし、${t} の投稿画面を新しいタブで開きます。貼り付けて投稿したら、このタブに戻ってください。`
-          : `下のボタンで本文をコピーします。${t} で貼り付けて投稿したら、この画面に戻ってください。`,
-    save_file: (name) => `保存: ${name}`,
-    hand_over: (files, url) => files ? "📋 本文をコピーして動画をアプリへ渡す" : url ? "📋 本文をコピーして投稿画面を開く" : "📋 本文をコピー",
-    preparing: "動画を準備中…", later: "あとで", stop: "案内を終える",
-    posted_question: (t) => `${t} に投稿できましたか？`,
-    resumed: (t) => `↩ 前回の続きです。さっき ${t} へ本文を渡しました。`,
-    yes_next: "投稿した → 次へ", again: "↩ もう一度渡す", skip_this: "この媒体は見送る",
-    card_finished: "このカードはすべて終わりました", only_one: "残っているのはこの媒体だけです",
+    text: "本文", text_and_files: "本文と添付",
+    save_kind: (kind, size) => `${kind === "video" ? "動画" : kind === "image" ? "画像" : "ファイル"}を保存${size ? `（${size}）` : ""}`,
+    large: (size) => `大きいファイル${size ? `（${size}）` : ""}です。スマホに保存すると時間と容量を使います。PC で保存するか、PC・iPhone のブラウザで投稿画面を開いて添付してください。`,
+    howto: "① 保存 → ② 本文をコピー → ③ 投稿画面（アプリ）で保存した動画を選び、本文を貼り付けて投稿 → ④「投稿した」を押す",
   } : {
     open: "Open", done: "Done", skip: "Skip", reopen: "Back to open", copy: "Copy text", copied: "Copied",
     close: "Close", tab_open: "Open", tab_done: "Done", tab_skipped: "Skipped", empty: "Nothing here",
     by_person: "by hand", by_auto: (who) => `checked automatically (${who})`, result: "Open result", heading: "📋 Pages",
     all: "All", no_target: "No target", targets: "Filter by target",
-    over: (n) => `${n} over`, save: "Save", share: "Share", play: "Play", unplayable: "could not be played", result_url: "Post URL (optional)",
+    over: (n) => `${n} over`, save: "Save", play: "Play", unplayable: "could not be played", result_url: "Post URL (optional)",
     bad_url: "The post URL must start with http(s)", attachments: "Attachments",
     copy_link: "Copy link", link: "Link to share",
     posted_by_hand: "Posted", posted_auto: "Posted automatically", expired: "Skipped: too old",
     auto_pending: "Posting automatically", auto_silent: "No result from the automatic post. Post it by hand",
     auto_failed: (e) => `Automatic post failed (${e}). Post it by hand`, not_posted: "Not posted",
-    text: "Text", text_and_files: "Text and files", next: "Post the rest one by one", step: (i, n, t) => `${t} (${i} of ${n} left)`,
-    start_walk: (n) => `Post the rest one by one (${n} left)`,
-    walk_order: (o) => `Walks you through one target at a time, in this order: ${o}`,
-    walk_steps: ["One button copies the text and opens the composer (the share menu on a phone)", "Paste the text there and post",
-      "Come back and press \"Posted\": it is recorded and the next target comes up"],
-    manual: (t) => `Handle ${t} on its own`,
-    does_open: "Opens the composer in a new tab (records nothing)", does_copy: "Only copies the text (records nothing)",
-    does_copy_link: "Only copies the link (records nothing)", does_done: "Records this target as posted",
-    does_skip: "Records that this target is not posted",
-    does_go: "Records nothing yet", does_later: "Next target, nothing recorded; comes back after a round", does_stop: "Closes the walk; records stay",
-    does_yes: "Records it as posted, then the next target", does_again: "Copies and opens it again", does_skip_next: "Records it as not posted, then the next target",
-    how: (route, t, url) => route === "share"
-      ? `The button copies the text and opens the share menu. Pick the ${t} app to hand it the video, paste the text and post, then come back here.`
-      : route === "save"
-        ? `This device cannot hand the video to ${t}. Save it first with "⬇ Save" below and attach it in ${url ? "the composer" : t}. The button copies the text.`
-        : url ? `The button copies the text and opens the ${t} composer in a new tab. Paste and post, then come back to this tab.`
-          : `The button copies the text. Paste it in ${t} and post, then come back here.`,
-    save_file: (name) => `Save: ${name}`,
-    hand_over: (files, url) => files ? "📋 Copy text, send the video to the app" : url ? "📋 Copy text, open the composer" : "📋 Copy text",
-    preparing: "Preparing the video…", later: "Later", stop: "End the walk",
-    posted_question: (t) => `Did the post on ${t} go out?`,
-    resumed: (t) => `↩ Picking up where you left off: the text was handed to ${t}.`,
-    yes_next: "Posted → next", again: "↩ Hand it over again", skip_this: "Skip this target",
-    card_finished: "Everything on this card is finished", only_one: "This is the only target left",
+    text: "Text", text_and_files: "Text and files",
+    save_kind: (kind, size) => `Save the ${kind === "video" ? "video" : kind === "image" ? "image" : "file"}${size ? ` (${size})` : ""}`,
+    large: (size) => `A large file${size ? ` (${size})` : ""}: saving it on a phone takes time and space. Save it on a computer, or open the composer in a browser on a computer or iPhone and attach it there.`,
+    howto: "1 Save → 2 Copy text → 3 In the posting app, pick the saved video and paste the text → 4 Press \"Posted\"",
   };
   const STORED = "/console/api/pages/";
 
@@ -94,15 +56,8 @@ window.ConsolePages = (() => {
   let target = null; // null = every target
   const blobs = new Map(); // stored image URL -> Promise<Blob>; videos are too large to keep
 
-  let resumeChecked = false; // a walk left mid-step reopens its page once per load (#1574)
-
   function onBoard(list) {
     pages = Array.isArray(list) ? list : [];
-    if (!resumeChecked && pages.length) {
-      resumeChecked = true;
-      const waiting = pages.find((p) => window.ConsolePageCards.pending(p.slug));
-      if (waiting && (!panel || panel.hidden)) { show(waiting.slug); return; }
-    }
     if (!panel || panel.hidden || !current) return;
     const fresh = pages.find((p) => p.slug === current.slug);
     if (!fresh) { hide(); return; }
@@ -141,7 +96,6 @@ window.ConsolePages = (() => {
     current = page;
     tab = "open";
     cards = [];
-    window.ConsolePageCards.reset(slug);
     target = localStorage.getItem(targetKey(slug));
     panel.hidden = false;
     panel.setAttribute("aria-label", page.title);
@@ -277,24 +231,6 @@ window.ConsolePages = (() => {
         "aria-label": `${L().save}: ${a.name}`, onclick: () => save(a) }));
   }
 
-  // The system share sheet hands text and files to an app (a phone's posting app) in one step.
-  function canShare() { return typeof navigator.share === "function" && typeof navigator.canShare === "function"; }
-
-  const hasFiles = (item) => (item.attachments || []).some(stored);
-  const filesOf = (item) => Promise.all((item.attachments || []).filter(stored).map(async (a) => {
-    const blob = await blobOf(a);
-    return new File([blob], a.name, { type: blob.type });
-  }));
-
-  async function share(item) {
-    try {
-      const files = await filesOf(item);
-      const data = { text: item.body || item.title };
-      if (files.length && navigator.canShare({ files })) data.files = files;
-      await navigator.share(data);
-    } catch (err) { if (err.name !== "AbortError") toast(err.message); }
-  }
-
   // -- rows -----------------------------------------------------------------------------------
   const button = (text, onclick, cls = "btn") => h("button", { type: "button", class: cls, text, onclick });
   const link = (text, url, cls) => h("a", { class: cls, href: url, target: "_blank", rel: "noopener noreferrer", text });
@@ -327,11 +263,9 @@ window.ConsolePages = (() => {
       change(item, "done", url);
     };
     posted.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); done(); } });
-    const files = (item.attachments || []).some(stored);
     return [item.url ? link(labels.open, item.url, "btn primary page-open") : null,
       item.body ? button(l.copy, () => copy(item.body), "btn page-copy") : null,
       item.link ? button(`🔗 ${l.copy_link}`, () => copy(item.link), "btn page-copy-link") : null,
-      canShare() && (item.body || files) ? button(`↗ ${l.share}`, () => share(item), "btn page-share") : null,
       posted,
       button(labels.done, done, "btn page-done"),
       button(labels.skip, () => change(item, "skipped"))];
@@ -384,10 +318,9 @@ window.ConsolePages = (() => {
     L, tab: () => tab, labels: () => ({
       open: current.open_label || L().open, done: current.done_label || L().done, skip: current.skip_label || L().skip,
     }),
-    change, copy, toast: (text) => toast(text), attachment, counter, when, canShare, hasFiles, filesOf, save,
+    change, copy, toast: (text) => toast(text), attachment, counter, when, save,
     storedFiles: (item) => (item.attachments || []).filter(stored),
     button: (...args) => button(...args), link: (...args) => link(...args),
-    cardOf: (group) => cards.find((c) => c.group === group), redraw: () => draw(),
   };
 
   function choose(value) {

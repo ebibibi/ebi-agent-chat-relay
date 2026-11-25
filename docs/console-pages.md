@@ -74,8 +74,8 @@ item says where it goes in `target`, and the Console offers a filter by target a
 holds more than one.
 
 For each open item the Console shows the text with a copy button, the attachments (a stored
-image as a thumbnail, a stored video on request; both can be saved, and on a phone the share
-button hands text and files to the posting app), the link that opens the compose screen, and the
+image as a thumbnail, a stored video on request; both can be saved with a normal download), the
+link that opens the compose screen, and the
 character count against the limit. **Posted** takes an optional link to the post the person just
 made; **Skip** sets it aside. Both are one tap, as before.
 
@@ -122,8 +122,8 @@ can seek, and "Save" is the browser's own download, resumable and never held in 
 reverse proxy that cuts long responses cuts one range, which the browser asks for again. Signed
 in with a bearer token only, which neither a `<video>` element nor a plain link can carry, the
 Console still fetches the whole file first, as before; prefer a session sign-in for long videos.
-The share sheet also hands over the whole file, so on a phone share a long video from the saved
-copy rather than from the page.
+The Console never reads a file into memory to hand it to a share sheet (#1589): a person saves it
+and picks the saved file in the posting app.
 
 #### Disk space and clean-up
 
@@ -230,26 +230,26 @@ tab, the rows still open, and shows only the chosen target's rows.
 `group` (empty for an item without one), `title`, `state`, `created_at` and every row in `items`.
 `GET /api/pages/{slug}/items?group=vid-42` lists one card's rows in one state.
 
-### Next ▶
+### Buttons on a row
 
-A card with rows to post has **Next ▶**. Each step shows the target and its text, then one tap
-copies the text to the clipboard and either hands the stored files (with the text) to the share
-sheet, so a phone passes the video straight to the posting app, or opens the item's `url`. Files
-are fetched before the tap: a phone browser opens the share sheet only right after a tap. Some
-apps ignore text that comes with a shared video, which is why the text is on the clipboard too.
-Back in the Console, **Posted?** marks the row done and moves on; **Later** goes to the next row
-without changing anything. On a card, done is one tap: there is no post-URL field.
+A row a person finishes shows a few plain buttons, usable on any row and in any order (#1589).
+No step-by-step walk: the person picks the network they want to post on now.
 
-The walk explains itself before anything is pressed (#1574). It is the one highlighted button
-on a card, and under it the card lists the targets in walk order and the walk's three steps.
-A row's own buttons (open, copy, done, skip) are folded under "Handle <target> on its own", and
-every button, there and in the walk, has one line under it saying what pressing it does and
-whether it records anything. Each step says what to do on this target, matched to the device. Where the browser cannot hand files to an
-app (most desktops), the step says so and offers the stored files to save and attach by hand.
-The walk's position is kept in `localStorage` (`page-flow:<slug>`, for 12 hours), written the
-moment the text is handed over: a phone that reloads the Console while the person is in the
-posting app reopens the page on return and asks **Posted?** again for that target. Nothing is
-recorded until it is answered. **Later** on the only row left stays on it.
+1. **⬇ Save the video (23 MB)** — one per stored file: a normal download of that file, with its
+   size (`size` on the attachment, filled when the item is registered). A file of 500 MB or more
+   also gets a note that a phone is the wrong place to save it: save it on a computer, or open the
+   composer in a browser and attach it there.
+2. **📋 Copy text** — the body to the clipboard.
+3. **↗ Open the composer** — when the row has a `url` (new tab).
+4. **✅ Posted** — marks the row done in one tap; **Skip** sets it aside.
+
+A card with rows to post says how once, above its rows ("save → copy → pick the saved video in
+the posting app and paste → Posted"), instead of under every button.
+
+Why not the share sheet: handing a file to the share sheet means reading the whole file into the
+page first, because a phone browser opens the sheet only right after a tap. A long video (a
+gigabyte) never finished "Preparing", and a walk that started at the first row made people post
+on a network they did not mean to (#1589 replaced the walk of #1564 and #1574).
 
 ### Fade and expire
 
