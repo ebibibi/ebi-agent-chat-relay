@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Console: an HTML file previews with its own CSS. The preview used a `srcdoc` frame, which
+  inherits the Console's `style-src 'self'` and dropped every style; it now loads
+  `static/html-frame.html`, served with its own policy (inline styles and `data:` images and fonts;
+  no script from the page, no network, no form, no Console access; a clicked link opens a new tab).
+
 - Evidence-based auto-completion (#1477): `/candidate` accepts an `evidence` body; with
   `CCDB_AUTO_COMPLETE=on` a thread whose waits, decision requests and child threads are all settled
   completes itself after the turn ends. Off by default; `dry-run` reports the verdict only. See

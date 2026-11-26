@@ -187,6 +187,21 @@ _SECURITY_HEADERS = {
     "Cache-Control": "no-store",
 }
 
+#: The HTML preview frame (static/html-frame.html). A delivered page's own CSS must apply, so
+#: this one document gets its own policy instead of the console's: inline styles and embedded
+#: images/fonts only, no network, no script but html-frame.js, framed only by the console.
+#: Popups are allowed so a clicked link opens in a new tab (the page itself runs no script).
+HTML_FRAME = "html-frame.html"
+_HTML_FRAME_HEADERS = {
+    "Content-Security-Policy": (
+        "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; "
+        "default-src 'none'; script-src 'self'; "
+        "style-src 'unsafe-inline'; img-src data:; font-src data:; "
+        "frame-ancestors 'self'; base-uri 'none'; form-action 'none'"
+    ),
+    "X-Frame-Options": "SAMEORIGIN",
+}
+
 
 #: The thread a "Resume" button continues: a short instruction, not a new task.
 RESUME_PROMPT = (
@@ -729,13 +744,10 @@ class ConsoleServer:
         path = allowed.get(name)
         if path is None or path.suffix not in _STATIC_TYPES:
             raise web.HTTPNotFound()
-        return web.Response(
-            body=path.read_bytes(),
-            content_type=None,
-            headers={
-                "Content-Type": _STATIC_TYPES[path.suffix],
-            },
-        )
+        headers = {"Content-Type": _STATIC_TYPES[path.suffix]}
+        if name == HTML_FRAME:
+            headers.update(_HTML_FRAME_HEADERS)
+        return web.Response(body=path.read_bytes(), content_type=None, headers=headers)
 
     # -- reads -------------------------------------------------------------
     async def me(self, request: web.Request) -> web.Response:
