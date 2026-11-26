@@ -259,7 +259,8 @@ window.ConsoleSituation = (() => {
     const l = L();
     rail.title = l.show;
     rail.setAttribute("aria-label", l.show);
-    rail.replaceChildren(h("span", { text: "📍" }), asks ? h("span", { class: "sit-rail-count", text: String(asks) }) : null);
+    // replaceChildren() would print a null child as the text "null".
+    rail.replaceChildren(...[h("span", { text: "📍" }), asks ? h("span", { class: "sit-rail-count", text: String(asks) }) : null].filter(Boolean));
   }
 
   // Called from renderDetail on every redraw; rebuilds only when something it shows changed.

@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Console: the folded situation panel's rail no longer reads "📍 null" when nothing is asked of you.
 - Decision cards no longer disappear when the person writes anything in their thread or the agent
   marks it without a request (#1438). A card closes when answered on the card, replaced by the same
   key, closed by its agent (`DELETE /api/threads/{id}/decisions/{key}`) or when the thread is
