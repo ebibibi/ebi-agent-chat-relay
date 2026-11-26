@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import time
 import unicodedata
@@ -21,7 +22,9 @@ from urllib.parse import unquote, urlsplit
 
 import aiosqlite
 
-from .page_files import PageFiles, kind_of_name, parse_url
+from .page_files import PageFiles, StoredFile, kind_of_name, parse_url
+
+logger = logging.getLogger(__name__)
 
 MAX_PAGES = 20
 MAX_TITLE_CHARS = 60
@@ -445,6 +448,7 @@ class PageRepository:
         self._db_path = db_path
         self._expired_at = float("-inf")
         self.files = PageFiles(files_dir or Path(db_path).parent / "page_files")
+        self._merging: asyncio.Task[int] | None = None  # kept so the task is not collected
 
     @property
     def db_path(self) -> str:
@@ -616,6 +620,118 @@ class PageRepository:
         return sum(
             [await asyncio.to_thread(self.files.remove, slug, token) for slug, token in doomed]
         )
+
+    async def merge_duplicate_files(self) -> int:
+        """Keep one copy per content of files listed before uploads were deduplicated (#1601).
+
+        Each stored attachment is hashed once; the copy registered first becomes the one every
+        item lists, the items are rewritten (a row listing the same file twice lists it once),
+        and a copy no item lists any more is deleted. Answers the bytes freed. Running it again
+        changes nothing.
+        """
+        async with aiosqlite.connect(self._db_path) as db:
+            rows = await db.execute_fetchall(
+                "SELECT page_slug, key, attachments FROM console_page_items"
+                " WHERE attachments != '' ORDER BY created_at, key"
+            )
+        digests: dict[tuple[str, str, str], str | None] = {}
+        canonical: dict[tuple[str, str], StoredFile] = {}
+        dropped: set[tuple[str, str]] = set()
+        updates: list[tuple[str, str, str]] = []
+        for slug, key, raw in rows:
+            entries = json.loads(raw)
+            merged: list[dict[str, Any]] = []
+            for entry in entries:
+                file = await self._canonical(slug, entry, digests, canonical)
+                if file is None:
+                    merged.append(entry)
+                    continue
+                stored = parse_url(entry.get("url", ""))
+                if stored is not None and file.url != entry.get("url"):
+                    dropped.add(stored[:2])
+                fresh = {
+                    **entry,
+                    "url": file.url,
+                    "name": file.name,
+                    "kind": file.kind,
+                    "size": file.size,
+                }
+                if all(m.get("url") != file.url for m in merged):
+                    merged.append(fresh)
+            if merged != entries:
+                updates.append((json.dumps(merged, ensure_ascii=False), slug, key))
+        if updates:
+            async with aiosqlite.connect(self._db_path) as db:
+                await db.executemany(
+                    "UPDATE console_page_items SET attachments = ? WHERE page_slug = ? AND key = ?",
+                    updates,
+                )
+                await db.commit()
+        return await self._remove_unlisted(dropped)
+
+    async def _canonical(
+        self,
+        slug: str,
+        entry: dict[str, Any],
+        digests: dict[tuple[str, str, str], str | None],
+        canonical: dict[tuple[str, str], StoredFile],
+    ) -> StoredFile | None:
+        """The one stored file with this attachment's bytes, or None for a link or a lost file."""
+        stored = parse_url(entry.get("url", ""))
+        if stored is None or stored[0] != slug:
+            return None
+        if stored not in digests:
+            digests[stored] = await asyncio.to_thread(self.files.digest, *stored)
+        digest = digests[stored]
+        if digest is None:
+            return None
+        if (slug, digest) not in canonical:
+            known = self.files.by_digest(slug, digest)
+            if known is None:
+                known = self.files.describe(*stored)
+                if known is None:
+                    return None
+                self.files.remember(slug, digest, stored[1], known.name)
+            canonical[(slug, digest)] = known
+        return canonical[(slug, digest)]
+
+    async def _remove_unlisted(self, candidates: set[tuple[str, str]]) -> int:
+        """Delete the copies in *candidates* that no item lists; answer the bytes freed."""
+        if not candidates:
+            return 0
+        async with aiosqlite.connect(self._db_path) as db:
+            rows = await db.execute_fetchall(
+                "SELECT attachments FROM console_page_items WHERE attachments != ''"
+            )
+        listed = {
+            stored[:2]
+            for (raw,) in rows
+            for entry in json.loads(raw)
+            if (stored := parse_url(entry.get("url", ""))) is not None
+        }
+        doomed = candidates - listed
+        return sum([await asyncio.to_thread(self.files.remove, *pair) for pair in doomed])
+
+    def start_merging_duplicate_files(self) -> asyncio.Task[int] | None:
+        """Run :meth:`merge_duplicate_files` in the background once at start-up (hashing may
+        take a while for long videos); failures are logged, never raised."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return None
+
+        async def run() -> int:
+            try:
+                freed = await self.merge_duplicate_files()
+            except Exception:  # housekeeping must not take the service down
+                logger.exception("Could not merge duplicate page files")
+                return 0
+            if freed:
+                logger.info("Merged duplicate page files, freeing %d bytes", freed)
+            return freed
+
+        self._merging = loop.create_task(run())
+        return self._merging
 
     async def list_items(
         self,

@@ -5,7 +5,9 @@
 //   → ✅ posted.
 // The file is never read into the page's memory to hand it to a share sheet: a gigabyte video
 // could not be prepared that way on a phone, and a person picks the saved file in the posting
-// app instead. Nothing here knows a network by name. Everything is drawn as text.
+// app instead. A card lists each file once at its top, saying which rows use it, and a row only
+// points at it ("use video 1"): the same video is downloaded once, not once per row (#1601).
+// Nothing here knows a network by name. Everything is drawn as text.
 "use strict";
 
 window.ConsolePageCards = (() => {
@@ -13,6 +15,24 @@ window.ConsolePageCards = (() => {
   const LARGE_BYTES = 500 * 1024 * 1024;
 
   const actionable = (item) => item.state === "open" && (item.mode !== "auto" || item.stalled);
+  const NUMBERS = "①②③④⑤⑥⑦⑧⑨⑩";
+  const savedKey = (url) => `page-saved:${url}`;
+  const wasSaved = (url) => { try { return Boolean(localStorage.getItem(savedKey(url))); } catch { return false; } };
+  const noteSaved = (url) => { try { localStorage.setItem(savedKey(url), String(Date.now())); } catch { /* blocked */ } };
+
+  // The files a card's open rows use, each once (by URL: the server keeps one copy per content),
+  // in the order the rows list them, with the targets that use each.
+  function cardFiles(data, kit) {
+    const files = new Map();
+    for (const item of data.items.filter(actionable)) {
+      for (const a of kit.storedFiles(item)) {
+        if (!files.has(a.url)) files.set(a.url, { file: a, targets: [] });
+        const target = item.target || kit.L().no_target;
+        if (!files.get(a.url).targets.includes(target)) files.get(a.url).targets.push(target);
+      }
+    }
+    return [...files.values()].map((entry, i, all) => ({ ...entry, mark: all.length > 1 ? NUMBERS[i] || `${i + 1}.` : "" }));
+  }
 
   function mark(item) {
     if (item.state === "done") return "✅";
@@ -51,18 +71,39 @@ window.ConsolePageCards = (() => {
       files.length ? h("div", { class: "page-files", "aria-label": l.attachments }, files.map(kit.attachment)) : null);
   }
 
-  // One save button per stored file, saying what it is and how big; a large one gets a warning.
-  function saves(item, kit) {
+  // The card's files at its top: one save button each, which rows use it, saved on this device.
+  function fileList(files, kit, redraw) {
+    if (!files.length) return null;
     const l = kit.L();
-    return kit.storedFiles(item).flatMap((a) => {
-      const bytes = size(a.size);
-      const save = kit.button(`⬇ ${l.save_kind(a.kind, bytes)}`, () => kit.save(a), "btn page-row-save");
-      save.setAttribute("aria-label", `${l.save}: ${a.name}`);
-      return Number(a.size) >= LARGE_BYTES ? [save, h("p", { class: "page-row-large", text: l.large(bytes) })] : [save];
-    });
+    return h("div", { class: "page-card-files", "aria-label": l.card_files },
+      h("div", { class: "page-card-files-head dim", text: l.card_files }),
+      files.map(({ file, targets, mark }) => {
+        const bytes = size(file.size);
+        const saved = wasSaved(file.url);
+        const save = kit.button(`⬇ ${mark ? `${mark} ` : ""}${l.save_kind(file.kind, bytes)}`, () => {
+          noteSaved(file.url);
+          kit.save(file);
+          redraw();
+        }, "btn page-file-save" + (saved ? "" : " primary"));
+        save.setAttribute("aria-label", `${l.save}: ${file.name}`);
+        return h("div", { class: "page-card-file", "data-url": file.url },
+          save,
+          h("span", { class: "page-card-file-use", text: l.used_by(targets.join("・")) }),
+          saved ? h("span", { class: "page-card-file-saved", text: `✓ ${l.saved_here}` }) : null,
+          Number(file.size) >= LARGE_BYTES ? h("p", { class: "page-row-large", text: l.large(bytes) }) : null);
+      }));
   }
 
-  function actions(item, kit) {
+  // On a row: which of the card's files to pick in the posting app (no save button of its own).
+  function rowFiles(item, files, kit) {
+    const l = kit.L();
+    const marks = kit.storedFiles(item).map((a) => files.find((f) => f.file.url === a.url)).filter(Boolean)
+      .map((f) => f.mark);
+    if (!marks.length) return null;
+    return h("span", { class: "page-row-uses dim", text: l.uses(marks.filter(Boolean).join("・")) });
+  }
+
+  function actions(item, kit, files) {
     const l = kit.L();
     const { button, link } = kit;
     if (kit.tab() !== "open") {
@@ -70,7 +111,7 @@ window.ConsolePageCards = (() => {
     }
     if (!actionable(item)) return [];
     const labels = kit.labels();
-    return [...saves(item, kit),
+    return [rowFiles(item, files, kit),
       item.body ? button(`📋 ${l.copy}`, () => kit.copy(item.body), "btn page-copy") : null,
       item.link ? button(`🔗 ${l.copy_link}`, () => kit.copy(item.link), "btn page-copy-link") : null,
       item.url ? link(`↗ ${labels.open}`, item.url, "btn page-open") : null,
@@ -78,11 +119,11 @@ window.ConsolePageCards = (() => {
       button(labels.skip, () => kit.change(item, "skipped"), "btn page-skip")];
   }
 
-  function row(item, kit) {
+  function row(item, kit, files) {
     const l = kit.L();
     const cls = ["page-row", `is-${item.state}`, item.mode === "auto" ? "is-auto" : "",
       item.faded ? "faded" : ""].filter(Boolean).join(" ");
-    const buttons = actions(item, kit).filter(Boolean);
+    const buttons = actions(item, kit, files).filter(Boolean);
     return h("div", { class: cls, "data-key": item.key },
       h("div", { class: "page-row-main" },
         h("span", { class: "page-row-mark", "aria-hidden": "true", text: mark(item) }),
@@ -96,13 +137,15 @@ window.ConsolePageCards = (() => {
   function card(data, rows, kit) {
     const l = kit.L();
     const todo = kit.tab() === "open" && data.items.some(actionable);
+    const files = todo ? cardFiles(data, kit) : [];
     return h("li", { class: "page-card", "data-group": data.group },
       h("div", { class: "page-card-head" },
         h("span", { class: "page-card-title", text: data.title || data.group }),
         h("span", { class: "dim page-card-when", text: kit.when(data.created_at) })),
       // How to post a row, said once per card instead of under every button.
       todo ? h("p", { class: "page-card-howto dim", text: l.howto }) : null,
-      h("div", { class: "page-rows" }, rows.map((item) => row(item, kit))));
+      fileList(files, kit, kit.redraw),
+      h("div", { class: "page-rows" }, rows.map((item) => row(item, kit, files))));
   }
 
   return { card, actionable, size };

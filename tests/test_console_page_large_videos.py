@@ -92,7 +92,8 @@ async def _upload(rest, data, content_type: str = "video/mp4") -> web.Response:
 
 
 def _files(repo: PageRepository) -> list[Path]:
-    return [p for p in repo.files.root.rglob("*") if p.is_file()]
+    """Stored files, without the content index (#1601)."""
+    return [p for p in repo.files.root.rglob("*") if p.is_file() and ".by-sha256" not in p.parts]
 
 
 # -- the limit ----------------------------------------------------------------------------------
@@ -226,11 +227,9 @@ async def test_videos_of_long_resolved_items_are_cleared_on_the_next_upload(rest
     async def upload(data: bytes, content_type: str) -> str:
         return (await (await _upload(rest, data, content_type)).json())["url"]
 
+    # Four different videos: the same bytes would be kept once (#1601).
     old, recent, open_, shared, image = [
-        await upload(MP4, "video/mp4"),
-        await upload(MP4, "video/mp4"),
-        await upload(MP4, "video/mp4"),
-        await upload(MP4, "video/mp4"),
+        *[await upload(MP4 + bytes([n]), "video/mp4") for n in range(4)],
         await upload(PNG, "image/png"),
     ]
     await _item(repo, "old", [old, shared, image], resolved_days_ago=31)
