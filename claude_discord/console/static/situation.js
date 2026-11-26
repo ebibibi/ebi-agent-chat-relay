@@ -19,7 +19,7 @@ window.ConsoleSituation = (() => {
       updated: (t) => `Parent's record: ${t}`, stale: "older than the latest activity",
       unwritten: "The parent has not written anything yet; this is what is measured.",
       queued: "waiting for a slot", wait: "waiting for", done: (n) => `${n} finished`, candidate: "ready to confirm",
-      noReport: "No report yet", hide: "Hide this panel", show: "Show where things stand",
+      noReport: "No report yet", hide: "Hide this panel", show: "Show where things stand", showFiles: "Show only the files",
       background: "↪ Handling a report or a finished wait", unexplained: "no request" },
     ja: { title: "📍 現在地", asks: "🙋 求められていること", running: "⚙️ 実行中", decided: "✅ 決定・完了",
       members: "👥 各スレッドの様子", chat: "💬 会話", tab: "📍 現在地", none: "今はありません",
@@ -27,7 +27,7 @@ window.ConsoleSituation = (() => {
       updated: (t) => `親の記入: ${t}`, stale: "最新の動きより古い記入です",
       unwritten: "親はまだ記入していません。下は実測です。",
       queued: "実行枠の待ち", wait: "待機中", done: (n) => `完了 ${n}件`, candidate: "完了の確認待ち",
-      noReport: "まだ報告はありません", hide: "このパネルを隠す", show: "現在地を表示",
+      noReport: "まだ報告はありません", hide: "このパネルを隠す", show: "現在地を表示", showFiles: "ファイルだけを表示",
       background: "↪ 子の報告や待機完了への対応", unexplained: "説明なし" },
   };
   const L = () => STRINGS[document.documentElement.lang === "ja" ? "ja" : "en"];
@@ -37,6 +37,7 @@ window.ConsoleSituation = (() => {
   const reports = new Map(); // item id -> {version, text}: the latest agent message, shortened
   const reportsPending = new Set();
   let tab = "chat";
+  let view = "situation"; // or "files": only the files the family's threads attached
   let observer = null;
   let hidden = localStorage.getItem(HIDDEN_KEY) === "1";
 
@@ -150,12 +151,12 @@ window.ConsoleSituation = (() => {
   }
 
   // Deliverables are listed per family, so a parent and its children share one list.
-  function deliverables(m, family) {
-    const D = window.ConsoleDeliverables;
+  function threadOf(family) {
     const members = new Map([family.root, ...family.rows.map((r) => r.item)]
       .filter((i) => i.thread_id).map((i) => [i.thread_id, { id: i.id, label: title(i) }]));
-    return D.section(family.root.id, (threadId) => members.get(threadId) || null);
+    return (threadId) => members.get(threadId) || null;
   }
+  const deliverables = (m, family) => window.ConsoleDeliverables.section(family.root.id, threadOf(family));
 
   function core(m, family, cardsOnly = false) {
     const l = L();
@@ -182,10 +183,19 @@ window.ConsoleSituation = (() => {
       h("summary", { class: "dim", text: l.done(m.finished.length) }),
       h("ul", { class: "sit-list" }, ...m.finished.map((i) => threadRow(i))))) : null;
     const others = m.members.filter((i) => !m.needs.includes(i));
+    const D = window.ConsoleDeliverables;
+    const files = D.fileCount(family.root.id);
+    const filesLabel = `${D.label()} (${files})`;
+    const switchView = (next) => { view = next; redrawOpen(); };
     const top = h("div", { class: "sit-top" },
-      h("h2", { class: "sit-title", text: l.title }),
+      h("h2", { class: "sit-title", text: view === "files" ? filesLabel : l.title }),
+      files ? h("button", { type: "button", class: "btn sit-view", "aria-pressed": view === "files" ? "true" : "false",
+        title: view === "files" ? l.show : l.showFiles,
+        text: view === "files" ? l.tab : filesLabel,
+        onclick: () => switchView(view === "files" ? "situation" : "files") }) : null,
       h("button", { type: "button", class: "btn sit-hide", title: l.hide, "aria-label": l.hide, text: "›",
         onclick: () => setHidden(true) }));
+    if (view === "files") return [top, D.files(family.root.id, threadOf(family))];
     const produced = window.ConsoleDeliverables.entries(family.root.id).length ? deliverables(m, family) : null;
     if (cardsOnly) {
       // Alone: the cards and what the thread produced, no empty headings.
@@ -262,6 +272,17 @@ window.ConsoleSituation = (() => {
     rail.replaceChildren(h("span", { text: "📍" }), asks ? h("span", { class: "sit-rail-count", text: String(asks) }) : null);
   }
 
+  // Under 📍 while folded: how many files the family attached; opens the panel on them alone.
+  function paintFilesRail(files) {
+    const rail = $("d-side-files");
+    if (!rail) return;
+    const l = L();
+    rail.hidden = !hidden || !files;
+    rail.title = l.showFiles;
+    rail.setAttribute("aria-label", l.showFiles);
+    rail.replaceChildren(h("span", { text: "🗂️" }), h("span", { class: "sit-rail-files", text: String(files) }));
+  }
+
   // Called from renderDetail on every redraw; rebuilds only when something it shows changed.
   function render(item) {
     const body = $("d-body"), side = $("d-side");
@@ -287,7 +308,10 @@ window.ConsoleSituation = (() => {
     if (!show) { paintTabs(body, false, tabs, 0); return; }
     const m = model(item, family, holder, data);
     paintTabs(body, true, tabs, count(m));
+    const files = window.ConsoleDeliverables.fileCount(family.root.id);
+    if (!files) view = "situation";
     paintRail(side, count(m));
+    paintFilesRail(files);
     if (hidden) return;
     loadReports(m.members);
     window.ConsoleSituationReply.render(
@@ -295,7 +319,7 @@ window.ConsoleSituation = (() => {
     // A thread on its own already has its reply box under the conversation.
     const reply = $("d-side-reply");
     if (reply) reply.hidden = cardsOnly;
-    const key = JSON.stringify([LANG, cardsOnly, holder.id, m.written, m.waits,
+    const key = JSON.stringify([LANG, view, cardsOnly, holder.id, m.written, m.waits,
       m.cards.map((c) => [c.request_id, c.card]), window.ConsoleSecretary.stateKey(),
       [...m.members, ...m.candidates, ...m.finished].map((i) =>
         [i.id, i.status, i.queued, i.running, i.title, i.ai && i.ai.next_step, reports.get(i.id)?.text,
@@ -314,7 +338,9 @@ window.ConsoleSituation = (() => {
   function attach(body) {
     observer?.disconnect();
     const rail = $("d-side-rail");
-    if (rail) rail.onclick = () => setHidden(false);
+    if (rail) rail.onclick = () => { view = "situation"; setHidden(false); };
+    const filesRail = $("d-side-files");
+    if (filesRail) filesRail.onclick = () => { view = "files"; setHidden(false); };
     if (!window.ResizeObserver) { body.dataset.layout = "split"; return; }
     // Known before the first draw: the family list's line depends on it (family.js).
     const width = body.getBoundingClientRect().width;

@@ -727,6 +727,7 @@ function buildDetail(pane, item, key) {
     h("div", { class: "d-main", id: "d-main" }, ...main),
     h("aside", { class: "d-side", id: "d-side", hidden: true, "aria-label": LANG === "ja" ? "現在地" : "Where things stand" },
       h("button", { class: "d-side-rail", id: "d-side-rail", type: "button", hidden: true }),
+      h("button", { class: "d-side-rail d-side-files", id: "d-side-files", type: "button", hidden: true }),
       h("div", { class: "d-side-core", id: "d-side-core" }),
       h("div", { class: "d-side-reply", id: "d-side-reply" })));
   const nodes = [

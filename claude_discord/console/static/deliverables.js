@@ -18,11 +18,11 @@ window.ConsoleDeliverables = (() => {
     { key: "link", kinds: ["pr", "release", "link"], folded: true },
   ];
   const STRINGS = {
-    en: { head: "📦 Deliverables", none: "Nothing yet", more: (n) => `${n} more`, replaced: (n) => `Replaced (${n})`,
+    en: { files: "🗂️ Files", head: "📦 Deliverables", none: "Nothing yet", more: (n) => `${n} more`, replaced: (n) => `Replaced (${n})`,
       play: "Play", preview: "Preview", download: "Download", open: "Open", missing: "file not found in the thread",
       unread: (n) => `${n} thread(s) could not be read`, failed: "Could not load",
       groups: { video: "🎬 Videos", image: "🖼️ Images", doc: "📄 Documents and notes", link: "🔗 PRs and links" } },
-    ja: { head: "📦 成果物", none: "まだありません", more: (n) => `ほか ${n}件`, replaced: (n) => `置き換え済み（${n}件）`,
+    ja: { files: "🗂️ ファイル", head: "📦 成果物", none: "まだありません", more: (n) => `ほか ${n}件`, replaced: (n) => `置き換え済み（${n}件）`,
       play: "再生", preview: "プレビュー", download: "ダウンロード", open: "開く", missing: "スレッドにファイルが見つかりません",
       unread: (n) => `${n}件のスレッドを読めませんでした`, failed: "読み込めませんでした",
       groups: { video: "🎬 動画", image: "🖼️ 画像", doc: "📄 文書・ノート", link: "🔗 PR・リンク" } },
@@ -187,6 +187,20 @@ window.ConsoleDeliverables = (() => {
     return node;
   }
 
+  // Only the files the bot attached in the family's threads, newest first, in one flat list.
+  function files(id, threadOf) {
+    const l = L();
+    const list = entries(id).filter((e) => e.source === "file").sort((a, b) => time(b) - time(a));
+    const key = JSON.stringify([LANG, list, list.map((e) => threadOf(e.thread_id)?.label)]);
+    const kept = nodes.get(`files:${id}`);
+    if (kept && kept.key === key) return kept.node;
+    const node = h("section", { class: "sit-section dlv-files" },
+      list.length ? h("ul", { class: "sit-list" }, ...list.map((e) => row(e, threadOf)))
+        : h("div", { class: "dim sit-empty", text: l.none }));
+    nodes.set(`files:${id}`, { key, node });
+    return node;
+  }
+  const fileCount = (id) => entries(id).filter((e) => e.source === "file").length;
 
-  return { load, entries, section, set onChange(fn) { onChange = fn; } };
+  return { load, entries, section, files, fileCount, label: () => L().files, set onChange(fn) { onChange = fn; } };
 })();
