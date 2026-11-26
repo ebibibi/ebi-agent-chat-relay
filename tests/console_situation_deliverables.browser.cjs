@@ -110,6 +110,13 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
     assert.equal(await page.locator('#d-side .sit-section.asks').count(), 0, 'no empty asks');
     assert.equal(await page.locator('#d-side .dlv-row a[href="/#note/02_Contexts/x/memo.md"]').count(), 1);
     if (process.env.SHOTS) await page.screenshot({path: `${process.env.SHOTS}/deliverables-single-${width}.png`});
+    if (width > 900) {
+      // Folded with nothing asked: the rail shows 📍 alone, not the text "null".
+      await page.locator('#d-side .sit-hide').click();
+      await page.locator('#d-side-rail').waitFor();
+      assert.equal((await page.locator('#d-side-rail').innerText()).trim(), '📍');
+      await page.locator('#d-side-rail').click();
+    }
     assert.deepEqual(errors, []);
     await page.close();
   }
