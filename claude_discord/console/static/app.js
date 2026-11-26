@@ -713,6 +713,7 @@ function buildDetail(pane, item, key) {
     const form = h("form", { class: "reply", onsubmit: (e) => { e.preventDefault(); sendReply(item.id, box); } },
       h("div", { class: "reply-main" }, meta, tray, box),
       h("div", { class: "reply-side" }, window.ConsolePaste.button(item.id), window.ConsoleNight.button(box),
+        window.ConsoleHtmlBrief.button(box, item.workspace_path),
         h("button", { class: "btn primary", type: "submit", text: T.send })));
     main.push(form);
     box.value = state.drafts[item.id] || "";

@@ -287,3 +287,12 @@ async def test_pin_order_endpoint_and_write_guards(client) -> None:
         {"target_id": ids[1], "placement": "bad"},
     ]:
         assert (await client.post(url, json=bad, headers=WRITE)).status == 400
+
+
+async def test_the_html_brief_text_is_served_behind_authentication(client) -> None:
+    assert (await client.get("/console/api/html-brief")).status == 401
+    response = await client.get(
+        "/console/api/html-brief?lang=en", headers={"Authorization": f"Bearer {TOKEN}"}
+    )
+    assert response.status == 200
+    assert (await response.json())["template"].startswith("Summarize the recent conversation")
