@@ -64,6 +64,15 @@ def codex_line(name: str, arguments: object) -> str:
         ),
         ("Edit", f"{VAULT}/Work/Site/notes.md", []),
         ("Edit", "/elsewhere/log.md", []),
+        # Discarding output or merging streams writes nothing: a read stays a read.
+        ("Bash", f"grep -n x '{VAULT}/Work/Site/log.md' 2>/dev/null | tail -5", []),
+        ("Bash", f"cat {VAULT}/Work/Site/status.md 2>&1 | head", []),
+        ("Bash", f"tail {VAULT}/Work/Site/log.md >/dev/null &>/dev/null 1>&2", []),
+        (
+            "Bash",
+            f"printf 'x' >> {VAULT}/Work/Site/log.md 2>/dev/null",
+            [("Work/Site", "log.md")],
+        ),
     ],
 )
 def test_record_writes_need_a_write_and_a_record_file(name, text, expected):

@@ -36,6 +36,9 @@ _WRITE_MARKERS = re.compile(
     r">>|(?<![<>=-])>\s*\S|\btee\b|\bsed\s+-i|write_text|\.write\(|open\([^)]*['\"][wa]"
     r"|\*\*\* (?:Update|Add) File|cat\s*<<|\bcp\b|\bmv\b"
 )
+# Redirections that write no file: output thrown away (``2>/dev/null``, ``&>/dev/null``)
+# or one stream merged into another (``2>&1``). A read followed by these is still a read.
+_NO_FILE_REDIRECTS = re.compile(r"(?:\d|&)?>>?\s*/dev/null\b|\d?>&\d")
 MAX_READ_BYTES = 8_000_000
 
 
@@ -100,7 +103,7 @@ def record_writes(name: str, text: str) -> list[RecordWrite]:
     """Record files one tool call wrote, judged from its name and input."""
     if "02_Contexts/" not in text:
         return []
-    if name not in WRITE_TOOLS and not _WRITE_MARKERS.search(text):
+    if name not in WRITE_TOOLS and not _WRITE_MARKERS.search(_NO_FILE_REDIRECTS.sub(" ", text)):
         return []
     found = [RecordWrite(folder=m[1], file=m[2]) for m in _DIRECT.finditer(text)]
     if not found:
