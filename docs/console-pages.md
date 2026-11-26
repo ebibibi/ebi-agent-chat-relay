@@ -235,13 +235,21 @@ tab, the rows still open, and shows only the chosen target's rows.
 A row a person finishes shows a few plain buttons, usable on any row and in any order (#1589).
 No step-by-step walk: the person picks the network they want to post on now.
 
-1. **⬇ Save the video (23 MB)** — one per stored file: a normal download of that file, with its
+1. **⬇ Save the video (23 MB)** — one per file, at the top of the card: a normal download of that file, with its
    size (`size` on the attachment, filled when the item is registered). A file of 500 MB or more
    also gets a note that a phone is the wrong place to save it: save it on a computer, or open the
    composer in a browser and attach it there.
 2. **📋 Copy text** — the body to the clipboard.
 3. **↗ Open the composer** — when the row has a `url` (new tab).
 4. **✅ Posted** — marks the row done in one tap; **Skip** sets it aside.
+
+**One copy per content (#1601).** A card's rows often carry the very same video (Instagram and
+TikTok usually do). An upload whose bytes (sha256) are already on the page answers the stored
+file's URL instead of keeping a second copy, and at start-up copies kept before this were merged
+into one, rewriting the items that listed them (a copy no item lists any more is deleted). The
+card lists each file once at its top — "⬇ ① Save the video (23 MB) — used on Instagram・TikTok"
+— and each row only says which one to use ("🎬 uses video ①"), so a phone downloads it once. A
+file saved on this device is marked "saved on this device" (`localStorage`, `page-saved:<url>`).
 
 A card with rows to post says how once, above its rows ("save → copy → pick the saved video in
 the posting app and paste → Posted"), instead of under every button.

@@ -2,6 +2,8 @@
 // target. Automatic rows show their outcome; a row a person finishes shows plain buttons usable
 // in any order (#1589): save the file (a normal download, its size shown), copy the text, open
 // the composer, posted. Nothing reads a file before it is asked for, and no share sheet is used.
+// A card lists each file once at its top, saying which rows use it; rows only point at it, and a
+// file saved on this device says so (#1601).
 const { chromium } = require('playwright');
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
@@ -19,6 +21,8 @@ const fixtures = () => [
   item('b', {target:'Net B', mode:'auto', body:'auto pending'}),
   item('c', {target:'Net C', body:'本文 C', url:'https://c.example/compose?text=c', error:'401 from the API'}),
   item('d', {target:'Net D', body:'本文 D', faded:true,
+    attachments:[{url:`${FILES}/clip.mp4`, name:'clip.mp4', kind:'video', size:23 * 1024 * 1024}]}),
+  item('f', {target:'Net F', body:'本文 F',
     attachments:[{url:`${FILES}/clip.mp4`, name:'clip.mp4', kind:'video', size:23 * 1024 * 1024}]}),
   item('e', {target:'Net E', body:'本文 E', url:'https://e.example/compose',
     attachments:[{url:`${FILES}/long.mp4`, name:'long.mp4', kind:'video', size:Math.round(1.3 * 1024 ** 3)}]}),
@@ -59,7 +63,7 @@ async function open(browser, viewport) {
         headers:url.searchParams.has('download') ? {'Content-Disposition':'attachment'} : {}});
     }
     let data = {};
-    if (url.pathname.endsWith('/board')) data = {items:[], slots:{}, places:[], pages:definition(4)};
+    if (url.pathname.endsWith('/board')) data = {items:[], slots:{}, places:[], pages:definition(5)};
     else if (url.pathname.endsWith('/pages/out/cards')) {
       data = {cards: url.searchParams.get('state') === 'open' ? toCards(rows.filter((i) => i.state === 'open' || i.group)) : []};
     } else if (request.method() === 'PATCH' && url.pathname.includes('/pages/out/items/')) {
@@ -97,7 +101,7 @@ async function open(browser, viewport) {
 
     // One card for the group, with its rows in order; the item without a group is drawn as before.
     assert.equal(await page.locator('.page-card').count(), 1);
-    assert.equal(await page.locator('.page-card .page-row').count(), 5);
+    assert.equal(await page.locator('.page-card .page-row').count(), 6);
     assert.equal(await page.locator('.page-item[data-key="plain"]').count(), 1);
     assert.equal(await page.evaluate(() => window.pwned), undefined);
     assert.ok((await page.locator('.page-card-title').textContent()).includes(hostile), 'the title stays text');
@@ -105,7 +109,7 @@ async function open(browser, viewport) {
     // Each row says where it stands. Automatic rows have no buttons; the posted one links its post.
     const statuses = await page.locator('.page-row-status').allTextContents();
     assert.deepEqual(statuses, ['自動で投稿済み', '自動で投稿中',
-      '自動投稿できませんでした（401 from the API）。手で投稿してください', '未投稿', '未投稿']);
+      '自動投稿できませんでした（401 from the API）。手で投稿してください', '未投稿', '未投稿', '未投稿']);
     const posted = page.locator('.page-row[data-key="a"] .page-row-result');
     assert.equal(await posted.getAttribute('href'), 'https://a.example/p/1');
     assert.equal(await posted.getAttribute('rel'), 'noopener noreferrer');
@@ -115,21 +119,28 @@ async function open(browser, viewport) {
     assert.equal(await page.locator('.page-next, .page-next-sheet, .page-row-manual').count(), 0);
     const labels = async (key) => page.locator(`.page-row[data-key="${key}"] .page-row-actions .btn`).allTextContents();
     assert.deepEqual(await labels('c'), ['📋 本文をコピー', '↗ 投稿画面を開く', '✅ 投稿した', '見送り']);
-    assert.deepEqual(await labels('d'), ['⬇ 動画を保存（23 MB）', '📋 本文をコピー', '✅ 投稿した', '見送り']);
-    assert.deepEqual(await labels('e'), ['⬇ 動画を保存（1.3 GB）', '📋 本文をコピー', '↗ 投稿画面を開く', '✅ 投稿した', '見送り']);
-    assert.equal(await page.locator('.page-row[data-key="c"] .page-open').getAttribute('href'), 'https://c.example/compose?text=c');
-    // A large file says a phone is the wrong place to save it; a small one does not.
-    assert.match(await page.locator('.page-row[data-key="e"] .page-row-large').textContent(), /大きいファイル（1\.3 GB）.*PC/);
-    assert.equal(await page.locator('.page-row[data-key="d"] .page-row-large').count(), 0);
-    // How to post is said once per card, not under every button.
+    assert.deepEqual(await labels('d'), ['📋 本文をコピー', '✅ 投稿した', '見送り']);
+    assert.deepEqual(await labels('e'), ['📋 本文をコピー', '↗ 投稿画面を開く', '✅ 投稿した', '見送り']);
+    assert.equal(await page.locator('.page-row-save, .page-row .page-file-save').count(), 0, 'no save button per row');
     assert.equal(await page.locator('.page-card-howto').count(), 1);
-    assert.match(await page.locator('.page-card-howto').textContent(), /保存.*本文をコピー.*投稿した/);
+    // Each file once at the top of the card, with the rows that use it; rows point at it.
+    const files = page.locator('.page-card-file');
+    assert.equal(await files.count(), 2, 'clip.mp4 on two rows is listed once');
+    assert.deepEqual(await page.locator('.page-card-file .page-file-save').allTextContents(),
+      ['⬇ ① 動画を保存（23 MB）', '⬇ ② 動画を保存（1.3 GB）']);
+    assert.deepEqual(await page.locator('.page-card-file-use').allTextContents(), ['Net D・Net F で使う', 'Net E で使う']);
+    assert.deepEqual(await page.locator('.page-row-uses').allTextContents(),
+      ['🎬 ① の動画を使う', '🎬 ① の動画を使う', '🎬 ② の動画を使う']);
+    // A large file says a phone is the wrong place to save it; a small one does not.
+    assert.match(await files.nth(1).locator('.page-row-large').textContent(), /大きいファイル（1\.3 GB）.*PC/);
+    assert.equal(await files.nth(0).locator('.page-row-large').count(), 0);
+    assert.match(await page.locator('.page-card-howto').textContent(), /一度保存.*本文をコピー.*投稿した/);
     assert.equal(await page.locator('.page-row[data-key="d"].faded').count(), 1, 'an old row is faded');
     assert.equal(await page.locator('.page-card .page-result').count(), 0, 'done is one tap');
 
     // The filter counts what is left to do on the open tab.
     const chips = await page.locator('.page-chip').allTextContents();
-    assert.deepEqual(chips, ['すべて5', 'Net B1', 'Net C1', 'Net D1', 'Net E1', '投稿先なし1']);
+    assert.deepEqual(chips, ['すべて6', 'Net B1', 'Net C1', 'Net D1', 'Net E1', 'Net F1', '投稿先なし1']);
 
     // Nothing was fetched to prepare a share: a file is read only when someone saves or plays it.
     assert.deepEqual(fetched, []);
@@ -139,17 +150,22 @@ async function open(browser, viewport) {
       const box = await page.locator('.page-shell').boundingBox();
       assert.ok(box.x >= 0 && box.x + box.width <= viewport.width, 'the panel fits a phone');
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth) <= viewport.width, 'no sideways scroll');
-      for (const button of await page.locator('.page-row[data-key="d"] .page-row-actions .btn').all()) {
+      for (const button of await page.locator('.page-row[data-key="d"] .page-row-actions .btn, .page-file-save').all()) {
         assert.ok((await button.boundingBox()).height >= 44, 'buttons are big enough to tap');
       }
     } else if (process.env.CONSOLE_TEST_SHOT) await page.screenshot({path:process.env.CONSOLE_TEST_SHOT});
 
-    // Any row, any order: start with the last one. Save is a plain download of the stored file.
+    // Save is a plain download of the stored file, once for every row that uses it.
+    assert.equal(await page.locator('.page-card-file-saved').count(), 0);
     const download = page.waitForEvent('download');
-    await page.locator('.page-row[data-key="d"] .page-row-save').click();
+    await page.locator('.page-card-file .page-file-save').first().click();
     const saved = await download;
     assert.equal(saved.suggestedFilename(), 'clip.mp4');
     assert.ok(saved.url().endsWith('/clip.mp4?download=1'), 'the browser downloads the stored file itself');
+    // This device remembers it, also after a reload.
+    await page.locator('.page-card-file-saved').first().waitFor();
+    assert.equal(await page.locator('.page-card-file').nth(0).locator('.page-card-file-saved').textContent(), '✓ この端末に保存済み');
+    assert.equal(await page.locator('.page-card-file').nth(1).locator('.page-card-file-saved').count(), 0);
     await page.locator('.page-row[data-key="d"] .page-copy').click();
     assert.deepEqual(await page.evaluate(() => window.copied), ['本文 D']);
     await page.locator('.page-row[data-key="d"] .page-done').click();

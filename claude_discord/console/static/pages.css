@@ -62,12 +62,18 @@
 /* Plain buttons on each row, in any order (#1589): save, copy, open, posted. */
 .page-card-howto { margin:-2px 0 8px; font-size:12px; overflow-wrap:anywhere; }
 .page-row-actions .page-skip { font-size:12px; color:var(--dim); }
+.page-card-files { display:flex; flex-direction:column; gap:8px; margin:0 0 10px; padding:10px; border:1px solid var(--line); border-radius:var(--radius); background:var(--raise); }
+.page-card-files-head { font-size:12px; }
+.page-card-file { display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; }
+.page-card-file-use { font-size:13px; overflow-wrap:anywhere; }
+.page-card-file-saved { font-size:12px; color:var(--ok, #3a3); }
+.page-row-uses { flex:1 1 100%; font-size:13px; }
 .page-row-large { flex:1 1 100%; margin:0; font-size:12px; color:var(--warn, #c80); overflow-wrap:anywhere; }
 @media (max-width: 640px) {
   .page-card { padding:10px; }
   .page-row-actions, .page-row-detail { padding-left:0; }
   .page-row-actions .btn { min-height:44px; }
-  .page-row-actions .page-row-save, .page-row-actions .page-done { flex-basis:100%; }
+  .page-card-file .page-file-save, .page-row-actions .page-done { flex-basis:100%; min-height:44px; }
 }
 .page-row-detail > summary { list-style:none; }
 .page-row-detail > summary::-webkit-details-marker { display:none; }

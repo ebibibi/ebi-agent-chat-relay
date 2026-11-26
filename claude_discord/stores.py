@@ -90,6 +90,8 @@ async def build_session_stores(session_db_path: str) -> SessionStores:
     await _seed_human_activity(attention)
     pages = PageRepository(session_db_path)
     await pages.init_db()
+    # One copy per content of files attached before uploads were deduplicated (#1601).
+    pages.start_merging_duplicate_files()
 
     # Adopt every thread this deployment already has, so the ledger answers for
     # all of its conversations rather than only the ones opened from now on.

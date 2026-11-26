@@ -127,6 +127,10 @@ what was left for one piece of content.
   earlier "Next" walk handed files to the share sheet, which meant reading a whole file into the
   page before the tap; a gigabyte video never got ready on a phone, and walking from the first
   row pushed people onto a network they had not chosen. The relay still posts nowhere.
+- **One copy per content (2026-11-26, #1601).** Rows of a card usually share a video, and the
+  generator uploads it once per row. The page keeps one copy per sha256 and the card lists each
+  file once, so a phone downloads a video once. Deduplicating at upload, not only in the view,
+  also saves disk; existing copies were merged once at start-up.
 - **Done is one tap again on cards.** The optional post-URL field is not shown on cards: pasting a
   URL by hand was the step people skipped, and automation that can see the post fills it later.
   Items without a group keep the field.

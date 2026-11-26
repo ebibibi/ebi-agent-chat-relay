@@ -6,6 +6,11 @@ Console serves is the type the file really is. Every part of a file URL is untru
 is the page's, the token the hex minted here, the name a bare filename, and the resolved path
 must stay under the page's directory.
 
+A page keeps one copy per content (#1601): a card's rows often carry the very same video, and an
+upload whose bytes (sha256) are already on the page answers the stored file instead of a second
+copy, so a phone downloads it once. The index is ``<slug>/.by-sha256/<digest>``, holding
+``<token>/<name>``; an entry whose file is gone is ignored and replaced.
+
 Videos may be long: a 20-minute 1080p screen recording is about 1.2 GB. The video limit, the disk
 space kept free, and how long a resolved item's videos are kept are read from the environment
 (see ``docs/console-pages.md``); every one has a working default.
@@ -14,6 +19,7 @@ space kept free, and how long a resolved item's videos are kept are read from th
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import re
@@ -43,6 +49,9 @@ _SPACE_CHECK_BYTES = 256 * _MB
 MAX_NAME_CHARS = 120
 MAX_NAME_BYTES = 200
 _HEAD_BYTES = 16
+#: Where a page's content index lives (not a token, so never served as a file).
+_INDEX = ".by-sha256"
+_DIGEST = re.compile(r"[0-9a-f]{64}")
 
 _TOKEN = re.compile(r"[0-9a-f]{32}")
 _SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
@@ -282,6 +291,7 @@ class PageFiles:
         token = uuid.uuid4().hex
         staging = self.root / slug / f".upload-{token}"
         staging.parent.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha256()
         try:
             size = 0
             checked = 0
@@ -296,7 +306,7 @@ class PageFiles:
                         await asyncio.to_thread(self.ensure_space, 0)
                     if len(head) < _HEAD_BYTES:
                         head += chunk[: _HEAD_BYTES - len(head)]
-                    await asyncio.to_thread(handle.write, chunk)
+                    await asyncio.to_thread(_write_and_hash, handle, digest, chunk)
             if size == 0:
                 raise PageFileError("the file is empty", 400)
             actual = sniff(head)
@@ -304,6 +314,9 @@ class PageFiles:
                 raise PageFileError("the file is not the type it claims to be", 400)
             if TYPES[claimed][0] == "image" and actual != claimed:
                 raise PageFileError("the file is not the image type it claims to be", 400)
+            known = self.by_digest(slug, digest.hexdigest())
+            if known is not None and known.size == size:
+                return known  # the same bytes are already here: one copy per content
             name = safe_name(filename, TYPES[actual][1])
             target = self.root / slug / token / name
             try:
@@ -312,9 +325,45 @@ class PageFiles:
             except OSError:
                 shutil.rmtree(target.parent, ignore_errors=True)
                 raise
+            self.remember(slug, digest.hexdigest(), token, name)
         finally:
             staging.unlink(missing_ok=True)
         return StoredFile(file_url(slug, token, name), name, actual, TYPES[actual][0], size)
+
+    # -- one copy per content (#1601) --------------------------------------------------------
+
+    def by_digest(self, slug: str, digest: str) -> StoredFile | None:
+        """The stored file with these bytes on this page, or None (also for a stale entry)."""
+        if not _SLUG.fullmatch(slug) or not _DIGEST.fullmatch(digest):
+            return None
+        entry = self.root / slug / _INDEX / digest
+        try:
+            token, _, name = entry.read_text(encoding="utf-8").strip().partition("/")
+        except OSError:
+            return None
+        return self.describe(slug, token, name)
+
+    def remember(self, slug: str, digest: str, token: str, name: str) -> None:
+        """Index a stored file by its content (best effort: without it a copy is kept twice)."""
+        if not _SLUG.fullmatch(slug) or not _DIGEST.fullmatch(digest):
+            return
+        folder = self.root / slug / _INDEX
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / digest).write_text(f"{token}/{name}", encoding="utf-8")
+        except OSError:
+            logger.warning("Could not index page file %s/%s", slug, token, exc_info=True)
+
+    def digest(self, slug: str, token: str, name: str) -> str | None:
+        """The sha256 of a stored file, read in blocks (a video may be gigabytes)."""
+        path = self.resolve(slug, token, name)
+        if path is None:
+            return None
+        hasher = hashlib.sha256()
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(_MB), b""):
+                hasher.update(block)
+        return hasher.hexdigest()
 
     def remove_page(self, slug: str) -> None:
         if _SLUG.fullmatch(slug):
@@ -328,6 +377,11 @@ class PageFiles:
         freed = sum(p.stat().st_size for p in folder.glob("*") if p.is_file())
         shutil.rmtree(folder, ignore_errors=True)
         return freed
+
+
+def _write_and_hash(handle, digest, chunk: bytes) -> None:  # noqa: ANN001 — file and hash objects
+    handle.write(chunk)
+    digest.update(chunk)
 
 
 def _disk_free(path: Path) -> int:

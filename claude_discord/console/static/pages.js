@@ -29,7 +29,10 @@ window.ConsolePages = (() => {
     text: "本文", text_and_files: "本文と添付",
     save_kind: (kind, size) => `${kind === "video" ? "動画" : kind === "image" ? "画像" : "ファイル"}を保存${size ? `（${size}）` : ""}`,
     large: (size) => `大きいファイル${size ? `（${size}）` : ""}です。スマホに保存すると時間と容量を使います。PC で保存するか、PC・iPhone のブラウザで投稿画面を開いて添付してください。`,
-    howto: "① 保存 → ② 本文をコピー → ③ 投稿画面（アプリ）で保存した動画を選び、本文を貼り付けて投稿 → ④「投稿した」を押す",
+    howto: "上の動画を一度保存 → 媒体ごとに「本文をコピー」→ アプリで保存した動画を選び、本文を貼り付けて投稿 →「投稿した」",
+    card_files: "このカードの動画（一度保存すれば全部の媒体で使えます）",
+    used_by: (t) => `${t} で使う`, saved_here: "この端末に保存済み",
+    uses: (m) => m ? `🎬 ${m} の動画を使う` : "🎬 上の動画を使う",
   } : {
     open: "Open", done: "Done", skip: "Skip", reopen: "Back to open", copy: "Copy text", copied: "Copied",
     close: "Close", tab_open: "Open", tab_done: "Done", tab_skipped: "Skipped", empty: "Nothing here",
@@ -44,7 +47,10 @@ window.ConsolePages = (() => {
     text: "Text", text_and_files: "Text and files",
     save_kind: (kind, size) => `Save the ${kind === "video" ? "video" : kind === "image" ? "image" : "file"}${size ? ` (${size})` : ""}`,
     large: (size) => `A large file${size ? ` (${size})` : ""}: saving it on a phone takes time and space. Save it on a computer, or open the composer in a browser on a computer or iPhone and attach it there.`,
-    howto: "1 Save → 2 Copy text → 3 In the posting app, pick the saved video and paste the text → 4 Press \"Posted\"",
+    howto: "Save the video above once → per target, \"Copy text\" → in the app, pick the saved video and paste → \"Posted\"",
+    card_files: "Videos on this card (save once, use on every target)",
+    used_by: (t) => `used on ${t}`, saved_here: "saved on this device",
+    uses: (m) => m ? `🎬 uses video ${m}` : "🎬 uses the video above",
   };
   const STORED = "/console/api/pages/";
 
@@ -320,7 +326,7 @@ window.ConsolePages = (() => {
     }),
     change, copy, toast: (text) => toast(text), attachment, counter, when, save,
     storedFiles: (item) => (item.attachments || []).filter(stored),
-    button: (...args) => button(...args), link: (...args) => link(...args),
+    button: (...args) => button(...args), link: (...args) => link(...args), redraw: () => draw(),
   };
 
   function choose(value) {
