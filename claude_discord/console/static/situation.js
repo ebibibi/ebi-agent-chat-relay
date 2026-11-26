@@ -37,7 +37,8 @@ window.ConsoleSituation = (() => {
   const reports = new Map(); // item id -> {version, text}: the latest agent message, shortened
   const reportsPending = new Set();
   let tab = "chat";
-  let view = "situation"; // or "files": only the files the family's threads attached
+  let view = "situation"; // or "files" / "html": only the files (or HTML) the family's threads attached
+  const FILE_VIEWS = ["files", "html"];
   let observer = null;
   let hidden = localStorage.getItem(HIDDEN_KEY) === "1";
 
@@ -184,18 +185,18 @@ window.ConsoleSituation = (() => {
       h("ul", { class: "sit-list" }, ...m.finished.map((i) => threadRow(i))))) : null;
     const others = m.members.filter((i) => !m.needs.includes(i));
     const D = window.ConsoleDeliverables;
-    const files = D.fileCount(family.root.id);
-    const filesLabel = `${D.label()} (${files})`;
-    const switchView = (next) => { view = next; redrawOpen(); };
+    const id = family.root.id;
+    const viewLabel = (v) => v === "situation" ? l.tab : `${D.label(v)} (${D.fileCount(id, v)})`;
+    // On a phone the tabs above switch views; beside the conversation these buttons do.
+    const switches = $("d-body")?.dataset.layout === "tabs" ? [] : ["situation", ...FILE_VIEWS]
+      .filter((v) => v !== view && (v === "situation" || D.fileCount(id, v)));
     const top = h("div", { class: "sit-top" },
-      h("h2", { class: "sit-title", text: view === "files" ? filesLabel : l.title }),
-      files ? h("button", { type: "button", class: "btn sit-view", "aria-pressed": view === "files" ? "true" : "false",
-        title: view === "files" ? l.show : l.showFiles,
-        text: view === "files" ? l.tab : filesLabel,
-        onclick: () => switchView(view === "files" ? "situation" : "files") }) : null,
+      h("h2", { class: "sit-title", text: view === "situation" ? l.title : viewLabel(view) }),
+      ...switches.map((v) => h("button", { type: "button", class: "btn sit-view", "data-view": v, text: viewLabel(v),
+        onclick: () => { view = v; redrawOpen(); } })),
       h("button", { type: "button", class: "btn sit-hide", title: l.hide, "aria-label": l.hide, text: "›",
         onclick: () => setHidden(true) }));
-    if (view === "files") return [top, D.files(family.root.id, threadOf(family))];
+    if (view !== "situation") return [top, D.files(id, threadOf(family), view)];
     const produced = window.ConsoleDeliverables.entries(family.root.id).length ? deliverables(m, family) : null;
     if (cardsOnly) {
       // Alone: the cards and what the thread produced, no empty headings.
@@ -234,7 +235,7 @@ window.ConsoleSituation = (() => {
     if (familyNode && familyNode.parentElement !== main) main.insertBefore(familyNode, notes);
   }
 
-  function paintTabs(body, show, tabs, asks) {
+  function paintTabs(body, show, tabs, asks, views = []) {
     const bar = $("d-tabs");
     if (!bar) return;
     bar.hidden = !(show && tabs);
@@ -248,15 +249,19 @@ window.ConsoleSituation = (() => {
         onclick: () => setHidden(false), text: label }));
       return;
     }
-    const button = (key, text) => h("button", { type: "button", class: "sit-tab" + (active === key ? " on" : ""),
-      "aria-pressed": active === key ? "true" : "false", onclick: () => switchTab(key), text });
-    bar.replaceChildren(button("chat", l.chat), button("situation", label));
+    // The file views share the panel's tab: the panel shows them in place of where things stand.
+    const on = active === "chat" ? "chat" : view;
+    const D = window.ConsoleDeliverables;
+    const button = (key, text) => h("button", { type: "button", class: "sit-tab" + (on === key ? " on" : ""),
+      "aria-pressed": on === key ? "true" : "false", onclick: () => switchTab(key), text });
+    bar.replaceChildren(button("chat", l.chat), button("situation", label), ...views.map((v) => button(v, D.label(v))));
   }
 
   function switchTab(next) {
     const msgs = $("msgs");
     const top = msgs ? msgs.scrollTop : 0;
-    tab = next;
+    if (next !== "chat") view = next;
+    tab = next === "chat" ? "chat" : "situation";
     redrawOpen();
     if (msgs && next === "chat") msgs.scrollTop = top;
   }
@@ -307,9 +312,10 @@ window.ConsoleSituation = (() => {
     place(show && !hidden, family);
     if (!show) { paintTabs(body, false, tabs, 0); return; }
     const m = model(item, family, holder, data);
-    paintTabs(body, true, tabs, count(m));
     const files = window.ConsoleDeliverables.fileCount(family.root.id);
-    if (!files) view = "situation";
+    const views = FILE_VIEWS.filter((v) => window.ConsoleDeliverables.fileCount(family.root.id, v));
+    if (!views.includes(view)) view = "situation";
+    paintTabs(body, true, tabs, count(m), views);
     paintRail(side, count(m));
     paintFilesRail(files);
     if (hidden) return;
@@ -319,7 +325,7 @@ window.ConsoleSituation = (() => {
     // A thread on its own already has its reply box under the conversation.
     const reply = $("d-side-reply");
     if (reply) reply.hidden = cardsOnly;
-    const key = JSON.stringify([LANG, view, cardsOnly, holder.id, m.written, m.waits,
+    const key = JSON.stringify([LANG, view, tabs, cardsOnly, holder.id, m.written, m.waits,
       m.cards.map((c) => [c.request_id, c.card]), window.ConsoleSecretary.stateKey(),
       [...m.members, ...m.candidates, ...m.finished].map((i) =>
         [i.id, i.status, i.queued, i.running, i.title, i.ai && i.ai.next_step, reports.get(i.id)?.text,

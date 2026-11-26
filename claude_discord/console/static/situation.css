@@ -16,7 +16,10 @@
 .sit-rail-count { font-size: 12px; font-weight: 700; color: var(--p1); }
 .d-side-files { margin-top: 0; }
 .sit-rail-files { font-size: 12px; color: var(--dim); }
-.sit-top .sit-view { margin-left: auto; font-size: 12px; }
+.sit-top { flex-wrap: wrap; }
+.sit-top .sit-view { font-size: 12px; white-space: nowrap; }
+.sit-top .sit-title + .sit-view { margin-left: auto; }
+.sit-title { white-space: nowrap; }
 /* The panel's own reply box stays at the bottom while the panel scrolls. */
 .d-side-reply { position: sticky; bottom: 0; background: var(--panel); border-top: 1px solid var(--line); padding: 8px 10px; }
 .sit-reply { display: flex; flex-direction: column; gap: 6px; }

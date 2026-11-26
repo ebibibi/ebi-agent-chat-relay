@@ -1,5 +1,6 @@
 // The 🗂️ button under 📍 in the side panel shows only the files the family's threads attached,
-// newest first in one list, without PRs or notes; the same button and 📍 go back to the panel.
+// newest first in one list, without PRs or notes; 📄 HTML keeps the HTML documents alone. On a
+// phone both are tabs beside 💬 and 📍.
 // Run: NODE_PATH=<dir with playwright> node tests/console_situation_files.browser.cjs
 const { chromium } = require('playwright');
 const fs = require('node:fs');
@@ -14,6 +15,7 @@ const family = {threads: ['10', '11'], unread: [], deliverables: [
   {source: 'declared', thread_id: '10', at: '2026-11-23T08:30:00Z', title: 'PR #77 試作の台本', url: 'https://github.com/o/r/pull/77', kind: 'pr'},
   {source: 'file', thread_id: '11', at: '2026-11-23T08:00:00Z', name: 'short_v2.mp4', url: cdn('short_v2.mp4'), content_type: 'video/mp4', size: 9, title: '試作 v2'},
   {source: 'file', thread_id: '11', at: '2026-11-23T07:00:00Z', name: 'report.md', url: cdn('report.md'), content_type: 'text/markdown', size: 20},
+  {source: 'file', thread_id: '11', at: '2026-11-23T06:30:00Z', name: 'summary.html', url: cdn('summary.html'), content_type: 'text/html', size: 50},
   {source: 'file', thread_id: '11', at: '2026-11-23T06:00:00Z', name: 'frame.png', url: cdn('frame.png'), content_type: 'image/png', size: 70},
   {source: 'file', thread_id: '11', at: '2026-11-22T06:00:00Z', name: 'short_v1.mp4', url: cdn('short_v1.mp4'), content_type: 'video/mp4', size: 9, title: '試作 v1', superseded: true},
   ...[1, 2, 3].map((n) => ({source: 'file', thread_id: '11', at: `2026-11-21T0${n}:00:00Z`, name: `shot${n}.png`, url: cdn(`shot${n}.png`), content_type: 'image/png', size: 70})),
@@ -59,39 +61,52 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
     await page.reload();
     await page.waitForFunction(() => typeof state !== 'undefined' && state.items.length === 3);
 
-    // Folded beside the conversation, a 🗂️ button sits under 📍 and opens the files alone.
+    // Folded beside the conversation, a 🗂️ button sits under 📍 and opens the files alone;
+    // on a phone the files and the HTML are tabs next to 💬 and 📍.
     await page.evaluate(() => openItem('t11'));
+    const tab = (text) => page.locator('#d-tabs button', {hasText: text}).first();
     if (width <= 900) {
-      await page.locator('#d-tabs button', {hasText: '現在地'}).first().click();
+      assert.deepEqual(await page.locator('#d-tabs button').allInnerTexts(), ['💬 会話', '📍 現在地', '🗂️ ファイル', '📄 HTML']);
+      await tab('ファイル').click();
     } else {
       await page.locator('#d-side .sit-hide').click();
       const rail = await page.locator('#d-side-rail').boundingBox();
       const files = page.locator('#d-side-files');
       await files.waitFor();
       assert.ok((await files.boundingBox()).y > rail.y, 'the files button is below 📍');
-      assert.match(await files.innerText(), /7/);
+      assert.match(await files.innerText(), /8/);
       if (process.env.SHOTS) await page.screenshot({path: `${process.env.SHOTS}/files-rail-${width}.png`});
       await files.click();
     }
-    if (width <= 900) await page.locator('#d-side .sit-view').click();
     const list = page.locator('#d-side .dlv-files');
     await list.locator('.dlv-row').first().waitFor();
-    assert.match(await page.locator('#d-side .sit-title').innerText(), /🗂️ ファイル \(7\)/);
-    const titles = (await list.locator('.dlv-row .dlv-title').allInnerTexts()).map((t) => t.replace(/^\S+\s/, ''));
-    assert.deepEqual(titles, ['試作 v2', 'report.md', 'frame.png', '試作 v1', 'shot3.png', 'shot2.png', 'shot1.png'], 'files only, newest first');
+    assert.match(await page.locator('#d-side .sit-title').innerText(), /🗂️ ファイル \(8\)/);
+    const titles = async () => (await list.locator('.dlv-row .dlv-title').allInnerTexts()).map((t) => t.replace(/^\S+\s/, ''));
+    assert.deepEqual(await titles(), ['試作 v2', 'report.md', 'summary.html', 'frame.png', '試作 v1', 'shot3.png', 'shot2.png', 'shot1.png'], 'files only, newest first');
     assert.equal(await page.locator('#d-side .sit-section.deliverables').count(), 0, 'the situation is not shown');
     assert.equal(await page.locator('#d-side a[href*="/pull/"]').count(), 0, 'no PRs');
     await page.evaluate(() => renderDetail());
     await page.waitForTimeout(200);
-    assert.equal(await list.locator('.dlv-row').count(), 7, 'the view survives a redraw');
+    assert.equal(await list.locator('.dlv-row').count(), 8, 'the view survives a redraw');
     if (process.env.SHOTS) await page.screenshot({path: `${process.env.SHOTS}/files-${width}.png`});
-    // The same button goes back to where things stand.
-    await page.locator('#d-side .sit-view').click();
-    await page.locator('#d-side .sit-section.deliverables').waitFor();
-    assert.match(await page.locator('#d-side .sit-title').innerText(), /📍 現在地/);
-    if (width > 900) {
+    // 📄 HTML keeps the HTML documents alone.
+    if (width <= 900) await tab('HTML').click();
+    else await page.locator('#d-side .sit-view[data-view="html"]').click();
+    await page.locator('#d-side .sit-title', {hasText: '📄 HTML (1)'}).waitFor();
+    assert.deepEqual(await titles(), ['summary.html']);
+    if (process.env.SHOTS) await page.screenshot({path: `${process.env.SHOTS}/html-${width}.png`});
+    // Back to where things stand.
+    if (width <= 900) {
+      await tab('現在地').click();
+      await page.locator('#d-side .sit-section.deliverables').waitFor();
+      await tab('会話').click();
+      assert.equal(await page.locator('#d-side').isVisible(), false, 'the conversation tab hides the panel');
+    } else {
+      await page.locator('#d-side .sit-view[data-view="situation"]').click();
+      await page.locator('#d-side .sit-section.deliverables').waitFor();
+      assert.match(await page.locator('#d-side .sit-title').innerText(), /📍 現在地/);
       // 📍 on the rail always opens where things stand.
-      await page.locator('#d-side .sit-view').click();
+      await page.locator('#d-side .sit-view[data-view="files"]').click();
       await page.locator('#d-side .sit-hide').click();
       await page.locator('#d-side-rail').click();
       await page.locator('#d-side .sit-section.deliverables').waitFor();
@@ -101,6 +116,7 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
     await page.evaluate(() => openItem('t42'));
     await page.locator('#d-side .dlv-row').first().waitFor({state: 'attached'});
     assert.equal(await page.locator('#d-side .sit-view').count(), 0);
+    assert.equal(await page.locator('#d-tabs button').count(), width <= 900 ? 2 : 0, 'no file tabs');
     assert.equal(await page.locator('#d-side-files').isVisible(), false);
     assert.deepEqual(errors, []);
     await page.close();
