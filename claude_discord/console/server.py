@@ -67,6 +67,7 @@ from .deliverables import DeliverableCollector
 from .files import resolve_file
 from .goals_api import GoalRoutes
 from .guide import build_guide
+from .html_brief import html_brief_template
 from .logsafe import q as _q
 from .messages import KIND_ACTIVITY, serialize_message, with_kind
 from .night_desk import NightDesk
@@ -435,6 +436,7 @@ class ConsoleServer:
             f"{API_PREFIX}/items/{{item_id}}/decisions/{{request_id}}/defer", self.defer_request
         )
         NightRoutes(self, IDENTITY).register(r, API_PREFIX)
+        r.add_get(f"{API_PREFIX}/html-brief", self.html_brief)
         r.add_get(f"{API_PREFIX}/secretary/stats", secretary_routes.stats)
         r.add_post(f"{API_PREFIX}/pages/{{slug}}", page_routes.define)
         r.add_get(f"{API_PREFIX}/pages/{{slug}}/items", page_routes.items)
@@ -740,6 +742,11 @@ class ConsoleServer:
     # -- reads -------------------------------------------------------------
     async def me(self, request: web.Request) -> web.Response:
         return web.json_response({"identity": request[IDENTITY]})
+
+    async def html_brief(self, request: web.Request) -> web.Response:
+        """The 📄 button's text (see :mod:`.html_brief`)."""
+        lang = "en" if request.rel_url.query.get("lang") == "en" else "ja"
+        return web.json_response({"template": html_brief_template(lang)})
 
     async def situation(self, request: web.Request) -> web.Response:
         """The panel beside a family: what its parent wrote, and which waits are active.

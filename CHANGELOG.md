@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Evidence-based auto-completion now leaves the same rescue record (`auto-closed:evidence`), so it is
   listed by `GET /api/auto-closures` and can be reopened from the Console (#1507).
 
+- Console: 📄 beside a reply box fills it with a request to summarize the thread as one HTML page
+  and attach it; like 🌙 it sends nothing. `GET /console/api/html-brief` serves the text;
+  `CCDB_HTML_BRIEF_TEMPLATE_FILE` replaces the built-in one (at most 4000 characters), and
+  `{{project}}` becomes the thread's Ebi Workspace project.
+
 ### Fixed
 
 - Decision cards no longer disappear when the person writes anything in their thread or the agent
