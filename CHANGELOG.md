@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Console: a **🗂️** button under **📍** on the folded situation panel opens it on the family's attached
+  files alone, newest first in one list, without PRs or notes; **📄 HTML** lists the HTML documents
+  alone. With the panel open they are buttons beside its title; on a phone they are tabs beside
+  💬 and 📍.
 - Evidence-based auto-completion (#1477): `/candidate` accepts an `evidence` body; with
   `CCDB_AUTO_COMPLETE=on` a thread whose waits, decision requests and child threads are all settled
   completes itself after the turn ends. Off by default; `dry-run` reports the verdict only. See

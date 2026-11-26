@@ -889,6 +889,13 @@ redraw. Chat threads are read through the Discord API (the last 300 messages of 
 threads per family) and cached until the thread gets a new message or ten minutes pass; a thread that
 could not be read is counted under the list.
 
+**🗂️ Files (n)** shows the attached files alone: every collected file of the family, newest first in one
+flat list (superseded ones included), with the same thumbnails, preview, playback and download, and no PRs,
+links or notes. Folded, it is the **🗂️** button under **📍** on the rail; open, it is one of the
+buttons beside the panel's title, one per other view. On a phone, where the panel is a tab, the bar reads
+**💬 Conversation | 📍 Where things stand | 🗂️ Files | 📄 HTML**. **📄 HTML (n)** lists the attached HTML
+documents alone. A view whose list would be empty shows no button and no tab.
+
 The parent keeps its part with the control-plane API. Agents are told how in their run context:
 
 ```bash
