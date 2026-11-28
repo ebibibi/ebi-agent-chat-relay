@@ -32,6 +32,21 @@ async def client(tmp_path):
         yield c
 
 
+async def test_only_the_html_preview_frame_gets_its_own_policy(client) -> None:
+    frame = await client.get("/static/html-frame.html")
+    assert frame.status == 200
+    csp = frame.headers["Content-Security-Policy"]
+    # The delivered page's CSS applies; scripts other than the frame's own and the network do not.
+    assert csp.startswith("sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; ")
+    assert "default-src 'none'; script-src 'self';" in csp
+    assert "style-src 'unsafe-inline'" in csp and "connect-src" not in csp
+    assert "frame-ancestors 'self'" in csp and frame.headers["X-Frame-Options"] == "SAMEORIGIN"
+    for other in ("/", "/static/preview.js", "/static/html-frame.js"):
+        response = await client.get(other)
+        assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
+        assert response.headers["X-Frame-Options"] == "DENY"
+
+
 async def test_the_api_requires_authentication(client) -> None:
     assert (await client.get("/console/api/board")).status == 401
     assert (

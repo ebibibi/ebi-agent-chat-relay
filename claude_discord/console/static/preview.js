@@ -2,9 +2,8 @@
 // full-window viewer instead of downloading. Markdown uses the vendored Markdown parser
 // (HTML off) and DOMPurify. Images use only declared attachments, safe image URLs or the
 // document directory; native attachments are fetched with Console authentication.
-// HTML is rendered in an iframe with an empty
-// sandbox: no scripts, no forms, no same-origin access, so a delivered page cannot reach
-// the console. "Source" shows the raw text; Download is always there. A large file shows
+// HTML is rendered through html-frame.html: its CSS applies, but it gets no scripts, no
+// network and no same-origin access, so a delivered page cannot reach the console. "Source" shows the raw text; Download is always there. A large file shows
 // its first part. Loaded before live.js and app.js, which call kind() and open().
 "use strict";
 
@@ -198,9 +197,13 @@ window.ConsolePreview = (() => {
   function rendered(k, text, name) {
     if (k === "markdown") return h("div", { class: "pv-doc md" }, markdown(text));
     if (k === "html") {
+      // A srcdoc frame would inherit the console's policy, which blocks the page's own CSS.
+      // html-frame.html carries its own policy and hands the page to a scriptless inner frame.
       const frame = h("iframe", { class: "pv-frame", title: name, referrerpolicy: "no-referrer" });
-      frame.setAttribute("sandbox", ""); // everything off: no scripts, forms, popups or same-origin
-      frame.srcdoc = text;
+      // Opaque origin: no console access. Popups only so a clicked link opens in a new tab.
+      frame.setAttribute("sandbox", "allow-scripts allow-popups allow-popups-to-escape-sandbox");
+      frame.addEventListener("load", () => frame.contentWindow.postMessage(text, "*"), { once: true });
+      frame.src = "/static/html-frame.html";
       return frame;
     }
     if (k === "csv") return table(text, name);
